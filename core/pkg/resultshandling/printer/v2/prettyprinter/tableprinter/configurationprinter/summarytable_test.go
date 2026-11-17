@@ -183,6 +183,11 @@ func TestGenerateFooter_Short(t *testing.T) {
 			complianceScore: 50,
 			wantContains:    []string{"Resource Summary", "Failed Resources", "All Resources"},
 		},
+		{
+			name:            "unscored sentinel score renders N/A",
+			complianceScore: -1.0,
+			wantContains:    []string{"Compliance-Score", "N/A"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -222,6 +227,11 @@ func TestGenerateFooter_Full(t *testing.T) {
 			name:                "sub-100 score near 100 does not round to 100.00%",
 			complianceScore:     99.996,
 			wantComplianceScore: "99.99%",
+		},
+		{
+			name:                "unscored sentinel score renders N/A",
+			complianceScore:     -1.0,
+			wantComplianceScore: "N/A",
 		},
 	}
 	for _, tt := range tests {

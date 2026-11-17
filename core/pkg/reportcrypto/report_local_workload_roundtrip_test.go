@@ -2,6 +2,7 @@ package reportcrypto_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -102,6 +103,8 @@ func resolveResults(t *testing.T, raw []byte, where string) []map[string]any {
 	require.Len(t, report.Resources, len(fileScanResources), where)
 	byID := make(map[string]map[string]any, len(report.Resources))
 	for _, resource := range report.Resources {
+		loaded := reporthandling.NewResource(resource.Object)
+		require.Equal(t, resource.ResourceID, loaded.GetID(), "%s: resource ID must match what report consumers load", where)
 		byID[resource.ResourceID] = resource.Object
 	}
 	objects := make([]map[string]any, 0, len(report.Results))
@@ -139,6 +142,74 @@ func TestEncryptedFileScanReportRoundTripKeepsResources(t *testing.T) {
 	// Each manifest path is encrypted on its own, so two documents of one file
 	// carry different ciphertext; both decrypt to the same path.
 	assert.Equal(t, want, restored)
+}
+
+func TestEncryptedLocalResourceIDsRoundTrip(t *testing.T) {
+	for _, rawOnly := range []bool{false, true} {
+		name := "resources"
+		if rawOnly {
+			name = "raw resources"
+		}
+		t.Run(name, func(t *testing.T) {
+			var resources []workloadinterface.IMetadata
+			var wantIDs []string
+			for _, path := range []string{"deploy/web.yaml:0", "deploy/web.yaml:1", "other/web.yaml:0"} {
+				resource := localworkload.NewLocalWorkload(map[string]any{
+					"apiVersion": "v1", "kind": "Pod", "sourcePath": path,
+					"metadata": map[string]any{"name": "web", "namespace": "production"},
+				})
+				wantIDs = append(wantIDs, resource.GetID())
+				resources = append(resources, resource)
+			}
+			encrypted := encryptedReport(t, resources...)
+			if rawOnly {
+				var report reporthandlingv2.PostureReport
+				require.NoError(t, json.Unmarshal(encrypted, &report))
+				byID := make(map[string]*reporthandling.Resource)
+				for i := range report.Resources {
+					byID[report.Resources[i].ResourceID] = &report.Resources[i]
+				}
+				for i := range report.Results {
+					report.Results[i].RawResource = byID[report.Results[i].ResourceID]
+				}
+				report.Resources = nil
+				var err error
+				encrypted, err = json.Marshal(report)
+				require.NoError(t, err)
+			}
+
+			decrypted, err := reportcrypto.DecryptReport(encrypted, []byte(exceptionTestMasterKey))
+			require.NoError(t, err)
+			var report reporthandlingv2.PostureReport
+			require.NoError(t, json.Unmarshal(decrypted, &report))
+			var gotIDs []string
+			for _, result := range report.Results {
+				gotIDs = append(gotIDs, result.ResourceID)
+				if rawOnly {
+					require.NotNil(t, result.RawResource)
+					assert.Equal(t, result.ResourceID, result.RawResource.GetID())
+				}
+			}
+			assert.ElementsMatch(t, wantIDs, gotIDs)
+		})
+	}
+}
+
+func TestDecryptReportRejectsLocalResourceWithoutSourcePath(t *testing.T) {
+	for _, path := range []any{nil, "", 42} {
+		t.Run(fmt.Sprintf("%v", path), func(t *testing.T) {
+			var report map[string]any
+			require.NoError(t, json.Unmarshal(encryptedFileScanReport(t), &report))
+			object := report["resources"].([]any)[0].(map[string]any)["object"].(map[string]any)
+			object["sourcePath"] = path
+			encrypted, err := json.Marshal(report)
+			require.NoError(t, err)
+
+			decrypted, err := reportcrypto.DecryptReport(encrypted, []byte(exceptionTestMasterKey))
+			require.ErrorContains(t, err, "sourcePath")
+			assert.Nil(t, decrypted)
+		})
+	}
 }
 
 func TestDecryptReportRejectsTamperedFileScanResource(t *testing.T) {

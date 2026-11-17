@@ -73,17 +73,23 @@ func TestGetInterfaces_StopsWhenTheDeadlineHasAlreadyPassed(t *testing.T) {
 }
 
 // TestGetInterfaces_StopsWhenDeadlineExpiresDuringClusterConnection pins that an in-flight cluster connection
-// stops promptly when the context deadline expires, without waiting for the slow connection to finish.
+// stops promptly when the scan is stopped, without waiting for the slow connection to finish. The scan is
+// cancelled from inside the connection, so it cannot end before the connection starts on a slow runner.
 func TestGetInterfaces_StopsWhenDeadlineExpiresDuringClusterConnection(t *testing.T) {
 	orig := kubernetesAPIFunc
 	connected := make(chan struct{})
 	entered := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var cancelled time.Time
 	kubernetesAPIFunc = func() *k8sinterface.KubernetesApi {
 		select {
 		case <-entered:
 		default:
 			close(entered)
 		}
+		cancelled = time.Now()
+		cancel()
 		// Simulate a hanging / slow cluster connection
 		<-connected
 		return nil
@@ -93,10 +99,6 @@ func TestGetInterfaces_StopsWhenDeadlineExpiresDuringClusterConnection(t *testin
 		kubernetesAPIFunc = orig
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-
-	start := time.Now()
 	errCh := make(chan error, 1)
 	go func() {
 		_, err := getInterfaces(ctx, &cautils.ScanInfo{}, nil)
@@ -107,19 +109,17 @@ func TestGetInterfaces_StopsWhenDeadlineExpiresDuringClusterConnection(t *testin
 	select {
 	case err = <-errCh:
 	case <-time.After(5 * time.Second):
-		t.Fatal("getInterfaces did not return after the context deadline")
+		t.Fatal("getInterfaces did not return after the scan was stopped")
 	}
-	elapsed := time.Since(start)
-
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.ErrorContains(t, err, "scan stopped while connecting to the cluster")
-	assert.Less(t, elapsed, 1*time.Second, "must abort promptly when deadline expires during connection")
 
 	select {
 	case <-entered:
 	default:
-		t.Fatal("kubernetesAPIFunc was not reached before deadline")
+		t.Fatal("kubernetesAPIFunc was not reached")
 	}
+	require.ErrorIs(t, err, context.Canceled)
+	assert.ErrorContains(t, err, "scan stopped while connecting to the cluster")
+	assert.Less(t, time.Since(cancelled), 1*time.Second, "must abort promptly when the scan stops during connection")
 }
 
 // TestGetInterfaces_StopsWhenTheDeadlinePassesDuringTenantSetup pins that setup stops before the host sensor and cloud provider lookups.

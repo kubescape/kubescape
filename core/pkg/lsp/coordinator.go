@@ -17,6 +17,13 @@ import (
 // defaultDebounce is how long after the last save a scan starts.
 const defaultDebounce = 500 * time.Millisecond
 
+// docTarget tracks the version and open lifecycle generation of a document at the
+// time a scan is scheduled.
+type docTarget struct {
+	version int32
+	openID  uint64
+}
+
 // coordinator turns saves into scans, and scans into published diagnostics.
 //
 // One goroutine owns all of it: it waits for a save, waits for the saves to stop
@@ -149,14 +156,15 @@ func (c *coordinator) scanOnce(ctx context.Context) {
 
 	// The versions the result will be for: a clean document's, as of the scan's
 	// scheduling. A document with unsaved changes is not what is on disk, so it
-	// is left as it is.
-	versions := make(map[string]int32)
+	// is left as it is. Keyed by pathKey so multiple open documents pointing to
+	// the same file (such as symlinks) do not collide.
+	expected := make(map[string]docTarget)
 	var paths []string
 	for _, d := range c.docs.snapshot() {
 		if v, ok := saves[pathKey(d.path)]; ok {
-			versions[canonicalKey(d.path)] = v
+			expected[pathKey(d.path)] = docTarget{version: v, openID: d.openID}
 		} else if !d.dirty {
-			versions[canonicalKey(d.path)] = d.version
+			expected[pathKey(d.path)] = docTarget{version: d.version, openID: d.openID}
 		}
 		paths = append(paths, d.path)
 	}
@@ -183,11 +191,11 @@ func (c *coordinator) scanOnce(ctx context.Context) {
 	if !current || !findings.complete {
 		return
 	}
-	c.apply(ctx, generation, findings, versions)
+	c.apply(ctx, generation, findings, expected)
 }
 
 // apply publishes the findings for the open documents in scope.
-func (c *coordinator) apply(ctx context.Context, generation uint64, findings scanFindings, versions map[string]int32) {
+func (c *coordinator) apply(ctx context.Context, generation uint64, findings scanFindings, expected map[string]docTarget) {
 	byFile := make(map[string][]protocol.Diagnostic, len(findings.byFile))
 	for path, ds := range findings.byFile {
 		byFile[canonicalKey(path)] = ds
@@ -200,12 +208,12 @@ func (c *coordinator) apply(ctx context.Context, generation uint64, findings sca
 	c.pubMu.Lock()
 	defer c.pubMu.Unlock()
 	for _, d := range c.docs.snapshot() {
-		key := canonicalKey(d.path)
-		version, scanned := versions[key]
+		exp, scanned := expected[pathKey(d.path)]
 		if !scanned || !c.inScope(d.path) {
 			continue
 		}
-		if _, skip := unreliable[key]; skip {
+		canonical := canonicalKey(d.path)
+		if _, skip := unreliable[canonical]; skip {
 			continue
 		}
 		// Re-checked for each document, under the publishing lock: a save, or the
@@ -216,10 +224,10 @@ func (c *coordinator) apply(ctx context.Context, generation uint64, findings sca
 		if !current {
 			return
 		}
-		if now, open := c.docs.get(d.path); !open || now.version != version {
+		if now, open := c.docs.get(d.path); !open || now.openID != exp.openID || now.version != exp.version {
 			continue
 		}
-		diagnostics := byFile[key]
+		diagnostics := byFile[canonical]
 		_, had := c.published[pathKey(d.path)]
 		if len(diagnostics) == 0 && !had {
 			continue
@@ -234,7 +242,7 @@ func (c *coordinator) apply(ctx context.Context, generation uint64, findings sca
 		}
 		c.send(ctx, &protocol.PublishDiagnosticsParams{
 			URI:         uri.URI(d.uri),
-			Version:     protocol.NewOptional(version),
+			Version:     protocol.NewOptional(exp.version),
 			Diagnostics: diagnostics,
 		})
 	}

@@ -34,6 +34,11 @@ const vcsDir = ".git"
 
 // FileWatcherOptions configures a FileWatcher.
 type FileWatcherOptions struct {
+	// AcceptDependencies, when set, accepts dependency files regardless of
+	// extension (e.g. Kustomize patch files and generator inputs) for
+	// rendered-input directory watches, keeping editor-file and path exclusions.
+	AcceptDependencies bool
+
 	// Exclude, when set, reports whether a path is kept out of the watch. It is
 	// called with absolute paths. Excluded directories are not watched, and an
 	// excluded file never signals a change. The root itself is never excluded:
@@ -59,7 +64,8 @@ type FileWatcherOptions struct {
 // For a directory, the files that signal are those a scan would load, by their
 // extension (.yaml, .yml, .json manifests, .tf and .tfvars Terraform files, and
 // .tpl Helm template helpers), less editors' lock files. For a single file,
-// that file signals whatever its extension, and its siblings do not.
+// that file signals whatever its extension, as does its sibling .kubescapeignore;
+// other siblings do not.
 //
 // Changes are signalled on a channel of capacity one that is sent to without
 // blocking, so any number of changes while the reader is busy leave exactly one
@@ -364,7 +370,8 @@ func (w *FileWatcher) handle(event fsnotify.Event) error {
 	gone := event.Has(fsnotify.Remove | fsnotify.Rename)
 
 	if w.file != "" {
-		if name == w.file {
+		// A single-file scan reads exclusions from its parent directory too.
+		if name == w.file || name == filepath.Join(w.dir, cautils.IgnoreFileName) {
 			w.notify(name)
 		}
 		if name == w.dir && gone {
@@ -661,15 +668,47 @@ func (w *FileWatcher) skipDir(path string) bool {
 // files (name~, .name.swp, name.tmp, #name#) are out already, being named with
 // another extension; what is left to rule out is an Emacs lock file, which is a
 // link named like the file it guards. The one manifest without an extension is a
-// kustomization named Kustomization, which kustomize accepts.
+// kustomization named Kustomization, which kustomize accepts. For rendered-input
+// directory watches (AcceptDependencies), dependency files are accepted
+// regardless of extension while preserving editor-file and path exclusions.
 func (w *FileWatcher) relevantFile(path string) bool {
-	if strings.HasPrefix(filepath.Base(path), ".#") {
+	if isEditorOrTempFile(path) {
 		return false
 	}
-	if !cautils.IsYaml(path) && !cautils.IsJson(path) && !cautils.IsKustomizeFile(path) && !isTerraformOrHelmFile(path) {
-		return false
+	if !w.opts.AcceptDependencies {
+		if !cautils.IsYaml(path) && !cautils.IsJson(path) && !cautils.IsKustomizeFile(path) && !isTerraformOrHelmFile(path) && !isPatchFile(path) {
+			return false
+		}
 	}
 	return w.opts.Exclude == nil || !w.opts.Exclude(path, false)
+}
+
+func isEditorOrTempFile(path string) bool {
+	base := filepath.Base(path)
+	if strings.HasPrefix(base, ".#") {
+		return true // Emacs lock file
+	}
+	if strings.HasPrefix(base, "#") && strings.HasSuffix(base, "#") {
+		return true // Emacs auto-save file
+	}
+	if strings.HasSuffix(base, "~") {
+		return true // Backup file
+	}
+	ext := strings.ToLower(filepath.Ext(base))
+	switch ext {
+	case ".swp", ".swo", ".swx", ".bak", ".tmp", ".orig":
+		return true
+	}
+	return false
+}
+
+func isPatchFile(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".patch", ".diff":
+		return true
+	default:
+		return false
+	}
 }
 
 // isTerraformOrHelmFile reports whether a directory scan reads path besides

@@ -727,6 +727,24 @@ func TestWatchSecurityScanWatchesAnExtensionlessKustomization(t *testing.T) {
 	require.NoError(t, stop())
 }
 
+// A kustomization input is also rendered with the patch files it lists (e.g.
+// patches/security.patch), and an edit to a patch file must trigger a rescan.
+func TestWatchSecurityScanWatchesWhatAKustomizationPatchRenders(t *testing.T) {
+	dir := t.TempDir()
+	kustomization := filepath.Join(dir, "kustomization.yaml")
+	patch := filepath.Join(dir, "security.patch")
+	writeFile(t, kustomization, "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- pod.yaml\npatches:\n- path: security.patch\n  target:\n    kind: Pod\n    name: web\n")
+	writeFile(t, filepath.Join(dir, "pod.yaml"), podManifest("web", false))
+	writeFile(t, patch, "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\nspec:\n  containers:\n  - name: c\n    image: nginx\n")
+	out, stop := startSecurityWatch(t, localWatchScanInfo(t, kustomization))
+
+	out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+	writeFile(t, patch, "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\nspec:\n  containers:\n  - name: c\n    image: nginx\n    securityContext:\n      readOnlyRootFilesystem: true\n")
+	out.waitFor(t, "0 new, 1 resolved")
+
+	require.NoError(t, stop())
+}
+
 func TestWatchRoots(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "pod.yaml")
@@ -840,4 +858,51 @@ func startSecurityWatchOutput(t *testing.T, info *cautils.ScanInfo) (out *lines,
 	}
 	t.Cleanup(func() { cancel() })
 	return out, stop
+}
+
+func TestReloadingFilterDetectsContentChangeWithUnchangedMetadata(t *testing.T) {
+	dir := t.TempDir()
+	ignoreFile := filepath.Join(dir, cautils.IgnoreFileName)
+	writeFile(t, ignoreFile, "first/\n")
+	info, err := os.Stat(ignoreFile)
+	require.NoError(t, err)
+	filter, err := newReloadingFilter(dir, nil, true)
+	require.NoError(t, err)
+	first := filepath.Join(dir, "first")
+	other := filepath.Join(dir, "other")
+	require.True(t, filter.Excluded(first, true))
+	require.False(t, filter.Excluded(other, true))
+
+	writeFile(t, ignoreFile, "other/\n")
+	require.NoError(t, os.Chtimes(ignoreFile, info.ModTime(), info.ModTime()))
+	updated, err := os.Stat(ignoreFile)
+	require.NoError(t, err)
+	require.Equal(t, info.Size(), updated.Size())
+	require.True(t, info.ModTime().Equal(updated.ModTime()))
+
+	assert.False(t, filter.Excluded(first, true), "a newly included directory must be watched")
+	assert.True(t, filter.Excluded(other, true), "the new exclusion must replace the previous one")
+}
+
+func TestReloadingFilterRetainsRulesOnReadErrorAndRecovers(t *testing.T) {
+	dir := t.TempDir()
+	ignoreFile := filepath.Join(dir, cautils.IgnoreFileName)
+	writeFile(t, ignoreFile, "first/\n")
+	filter, err := newReloadingFilter(dir, nil, true)
+	require.NoError(t, err)
+	first := filepath.Join(dir, "first")
+	require.True(t, filter.Excluded(first, true))
+
+	// An unreadable ignore file must not clear the previous exclusions.
+	require.NoError(t, os.Remove(ignoreFile))
+	require.NoError(t, os.Mkdir(ignoreFile, 0o700))
+	assert.True(t, filter.Excluded(first, true))
+	require.NoError(t, os.Remove(ignoreFile))
+	writeFile(t, ignoreFile, "other/\n")
+	assert.False(t, filter.Excluded(first, true))
+	assert.True(t, filter.Excluded(filepath.Join(dir, "other"), true))
+
+	// Removing the ignore file restores the empty rule set.
+	require.NoError(t, os.Remove(ignoreFile))
+	assert.False(t, filter.Excluded(filepath.Join(dir, "other"), true))
 }

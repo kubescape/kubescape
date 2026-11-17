@@ -15,12 +15,14 @@ type document struct {
 	path    string
 	version int32
 	dirty   bool // changed in the editor since it was last saved
+	openID  uint64
 }
 
 // documentStore tracks the open documents. It is safe for concurrent use.
 type documentStore struct {
-	mu   sync.Mutex
-	docs map[string]document // by pathKey
+	mu     sync.Mutex
+	nextID uint64
+	docs   map[string]document // by pathKey
 }
 
 func newDocumentStore() *documentStore {
@@ -40,7 +42,8 @@ func pathKey(path string) string {
 func (s *documentStore) open(uri, path string, version int32) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.docs[pathKey(path)] = document{uri: uri, path: path, version: version}
+	s.nextID++
+	s.docs[pathKey(path)] = document{uri: uri, path: path, version: version, openID: s.nextID}
 }
 
 // change records a new version and marks the document dirty. It reports whether

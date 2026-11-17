@@ -799,6 +799,7 @@ func TestFileWatcherRelevantFile(t *testing.T) {
 		// Terraform and Helm files a directory scan renders
 		{"main.tf", true}, {"terraform.tfvars", true}, {"prod.auto.tfvars", true},
 		{"terraform.tfvars.json", true}, {"_helpers.tpl", true},
+		{"security.patch", true}, {"patch.diff", true},
 		{"main.tf.bak", false}, {".terraform.lock.hcl", false},
 		{"notes.txt", false}, {"deploy", false}, {"deploy.yaml.bak", false},
 		{".deploy.yaml.swp", false}, {"deploy.yaml~", false}, {"#deploy.yaml#", false},
@@ -807,6 +808,26 @@ func TestFileWatcherRelevantFile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		assert.Equal(t, tt.want, w.relevantFile(filepath.Join("/tmp", "x", tt.name)), tt.name)
+	}
+
+	wWithDeps := &FileWatcher{opts: FileWatcherOptions{
+		AcceptDependencies: true,
+		Exclude: func(path string, isDir bool) bool {
+			return !isDir && filepath.Base(path) == "excluded.yaml"
+		},
+	}}
+	depTests := []struct {
+		name string
+		want bool
+	}{
+		{"deploy.yaml", true}, {"security.patch", true}, {"patch.diff", true},
+		{"patch", true}, {"config.properties", true}, {"settings.ini", true},
+		{"main.tf.bak", false}, {".deploy.yaml.swp", false}, {"deploy.yaml~", false},
+		{"#deploy.yaml#", false}, {".#deploy.yaml", false},
+		{"excluded.yaml", false},
+	}
+	for _, tt := range depTests {
+		assert.Equal(t, tt.want, wWithDeps.relevantFile(filepath.Join("/tmp", "x", tt.name)), tt.name)
 	}
 }
 
@@ -1150,4 +1171,30 @@ func TestFileWatcherWatchesWhatTheIgnoreFileNoLongerExcludes(t *testing.T) {
 
 	assert.Contains(t, w.dirs, extra, "a directory the ignore file no longer excludes is not watched")
 	assert.Len(t, w.changes, 1, "an edit to the ignore file is signalled")
+}
+
+func TestFileWatcherSingleFileIgnoreChanges(t *testing.T) {
+	t.Parallel()
+	for _, op := range []fsnotify.Op{fsnotify.Create, fsnotify.Write, fsnotify.Remove, fsnotify.Rename} {
+		t.Run(op.String(), func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			file := filepath.Join(root, "pod.yaml")
+			write(t, file, "kind: Pod\n")
+			w, err := newFileWatcher(file, FileWatcherOptions{})
+			require.NoError(t, err)
+			defer w.fs.Close()
+
+			// Unrelated siblings must still be ignored in single-file mode.
+			for _, name := range []string{"other.yaml", "other.ignore", filepath.Join("nested", cautils.IgnoreFileName)} {
+				require.NoError(t, w.handle(fsnotify.Event{Name: filepath.Join(root, name), Op: op}))
+				assert.Empty(t, w.changes)
+			}
+			ignoreFile := filepath.Join(root, cautils.IgnoreFileName)
+			require.NoError(t, w.handle(fsnotify.Event{Name: ignoreFile, Op: fsnotify.Chmod}))
+			assert.Empty(t, w.changes)
+			require.NoError(t, w.handle(fsnotify.Event{Name: ignoreFile, Op: op}))
+			assert.Len(t, w.changes, 1, "changing the scan's ignore file must trigger a rescan")
+		})
+	}
 }

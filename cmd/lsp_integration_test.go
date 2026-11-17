@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -130,36 +131,90 @@ func (p *lspProcess) call(method string, params any) map[string]any {
 // output is anything but one.
 func (p *lspProcess) readFrame() map[string]any {
 	p.t.Helper()
-	length := -1
-	for {
-		line, err := p.stdout.ReadString('\n')
-		require.NoError(p.t, err, "standard output ended; stderr:\n%s", p.stderr.String())
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
-			break
-		}
-		name, value, ok := strings.Cut(line, ":")
-		require.True(p.t, ok && strings.HasPrefix(strings.ToLower(name), "content-"), "standard output holds something that is not an LSP header: %q", line)
-		if strings.EqualFold(name, "Content-Length") {
-			length, err = strconv.Atoi(strings.TrimSpace(value))
-			require.NoError(p.t, err)
-		}
+	type frameResult struct {
+		frame map[string]any
+		err   error
 	}
-	require.GreaterOrEqual(p.t, length, 0, "a frame without Content-Length")
-	body := make([]byte, length)
-	_, err := io.ReadFull(p.stdout, body)
-	require.NoError(p.t, err)
-	var m map[string]any
-	require.NoError(p.t, json.Unmarshal(body, &m), "a frame that is not JSON: %q", body)
-	return m
+	ch := make(chan frameResult, 1)
+	go func() {
+		length := -1
+		for {
+			line, err := p.stdout.ReadString('\n')
+			if err != nil {
+				ch <- frameResult{err: fmt.Errorf("standard output ended: %w; stderr:\n%s", err, p.stderr.String())}
+				return
+			}
+			line = strings.TrimRight(line, "\r\n")
+			if line == "" {
+				break
+			}
+			name, value, ok := strings.Cut(line, ":")
+			if !ok || !strings.HasPrefix(strings.ToLower(name), "content-") {
+				ch <- frameResult{err: fmt.Errorf("standard output holds something that is not an LSP header: %q", line)}
+				return
+			}
+			if strings.EqualFold(name, "Content-Length") {
+				var convErr error
+				length, convErr = strconv.Atoi(strings.TrimSpace(value))
+				if convErr != nil {
+					ch <- frameResult{err: convErr}
+					return
+				}
+			}
+		}
+		if length < 0 {
+			ch <- frameResult{err: errors.New("a frame without Content-Length")}
+			return
+		}
+		body := make([]byte, length)
+		if _, err := io.ReadFull(p.stdout, body); err != nil {
+			ch <- frameResult{err: err}
+			return
+		}
+		var m map[string]any
+		if err := json.Unmarshal(body, &m); err != nil {
+			ch <- frameResult{err: fmt.Errorf("a frame that is not JSON: %q", body)}
+			return
+		}
+		ch <- frameResult{frame: m}
+	}()
+
+	select {
+	case res := <-ch:
+		require.NoError(p.t, res.err)
+		return res.frame
+	case <-time.After(30 * time.Second):
+		_ = p.cmd.Process.Kill()
+		p.t.Fatalf("reading frame timed out; stderr:\n%s", p.stderr.String())
+		return nil
+	}
 }
 
 // finish waits for the process to end and returns its exit code, after checking
 // that nothing but frames is left on its standard output.
 func (p *lspProcess) finish() int {
 	p.t.Helper()
+	type drainResult struct {
+		data []byte
+		err  error
+	}
+	drain := make(chan drainResult, 1)
+	go func() {
+		data, err := io.ReadAll(p.stdout)
+		drain <- drainResult{data: data, err: err}
+	}()
+
+	var rest []byte
+	select {
+	case res := <-drain:
+		require.NoError(p.t, res.err, "error reading remaining standard output; stderr:\n%s", p.stderr.String())
+		rest = res.data
+	case <-time.After(30 * time.Second):
+		_ = p.cmd.Process.Kill()
+		p.t.Fatalf("reading standard output timed out; stderr:\n%s", p.stderr.String())
+	}
+
 	go func() { p.done <- p.cmd.Wait() }()
-	rest, _ := io.ReadAll(p.stdout)
 	select {
 	case err := <-p.done:
 		assert.Empty(p.t, strings.TrimSpace(string(rest)), "unexpected output after the last frame")
@@ -170,7 +225,8 @@ func (p *lspProcess) finish() int {
 			return ee.ExitCode()
 		}
 		p.t.Fatalf("waiting for the process: %v", err)
-	case <-time.After(60 * time.Second):
+	case <-time.After(30 * time.Second):
+		_ = p.cmd.Process.Kill()
 		p.t.Fatal("the process did not end")
 	}
 	return -1

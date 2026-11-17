@@ -2,10 +2,10 @@ package scan
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -103,6 +103,19 @@ func watchRoots(inputs []string) []string {
 	return roots
 }
 
+func isRenderedDirectory(root string, inputs []string) bool {
+	cleaned := filepath.Clean(root)
+	for _, input := range inputs {
+		inputRoot, _ := cautils.GlobInputRoot(input)
+		if cautils.IsKustomizeFile(inputRoot) || cautils.IsTerraformFile(inputRoot) {
+			if filepath.Clean(filepath.Dir(inputRoot)) == cleaned {
+				return true
+			}
+		}
+	}
+	return cautils.IsKustomizeDirectory(root)
+}
+
 // watchSecurityScan runs `kubescape scan <paths> --watch`: it scans the local
 // inputs, and again whenever one of them changes, until the context ends.
 func watchSecurityScan(cmd *cobra.Command, ks interface{ Context() context.Context }, scanInfo *cautils.ScanInfo, ids []cautils.PolicyIdentifier) error {
@@ -125,6 +138,9 @@ func watchSecurityScan(cmd *cobra.Command, ks interface{ Context() context.Conte
 	timeout := scanInfo.ScanTimeout
 	return runWatch(ks.Context(), watchConfig{
 		Roots: roots,
+		AcceptDependencies: func(root string) bool {
+			return isRenderedDirectory(root, scanInfo.InputPatterns)
+		},
 		Exclude: func(root string) (func(string, bool) bool, error) {
 			filter, err := newReloadingFilter(root, scanInfo.ExcludePaths, !scanInfo.NoIgnoreFile)
 			if err != nil {
@@ -159,7 +175,7 @@ type reloadingFilter struct {
 	ignoreFile    string
 
 	mu      sync.Mutex
-	version string // the ignore file's size and modification time when filter was made
+	version string // digest of the ignore file's lines when filter was made
 	filter  *cautils.PathFilter
 }
 
@@ -181,11 +197,13 @@ func (f *reloadingFilter) ignoreFileVersion() string {
 	if f.ignoreFile == "" {
 		return ""
 	}
-	info, err := os.Stat(f.ignoreFile)
+	// Use the scan's bounded reader, including its regular-file checks. File
+	// size and mtime alone miss edits made by timestamp-preserving tools.
+	patterns, err := cautils.LoadIgnoreFilePatterns(filepath.Dir(f.ignoreFile))
 	if err != nil {
-		return "absent"
+		return f.version // retain the last usable filter until the file is readable
 	}
-	return fmt.Sprintf("%d %d", info.Size(), info.ModTime().UnixNano())
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(patterns, "\n"))))
 }
 
 // Excluded is (*cautils.PathFilter).Excluded with the filter made again first if
@@ -229,6 +247,9 @@ type watchScan struct {
 type watchConfig struct {
 	// Roots are the files and directories scanned, and watched.
 	Roots []string
+	// AcceptDependencies reports whether root is a rendered-input directory
+	// that should accept dependency files regardless of extension.
+	AcceptDependencies func(root string) bool
 	// Exclude gives the filter of what a root leaves out of the watch, the one
 	// its scan applies. Nil leaves nothing out.
 	Exclude func(root string) (func(path string, isDir bool) bool, error)
@@ -270,9 +291,14 @@ func runWatch(ctx context.Context, cfg watchConfig) error {
 				return fmt.Errorf("--watch: %w", err)
 			}
 		}
+		acceptDeps := false
+		if cfg.AcceptDependencies != nil {
+			acceptDeps = cfg.AcceptDependencies(root)
+		}
 		watcher, err := watch.NewFileWatcher(ctx, root, watch.FileWatcherOptions{
-			Exclude: exclude,
-			OnError: func(err error) { fmt.Fprintf(errOut, "Warning: %v\n", err) },
+			AcceptDependencies: acceptDeps,
+			Exclude:            exclude,
+			OnError:            func(err error) { fmt.Fprintf(errOut, "Warning: %v\n", err) },
 		})
 		if err != nil {
 			return fmt.Errorf("--watch: %w", err)
