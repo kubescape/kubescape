@@ -325,6 +325,9 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 		}
 		out[attributeNameFor(name)] = value
 	}
+	if isPodSpecBlockPath(path) {
+		applyProviderPodSpecDefaults(body, evalCtx, out)
+	}
 
 	grouped := map[string][]*hclsyntax.Block{}
 	var order []string
@@ -473,4 +476,68 @@ func extractTypedResources(body hcl.Body, evalCtx *hcl.EvalContext) ([]map[strin
 		manifests = append(manifests, obj)
 	}
 	return manifests, errs
+}
+
+// podSpecBlockPath is where, below the resource itself, a typed resource of the
+// given kind keeps its pod spec block, or "" for a kind without one.
+func podSpecBlockPath(kind string) string {
+	switch kind {
+	case "Pod":
+		return "spec"
+	case "Deployment", "StatefulSet", "DaemonSet", "Job":
+		return "spec.template.spec"
+	case "CronJob":
+		return "spec.job_template.spec.template.spec"
+	}
+	return ""
+}
+
+// isPodSpecBlockPath reports whether path, as hclBodyToMap builds it
+// (<resource type>.<resource name>.<blocks>), is the pod spec block of a typed
+// resource.
+func isPodSpecBlockPath(path string) bool {
+	resourceType, rest, ok := strings.Cut(path, ".")
+	if !ok {
+		return false
+	}
+	_, blocks, ok := strings.Cut(rest, ".")
+	if !ok {
+		return false
+	}
+	gvk, known := typedResourceGVK[resourceType]
+	if !known {
+		return false
+	}
+	want := podSpecBlockPath(gvk.kind)
+	return want != "" && blocks == want
+}
+
+// providerPodSpecDefaults are pod spec fields the provider writes into every pod
+// it creates even when the configuration leaves them out, because its schema
+// gives them a default, and whose default differs from what Kubernetes does
+// when the field is absent. automount_service_account_token defaults to true:
+// the provider always sends automountServiceAccountToken, so a pod made from a
+// configuration that leaves it out mounts a token even when its
+// ServiceAccount disables automounting.
+var providerPodSpecDefaults = map[string]interface{}{
+	"automount_service_account_token": true,
+}
+
+// applyProviderPodSpecDefaults fills in providerPodSpecDefaults for the fields
+// the pod spec block leaves out or sets to null, which Terraform treats the same
+// way. A field whose expression could not be evaluated is left out, as every
+// unresolved attribute is, rather than guessed.
+func applyProviderPodSpecDefaults(body *hclsyntax.Body, evalCtx *hcl.EvalContext, out map[string]interface{}) {
+	for name, value := range providerPodSpecDefaults {
+		field := attributeNameFor(name)
+		if _, set := out[field]; set {
+			continue
+		}
+		if attr, declared := body.Attributes[name]; declared {
+			if _, diags := attr.Expr.Value(evalCtx); diags.HasErrors() {
+				continue
+			}
+		}
+		out[field] = value
+	}
 }
