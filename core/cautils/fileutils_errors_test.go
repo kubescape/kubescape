@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -216,6 +217,7 @@ func TestNestedHelmChartLoadFailureIsSkipped(t *testing.T) {
 }
 
 func TestLoadResourcesFromKustomizeDirectoryPropagatesBuildFailure(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	dir := t.TempDir()
 	writeManifestFixture(t, dir, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -230,6 +232,159 @@ resources:
 	assert.Equal(t, dir, name)
 	assert.Contains(t, err.Error(), "failed to render Kustomize resources")
 	assert.Contains(t, err.Error(), "missing-deployment.yaml")
+	assert.ErrorIs(t, err, ErrManifestsNotLoaded)
+}
+
+func TestLoadResourcesFromKustomizeDirectoryMissingHelmIsFatal(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	dir := filepath.Join(kustomizeTestdataPath(), "helm")
+
+	_, _, err := LoadResourcesFromKustomizeDirectory(context.Background(), dir)
+
+	require.Error(t, err)
+	var executableError *exec.Error
+	require.ErrorAs(t, err, &executableError)
+	assert.NotErrorIs(t, err, ErrManifestsNotLoaded)
+}
+
+func TestLoadResourcesFromKustomizeDirectoryUnstartableHelmIsFatal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a missing shebang interpreter is a Unix executable-start failure")
+	}
+	bin := t.TempDir()
+	interpreter := filepath.Join(bin, "missing-interpreter")
+	helmPath := filepath.Join(bin, "helm")
+	require.NoError(t, os.WriteFile(helmPath, []byte("#!"+interpreter+"\n"), 0o600))
+	require.NoError(t, os.Chmod(helmPath, 0o700))
+	t.Setenv("PATH", bin)
+
+	_, _, err := LoadResourcesFromKustomizeDirectory(context.Background(), filepath.Join(kustomizeTestdataPath(), "helm"))
+
+	require.Error(t, err)
+	var pathError *os.PathError
+	require.ErrorAs(t, err, &pathError)
+	assert.Equal(t, "fork/exec", pathError.Op)
+	assert.NotErrorIs(t, err, ErrManifestsNotLoaded)
+}
+
+func TestLoadResourcesFromKustomizeDirectoryHelmErrors(t *testing.T) {
+	for _, layout := range []string{"root", "component", "generator", "component generator", "symlink configuration", "inline generator", "symlink generator", "List generator", "inline List generator", "symlink configuration generator"} {
+		for _, tc := range []struct {
+			name        string
+			version     string
+			versionExit bool
+			missing     bool
+			recoverable bool
+		}{
+			{name: "missing Helm", missing: true},
+			{name: "unsupported Helm", version: "v2.17.0"},
+			{name: "invalid version output", version: "not a version"},
+			{name: "version command failed", versionExit: true},
+			{name: "Helm v3 template error", version: "v3.15.0", recoverable: true},
+			{name: "Helm v4 template error", version: "v4.0.0", recoverable: true},
+		} {
+			t.Run(layout+"/"+tc.name, func(t *testing.T) {
+				bin := t.TempDir()
+				t.Setenv("PATH", bin)
+				if !tc.missing {
+					installHelmFailureCommand(t, bin, tc.version, tc.versionExit)
+				}
+				dir := t.TempDir()
+				chartRoot := dir
+				kind := "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n"
+				if strings.Contains(layout, "component") {
+					writeManifestFixture(t, dir, "kustomization.yaml", kind+"components: [component]\n")
+					chartRoot = filepath.Join(dir, "component")
+					require.NoError(t, os.Mkdir(chartRoot, 0o700))
+					kind = "apiVersion: kustomize.config.k8s.io/v1alpha1\nkind: Component\n"
+				}
+				config := "helmCharts:\n- name: test-chart\n"
+				if strings.Contains(layout, "generator") {
+					generator := "apiVersion: builtin\nkind: HelmChartInflationGenerator\nmetadata:\n  name: chart\nname: test-chart\n"
+					if strings.Contains(layout, "List") {
+						generator = "apiVersion: v1\nkind: List\nitems:\n- " + strings.ReplaceAll(strings.TrimSuffix(generator, "\n"), "\n", "\n  ") + "\n"
+					}
+					if strings.Contains(layout, "inline") {
+						config = "generators:\n- |\n    " + strings.ReplaceAll(strings.TrimSuffix(generator, "\n"), "\n", "\n    ") + "\n"
+					} else {
+						config = "generators: [helm.yaml]\n"
+						file := "helm.yaml"
+						if layout == "symlink generator" {
+							file = "actual-generator.yaml"
+							if runtime.GOOS == "windows" {
+								t.Skip("symlink creation requires privileges on Windows")
+							}
+							require.NoError(t, os.Symlink(file, filepath.Join(chartRoot, "helm.yaml")))
+						}
+						writeManifestFixture(t, chartRoot, file, generator)
+					}
+				}
+				file := "kustomization.yaml"
+				if strings.HasPrefix(layout, "symlink configuration") {
+					file = "config.yaml"
+					if strings.Contains(layout, "generator") {
+						// Generators remain relative to chartRoot, not this target directory.
+						require.NoError(t, os.Mkdir(filepath.Join(chartRoot, "configuration"), 0o700))
+						file = filepath.Join("configuration", "config.yaml")
+					}
+					if runtime.GOOS == "windows" {
+						t.Skip("symlink creation requires privileges on Windows")
+					}
+					require.NoError(t, os.Symlink(file, filepath.Join(chartRoot, "kustomization.yaml")))
+				}
+				writeManifestFixture(t, chartRoot, file, kind+config)
+				chart := filepath.Join(chartRoot, "charts", "test-chart")
+				require.NoError(t, os.MkdirAll(chart, 0o700))
+				writeManifestFixture(t, chart, "Chart.yaml", "apiVersion: v2\nname: test-chart\nversion: 0.1.0\n")
+				writeManifestFixture(t, chart, "values.yaml", "{}\n")
+
+				_, _, err := LoadResourcesFromKustomizeDirectory(context.Background(), dir)
+
+				require.Error(t, err)
+				if tc.recoverable {
+					assert.ErrorIs(t, err, ErrManifestsNotLoaded)
+					assert.Contains(t, err.Error(), "invalid chart template")
+				} else {
+					assert.ErrorIs(t, err, ErrKustomizeHelmSetup)
+					assert.NotErrorIs(t, err, ErrManifestsNotLoaded)
+				}
+			})
+		}
+	}
+}
+
+func TestLoadResourcesFromKustomizeDirectoryDoesNotProbeHelmForPlainResource(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	dir := t.TempDir()
+	writeManifestFixture(t, dir, "kustomization.yaml", "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: [helm.yaml, invalid.yaml]\n")
+	writeManifestFixture(t, dir, "helm.yaml", "apiVersion: builtin\nkind: HelmChartInflationGenerator\nmetadata:\n  name: plain-resource\n")
+	writeManifestFixture(t, dir, "invalid.yaml", "kind: [unclosed\n")
+
+	_, _, err := LoadResourcesFromKustomizeDirectory(context.Background(), dir)
+
+	require.ErrorIs(t, err, ErrManifestsNotLoaded)
+	assert.NotErrorIs(t, err, ErrKustomizeHelmSetup)
+}
+
+// The version probe can succeed independently of rendering the chart.
+func installHelmFailureCommand(t *testing.T, bin, version string, versionExit bool) {
+	t.Helper()
+	versionCommand := "echo " + version
+	if versionExit {
+		versionCommand = "exit 1"
+	}
+	name := "helm"
+	script := "#!/bin/sh\nif [ \"$1\" = \"version\" ]; then\n  " + versionCommand + "\nelse\n  echo 'invalid chart template' >&2\n  exit 1\nfi\n"
+	if runtime.GOOS == "windows" {
+		name = "helm.bat"
+		if versionExit {
+			versionCommand = "exit /b 1"
+		}
+		script = "@echo off\r\nif \"%1\"==\"version\" (\r\n  " + versionCommand + "\r\n) else (\r\n  echo invalid chart template 1>&2\r\n  exit /b 1\r\n)\r\n"
+	}
+	path := filepath.Join(bin, name)
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o600))
+	require.NoError(t, os.Chmod(path, 0o700))
 }
 
 func TestLoadResourcesFromKustomizeDirectoryNoopsForPlainDirectory(t *testing.T) {

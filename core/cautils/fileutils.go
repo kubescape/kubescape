@@ -745,7 +745,12 @@ func loadKustomizeDirectory(ctx context.Context, basePath string) (map[string][]
 	kustomizeDirectoryName := getKustomizeDirectoryName(newBasePath)
 
 	if len(errs) > 0 {
-		err := fmt.Errorf("failed to render Kustomize resources from %q: %w", newBasePath, errors.Join(errs...))
+		cause := errors.Join(errs...)
+		// Input edits can repair a build, but not the Helm installation.
+		if !errors.Is(cause, ErrKustomizeHelmSetup) {
+			cause = fmt.Errorf("%w: %w", ErrManifestsNotLoaded, cause)
+		}
+		err := fmt.Errorf("failed to render Kustomize resources from %q: %w", newBasePath, cause)
 		logger.L().Ctx(ctx).Error("Rendering yaml from Kustomize failed", helpers.Error(err))
 		return nil, kustomizeDirectoryName, nil, err
 	}
