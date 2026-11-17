@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/kubescape/v4/cmd/download"
 	"github.com/kubescape/kubescape/v4/cmd/fix"
 	"github.com/kubescape/kubescape/v4/cmd/list"
+	"github.com/kubescape/kubescape/v4/cmd/lsp"
 	"github.com/kubescape/kubescape/v4/cmd/mcpserver"
 	"github.com/kubescape/kubescape/v4/cmd/operator"
 	"github.com/kubescape/kubescape/v4/cmd/patch"
@@ -68,6 +69,9 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 		Short:   "Kubescape is a tool for testing Kubernetes security posture. Docs: https://kubescape.io/docs/",
 		Example: ksExamples,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// First: a command that speaks a protocol on standard output must not
+			// have anything else written there, and the logger is made below.
+			lsp.ClaimStdout(cmd)
 			k8sinterface.SetClusterContextName(rootInfo.KubeContext)
 			initLogger()
 			if err := initLoggerLevel(cmd); err != nil {
@@ -129,6 +133,7 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 	rootCmd.AddCommand(operator.GetOperatorCmd(ks))
 	rootCmd.AddCommand(prerequisites.GetPreReqCmd(ks))
 	rootCmd.AddCommand(mcpserver.GetMCPServerCmd())
+	rootCmd.AddCommand(lsp.GetLSPCmd(ks))
 	rootCmd.AddCommand(predict.GetPredictCmd())
 
 	// deprecated commands
