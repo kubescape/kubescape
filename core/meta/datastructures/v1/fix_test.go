@@ -216,3 +216,28 @@ func TestFixInfoValidateContainerProfilePath(t *testing.T) {
 		})
 	}
 }
+
+func TestFixInfoValidateControlSelection(t *testing.T) {
+	tests := []struct {
+		name    string
+		fixInfo FixInfo
+		wantErr string
+	}{
+		{name: "no filters", fixInfo: FixInfo{}},
+		{name: "populated filters", fixInfo: FixInfo{IncludeControls: []string{"C-0016"}, SkipControls: []string{"C-0017"}}},
+		{name: "empty include entry", fixInfo: FixInfo{IncludeControls: []string{"C-0016", " "}}, wantErr: "--include-controls contains an empty control identifier"},
+		{name: "empty skip entry", fixInfo: FixInfo{SkipControls: []string{""}}, wantErr: "--skip-controls contains an empty control identifier"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.fixInfo.ValidateControlSelection()
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.EqualError(t, err, tt.wantErr)
+		})
+	}
+}

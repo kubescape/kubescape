@@ -68,6 +68,9 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	if err := fixInfo.ValidateVerify(); err != nil {
 		return err
 	}
+	if err := fixInfo.ValidateControlSelection(); err != nil {
+		return err
+	}
 
 	fixInfo.ReportFile = strings.TrimSpace(fixInfo.ReportFile)
 	fixInfo.OutputDir = strings.TrimSpace(fixInfo.OutputDir)
