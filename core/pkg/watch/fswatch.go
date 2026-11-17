@@ -388,6 +388,16 @@ func (w *FileWatcher) handle(event fsnotify.Event) error {
 		// now is looked at, and watched.
 		return w.created(name)
 	}
+	if filepath.Base(name) == cautils.IgnoreFileName && filepath.Dir(name) == w.root {
+		// The scan reads its exclusions from this file, so what it excludes may have
+		// changed: a directory it no longer excludes is watched from now on, and the
+		// scan runs again. Exclude is expected to read the file as it is now.
+		if _, err := w.registerTree(w.root, true); err != nil {
+			return err
+		}
+		w.notify(name)
+		return nil
+	}
 	if event.Has(fsnotify.Create) {
 		return w.created(name)
 	}
