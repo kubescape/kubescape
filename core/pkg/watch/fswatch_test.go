@@ -1151,3 +1151,29 @@ func TestFileWatcherWatchesWhatTheIgnoreFileNoLongerExcludes(t *testing.T) {
 	assert.Contains(t, w.dirs, extra, "a directory the ignore file no longer excludes is not watched")
 	assert.Len(t, w.changes, 1, "an edit to the ignore file is signalled")
 }
+
+func TestFileWatcherSingleFileIgnoreChanges(t *testing.T) {
+	t.Parallel()
+	for _, op := range []fsnotify.Op{fsnotify.Create, fsnotify.Write, fsnotify.Remove, fsnotify.Rename} {
+		t.Run(op.String(), func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			file := filepath.Join(root, "pod.yaml")
+			write(t, file, "kind: Pod\n")
+			w, err := newFileWatcher(file, FileWatcherOptions{})
+			require.NoError(t, err)
+			defer w.fs.Close()
+
+			// Unrelated siblings must still be ignored in single-file mode.
+			for _, name := range []string{"other.yaml", "other.ignore", filepath.Join("nested", cautils.IgnoreFileName)} {
+				require.NoError(t, w.handle(fsnotify.Event{Name: filepath.Join(root, name), Op: op}))
+				assert.Empty(t, w.changes)
+			}
+			ignoreFile := filepath.Join(root, cautils.IgnoreFileName)
+			require.NoError(t, w.handle(fsnotify.Event{Name: ignoreFile, Op: fsnotify.Chmod}))
+			assert.Empty(t, w.changes)
+			require.NoError(t, w.handle(fsnotify.Event{Name: ignoreFile, Op: op}))
+			assert.Len(t, w.changes, 1, "changing the scan's ignore file must trigger a rescan")
+		})
+	}
+}
