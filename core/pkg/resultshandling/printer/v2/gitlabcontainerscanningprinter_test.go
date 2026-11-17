@@ -154,12 +154,47 @@ func TestNormalizeImageRef(t *testing.T) {
 		{"nginx@sha256:abc", "nginx:latest@sha256:abc"},
 		{"nginx:1.0@sha256:abc", "nginx:1.0@sha256:abc"},
 		{"", ""},
+		// a local source is a path, kept whole, whether or not it has a "/" or a ":"
+		{"docker-archive:app.tar", "docker-archive:app.tar:latest"},
+		{"docker-archive:./app.tar", "docker-archive:./app.tar:latest"},
+		{`docker-archive:C:\images\app.tar`, `docker-archive:C:\images\app.tar:latest`},
+		{"OCI-Archive:app.tar", "OCI-Archive:app.tar:latest"},
+		{"dir:.", "dir:.:latest"},
+		// a daemon or registry scheme is followed by a reference
+		{"docker:nginx", "docker:nginx:latest"},
+		{"docker:nginx:1.25", "docker:nginx:1.25"},
+		{"registry:localhost:5000/app", "registry:localhost:5000/app:latest"},
+		{"podman:nginx@sha256:abc", "podman:nginx:latest@sha256:abc"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			assert.Equal(t, tt.want, normalizeImageRef(tt.input))
 		})
 	}
+}
+
+// GitLab keys a container-scanning finding by its image without the tag, which it
+// takes to be what follows the last ":" unless that reads as a version
+// (Locations::ContainerScanning#docker_image_name_without_tag). Two archives, or two
+// images named through a scheme, are still two images to it.
+func TestGitLabContainerScanningPrinter_SourceSchemeInputsKeepDistinctImages(t *testing.T) {
+	inputs := []string{"docker-archive:frontend.tar", "docker-archive:backend.tar", "docker:nginx", "docker:redis"}
+	var imageScanData []cautils.ImageScanData
+	for _, image := range inputs {
+		imageScanData = append(imageScanData, cautils.ImageScanData{
+			Image:   image,
+			Matches: match.NewMatches(containerScanningMatch("CVE-2024-0001", "High", "openssl", "a")),
+		})
+	}
+	report := printContainerScanning(t, imageScanData)
+
+	require.Len(t, report.Vulnerabilities, len(inputs))
+	gitLabImages := make(map[string]bool)
+	for _, vulnerability := range report.Vulnerabilities {
+		image := vulnerability.Location.Image
+		gitLabImages[image[:max(strings.LastIndex(image, ":"), 0)]] = true
+	}
+	assert.Len(t, gitLabImages, len(inputs), "images GitLab tells apart: %v", gitLabImages)
 }
 
 func TestGitLabContainerScanningPrinter_MultiPlatformDistinctFingerprints(t *testing.T) {
