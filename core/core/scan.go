@@ -80,6 +80,27 @@ func closePrinters(printers ...printer.IPrinter) error {
 	return closeErr
 }
 
+// getKubernetesApiWithContext calls kubernetesAPIFunc in a goroutine and returns
+// promptly if ctx is cancelled or its deadline expires during cluster connection.
+func getKubernetesApiWithContext(ctx context.Context) (*k8sinterface.KubernetesApi, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("scan stopped while connecting to the cluster: %w", err)
+	}
+
+	ch := make(chan *k8sinterface.KubernetesApi, 1)
+	connect := kubernetesAPIFunc
+	go func() {
+		ch <- connect()
+	}()
+
+	select {
+	case k8s := <-ch:
+		return k8s, nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("scan stopped while connecting to the cluster: %w", ctx.Err())
+	}
+}
+
 // getInterfaces initializes and returns the component interfaces required for scanning,
 // including Kubernetes API and tenant configuration.
 func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (componentInterfaces, error) {
@@ -90,7 +111,12 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 	var k8s *k8sinterface.KubernetesApi
 	var k8sClient kubernetes.Interface
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
-		k8s = kubernetesAPIFunc()
+		var err error
+		k8s, err = getKubernetesApiWithContext(ctx)
+		if err != nil {
+			span.RecordError(err)
+			return componentInterfaces{}, err
+		}
 		if k8s == nil {
 			// Return rather than terminate: Scan already propagates this to the
 			// caller, and the command layer still exits non-zero on it.
@@ -100,7 +126,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 		}
 		k8sClient = k8s.KubernetesClient
 	}
-	// Connecting takes no context, so a deadline that passed meanwhile stops the scan here.
+	// Connecting takes no context in underlying client-go calls, so check deadline here.
 	if err := ctx.Err(); err != nil {
 		err = fmt.Errorf("scan stopped while connecting to the cluster: %w", err)
 		span.RecordError(err)
@@ -116,7 +142,11 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 		if scanInfo.NoClusterAccess || hasResolvedTenantConfig(scanInfo, localTenantConfig) {
 			tenantConfig = localTenantConfig
 		} else {
-			k8sForTenant := kubernetesAPIFunc()
+			k8sForTenant, err := getKubernetesApiWithContext(ctx)
+			if err != nil {
+				span.RecordError(err)
+				return componentInterfaces{}, err
+			}
 			tenantConfig = cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, k8sForTenant)
 		}
 	}
