@@ -1,6 +1,7 @@
 package prettyprinter
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"reflect"
@@ -845,4 +846,87 @@ func TestPrintTopComponents_PackageNameWithPercentVerbs(t *testing.T) {
 	}
 
 	assert.Contains(t, string(got), name, "package name must be printed literally, not interpreted as a format string")
+}
+
+func TestPrintComplianceScore(t *testing.T) {
+	tests := []struct {
+		name       string
+		frameworks []reportsummary.IFrameworkSummary
+		wantSub    []string
+		notWantSub []string
+	}{
+		{
+			name: "valid framework scores",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: 85.4},
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: 100.0},
+			},
+			wantSub: []string{
+				"nsa: 85.40%",
+				"mitre: 100.00%",
+			},
+			notWantSub: []string{
+				"N/A",
+				"-1",
+			},
+		},
+		{
+			name: "uncalculated sentinel score -1.0",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: -1.0},
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: 80.0},
+			},
+			wantSub: []string{
+				"nsa: N/A",
+				"mitre: 80.00%",
+			},
+			notWantSub: []string{
+				"-1.00%",
+				"-1%",
+			},
+		},
+		{
+			name: "fractional negative sentinel scores",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: -0.25},
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: -0.5},
+			},
+			wantSub: []string{
+				"nsa: N/A",
+				"mitre: N/A",
+			},
+			notWantSub: []string{
+				"-0.25%",
+				"-0.50%",
+				"-1%",
+				"0.00%",
+			},
+		},
+		{
+			name: "genuine zero score",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: 0.0},
+			},
+			wantSub: []string{
+				"nsa: 0.00%",
+			},
+			notWantSub: []string{
+				"N/A",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			printComplianceScore(&buf, tt.frameworks)
+			got := buf.String()
+			for _, want := range tt.wantSub {
+				assert.Contains(t, got, want)
+			}
+			for _, notWant := range tt.notWantSub {
+				assert.NotContains(t, got, notWant)
+			}
+		})
+	}
 }
