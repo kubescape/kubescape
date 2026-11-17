@@ -152,6 +152,7 @@ func TestFindingsOfAMalformedManifestAreUnreliableNotResolved(t *testing.T) {
 	findings := scanForTest(t, dir)
 	assert.Contains(t, findings.unreliable, pathKey(bad), "a manifest the scan could not load is not a clean one")
 	assert.Len(t, findings.byFile[good], 1, "the other manifests are still reported")
+	assert.True(t, findings.complete, "a skipped manifest is unreliable on its own; it doesn't make the rest of the scan incomplete")
 }
 
 // podManifest is a pod that fails C-0017 unless it sets a read-only root filesystem.
