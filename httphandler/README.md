@@ -358,7 +358,7 @@ Configure the HTTP handler using environment variables:
 | `KS_SERVICE_DISCOVERY_FILE_PATH` | Optional JSON file supplying service-discovery endpoints | `/etc/services.json` |
 | `KS_CONTEXT` | Kubernetes context/cluster name override | `my-cluster` |
 | `CLUSTER_NAME` | Cluster name used for telemetry and scan identity | `my-cluster` |
-| `NAMESPACE` | Namespace the server runs in (fallback when `POD_NAMESPACE` is unset) | `kubescape` |
+| `NAMESPACE` | Namespace used for server storage. Overrides the namespace from the configuration file. Independent of `POD_NAMESPACE` | `kubescape` |
 | `KS_SWEEP_ORPHANED_POSTURE_RESULTS` | Enable sweeping of orphaned posture results | `true`, `false` |
 | `OTEL_COLLECTOR_SVC` | OpenTelemetry collector endpoint (host:port) enabling OTLP export | `otel-collector:4317` |
 | `KS_SUBMIT` | Submit scan results to the Kubescape SaaS backend | `true`, `false` |
