@@ -125,3 +125,21 @@ func TestGetPrinterWriterNoFallback_StillTightensPermissions(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
+
+func TestGetPrinterWriterNoFallback_RejectsDanglingSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on Windows")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "missing-target.json")
+	link := filepath.Join(dir, "report.json")
+	require.NoError(t, os.Symlink(target, link))
+
+	_, err := GetPrinterWriterNoFallback(link)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "dangling symlink")
+
+	// The missing target must not have been created.
+	_, statErr := os.Stat(target)
+	assert.True(t, os.IsNotExist(statErr), "dangling target must not be created")
+}

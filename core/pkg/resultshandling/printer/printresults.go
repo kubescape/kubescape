@@ -231,6 +231,15 @@ type pendingOutput struct {
 var pendingOutputs sync.Map
 
 func openOutputFile(path string, deferTruncate bool) (*os.File, error) {
+	// Reject a dangling symlink up front. O_EXCL returns ErrExist for the
+	// symlink node even when its target does not exist, so the fallback open
+	// below would create the missing target while leaving created=false.
+	// CloseOutput would then skip the removal, leaving an empty target file.
+	if linfo, lerr := os.Lstat(path); lerr == nil && linfo.Mode()&os.ModeSymlink != 0 {
+		if _, serr := os.Stat(path); serr != nil {
+			return nil, fmt.Errorf("output path is a dangling symlink: %s", path)
+		}
+	}
 	created := false
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	switch {
