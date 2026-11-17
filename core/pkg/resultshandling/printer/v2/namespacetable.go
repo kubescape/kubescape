@@ -34,9 +34,13 @@ func printNamespaceSummaries(writer io.Writer, summaries cautils.NamespaceSummar
 	t.AppendHeader(table.Row{"Namespace", "Compliance Score", "Non-Compliant Controls", "Resources"})
 
 	for _, summary := range summaries {
+		scoreStr := "N/A"
+		if summary.ComplianceScore >= 0 {
+			scoreStr = fmt.Sprintf("%d%%", cautils.ComplianceScoreToInt(summary.ComplianceScore))
+		}
 		t.AppendRow(table.Row{
 			summary.Namespace,
-			fmt.Sprintf("%d%%", cautils.ComplianceScoreToInt(summary.ComplianceScore)),
+			scoreStr,
 			fmt.Sprintf("%d/%d", summary.NonCompliantControls, summary.TotalControls),
 			summary.ResourceCount,
 		})
