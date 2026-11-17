@@ -268,7 +268,7 @@ func TestLoadResourcesFromKustomizeDirectoryUnstartableHelmIsFatal(t *testing.T)
 }
 
 func TestLoadResourcesFromKustomizeDirectoryHelmErrors(t *testing.T) {
-	for _, layout := range []string{"root", "component", "generator", "component generator", "symlink configuration", "inline generator", "symlink generator", "List generator", "inline List generator", "symlink configuration generator"} {
+	for _, layout := range []string{"root", "component", "generator", "component generator", "symlink configuration", "inline generator", "symlink generator", "List generator", "inline List generator", "symlink configuration generator", "directory generator"} {
 		for _, tc := range []struct {
 			name        string
 			version     string
@@ -306,6 +306,12 @@ func TestLoadResourcesFromKustomizeDirectoryHelmErrors(t *testing.T) {
 					}
 					if strings.Contains(layout, "inline") {
 						config = "generators:\n- |\n    " + strings.ReplaceAll(strings.TrimSuffix(generator, "\n"), "\n", "\n    ") + "\n"
+					} else if layout == "directory generator" {
+						config = "generators: [generator-dir]\n"
+						genDir := filepath.Join(chartRoot, "generator-dir")
+						require.NoError(t, os.Mkdir(genDir, 0o700))
+						writeManifestFixture(t, genDir, "kustomization.yaml", "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: [helm.yaml]\n")
+						writeManifestFixture(t, genDir, "helm.yaml", generator)
 					} else {
 						config = "generators: [helm.yaml]\n"
 						file := "helm.yaml"
@@ -363,6 +369,19 @@ func TestLoadResourcesFromKustomizeDirectoryDoesNotProbeHelmForPlainResource(t *
 	_, _, err := LoadResourcesFromKustomizeDirectory(context.Background(), dir)
 
 	require.ErrorIs(t, err, ErrManifestsNotLoaded)
+	assert.NotErrorIs(t, err, ErrKustomizeHelmSetup)
+}
+
+func TestLoadResourcesFromKustomizeDirectoryNonHelmMissingResourceStaysRecoverable(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	dir := filepath.Join(t.TempDir(), "helm-charts", "app")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	writeManifestFixture(t, dir, "kustomization.yaml", "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: [helm-values.yaml]\n")
+
+	_, _, err := LoadResourcesFromKustomizeDirectory(context.Background(), dir)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrManifestsNotLoaded)
 	assert.NotErrorIs(t, err, ErrKustomizeHelmSetup)
 }
 
