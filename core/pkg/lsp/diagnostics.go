@@ -63,7 +63,7 @@ func findingsOf(session *cautils.OPASessionObj, coverage cautils.ScanCoverage) s
 	for _, skipped := range coverage.SkippedManifests {
 		out.unreliable[pathKey(skipped.Path)] = struct{}{}
 	}
-	if session == nil {
+	if session == nil || session.Report == nil {
 		return out
 	}
 
@@ -245,6 +245,9 @@ func (m *manifest) position(evidence *resourcesresults.ResourceAssociatedControl
 // uses unless another is negotiated (none is). A location past the end of the
 // file or line is clamped to it.
 func (m *manifest) toPosition(loc locationresolver.Location) protocol.Position {
+	if len(m.lines) == 0 {
+		return protocol.Position{}
+	}
 	line := max(loc.Line-1, 0)
 	if line >= len(m.lines) {
 		line = len(m.lines) - 1

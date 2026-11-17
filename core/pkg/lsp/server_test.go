@@ -499,3 +499,7 @@ func TestAManifestThatDoesNotParseDoesNotHoldBackTheOthers(t *testing.T) {
 	require.Len(t, ds, 1)
 	assert.Equal(t, "C-0017", ds[0].(map[string]any)["code"])
 }
+
+func TestWorkspaceRoots_NilParams(t *testing.T) {
+	assert.Nil(t, workspaceRoots(nil))
+}

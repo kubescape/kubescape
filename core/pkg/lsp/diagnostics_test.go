@@ -58,6 +58,19 @@ func TestToPositionConvertsToZeroBasedUTF16(t *testing.T) {
 	}
 }
 
+func TestToPosition_EmptyLinesDoesNotPanic(t *testing.T) {
+	m := &manifest{lines: []string{}}
+	pos := m.toPosition(locationresolver.Location{Line: 1, Column: 1})
+	assert.Equal(t, protocol.Position{}, pos)
+}
+
+func TestFindingsOf_NilReportDoesNotPanic(t *testing.T) {
+	session := &cautils.OPASessionObj{}
+	findings := findingsOf(session, cautils.ScanCoverage{})
+	assert.Empty(t, findings.byFile)
+	assert.Empty(t, findings.unreliable)
+}
+
 func TestUTF16Offset(t *testing.T) {
 	assert.Equal(t, uint32(0), utf16Offset("abc", 0))
 	assert.Equal(t, uint32(2), utf16Offset("abc", 2))
