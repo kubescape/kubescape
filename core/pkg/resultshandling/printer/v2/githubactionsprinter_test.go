@@ -821,3 +821,39 @@ func TestGenerateStepSummaryWithBudget_Boundaries(t *testing.T) {
 	assert.Contains(t, truncated, "Summary truncated to stay within GitHub's 1 MiB limit (1 entry omitted).")
 	assert.NotContains(t, truncated, "C-0002")
 }
+
+func TestGenerateStepSummary_SanitizesControlID(t *testing.T) {
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     50.0,
+		EvaluatedControls: 1,
+		TotalControls:     2,
+		Degraded:          true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{
+				ControlID: "CUSTOM|ID\r\n| rogue | row |",
+				Reason:    "skipped for testing",
+			},
+		},
+	}
+
+	summary := generateStepSummaryWithBudget(session, 1024*1024)
+	assert.Contains(t, summary, "CUSTOM\\|ID \\| rogue \\| row \\|")
+	assert.NotContains(t, summary, "CUSTOM|ID")
+	assert.NotContains(t, summary, "\r\n")
+
+	// Ensure each line in the table section has the expected table column structure (4 pipes per row: | col1 | col2 | col3 |)
+	lines := strings.Split(summary, "\n")
+	inSkippedSection := false
+	for _, line := range lines {
+		if strings.Contains(line, "#### Skipped Controls") {
+			inSkippedSection = true
+			continue
+		}
+		if inSkippedSection && strings.HasPrefix(line, "|") {
+			// Header and row lines must have exactly 4 unescaped pipes delimiting 3 columns: | c1 | c2 | c3 |
+			unescapedPipes := strings.Count(strings.ReplaceAll(line, `\|`, ``), "|")
+			assert.Equal(t, 4, unescapedPipes, "table row should have exactly 3 columns: %q", line)
+		}
+	}
+}

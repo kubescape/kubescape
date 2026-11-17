@@ -218,7 +218,7 @@ func generateStepSummaryWithBudget(opaSessionObj *cautils.OPASessionObj, maxByte
 				reason = "not evaluated"
 			}
 			rows = append(rows, fmt.Sprintf("| %s | %s | %s |\n",
-				sc.controlID,
+				sanitizeMarkdownTableCell(sc.controlID),
 				sanitizeMarkdownTableCell(name),
 				sanitizeMarkdownTableCell(reason)))
 		}
