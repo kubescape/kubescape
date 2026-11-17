@@ -623,6 +623,10 @@ func TestMatchSeverity(t *testing.T) {
 		assert.False(t, unknown)
 		assert.Equal(t, vulnerability.NegligibleSeverity, sev)
 	})
+	t.Run("provider returning nil metadata without error is unknown without panic", func(t *testing.T) {
+		_, unknown := MatchSeverity(makeThresholdTestMatch("CVE-not-found"), provider)
+		assert.True(t, unknown)
+	})
 }
 
 func TestValidateDBLoad(t *testing.T) {
@@ -845,6 +849,33 @@ func TestFilterMatchesBasedOnSeverity(t *testing.T) {
 
 	t.Run("metadata lookup errors preserve matches", func(t *testing.T) {
 		filtered := filterMatchesBasedOnSeverity([]string{"HIGH"}, remainingMatches, provider)
+		assert.ElementsMatch(t, []string{"CVE-medium", "CVE-error"}, matchIDs(filtered))
+	})
+
+	t.Run("embedded severity filters out match with nil provider without panic", func(t *testing.T) {
+		embeddedMatches := match.NewMatches(
+			makeThresholdTestMatchWithMetadata("CVE-high", "High"),
+			makeThresholdTestMatchWithMetadata("CVE-low", "Low"),
+		)
+		filtered := filterMatchesBasedOnSeverity([]string{"High"}, embeddedMatches, nil)
+		assert.ElementsMatch(t, []string{"CVE-low"}, matchIDs(filtered))
+	})
+
+	t.Run("embedded severity preferred when provider errors", func(t *testing.T) {
+		m := makeThresholdTestMatchWithMetadata("CVE-error", "High")
+		matches := match.NewMatches(m)
+		filtered := filterMatchesBasedOnSeverity([]string{"High"}, matches, provider)
+		assert.Empty(t, matchIDs(filtered))
+	})
+
+	t.Run("provider returning nil metadata without error preserves match without panic", func(t *testing.T) {
+		matches := match.NewMatches(makeTestMatch("CVE-not-found"))
+		filtered := filterMatchesBasedOnSeverity([]string{"High"}, matches, provider)
+		assert.ElementsMatch(t, []string{"CVE-not-found"}, matchIDs(filtered))
+	})
+
+	t.Run("whitespace trimmed on severity exceptions", func(t *testing.T) {
+		filtered := filterMatchesBasedOnSeverity([]string{" HIGH ", "  "}, remainingMatches, provider)
 		assert.ElementsMatch(t, []string{"CVE-medium", "CVE-error"}, matchIDs(filtered))
 	})
 }
