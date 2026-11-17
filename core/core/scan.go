@@ -82,8 +82,9 @@ func getKubernetesApiWithContext(ctx context.Context) (*k8sinterface.KubernetesA
 	}
 
 	ch := make(chan *k8sinterface.KubernetesApi, 1)
+	connect := kubernetesAPIFunc
 	go func() {
-		ch <- kubernetesAPIFunc()
+		ch <- connect()
 	}()
 
 	select {
