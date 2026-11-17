@@ -62,7 +62,9 @@ func classifyScanError(err error) ErrorCode {
 
 	case errors.Is(err, errPolicyNotReady),
 		errors.Is(err, context.DeadlineExceeded),
-		errors.Is(err, context.Canceled):
+		errors.Is(err, context.Canceled),
+		apierrors.IsTimeout(err),
+		apierrors.IsServerTimeout(err):
 		return ErrCodeTimeout
 
 	default:
