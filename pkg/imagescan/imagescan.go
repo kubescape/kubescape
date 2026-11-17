@@ -311,8 +311,12 @@ func getIgnoredMatches(vulnerabilityExceptions []string, vp vulnerability.Provid
 
 	var ignoreRules []match.IgnoreRule
 	for _, exception := range vulnerabilityExceptions {
+		trimmed := strings.TrimSpace(exception)
+		if trimmed == "" {
+			continue
+		}
 		rule := match.IgnoreRule{
-			Vulnerability: exception,
+			Vulnerability: trimmed,
 		}
 		ignoreRules = append(ignoreRules, rule)
 	}
@@ -342,9 +346,8 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 	filteredMatches := match.NewMatches()
 
 	for m := range remainingMatches.Enumerate() {
-		//nolint:staticcheck // deprecated but replacing it requires refactoring
-		metadata, err := vp.VulnerabilityMetadata(m.Vulnerability.Reference)
-		if err != nil {
+		matchSeverity, isUnknown := MatchSeverity(m, vp)
+		if isUnknown {
 			filteredMatches.Add(m)
 			continue
 		}
@@ -352,7 +355,11 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 		// Skip this match if the severity of this match is present in severityExceptions.
 		excludeSeverity := false
 		for _, sever := range severityExceptions {
-			if strings.EqualFold(metadata.Severity, sever) {
+			trimmed := strings.TrimSpace(sever)
+			if trimmed == "" {
+				continue
+			}
+			if strings.EqualFold(matchSeverity.String(), trimmed) {
 				excludeSeverity = true
 				break
 			}
@@ -458,6 +465,9 @@ func MatchSeverity(m match.Match, vp vulnerability.Provider) (vulnerability.Seve
 		if err != nil {
 			return vulnerability.UnknownSeverity, true
 		}
+	}
+	if metadata == nil {
+		return vulnerability.UnknownSeverity, true
 	}
 	severity := vulnerability.ParseSeverity(metadata.Severity)
 	return severity, severity == vulnerability.UnknownSeverity
