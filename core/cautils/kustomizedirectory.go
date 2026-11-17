@@ -118,6 +118,11 @@ func (kd *KustomizeDirectory) OriginFiles() map[string]string {
 // Used for checking if there is "Kustomization" file in the given Directory
 var kustomizationFileMatchers = [3]string{"kustomization.yml", "kustomization.yaml", "Kustomization"}
 
+// IsKustomizeDirectory reports whether path is a directory containing a Kustomization file.
+func IsKustomizeDirectory(path string) bool {
+	return isKustomizeDirectory(path)
+}
+
 func isKustomizeDirectory(path string) bool {
 	if ok := isDir(path); !ok {
 		return false

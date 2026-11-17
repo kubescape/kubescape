@@ -34,6 +34,11 @@ const vcsDir = ".git"
 
 // FileWatcherOptions configures a FileWatcher.
 type FileWatcherOptions struct {
+	// AcceptDependencies, when set, accepts dependency files regardless of
+	// extension (e.g. Kustomize patch files and generator inputs) for
+	// rendered-input directory watches, keeping editor-file and path exclusions.
+	AcceptDependencies bool
+
 	// Exclude, when set, reports whether a path is kept out of the watch. It is
 	// called with absolute paths. Excluded directories are not watched, and an
 	// excluded file never signals a change. The root itself is never excluded:
@@ -663,15 +668,47 @@ func (w *FileWatcher) skipDir(path string) bool {
 // files (name~, .name.swp, name.tmp, #name#) are out already, being named with
 // another extension; what is left to rule out is an Emacs lock file, which is a
 // link named like the file it guards. The one manifest without an extension is a
-// kustomization named Kustomization, which kustomize accepts.
+// kustomization named Kustomization, which kustomize accepts. For rendered-input
+// directory watches (AcceptDependencies), dependency files are accepted
+// regardless of extension while preserving editor-file and path exclusions.
 func (w *FileWatcher) relevantFile(path string) bool {
-	if strings.HasPrefix(filepath.Base(path), ".#") {
+	if isEditorOrTempFile(path) {
 		return false
 	}
-	if !cautils.IsYaml(path) && !cautils.IsJson(path) && !cautils.IsKustomizeFile(path) && !isTerraformOrHelmFile(path) {
-		return false
+	if !w.opts.AcceptDependencies {
+		if !cautils.IsYaml(path) && !cautils.IsJson(path) && !cautils.IsKustomizeFile(path) && !isTerraformOrHelmFile(path) && !isPatchFile(path) {
+			return false
+		}
 	}
 	return w.opts.Exclude == nil || !w.opts.Exclude(path, false)
+}
+
+func isEditorOrTempFile(path string) bool {
+	base := filepath.Base(path)
+	if strings.HasPrefix(base, ".#") {
+		return true // Emacs lock file
+	}
+	if strings.HasPrefix(base, "#") && strings.HasSuffix(base, "#") {
+		return true // Emacs auto-save file
+	}
+	if strings.HasSuffix(base, "~") {
+		return true // Backup file
+	}
+	ext := strings.ToLower(filepath.Ext(base))
+	switch ext {
+	case ".swp", ".swo", ".swx", ".bak", ".tmp", ".orig":
+		return true
+	}
+	return false
+}
+
+func isPatchFile(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".patch", ".diff":
+		return true
+	default:
+		return false
+	}
 }
 
 // isTerraformOrHelmFile reports whether a directory scan reads path besides

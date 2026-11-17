@@ -799,6 +799,7 @@ func TestFileWatcherRelevantFile(t *testing.T) {
 		// Terraform and Helm files a directory scan renders
 		{"main.tf", true}, {"terraform.tfvars", true}, {"prod.auto.tfvars", true},
 		{"terraform.tfvars.json", true}, {"_helpers.tpl", true},
+		{"security.patch", true}, {"patch.diff", true},
 		{"main.tf.bak", false}, {".terraform.lock.hcl", false},
 		{"notes.txt", false}, {"deploy", false}, {"deploy.yaml.bak", false},
 		{".deploy.yaml.swp", false}, {"deploy.yaml~", false}, {"#deploy.yaml#", false},
@@ -807,6 +808,26 @@ func TestFileWatcherRelevantFile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		assert.Equal(t, tt.want, w.relevantFile(filepath.Join("/tmp", "x", tt.name)), tt.name)
+	}
+
+	wWithDeps := &FileWatcher{opts: FileWatcherOptions{
+		AcceptDependencies: true,
+		Exclude: func(path string, isDir bool) bool {
+			return !isDir && filepath.Base(path) == "excluded.yaml"
+		},
+	}}
+	depTests := []struct {
+		name string
+		want bool
+	}{
+		{"deploy.yaml", true}, {"security.patch", true}, {"patch.diff", true},
+		{"patch", true}, {"config.properties", true}, {"settings.ini", true},
+		{"main.tf.bak", false}, {".deploy.yaml.swp", false}, {"deploy.yaml~", false},
+		{"#deploy.yaml#", false}, {".#deploy.yaml", false},
+		{"excluded.yaml", false},
+	}
+	for _, tt := range depTests {
+		assert.Equal(t, tt.want, wWithDeps.relevantFile(filepath.Join("/tmp", "x", tt.name)), tt.name)
 	}
 }
 

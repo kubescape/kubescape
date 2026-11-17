@@ -727,6 +727,24 @@ func TestWatchSecurityScanWatchesAnExtensionlessKustomization(t *testing.T) {
 	require.NoError(t, stop())
 }
 
+// A kustomization input is also rendered with the patch files it lists (e.g.
+// patches/security.patch), and an edit to a patch file must trigger a rescan.
+func TestWatchSecurityScanWatchesWhatAKustomizationPatchRenders(t *testing.T) {
+	dir := t.TempDir()
+	kustomization := filepath.Join(dir, "kustomization.yaml")
+	patch := filepath.Join(dir, "security.patch")
+	writeFile(t, kustomization, "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- pod.yaml\npatches:\n- path: security.patch\n  target:\n    kind: Pod\n    name: web\n")
+	writeFile(t, filepath.Join(dir, "pod.yaml"), podManifest("web", false))
+	writeFile(t, patch, "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\nspec:\n  containers:\n  - name: c\n    image: nginx\n")
+	out, stop := startSecurityWatch(t, localWatchScanInfo(t, kustomization))
+
+	out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+	writeFile(t, patch, "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\nspec:\n  containers:\n  - name: c\n    image: nginx\n    securityContext:\n      readOnlyRootFilesystem: true\n")
+	out.waitFor(t, "0 new, 1 resolved")
+
+	require.NoError(t, stop())
+}
+
 func TestWatchRoots(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "pod.yaml")
