@@ -60,12 +60,15 @@ func (ep *ExceptionsPrinter) Score(float32) {}
 
 func (ep *ExceptionsPrinter) PrintNextSteps() {}
 
-func (ep *ExceptionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
+func (ep *ExceptionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if err := printer.PrepareOutput(ep.writer); err != nil {
 		return err
 	}
 	if opaSessionObj == nil {
 		return fmt.Errorf("failed to write exceptions: no data provided")
+	}
+	if len(imageScanData) > 0 {
+		return fmt.Errorf("exceptions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
 	}
 
 	policies := buildExceptionPolicies(ctx, opaSessionObj)

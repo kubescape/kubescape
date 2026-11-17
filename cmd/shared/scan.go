@@ -215,6 +215,8 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 				return fmt.Errorf("gitlab-codequality cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
 			case printer.GitHubActionsFormat:
 				return fmt.Errorf("github-actions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
+			case printer.ExceptionsFormat:
+				return fmt.Errorf("exceptions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
 			}
 		}
 	}
