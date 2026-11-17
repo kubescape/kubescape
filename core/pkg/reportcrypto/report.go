@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	k8sjson "k8s.io/apimachinery/pkg/util/json"
@@ -320,6 +321,13 @@ func (d *reportDecryptor) decryptResource(resource rawObject, context string) (s
 	}
 
 	newID := workload.GetID()
+	if strings.HasPrefix(oldID, "path=") {
+		// File-scan IDs include the restored sourcePath, including its document index.
+		if path, ok := workload.GetObject()[localworkload.PathKey].(string); !ok || path == "" {
+			return "", "", fmt.Errorf("cannot restore %s.resourceID: local resource has no valid sourcePath", context)
+		}
+		newID = localworkload.NewLocalWorkload(workload.GetObject()).GetID()
+	}
 
 	if oldID != "" || newID != "" {
 		resource["resourceID"], err = json.Marshal(newID)
