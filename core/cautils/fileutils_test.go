@@ -1645,3 +1645,35 @@ spec:
 		}
 	}
 }
+
+// WorkloadDocuments numbers documents as gopkg.in/yaml.v3 does, so a workload
+// after a document that yields none still names its own document.
+func TestWorkloadDocuments(t *testing.T) {
+	pod := func(name string) string {
+		return "apiVersion: v1\nkind: Pod\nmetadata:\n  name: " + name + "\nspec:\n  containers:\n  - name: c\n    image: nginx\n"
+	}
+	list := "apiVersion: v1\nkind: List\nitems:\n- " + strings.ReplaceAll(strings.TrimSuffix(pod("x"), "\n"), "\n", "\n  ") + "\n- " + strings.ReplaceAll(strings.TrimSuffix(pod("y"), "\n"), "\n", "\n  ") + "\n"
+	tests := []struct {
+		name    string
+		content string
+		want    []int
+	}{
+		{name: "one workload per document", content: pod("a") + "---\n" + pod("b"), want: []int{0, 1}},
+		{name: "an empty document", content: pod("a") + "---\n---\n" + pod("b"), want: []int{0, 2}},
+		{name: "a comment-only document", content: pod("a") + "---\n# disabled\n---\n" + pod("b"), want: []int{0, 2}},
+		{name: "a document that isn't a Kubernetes object", content: "replicaCount: 1\n---\n" + pod("a"), want: []int{1}},
+		{name: "a List", content: list + "---\n" + pod("a"), want: []int{-1, -1, 1}},
+		{name: "no workloads", content: "a: 1\n---\nb: 2\n", want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := WorkloadDocuments([]byte(tt.content))
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+
+			// The loader's own count of workloads is what the indexes run over.
+			workloads, _ := readYamlFile([]byte(tt.content))
+			assert.Len(t, got, len(workloads))
+		})
+	}
+}

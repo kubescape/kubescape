@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -190,4 +191,27 @@ func scanForTest(t *testing.T, dir string) scanFindings {
 	findings, err := scanWith(realScanner(t))(context.Background(), []string{dir})
 	require.NoError(t, err)
 	return findings
+}
+
+// A finding after an empty or comment-only document in the same file is put on
+// its own resource, not on the one before it.
+func TestAFindingAfterAnEmptyDocumentIsOnItsOwnResource(t *testing.T) {
+	for name, between := range map[string]string{
+		"an empty document":       "---\n---\n",
+		"a comment-only document": "---\n# disabled\n---\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "pods.yaml")
+			content := podManifest("a", true) + between + podManifest("b", true) + "---\n" + podManifest("c", false)
+			require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+			podC := strings.Count(content[:strings.LastIndex(content, "apiVersion: v1")], "\n") // Pod/c's first line
+
+			ds := scanForTest(t, dir).byFile[path]
+
+			require.Len(t, ds, 1)
+			assert.Contains(t, ds[0].Message, "(Pod/c)")
+			assert.GreaterOrEqual(t, int(ds[0].Range.Start.Line), podC, "the finding is on Pod/c's lines")
+		})
+	}
 }
