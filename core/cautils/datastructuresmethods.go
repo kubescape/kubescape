@@ -86,19 +86,27 @@ func ShouldSkipRuleWithWarned(control reporthandling.Control, rule reporthandlin
 	return false
 }
 
+// normalizeSemVer normalizes a semver string by prefixing "v" if it is valid
+// semver without the "v" prefix (e.g. "1.2.3" -> "v1.2.3"). If the version is
+// already valid semver or cannot be parsed as semver, it is returned as is.
+func normalizeSemVer(v string) string {
+	if v != "" && !semver.IsValid(v) && semver.IsValid("v"+v) {
+		return "v" + v
+	}
+	return v
+}
+
 // Checks that kubescape version is in range of use for this rule
 // In local build (BuildNumber = ""):
 // returns true only if rule doesn't have the "until" attribute
 func isRuleKubescapeVersionCompatible(ruleName string, attributes map[string]any, version string, warned map[string]struct{}) bool {
-	normalizedVersion := version
-	if version != "" && !semver.IsValid(version) {
-		normalizedVersion = "v" + version
-	}
+	normalizedVersion := normalizeSemVer(version)
 
 	if from, ok := attributes["useFromKubescapeVersion"]; ok && from != nil {
 		switch sfrom := from.(type) {
 		case string:
-			if !semver.IsValid(sfrom) {
+			normalizedFrom := normalizeSemVer(sfrom)
+			if !semver.IsValid(normalizedFrom) {
 				key := ruleName + ":useFromKubescapeVersion:" + sfrom
 				if _, seen := warned[key]; !seen {
 					warned[key] = struct{}{}
@@ -107,7 +115,7 @@ func isRuleKubescapeVersionCompatible(ruleName string, attributes map[string]any
 						helpers.String("rule", ruleName))
 				}
 			}
-			if normalizedVersion != "" && semver.IsValid(normalizedVersion) && semver.Compare(normalizedVersion, sfrom) == -1 {
+			if normalizedVersion != "" && semver.IsValid(normalizedVersion) && semver.Compare(normalizedVersion, normalizedFrom) == -1 {
 				return false
 			}
 		default:
@@ -124,7 +132,8 @@ func isRuleKubescapeVersionCompatible(ruleName string, attributes map[string]any
 	if until, ok := attributes["useUntilKubescapeVersion"]; ok && until != nil {
 		switch suntil := until.(type) {
 		case string:
-			if !semver.IsValid(suntil) {
+			normalizedUntil := normalizeSemVer(suntil)
+			if !semver.IsValid(normalizedUntil) {
 				key := ruleName + ":useUntilKubescapeVersion:" + suntil
 				if _, seen := warned[key]; !seen {
 					warned[key] = struct{}{}
@@ -134,7 +143,7 @@ func isRuleKubescapeVersionCompatible(ruleName string, attributes map[string]any
 				}
 				return false
 			}
-			if normalizedVersion == "" || semver.Compare(normalizedVersion, suntil) >= 0 {
+			if normalizedVersion == "" || semver.Compare(normalizedVersion, normalizedUntil) >= 0 {
 				return false
 			}
 		default:
