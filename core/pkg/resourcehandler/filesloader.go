@@ -59,10 +59,11 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		} else {
 			pathFilter, filterErr := pathFilterFromScanInfo(ctx, scanInfo.InputPatterns[path], scanInfo)
 			if filterErr != nil {
-				return nil, allResources, nil, nil, filterErr
+				err = filterErr
+			} else {
+				input.root, input.sources, input.workloads, skipped, err = getResourcesFromInput(ctx, scanInfo.InputPatterns[path], helmValueOpts, pathFilter, cloneDepth, scanInfo.WorkspaceDir)
+				input.remote = remoteName(scanInfo.InputPatterns[path], cloneDepth)
 			}
-			input.root, input.sources, input.workloads, skipped, err = getResourcesFromInput(ctx, scanInfo.InputPatterns[path], helmValueOpts, pathFilter, cloneDepth, scanInfo.WorkspaceDir)
-			input.remote = remoteName(scanInfo.InputPatterns[path], cloneDepth)
 		}
 		sessionObj.SkippedManifests = append(sessionObj.SkippedManifests, skipped...)
 		if err != nil {
