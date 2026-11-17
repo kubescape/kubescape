@@ -2,11 +2,14 @@ package lsp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/core"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 )
@@ -85,13 +88,48 @@ func (s *server) codeWithoutExit() int {
 
 // scanWith adapts a scanner to what the coordinator needs.
 func scanWith(s Scanner) func(context.Context, []string) (scanFindings, error) {
-	return func(ctx context.Context, paths []string) (scanFindings, error) {
+	scan := func(ctx context.Context, paths []string) (scanFindings, error) {
 		result, err := s.Scan(ctx, core.LocalInput{Paths: paths})
 		if err != nil {
 			return scanFindings{}, err
 		}
 		return findingsOf(result.Session, result.Coverage), nil
 	}
+	return func(ctx context.Context, paths []string) (scanFindings, error) {
+		findings, err := scan(ctx, paths)
+		if err == nil || len(paths) < 2 || !nothingToScan(err) {
+			return findings, err
+		}
+		// A scan of several inputs fails when one of them has nothing to scan,
+		// such as a workspace folder without manifests or an open values file.
+		// Such an input has no findings, so the others are scanned without it.
+		var rest []string
+		for _, path := range paths {
+			alone, aloneErr := scan(ctx, []string{path})
+			if nothingToScan(aloneErr) {
+				continue
+			}
+			if aloneErr != nil {
+				return scanFindings{}, aloneErr
+			}
+			findings = alone
+			rest = append(rest, path)
+		}
+		switch len(rest) {
+		case 0:
+			return scanFindings{}, err
+		case 1:
+			return findings, nil
+		default:
+			return scan(ctx, rest)
+		}
+	}
+}
+
+// nothingToScan reports whether a scan failed only because an input holds no
+// manifests or no Kubernetes objects, as cmd/scan's watch also tells apart.
+func nothingToScan(err error) bool {
+	return errors.Is(err, cautils.ErrNoManifestFiles) || errors.Is(err, resourcehandler.ErrNoScannableResources)
 }
 
 // codec encodes and decodes the protocol's messages: the protocol package's own,
