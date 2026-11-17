@@ -49,12 +49,11 @@ func getComplianceScoreColumn(controlSummary reportsummary.IControlSummary, info
 	if controlSummary.GetStatus().IsSkipped() {
 		return fmt.Sprintf("%s %s", "Action Required", getInfoColumn(controlSummary, infoToPrintInfo))
 	}
-	if compliance := cautils.ComplianceScoreToInt(controlSummary.GetComplianceScore()); compliance < 0 {
+	rawScore := controlSummary.GetComplianceScore()
+	if rawScore < 0 {
 		return "N/A"
-	} else {
-		return fmt.Sprintf("%d", compliance) + "%"
 	}
-
+	return fmt.Sprintf("%d%%", cautils.ComplianceScoreToInt(rawScore))
 }
 
 func getSeverityColumn(controlSummary reportsummary.IControlSummary) string {
