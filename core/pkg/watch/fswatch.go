@@ -59,7 +59,8 @@ type FileWatcherOptions struct {
 // For a directory, the files that signal are those a scan would load, by their
 // extension (.yaml, .yml, .json manifests, .tf and .tfvars Terraform files, and
 // .tpl Helm template helpers), less editors' lock files. For a single file,
-// that file signals whatever its extension, and its siblings do not.
+// that file signals whatever its extension, as does its sibling .kubescapeignore;
+// other siblings do not.
 //
 // Changes are signalled on a channel of capacity one that is sent to without
 // blocking, so any number of changes while the reader is busy leave exactly one
@@ -364,7 +365,8 @@ func (w *FileWatcher) handle(event fsnotify.Event) error {
 	gone := event.Has(fsnotify.Remove | fsnotify.Rename)
 
 	if w.file != "" {
-		if name == w.file {
+		// A single-file scan reads exclusions from its parent directory too.
+		if name == w.file || name == filepath.Join(w.dir, cautils.IgnoreFileName) {
 			w.notify(name)
 		}
 		if name == w.dir && gone {
