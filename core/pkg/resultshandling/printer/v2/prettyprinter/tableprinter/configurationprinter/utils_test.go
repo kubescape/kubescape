@@ -1,11 +1,14 @@
 package configurationprinter
 
 import (
+	"bytes"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMapCategoryToSummary(t *testing.T) {
@@ -595,4 +598,14 @@ func TestGetRunCommandForControl(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPrintCategoryInfo_PercentVerbsPreserved(t *testing.T) {
+	var buf bytes.Buffer
+	info := "threshold exceeds 95% of capacity (%s %d)"
+	printCategoryInfo(&buf, []utils.InfoStars{{Stars: "**", Info: info}})
+
+	got := buf.String()
+	assert.Contains(t, got, info, "category info text must be printed literally, not evaluated as format string")
+	assert.NotContains(t, got, "%!o(MISSING)", "percent signs must not cause format string errors")
 }

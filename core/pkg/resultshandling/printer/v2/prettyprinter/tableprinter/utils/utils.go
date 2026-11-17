@@ -128,7 +128,7 @@ func FrameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 func PrintInfo(writer io.Writer, infoToPrintInfo []InfoStars) {
 	fmt.Fprintln(writer)
 	for i := range infoToPrintInfo {
-		cautils.InfoDisplay(writer, fmt.Sprintf("%s %s %s\n", emoji.PoliceCarLight, infoToPrintInfo[i].Stars, infoToPrintInfo[i].Info))
+		cautils.InfoDisplay(writer, "%s %s %s\n", emoji.PoliceCarLight, infoToPrintInfo[i].Stars, infoToPrintInfo[i].Info)
 	}
 }
 

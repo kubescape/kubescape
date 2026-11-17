@@ -37,7 +37,7 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 	}
 
 	// When scanning controls the framework list will be empty
-	cautils.SimpleDisplay(writer, utils.FrameworksScoresToString(summaryDetails.ListFrameworks())+"\n")
+	cautils.SimpleDisplay(writer, "%s\n", utils.FrameworksScoresToString(summaryDetails.ListFrameworks()))
 
 	controlCountersTable := table.NewWriter()
 	controlCountersTable.SetOutputMirror(writer)

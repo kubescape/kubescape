@@ -930,3 +930,38 @@ func TestPrintComplianceScore(t *testing.T) {
 		})
 	}
 }
+
+func TestPrintNextSteps_PercentVerbsPreserved(t *testing.T) {
+	f, err := os.CreateTemp("", "print-next-steps")
+	require.NoError(t, err)
+	defer f.Close()
+
+	nextStep := "Increase memory request to at least 80% of limit (%s-%d)"
+	printNextSteps(f, []string{nextStep}, false)
+
+	_, err = f.Seek(0, 0)
+	require.NoError(t, err)
+	got, err := io.ReadAll(f)
+	require.NoError(t, err)
+
+	assert.Contains(t, string(got), nextStep, "next step text must be printed literally, not evaluated as format string")
+}
+
+func TestPrintImagesCommands_PercentVerbsPreserved(t *testing.T) {
+	f, err := os.CreateTemp("", "print-images-commands")
+	require.NoError(t, err)
+	defer f.Close()
+
+	img := "registry.example.com/repo:tag-100%cpu-%s"
+	summary := imageprinter.ImageScanSummary{
+		Images: []string{img},
+	}
+	printImagesCommands(f, summary)
+
+	_, err = f.Seek(0, 0)
+	require.NoError(t, err)
+	got, err := io.ReadAll(f)
+	require.NoError(t, err)
+
+	assert.Contains(t, string(got), img, "image name must be printed literally, not evaluated as format string")
+}

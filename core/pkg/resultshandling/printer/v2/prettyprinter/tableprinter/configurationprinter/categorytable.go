@@ -89,7 +89,7 @@ func getCategoryTableWriter(writer io.Writer, headers table.Row, columnAlignment
 
 func renderSingleCategory(writer io.Writer, categoryName string, tableWriter table.Writer, rows []table.Row, infoToPrintInfo []utils.InfoStars) {
 
-	cautils.InfoDisplay(writer, categoryName+"\n")
+	cautils.InfoDisplay(writer, "%s\n", categoryName)
 
 	tableWriter.ResetRows()
 	tableWriter.AppendRows(rows)

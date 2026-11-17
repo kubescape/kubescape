@@ -151,6 +151,6 @@ func sortControlSummaries(controlSummaries []reportsummary.IControlSummary) {
 
 func printCategoryInfo(writer io.Writer, infoToPrintInfo []utils.InfoStars) {
 	for i := range infoToPrintInfo {
-		cautils.InfoDisplay(writer, fmt.Sprintf("%s %s\n", infoToPrintInfo[i].Stars, infoToPrintInfo[i].Info))
+		cautils.InfoDisplay(writer, "%s %s\n", infoToPrintInfo[i].Stars, infoToPrintInfo[i].Info)
 	}
 }

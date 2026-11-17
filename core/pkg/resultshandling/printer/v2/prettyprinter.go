@@ -167,10 +167,10 @@ func (pp *PrettyPrinter) printOverview(opaSessionObj *cautils.OPASessionObj, pri
 func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
 	switch pp.scanType {
 	case cautils.ScanTypeCluster:
-		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nSecurity posture overview for cluster: '%s'\n\n", pp.clusterName))
+		cautils.InfoDisplay(pp.writer, "\nSecurity posture overview for cluster: '%s'\n\n", pp.clusterName)
 		cautils.SimpleDisplay(pp.writer, "In this overview, Kubescape shows you a summary of your cluster security posture, including the number of users who can perform administrative actions. For each result greater than 0, you should evaluate its need, and then define an exception to allow it. This baseline can be used to detect drift in future.\n\n")
 	case cautils.ScanTypeRepo:
-		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nSecurity posture overview for repo: '%s'\n\n", strings.Join(pp.inputPatterns, ", ")))
+		cautils.InfoDisplay(pp.writer, "\nSecurity posture overview for repo: '%s'\n\n", strings.Join(pp.inputPatterns, ", "))
 	case cautils.ScanTypeWorkload:
 		cautils.InfoDisplay(pp.writer, "Workload security posture overview for:\n")
 		if opaSessionObj == nil || opaSessionObj.SingleResourceScan == nil {
