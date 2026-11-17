@@ -297,6 +297,12 @@ func TestResolveLocationWithoutWorkloadsAndInAList(t *testing.T) {
 	list := "apiVersion: v1\nkind: List\nitems:\n- apiVersion: v1\n  kind: Pod\n  metadata:\n    name: x\n"
 	_, err = newWorkloadResolverFor(t, list).ResolveLocation("metadata.name", 0)
 	assert.ErrorContains(t, err, "inside a List")
+
+	// Nor has a workload of a file the loader splits differently from the
+	// decoder, here at lone CR line breaks.
+	loneCR := "values: true\r---\rapiVersion: v1\rkind: Pod\rmetadata:\r  name: a\n---\napiVersion: v1\nkind: Pod\nmetadata:\n  name: b\n"
+	_, err = newWorkloadResolverFor(t, loneCR).ResolveLocation("metadata.name", 0)
+	assert.ErrorContains(t, err, "the loader reads")
 }
 
 // newWorkloadResolverFor is newResolverFor indexed by workload, as the

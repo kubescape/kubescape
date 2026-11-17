@@ -1676,4 +1676,11 @@ func TestWorkloadDocuments(t *testing.T) {
 			assert.Len(t, got, len(workloads))
 		})
 	}
+
+	// The loader splits documents by lines and doesn't take a lone CR for one,
+	// so it reads other workloads than the documents hold: the mapping refuses
+	// rather than match them up wrongly.
+	loneCR := "values: true\r---\rapiVersion: v1\rkind: Pod\rmetadata:\r  name: a\n---\napiVersion: v1\nkind: Pod\nmetadata:\n  name: b\n"
+	_, err := WorkloadDocuments([]byte(loneCR))
+	assert.ErrorContains(t, err, "the loader reads")
 }

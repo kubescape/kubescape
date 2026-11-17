@@ -1482,7 +1482,7 @@ func WorkloadDocuments(data []byte) ([]int, error) {
 	for i := 0; ; i++ {
 		var node yaml.Node
 		if err := decoder.Decode(&node); errors.Is(err, io.EOF) {
-			return documents, nil
+			break
 		} else if err != nil {
 			return nil, fmt.Errorf("document %d: %w", i, err)
 		}
@@ -1501,6 +1501,13 @@ func WorkloadDocuments(data []byte) ([]int, error) {
 			documents = append(documents, document)
 		}
 	}
+	// The loader splits the file into documents on its own, by lines. Where it
+	// doesn't split as the decoder does, as with lone CR line breaks, it reads
+	// other workloads than the documents hold, and they can't be matched up.
+	if loaded, _ := readYamlFile(data); len(loaded) != len(documents) {
+		return nil, fmt.Errorf("the loader reads %d workloads from the file and its documents hold %d", len(loaded), len(documents))
+	}
+	return documents, nil
 }
 
 func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err error) {

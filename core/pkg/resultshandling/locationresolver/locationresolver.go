@@ -89,6 +89,9 @@ type PathLocationResolver struct {
 	// workloadDocuments maps the index the scanner gives a workload to its
 	// document in yamlNodes, -1 for one in a List; see IndexedByWorkload.
 	workloadDocuments []int
+	// unmatched is why an indexed file's workloads couldn't be matched to its
+	// documents. Its workloads then have no location rather than another's.
+	unmatched error
 }
 
 // Option configures a PathLocationResolver.
@@ -101,7 +104,7 @@ type Option func(l *PathLocationResolver, data []byte)
 // the file's content; cautils.WorkloadDocuments is the scanner's own mapping.
 func IndexedByWorkload(workloadDocuments func(data []byte) ([]int, error)) Option {
 	return func(l *PathLocationResolver, data []byte) {
-		l.workloadDocuments, _ = workloadDocuments(data)
+		l.workloadDocuments, l.unmatched = workloadDocuments(data)
 	}
 }
 
@@ -191,9 +194,13 @@ func NewPathLocationResolver(yamlPath string, opts ...Option) (*PathLocationReso
 // With IndexedByWorkload, nodeIndex is the index the scanner gives the workload
 // ("<path>:<n>"), and names its document even when an empty, comment-only or
 // non-Kubernetes document comes before it; a workload inside a List has no
-// document of its own and no location. Otherwise, and in a file without
+// document of its own and no location, and neither has one of a file whose
+// workloads can't be matched to its documents. Otherwise, and in a file without
 // workloads, nodeIndex is the document's position in the file.
 func (l *PathLocationResolver) ResolveLocation(path string, nodeIndex int) (Location, error) {
+	if l.unmatched != nil {
+		return Location{}, l.unmatched
+	}
 	if nodeIndex >= 0 && nodeIndex < len(l.workloadDocuments) {
 		document := l.workloadDocuments[nodeIndex]
 		if document < 0 {
