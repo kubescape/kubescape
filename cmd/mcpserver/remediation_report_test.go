@@ -605,13 +605,14 @@ func TestApplyRemediation_ArgumentCombinations(t *testing.T) {
 
 func TestRemediationKey_ReportPathAndBasePathAreDistinguishing(t *testing.T) {
 	ids := []string{"C-0013"}
-	base := remediationKey("", "/r.json", "/b", ids)
+	base := toolRemediationKey("apply_remediation", "", "/r.json", "/b", ids)
 
-	assert.NotEqual(t, base, remediationKey("", "/other.json", "/b", ids))
-	assert.NotEqual(t, base, remediationKey("", "/r.json", "/other", ids))
-	assert.NotEqual(t, base, remediationKey("", "/r.json", "", ids))
-	assert.NotEqual(t, base, remediationKey("/r.json", "", "/b", ids), "path and report_path must not alias")
-	assert.Equal(t, base, remediationKey("", "/r.json", "/b", []string{"C-0013"}))
+	assert.NotEqual(t, base, toolRemediationKey("apply_remediation", "", "/other.json", "/b", ids))
+	assert.NotEqual(t, base, toolRemediationKey("apply_remediation", "", "/r.json", "/other", ids))
+	assert.NotEqual(t, base, toolRemediationKey("apply_remediation", "", "/r.json", "", ids))
+	assert.NotEqual(t, base, toolRemediationKey("apply_remediation", "/r.json", "", "/b", ids), "path and report_path must not alias")
+	assert.Equal(t, base, toolRemediationKey("apply_remediation", "", "/r.json", "/b", []string{"C-0013"}))
+	assert.NotEqual(t, base, toolRemediationKey("suggest_fix", "", "/r.json", "/b", ids), "tool names must not alias")
 }
 
 // --- backward compatibility ------------------------------------------------

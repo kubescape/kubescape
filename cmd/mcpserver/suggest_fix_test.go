@@ -247,3 +247,43 @@ spec:
 	require.Len(t, resp.Items, 1)
 	assert.Equal(t, classManual, resp.Items[0].Classification)
 }
+
+func TestSuggestFix_RealDefaultScan(t *testing.T) {
+	tmpDir := t.TempDir()
+	manifestName := "privileged-pod.yaml"
+	manifestPath := filepath.Join(tmpDir, manifestName)
+	require.NoError(t, os.WriteFile(manifestPath, []byte(privilegedPodManifest), 0600))
+
+	ksServer := &KubescapeMcpserver{
+		s:            server.NewMCPServer("kubescape-test", "test"),
+		policyGetter: getSharedLiveClusterPolicyGetter(t),
+		workspaceDir: tmpDir,
+	}
+	if _, err := ksServer.policyGetter.GetFramework("allcontrols"); err != nil {
+		if sharedLiveClusterPolicyFallback {
+			t.Skipf("skipping test due to missing allcontrols framework: %v", err)
+		}
+		t.Fatalf("missing allcontrols framework: %v", err)
+	}
+	registerTools(ksServer)
+
+	// Call suggest_fix without control_ids to exercise the real default allcontrols scan path
+	res, err := ksServer.CallTool(context.Background(), "suggest_fix", map[string]any{
+		"path": manifestName,
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError, "tool call returned error: %v", res)
+
+	text := res.Content[0].(mcp.TextContent).Text
+	var resp suggestFixResponse
+	require.NoError(t, json.Unmarshal([]byte(text), &resp))
+
+	// Because allcontrols was evaluated, items should report findings for the privileged pod
+	assert.NotEmpty(t, resp.Items, "expected evaluated items from default allcontrols scan")
+	assert.NotNil(t, resp.Report)
+
+	// Must never modify file on disk
+	content, err := os.ReadFile(manifestPath)
+	require.NoError(t, err)
+	assert.Equal(t, privilegedPodManifest, string(content), "suggest_fix must never modify file on disk")
+}
