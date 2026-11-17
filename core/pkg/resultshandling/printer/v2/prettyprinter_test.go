@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -593,4 +594,84 @@ func TestActionPrint_WorkloadScanNilSingleResourceScanDoesNotPanic(t *testing.T)
 	out := read()
 	assert.Contains(t, out, "Workload security posture overview")
 	assert.Contains(t, out, "In this overview, Kubescape shows you a summary")
+}
+
+// captureLog redirects the shared logger to a temp file for the duration of
+// fn and returns everything written to it, so tests can assert on log
+// content instead of just "it didn't panic".
+func captureLog(t *testing.T, fn func()) string {
+	t.Helper()
+	buf, err := os.CreateTemp(t.TempDir(), "log-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = buf.Close() })
+	prev := logger.L().GetWriter()
+	logger.L().SetWriter(buf)
+	t.Cleanup(func() { logger.L().SetWriter(prev) })
+
+	fn()
+
+	require.NoError(t, buf.Sync())
+	b, err := os.ReadFile(buf.Name())
+	require.NoError(t, err)
+	return string(b)
+}
+
+func TestActionPrint_PrettyPrinter_LogsOutputFileForImageScan(t *testing.T) {
+	pp, read := newTestPrettyPrinterFile(t)
+	pp.scanType = cautils.ScanTypeImage
+	pp.SetMainPrinter()
+
+	imageScanData := []cautils.ImageScanData{{Image: "nginx:latest"}}
+	log := captureLog(t, func() {
+		err := pp.ActionPrint(context.Background(), nil, imageScanData)
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, log, "Scan results saved")
+	assert.Contains(t, log, pp.writer.Name())
+	assert.NotEmpty(t, read())
+}
+
+func TestActionPrint_PrettyPrinter_LogsOutputFileAfterCombinedScan(t *testing.T) {
+	pp, read := newTestPrettyPrinterFile(t)
+	pp.scanType = cautils.ScanTypeCluster
+	pp.SetMainPrinter()
+
+	session := controlViewAssistedRemediationSession()
+	imageScanData := []cautils.ImageScanData{{Image: "nginx:latest"}}
+
+	log := captureLog(t, func() {
+		err := pp.ActionPrint(context.Background(), session, imageScanData)
+		require.NoError(t, err)
+	})
+
+	assert.Equal(t, 1, strings.Count(log, "Scan results saved"))
+	assert.Contains(t, log, pp.writer.Name())
+	assert.NotEmpty(t, read())
+}
+
+func TestActionPrint_PrettyPrinter_StdoutDoesNotLogOutputFile(t *testing.T) {
+	pp := NewPrettyPrinter(false, "v2", false, cautils.ControlViewType, cautils.ScanTypeImage, nil, "", false, false)
+	require.NoError(t, pp.SetWriter(context.Background(), os.Stdout.Name()))
+
+	imageScanData := []cautils.ImageScanData{{Image: "nginx:latest"}}
+	log := captureLog(t, func() {
+		err := pp.ActionPrint(context.Background(), nil, imageScanData)
+		require.NoError(t, err)
+	})
+
+	assert.NotContains(t, log, "Scan results saved")
+}
+
+func TestActionPrint_PrettyPrinter_NoDataDoesNotLogOutputFile(t *testing.T) {
+	pp, _ := newTestPrettyPrinterFile(t)
+	pp.scanType = cautils.ScanTypeCluster
+	pp.SetMainPrinter()
+
+	log := captureLog(t, func() {
+		err := pp.ActionPrint(context.Background(), nil, nil)
+		require.NoError(t, err)
+	})
+
+	assert.NotContains(t, log, "Scan results saved")
 }
