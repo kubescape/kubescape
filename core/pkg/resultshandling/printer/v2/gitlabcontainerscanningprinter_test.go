@@ -165,6 +165,14 @@ func TestNormalizeImageRef(t *testing.T) {
 		{"docker:nginx:1.25", "docker:nginx:1.25"},
 		{"registry:localhost:5000/app", "registry:localhost:5000/app:latest"},
 		{"podman:nginx@sha256:abc", "podman:nginx:latest@sha256:abc"},
+		// what follows a daemon or registry scheme is a reference, even when the
+		// image is named like a scheme
+		{"docker:dir:latest", "docker:dir:latest"},
+		{"docker:registry:2", "docker:registry:2"},
+		{"image:dir:latest", "image:dir:latest"},
+		{"docker:dir", "docker:dir:latest"},
+		{"podman:docker-archive@sha256:abc", "podman:docker-archive:latest@sha256:abc"},
+		{"registry:registry:2", "registry:registry:2"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
@@ -195,6 +203,19 @@ func TestGitLabContainerScanningPrinter_SourceSchemeInputsKeepDistinctImages(t *
 		gitLabImages[image[:max(strings.LastIndex(image, ":"), 0)]] = true
 	}
 	assert.Len(t, gitLabImages, len(inputs), "images GitLab tells apart: %v", gitLabImages)
+}
+
+// An image named like a source scheme, pulled through a daemon or registry scheme,
+// keeps the tag it was given: "docker:registry:2" is the image registry:2, not an
+// untagged "registry:2" that needs ":latest".
+func TestGitLabContainerScanningPrinter_ImageNamedLikeASchemeKeepsItsTag(t *testing.T) {
+	report := printContainerScanning(t, []cautils.ImageScanData{{
+		Image:   "docker:registry:2",
+		Matches: match.NewMatches(containerScanningMatch("CVE-2024-0001", "High", "openssl", "a")),
+	}})
+
+	require.Len(t, report.Vulnerabilities, 1)
+	assert.Equal(t, "docker:registry:2", report.Vulnerabilities[0].Location.Image)
 }
 
 func TestGitLabContainerScanningPrinter_MultiPlatformDistinctFingerprints(t *testing.T) {
