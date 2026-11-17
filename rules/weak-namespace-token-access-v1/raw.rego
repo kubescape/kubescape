@@ -122,13 +122,16 @@ token_verbs(rule) := {"get", "list", "watch", "update", "patch", "*"} if {
 token_verbs(rule) := {"list", "watch", "*"} if {
 	not unrestricted_rule(rule)
 	not names_a_secret(rule)
+	"" in resource_names(rule)
 }
 
-# A non-empty resourceNames entry is a real secret. "" is the name a collection
-# request is authorized with, not the name of an object.
+# A resourceNames entry other than "" and "*" can be a real secret. "" is the
+# name a collection request is authorized with, not the name of an object, and
+# "*" is matched literally (RBAC does not expand it), which no secret can be
+# named.
 names_a_secret(rule) if {
 	some name in resource_names(rule)
-	name != ""
+	not name in {"", "*"}
 }
 
 targets_secrets(rule) if {
