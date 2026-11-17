@@ -248,7 +248,10 @@ type watchConfig struct {
 	// Roots are the files and directories scanned, and watched.
 	Roots []string
 	// AcceptDependencies reports whether root is a rendered-input directory
-	// that should accept dependency files regardless of extension.
+	// that should accept dependency files regardless of extension. It is
+	// consulted as files change, so a directory that becomes one when a
+	// kustomization appears, or stops being one when it is removed, is
+	// classified as it is at that moment.
 	AcceptDependencies func(root string) bool
 	// Exclude gives the filter of what a root leaves out of the watch, the one
 	// its scan applies. Nil leaves nothing out.
@@ -291,12 +294,12 @@ func runWatch(ctx context.Context, cfg watchConfig) error {
 				return fmt.Errorf("--watch: %w", err)
 			}
 		}
-		acceptDeps := false
+		var acceptDependencies func() bool
 		if cfg.AcceptDependencies != nil {
-			acceptDeps = cfg.AcceptDependencies(root)
+			acceptDependencies = func() bool { return cfg.AcceptDependencies(root) }
 		}
 		watcher, err := watch.NewFileWatcher(ctx, root, watch.FileWatcherOptions{
-			AcceptDependencies: acceptDeps,
+			AcceptDependencies: acceptDependencies,
 			Exclude:            exclude,
 			OnError:            func(err error) { fmt.Fprintf(errOut, "Warning: %v\n", err) },
 		})
