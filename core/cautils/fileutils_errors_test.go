@@ -268,7 +268,7 @@ func TestLoadResourcesFromKustomizeDirectoryUnstartableHelmIsFatal(t *testing.T)
 }
 
 func TestLoadResourcesFromKustomizeDirectoryHelmErrors(t *testing.T) {
-	for _, layout := range []string{"root", "component", "generator", "component generator"} {
+	for _, layout := range []string{"root", "component", "generator", "component generator", "symlink configuration", "inline generator", "symlink generator", "List generator", "inline List generator", "symlink configuration generator"} {
 		for _, tc := range []struct {
 			name        string
 			version     string
@@ -300,10 +300,39 @@ func TestLoadResourcesFromKustomizeDirectoryHelmErrors(t *testing.T) {
 				}
 				config := "helmCharts:\n- name: test-chart\n"
 				if strings.Contains(layout, "generator") {
-					config = "generators: [helm.yaml]\n"
-					writeManifestFixture(t, chartRoot, "helm.yaml", "apiVersion: builtin\nkind: HelmChartInflationGenerator\nmetadata:\n  name: chart\nname: test-chart\n")
+					generator := "apiVersion: builtin\nkind: HelmChartInflationGenerator\nmetadata:\n  name: chart\nname: test-chart\n"
+					if strings.Contains(layout, "List") {
+						generator = "apiVersion: v1\nkind: List\nitems:\n- " + strings.ReplaceAll(strings.TrimSuffix(generator, "\n"), "\n", "\n  ") + "\n"
+					}
+					if strings.Contains(layout, "inline") {
+						config = "generators:\n- |\n    " + strings.ReplaceAll(strings.TrimSuffix(generator, "\n"), "\n", "\n    ") + "\n"
+					} else {
+						config = "generators: [helm.yaml]\n"
+						file := "helm.yaml"
+						if layout == "symlink generator" {
+							file = "actual-generator.yaml"
+							if runtime.GOOS == "windows" {
+								t.Skip("symlink creation requires privileges on Windows")
+							}
+							require.NoError(t, os.Symlink(file, filepath.Join(chartRoot, "helm.yaml")))
+						}
+						writeManifestFixture(t, chartRoot, file, generator)
+					}
 				}
-				writeManifestFixture(t, chartRoot, "kustomization.yaml", kind+config)
+				file := "kustomization.yaml"
+				if strings.HasPrefix(layout, "symlink configuration") {
+					file = "config.yaml"
+					if strings.Contains(layout, "generator") {
+						// Generators remain relative to chartRoot, not this target directory.
+						require.NoError(t, os.Mkdir(filepath.Join(chartRoot, "configuration"), 0o700))
+						file = filepath.Join("configuration", "config.yaml")
+					}
+					if runtime.GOOS == "windows" {
+						t.Skip("symlink creation requires privileges on Windows")
+					}
+					require.NoError(t, os.Symlink(file, filepath.Join(chartRoot, "kustomization.yaml")))
+				}
+				writeManifestFixture(t, chartRoot, file, kind+config)
 				chart := filepath.Join(chartRoot, "charts", "test-chart")
 				require.NoError(t, os.MkdirAll(chart, 0o700))
 				writeManifestFixture(t, chart, "Chart.yaml", "apiVersion: v2\nname: test-chart\nversion: 0.1.0\n")
