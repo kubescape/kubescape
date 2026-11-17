@@ -79,6 +79,7 @@ func TestPrintHeaderRendersScanContext(t *testing.T) {
 	tests := []struct {
 		name       string
 		scanType   cautils.ScanTypes
+		nilSession bool
 		configure  func(*PrettyPrinter, *cautils.OPASessionObj)
 		wantText   []string
 		rejectText string
@@ -106,6 +107,20 @@ func TestPrintHeaderRendersScanContext(t *testing.T) {
 			wantText: []string{"Workload security posture overview", "Namespace", "shop", "Deployment", "checkout"},
 		},
 		{
+			name: "workload scan with nil SingleResourceScan does not panic", scanType: cautils.ScanTypeWorkload,
+			configure: func(_ *PrettyPrinter, session *cautils.OPASessionObj) {
+				session.SingleResourceScan = nil
+			},
+			wantText:   []string{"Workload security posture overview", "In this overview, Kubescape shows you a summary"},
+			rejectText: "Namespace",
+		},
+		{
+			name: "workload scan with nil session does not panic", scanType: cautils.ScanTypeWorkload,
+			nilSession: true,
+			wantText:   []string{"Workload security posture overview", "In this overview, Kubescape shows you a summary"},
+			rejectText: "Namespace",
+		},
+		{
 			name: "control has no overview header", scanType: cautils.ScanTypeControl,
 			wantText: []string{}, rejectText: "Security posture overview",
 		},
@@ -115,9 +130,12 @@ func TestPrintHeaderRendersScanContext(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			pp, read := newDataDrivenPrettyPrinter(t)
 			pp.scanType = test.scanType
-			session := &cautils.OPASessionObj{}
-			if test.configure != nil {
-				test.configure(pp, session)
+			var session *cautils.OPASessionObj
+			if !test.nilSession {
+				session = &cautils.OPASessionObj{}
+				if test.configure != nil {
+					test.configure(pp, session)
+				}
 			}
 
 			pp.printHeader(session)
