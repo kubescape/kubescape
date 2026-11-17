@@ -47,9 +47,9 @@ type coordinator struct {
 
 	mu         sync.Mutex
 	generation uint64
-	cancelScan context.CancelFunc // of the scan in progress, if any
-	saves      map[string]int32   // version of each document at its latest save, by pathKey
-	wake       chan struct{}      // capacity one: a save signals without blocking
+	cancelScan context.CancelFunc   // of the scan in progress, if any
+	saves      map[string]docTarget // version and lifecycle at each document's latest save, by pathKey
+	wake       chan struct{}        // capacity one: a save signals without blocking
 
 	// pubMu orders publishing with a document's close: nothing is published for a
 	// document after the empty list that closed it.
@@ -66,7 +66,7 @@ func newCoordinator(docs *documentStore, roots []string, scan func(context.Conte
 		docs:      docs,
 		publish:   publish,
 		roots:     dedupeRoots(roots),
-		saves:     make(map[string]int32),
+		saves:     make(map[string]docTarget),
 		wake:      make(chan struct{}, 1),
 		published: make(map[string]struct{}),
 	}
@@ -84,12 +84,11 @@ func (c *coordinator) start(ctx context.Context) {
 // stop waits for the coordinator to end, after the context given to start has.
 func (c *coordinator) stop() { c.wg.Wait() }
 
-// saved records a save of a document that is open at version, and schedules a
-// scan.
-func (c *coordinator) saved(path string, version int32) {
+// saved records the document as it was at save time and schedules a scan.
+func (c *coordinator) saved(d document) {
 	c.mu.Lock()
 	c.generation++
-	c.saves[pathKey(path)] = version
+	c.saves[pathKey(d.path)] = docTarget{version: d.version, openID: d.openID}
 	if c.cancelScan != nil {
 		c.cancelScan() // obsolete: its result will not be published
 	}
@@ -151,7 +150,7 @@ func (c *coordinator) scanOnce(ctx context.Context) {
 	generation := c.generation
 	c.cancelScan = cancel
 	saves := c.saves
-	c.saves = make(map[string]int32)
+	c.saves = make(map[string]docTarget)
 	c.mu.Unlock()
 
 	// The versions the result will be for: a clean document's, as of the scan's
@@ -161,8 +160,8 @@ func (c *coordinator) scanOnce(ctx context.Context) {
 	expected := make(map[string]docTarget)
 	var paths []string
 	for _, d := range c.docs.snapshot() {
-		if v, ok := saves[pathKey(d.path)]; ok {
-			expected[pathKey(d.path)] = docTarget{version: v, openID: d.openID}
+		if saved, ok := saves[pathKey(d.path)]; ok && saved.openID == d.openID {
+			expected[pathKey(d.path)] = saved
 		} else if !d.dirty {
 			expected[pathKey(d.path)] = docTarget{version: d.version, openID: d.openID}
 		}
