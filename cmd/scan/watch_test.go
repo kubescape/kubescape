@@ -841,3 +841,50 @@ func startSecurityWatchOutput(t *testing.T, info *cautils.ScanInfo) (out *lines,
 	t.Cleanup(func() { cancel() })
 	return out, stop
 }
+
+func TestReloadingFilterDetectsContentChangeWithUnchangedMetadata(t *testing.T) {
+	dir := t.TempDir()
+	ignoreFile := filepath.Join(dir, cautils.IgnoreFileName)
+	writeFile(t, ignoreFile, "first/\n")
+	info, err := os.Stat(ignoreFile)
+	require.NoError(t, err)
+	filter, err := newReloadingFilter(dir, nil, true)
+	require.NoError(t, err)
+	first := filepath.Join(dir, "first")
+	other := filepath.Join(dir, "other")
+	require.True(t, filter.Excluded(first, true))
+	require.False(t, filter.Excluded(other, true))
+
+	writeFile(t, ignoreFile, "other/\n")
+	require.NoError(t, os.Chtimes(ignoreFile, info.ModTime(), info.ModTime()))
+	updated, err := os.Stat(ignoreFile)
+	require.NoError(t, err)
+	require.Equal(t, info.Size(), updated.Size())
+	require.True(t, info.ModTime().Equal(updated.ModTime()))
+
+	assert.False(t, filter.Excluded(first, true), "a newly included directory must be watched")
+	assert.True(t, filter.Excluded(other, true), "the new exclusion must replace the previous one")
+}
+
+func TestReloadingFilterRetainsRulesOnReadErrorAndRecovers(t *testing.T) {
+	dir := t.TempDir()
+	ignoreFile := filepath.Join(dir, cautils.IgnoreFileName)
+	writeFile(t, ignoreFile, "first/\n")
+	filter, err := newReloadingFilter(dir, nil, true)
+	require.NoError(t, err)
+	first := filepath.Join(dir, "first")
+	require.True(t, filter.Excluded(first, true))
+
+	// An unreadable ignore file must not clear the previous exclusions.
+	require.NoError(t, os.Remove(ignoreFile))
+	require.NoError(t, os.Mkdir(ignoreFile, 0o700))
+	assert.True(t, filter.Excluded(first, true))
+	require.NoError(t, os.Remove(ignoreFile))
+	writeFile(t, ignoreFile, "other/\n")
+	assert.False(t, filter.Excluded(first, true))
+	assert.True(t, filter.Excluded(filepath.Join(dir, "other"), true))
+
+	// Removing the ignore file restores the empty rule set.
+	require.NoError(t, os.Remove(ignoreFile))
+	assert.False(t, filter.Excluded(filepath.Join(dir, "other"), true))
+}

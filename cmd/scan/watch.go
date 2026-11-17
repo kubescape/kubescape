@@ -2,10 +2,10 @@ package scan
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -159,7 +159,7 @@ type reloadingFilter struct {
 	ignoreFile    string
 
 	mu      sync.Mutex
-	version string // the ignore file's size and modification time when filter was made
+	version string // digest of the ignore file's lines when filter was made
 	filter  *cautils.PathFilter
 }
 
@@ -181,11 +181,13 @@ func (f *reloadingFilter) ignoreFileVersion() string {
 	if f.ignoreFile == "" {
 		return ""
 	}
-	info, err := os.Stat(f.ignoreFile)
+	// Use the scan's bounded reader, including its regular-file checks. File
+	// size and mtime alone miss edits made by timestamp-preserving tools.
+	patterns, err := cautils.LoadIgnoreFilePatterns(filepath.Dir(f.ignoreFile))
 	if err != nil {
-		return "absent"
+		return f.version // retain the last usable filter until the file is readable
 	}
-	return fmt.Sprintf("%d %d", info.Size(), info.ModTime().UnixNano())
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(patterns, "\n"))))
 }
 
 // Excluded is (*cautils.PathFilter).Excluded with the filter made again first if
