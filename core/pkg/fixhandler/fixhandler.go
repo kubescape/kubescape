@@ -1822,9 +1822,15 @@ func isFixableSourceType(fileType string) bool {
 
 // applyFixToFileContent rewrites one file, keeping it in the format it was
 // written in. Emitting YAML into a .json manifest would break every tool that
-// reads it back.
+// reads it back. A JSON manifest is edited in place first as well, so what the
+// fixes don't touch stays as it was written: re-encoding it rounds an integer
+// above 2^53. It is re-encoded only when the in-place edit isn't JSON, as when
+// a fix adds a field.
 func applyFixToFileContent(ctx context.Context, filePath, content string, fixes []ResourceFixInfo) (string, error) {
 	if isJSONSource(filePath) {
+		if patched, _, err := (YAMLTreeEditor{}).ApplyFixes(ctx, content, fixes); err == nil && json.Valid([]byte(patched)) {
+			return patched, nil
+		}
 		expression := strings.Join(fileFixExpressions(fixes), " | ")
 		return applyFixToJSONContent(ctx, content, expression, fixes)
 	}
