@@ -182,6 +182,15 @@ func parseYAMLPath(path string) ([]yamlPathPart, error) {
 
 // The expression builder escapes only double quotes. In particular, \n in
 // an expression string denotes a backslash followed by n, not a newline.
+func isYAMLBoolean(s string) bool {
+	switch s {
+	case "true", "false", "True", "False", "TRUE", "FALSE":
+		return true
+	default:
+		return false
+	}
+}
+
 func parseYAMLLiteral(s string) (*yaml.Node, error) {
 	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
 		parts, err := splitYAMLPipeline(s)
@@ -200,7 +209,7 @@ func parseYAMLLiteral(s string) (*yaml.Node, error) {
 		}
 		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: strings.ReplaceAll(s[1:len(s)-1], `\"`, `"`)}, nil
 	}
-	if s == "true" || s == "false" || s == "True" || s == "False" || s == "TRUE" || s == "FALSE" {
+	if isYAMLBoolean(s) {
 		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: strings.ToLower(s)}, nil
 	}
 	if f, err := strconv.ParseFloat(s, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
