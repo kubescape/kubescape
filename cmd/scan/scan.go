@@ -216,6 +216,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				// The invocation is valid from this point on. Runtime and result-gate
 				// failures should not print command usage.
 				cmd.SilenceUsage = true
+				// The contract picks its own policies, so its compliance floor and an
+				// explicit --compliance-threshold apply here, unlike the default security view.
+				scanInfo.EnforceCompliance = true
 				if watchMode {
 					return watchSecurityScan(cmd, ks, &scanInfo, policyIdentifiers)
 				}
@@ -293,7 +296,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.MinSeverity, "min-severity", "", "Only include findings at or above this severity (low, medium, high, critical) in the output. Applies to posture controls and image vulnerabilities. Does not affect exit codes, which are computed on the full unfiltered report")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.MaxSeverity, "max-severity", "", "Only include findings at or below this severity (low, medium, high, critical) in the output. Applies to posture controls and image vulnerabilities. Does not affect exit codes, which are computed on the full unfiltered report")
 
-	scanCmd.PersistentFlags().Float32VarP(&scanInfo.ComplianceThreshold, "compliance-threshold", "", 0, "Compliance threshold is the percent below which the command fails and returns exit code 1. Applies to 'scan framework', 'scan control', 'scan workload', and '--view resource|control'")
+	scanCmd.PersistentFlags().Float32VarP(&scanInfo.ComplianceThreshold, "compliance-threshold", "", 0, "Compliance threshold is the percent below which the command fails and returns exit code 1. Applies to 'scan framework', 'scan control', 'scan workload', '--view resource|control', and scans driven by a scan contract's policy")
 	scanCmd.PersistentFlags().Float32Var(&scanInfo.FailCoverageThreshold, "fail-coverage-below", 0, "Fail (exit code 1) when the scan coverage score drops below this percentage (0 to disable). The score is the ratio of evaluated controls discounted by 3 points per silent failed GVR pull (a resource type that failed to collect entirely but whose dependent controls still evaluated via other resource types), 2 points per partial GVR pull, and 5 points per degraded policy input, so a scan with every control evaluated can still fail on partial resource collection or fallback policy inputs")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.FailOnDegradedConfig, "fail-on-degraded-config", false, "Fail the scan (exit code 1) if control configurations or exceptions could not be loaded from their configured source and bundled defaults were used instead")
 
@@ -537,6 +540,10 @@ func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IK
 
 	if err = results.HandleResults(ctx, scanInfo); err != nil {
 		return results, err
+	}
+
+	if scanInfo.EnforceCompliance && results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
+		return results, fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
 	}
 
 	if err := joinGateErrors(

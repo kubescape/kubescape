@@ -161,6 +161,7 @@ type ScanInfo struct {
 	Silent                    bool                         // Silent mode - Do not print progress logs
 	FailThreshold             float32                      // DEPRECATED - Failure score threshold
 	ComplianceThreshold       float32                      // Compliance score threshold
+	EnforceCompliance         bool                         // Fail a security-view scan below ComplianceThreshold (set for contract-driven policy scans)
 	FailThresholdSeverity     string                       // Severity at and above which the command should fail
 	OnlyFixable               bool                         // Gate the image vulnerability thresholds to only count CVEs that have an available fix
 	FailOnKEV                 bool                         // Fail image scans on any vulnerability listed in the CISA Known Exploited Vulnerabilities catalog
