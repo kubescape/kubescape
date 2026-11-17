@@ -91,6 +91,16 @@ func TestClassifyScanError(t *testing.T) {
 			expected: ErrCodeTimeout,
 		},
 		{
+			name:     "apierrors server timeout",
+			err:      apierrors.NewServerTimeout(schema.GroupResource{Resource: "containerprofiles"}, "list", 1),
+			expected: ErrCodeTimeout,
+		},
+		{
+			name:     "apierrors timeout",
+			err:      apierrors.NewTimeoutError("storage read timeout", 1),
+			expected: ErrCodeTimeout,
+		},
+		{
 			name:     "generic unknown error",
 			err:      errors.New("something totally unknown"),
 			expected: ErrCodeScanFailed,
