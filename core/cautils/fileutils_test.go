@@ -697,10 +697,12 @@ func getRelativePath(p string) string {
 // Converts a YAML object to a JSON object
 func TestConvertYamlToJson(t *testing.T) {
 	tests := []struct {
-		yamlObj map[any]any
-		jsonObj map[string]any
+		name    string
+		yamlObj any
+		jsonObj any
 	}{
 		{
+			name: "string keys",
 			yamlObj: map[any]any{
 				"name": "John",
 				"age":  30,
@@ -712,10 +714,68 @@ func TestConvertYamlToJson(t *testing.T) {
 				"city": "New York",
 			},
 		},
+		{
+			name: "integer keys",
+			yamlObj: map[any]any{
+				80:  "http",
+				443: "https",
+				-1:  "negative",
+			},
+			jsonObj: map[string]any{
+				"80":  "http",
+				"443": "https",
+				"-1":  "negative",
+			},
+		},
+		{
+			name: "boolean keys",
+			yamlObj: map[any]any{
+				true:  "enabled",
+				false: "disabled",
+			},
+			jsonObj: map[string]any{
+				"true":  "enabled",
+				"false": "disabled",
+			},
+		},
+		{
+			name: "float and nil keys",
+			yamlObj: map[any]any{
+				3.14: "pi",
+				nil:  "empty",
+			},
+			jsonObj: map[string]any{
+				"3.14": "pi",
+				"null": "empty",
+			},
+		},
+		{
+			name: "nested maps and slices with non-string keys",
+			yamlObj: map[string]any{
+				"endpoints": map[any]any{
+					8080: "app",
+				},
+				"list": []any{
+					map[any]any{
+						200: "ok",
+					},
+				},
+			},
+			jsonObj: map[string]any{
+				"endpoints": map[string]any{
+					"8080": "app",
+				},
+				"list": []any{
+					map[string]any{
+						"200": "ok",
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
-		t.Run("", func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.jsonObj, convertYamlToJson(tt.yamlObj))
 		})
 	}
@@ -727,7 +787,7 @@ func TestConvertYamlToJson(t *testing.T) {
 // convertYamlToJson must recurse into map[string]any values so the result
 // stays json.Marshal-able (issue #2833).
 func TestConvertYamlToJson_NestedNonStringKey(t *testing.T) {
-	input := map[string]any{"spec": map[any]any{"1": "enabled"}}
+	input := map[string]any{"spec": map[any]any{1: "enabled"}}
 
 	got := convertYamlToJson(input)
 	_, err := json.Marshal(got)
@@ -741,13 +801,43 @@ func TestConvertYamlToJson_NestedNonStringKey(t *testing.T) {
 // TestReadYamlFile_NestedNonStringKeyIsJSONMarshalable exercises the same bug
 // through readYamlFile: a manifest with a nested non-string key must produce a
 // workload whose object is JSON-serializable (OPA marshals these to build its
-// input, so an unconverted map[interface{}]interface{} breaks evaluation).
+// input, so an unconverted map[interface{}]interface{} breaks evaluation) and
+// must preserve the key as a string (issue #5095).
 func TestReadYamlFile_NestedNonStringKeyIsJSONMarshalable(t *testing.T) {
 	manifest := []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\ndata:\n  1: enabled\n")
 
 	workloads, err := readYamlFile(manifest)
 	require.NoError(t, err)
 	require.Len(t, workloads, 1)
+
+	_, err = json.Marshal(workloads[0].GetObject())
+	assert.NoError(t, err)
+
+	data, ok := workloads[0].GetObject()["data"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "enabled", data["1"])
+}
+
+func TestReadYamlFile_NonStringKeysInConfigMapPreserved(t *testing.T) {
+	manifest := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: status-codes
+data:
+  200: OK
+  404: Not Found
+  server: nginx
+`)
+
+	workloads, err := readYamlFile(manifest)
+	require.NoError(t, err)
+	require.Len(t, workloads, 1)
+
+	data, ok := workloads[0].GetObject()["data"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "OK", data["200"])
+	assert.Equal(t, "Not Found", data["404"])
+	assert.Equal(t, "nginx", data["server"])
 
 	_, err = json.Marshal(workloads[0].GetObject())
 	assert.NoError(t, err)

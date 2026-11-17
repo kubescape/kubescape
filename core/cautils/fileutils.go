@@ -1881,11 +1881,18 @@ func restoreTypedListItemTypeMeta(list *unstructured.UnstructuredList, listKind 
 func convertYamlToJson(i any) any {
 	switch x := i.(type) {
 	case map[any]any:
-		m2 := map[string]any{}
+		m2 := make(map[string]any, len(x))
 		for k, v := range x {
-			if s, ok := k.(string); ok {
-				m2[s] = convertYamlToJson(v)
+			var keyStr string
+			switch s := k.(type) {
+			case string:
+				keyStr = s
+			case nil:
+				keyStr = "null"
+			default:
+				keyStr = fmt.Sprintf("%v", k)
 			}
+			m2[keyStr] = convertYamlToJson(v)
 		}
 		return m2
 	case map[string]any:
@@ -1902,6 +1909,7 @@ func convertYamlToJson(i any) any {
 		for i, v := range x {
 			x[i] = convertYamlToJson(v)
 		}
+		return x
 	}
 	return i
 }
