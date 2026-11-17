@@ -151,3 +151,44 @@ func TestIaCScanControlsReport_ReturnsPostureReport(t *testing.T) {
 		t.Error("expected the report JSON to carry scanCoverage")
 	}
 }
+
+// TestIaCScanControlsReport_DefaultAllControls asserts that scanning without control IDs
+// defaults to the "allcontrols" framework, successfully producing a posture report
+// bounded to the local path.
+func TestIaCScanControlsReport_DefaultAllControls(t *testing.T) {
+	ksServer := &KubescapeMcpserver{
+		policyGetter: getSharedLiveClusterPolicyGetter(t),
+	}
+	if _, err := ksServer.policyGetter.GetFramework("allcontrols"); err != nil {
+		if sharedLiveClusterPolicyFallback {
+			t.Skipf("skipping test due to missing allcontrols framework: %v", err)
+		}
+		t.Fatalf("missing allcontrols framework: %v", err)
+	}
+
+	fixture := filepath.Join(t.TempDir(), "privileged-pod.yaml")
+	if err := os.WriteFile(fixture, []byte(privilegedPodManifest), 0600); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+
+	outcome, err := ksServer.runIaCScanControlsReport(context.Background(), fixture, nil)
+	if err != nil {
+		t.Fatalf("unexpected error scanning with default allcontrols: %v", err)
+	}
+
+	var report reporthandlingv2.PostureReport
+	if err := json.Unmarshal(outcome.ReportJSON, &report); err != nil {
+		t.Fatalf("failed to unmarshal posture report: %v", err)
+	}
+
+	if report.Metadata.ScanMetadata.ScanningTarget != reporthandlingv2.File {
+		t.Errorf("expected ScanningTarget %d (File), got %d", reporthandlingv2.File, report.Metadata.ScanMetadata.ScanningTarget)
+	}
+	if len(report.Resources) == 0 {
+		t.Error("expected raw resources in report")
+	}
+	// Under allcontrols, multiple controls are evaluated against the pod
+	if len(report.Results) == 0 {
+		t.Error("expected non-empty evaluation results under allcontrols")
+	}
+}

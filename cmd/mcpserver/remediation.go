@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -276,13 +277,20 @@ func createRemediationTools(ksServer *KubescapeMcpserver) {
 	ksServer.s.AddTool(applyRemediationTool, ksServer.toolHandler(applyRemediationTool.Name))
 }
 
-// remediationKey is the in-flight coalescing key of one apply_remediation call.
+// toolRemediationKey generates the in-flight coalescing key for remediation tools.
 // report_path and base_path both change the result, so both are in it: two calls
 // that differ only in either must not share one execution.
-func remediationKey(path, reportPath, basePath string, controlIDs []string) string {
-	return fmt.Sprintf("apply_remediation:%s:%s:%s:%s",
-		url.QueryEscape(path), url.QueryEscape(reportPath), url.QueryEscape(basePath),
-		url.QueryEscape(strings.Join(controlIDs, ",")))
+func toolRemediationKey(toolName, path, reportPath, basePath string, controlIDs []string) string {
+	sortedIDs := make([]string, len(controlIDs))
+	copy(sortedIDs, controlIDs)
+	sort.Strings(sortedIDs)
+	return fmt.Sprintf("%s:%s:%s:%s:%s",
+		toolName,
+		url.QueryEscape(path),
+		url.QueryEscape(reportPath),
+		url.QueryEscape(basePath),
+		url.QueryEscape(strings.Join(sortedIDs, ",")),
+	)
 }
 
 // remediationRequest carries what runRemediation needs beyond the report.
@@ -306,9 +314,12 @@ type remediationRequest struct {
 	// report is the decoded report when the caller already has it, so a large
 	// report is not decoded again.
 	report *reporthandlingv2.PostureReport
+	// wantDiff generates a unified diff response (suggestFixResponse) rather than
+	// full patched YAML files (remediationResponse).
+	wantDiff bool
 }
 
-func (ksServer *KubescapeMcpserver) runApplyRemediation(ctx context.Context, path string, controlIDs []string, workspaceRoots ...*os.Root) ([]byte, error) {
+func (ksServer *KubescapeMcpserver) runRemediationScan(ctx context.Context, path string, controlIDs []string, wantDiff bool, workspaceRoots ...*os.Root) ([]byte, error) {
 	// 1. Scan in memory.
 	outcome, err := iacScanReportFn(ksServer, ctx, path, controlIDs)
 	if err != nil {
@@ -320,18 +331,20 @@ func (ksServer *KubescapeMcpserver) runApplyRemediation(ctx context.Context, pat
 	}
 	return runRemediation(ctx, outcome.ReportJSON, remediationRequest{
 		controlIDs:     controlIDs,
+		selectControls: len(controlIDs) > 0,
 		workspaceRoot:  workspaceRoot,
 		degraded:       outcome.Degraded,
 		notEvaluated:   outcome.NotEvaluatedControls,
 		useScanOutcome: true,
+		wantDiff:       wantDiff,
 	})
 }
 
-// runApplyRemediationFromReport plans remediation from a report file that was
+// runRemediationFromReport plans remediation from a report file that was
 // produced elsewhere. It reads at most maxRemediationReportLen bytes, once, and
 // works from that copy, so the file cannot change between the checks and the
 // use.
-func runApplyRemediationFromReport(ctx context.Context, reportPath, basePath string, controlIDs []string, workspaceRoots ...*os.Root) ([]byte, error) {
+func runRemediationFromReport(ctx context.Context, reportPath, basePath string, controlIDs []string, wantDiff bool, workspaceRoots ...*os.Root) ([]byte, error) {
 	var workspaceRoot *os.Root
 	if len(workspaceRoots) > 0 {
 		workspaceRoot = workspaceRoots[0]
@@ -346,7 +359,13 @@ func runApplyRemediationFromReport(ctx context.Context, reportPath, basePath str
 		return nil, newRemediationInputError("report_path %q is not a Kubescape posture report JSON: %v", reportPath, err)
 	}
 
-	req := remediationRequest{controlIDs: controlIDs, selectControls: true, inputErrors: true, report: &report}
+	req := remediationRequest{
+		controlIDs:     controlIDs,
+		selectControls: len(controlIDs) > 0 || !wantDiff,
+		inputErrors:    true,
+		report:         &report,
+		wantDiff:       wantDiff,
+	}
 	if !fixhandler.IsClusterPostureReport(&report) {
 		// A file-backed report names, itself, where the files to patch are. A
 		// report from another party must not be allowed to name a place the
@@ -364,6 +383,82 @@ func runApplyRemediationFromReport(ctx context.Context, reportPath, basePath str
 	}
 	req.workspaceRoot = workspaceRoot
 	return runRemediation(ctx, raw, req)
+}
+
+func (ksServer *KubescapeMcpserver) handleRemediationTool(ctx context.Context, toolName string, arguments map[string]interface{}) (*mcp.CallToolResult, error) {
+	path, toolErr := mcpStringArg(arguments, "path")
+	if toolErr != nil {
+		return toolErr, nil
+	}
+	reportPath, toolErr := mcpStringArg(arguments, "report_path")
+	if toolErr != nil {
+		return toolErr, nil
+	}
+	basePath, toolErr := mcpStringArg(arguments, "base_path")
+	if toolErr != nil {
+		return toolErr, nil
+	}
+	switch {
+	case path == "" && reportPath == "":
+		return mcpToolError(ErrCodeInvalidArgument, "path argument is required and cannot be empty, unless report_path is supplied instead (exactly one of path or report_path is required)", map[string]any{"argument": "path"}), nil
+	case path != "" && reportPath != "":
+		return mcpToolError(ErrCodeInvalidArgument, "path and report_path are mutually exclusive; supply exactly one", map[string]any{"argument": "report_path"}), nil
+	case path != "" && basePath != "":
+		return mcpToolError(ErrCodeInvalidArgument, "base_path applies only with report_path", map[string]any{"argument": "base_path"}), nil
+	}
+	workspaceRoot, closeWorkspaceRoot, err := ksServer.openWorkspaceRoot()
+	if err != nil {
+		return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("cannot open workspace root: %v", err), nil), nil
+	}
+	defer closeWorkspaceRoot()
+	// path is confined to the workspace by the scan it runs. report_path is
+	// read here instead, and base_path is where the files the report names
+	// are read from and returned patched, so both need the same boundary.
+	if reportPath, toolErr = ksServer.containToWorkspace("report_path", reportPath); toolErr != nil {
+		return toolErr, nil
+	}
+	if basePath, toolErr = ksServer.containToWorkspace("base_path", basePath); toolErr != nil {
+		return toolErr, nil
+	}
+
+	var controlIDs []string
+	rawControlIDs, hasControlIDs := arguments["control_ids"]
+	if toolName == "suggest_fix" {
+		if hasControlIDs && rawControlIDs != nil {
+			controlIDs, toolErr = parseControlIDs(rawControlIDs, hasControlIDs)
+			if toolErr != nil {
+				return toolErr, nil
+			}
+		}
+	} else {
+		controlIDs, toolErr = parseControlIDs(rawControlIDs, hasControlIDs)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+	}
+
+	wantDiff := toolName == "suggest_fix"
+	key := toolRemediationKey(toolName, path, reportPath, basePath, controlIDs)
+	v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+		if reportPath != "" {
+			return runRemediationFromReport(scanCtx, reportPath, basePath, controlIDs, wantDiff, workspaceRoot)
+		}
+		return ksServer.runRemediationScan(scanCtx, path, controlIDs, wantDiff, workspaceRoot)
+	})
+	if err != nil {
+		var inputErr *remediationInputError
+		if errors.As(err, &inputErr) {
+			return mcpToolError(ErrCodeInvalidArgument, inputErr.Error(), nil), nil
+		}
+		code := classifyScanError(err)
+		action := "compute remediation"
+		if wantDiff {
+			action = "suggest fix"
+		}
+		msg := fmt.Sprintf("failed to %s: %v", action, err)
+		return mcpToolError(code, msg, nil), nil
+	}
+	return mcp.NewToolResultText(string(v.([]byte))), nil
 }
 
 // readRemediationReport reads a report file, refusing anything that is not a
@@ -527,9 +622,14 @@ func runRemediation(ctx context.Context, reportBytes []byte, req remediationRequ
 	resourcesToFix := handler.PrepareResourcesToFix(ctx)
 
 	files := make([]remediationFileResult, 0)
+	diffFiles := make([]suggestFixFileResult, 0)
 	rendered := make([]renderedManifest, 0)
 	var warnings []string
 	renderFailed := make(map[string]string)
+
+	var diff string
+	var filesChanged int
+	var resourcesChanged int
 
 	if handler.IsClusterReport() {
 		// A cluster resource has no file; render each fix from the scanned
@@ -552,7 +652,33 @@ func runRemediation(ctx context.Context, reportBytes []byte, req remediationRequ
 			}
 		}
 		sort.Slice(rendered, func(i, j int) bool { return rendered[i].ResourceID < rendered[j].ResourceID })
+		if req.wantDiff {
+			resourcesChanged = len(rendered)
+		}
 	} else {
+		var patchNames map[string]string
+		if req.wantDiff {
+			patchResult, err := handler.BuildPatch(ctx, resourcesToFix)
+			if err != nil {
+				return nil, fmt.Errorf("failed to build patch: %w", err)
+			}
+			if patchResult != nil {
+				diff = patchResult.Patch
+				filesChanged = patchResult.Files
+				resourcesChanged = patchResult.Resources
+			}
+
+			// PatchNames maps each canonical file path to the relative diff header
+			// name (e.g. "a/manifest.yaml", "b/manifest.yaml") that BuildPatch uses.
+			// BuildPatch already validated the names internally during patch generation;
+			// we verify no error occurred to guard against any resolution discrepancy.
+			names, err := handler.PatchNames(resourcesToFix)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve patch names: %w", err)
+			}
+			patchNames = names
+		}
+
 		fileFixes := make(map[string][]fixhandler.ResourceFixInfo)
 		for _, rfi := range resourcesToFix {
 			fileFixes[rfi.FilePath] = append(fileFixes[rfi.FilePath], rfi)
@@ -573,11 +699,24 @@ func runRemediation(ctx context.Context, reportBytes []byte, req remediationRequ
 			if err != nil {
 				return nil, fmt.Errorf("failed to compute fix for %s: %w", fp, err)
 			}
-			files = append(files, remediationFileResult{
-				FilePath:           fp,
-				PatchedYAML:        patched,
-				AppliedExpressions: expressions,
-			})
+			if req.wantDiff {
+				diffName := fp
+				if patchNames != nil && patchNames[fp] != "" {
+					diffName = patchNames[fp]
+				}
+				fileDiff := fixhandler.UnifiedDiff(diffName, fileAsString, patched)
+				diffFiles = append(diffFiles, suggestFixFileResult{
+					FilePath:           fp,
+					Diff:               fileDiff,
+					AppliedExpressions: expressions,
+				})
+			} else {
+				files = append(files, remediationFileResult{
+					FilePath:           fp,
+					PatchedYAML:        patched,
+					AppliedExpressions: expressions,
+				})
+			}
 		}
 	}
 
@@ -612,6 +751,23 @@ func runRemediation(ctx context.Context, reportBytes []byte, req remediationRequ
 
 	if coverage == nil {
 		warnings = append(warnings, "the report carries no scanCoverage, so whether the scan was complete cannot be determined; an empty items list is not confirmation that nothing failed")
+	}
+
+	if req.wantDiff {
+		resp := suggestFixResponse{
+			Diff:                  diff,
+			FilesChanged:          filesChanged,
+			ResourcesChanged:      resourcesChanged,
+			FixedControlInstances: handler.FixedControlsCount(),
+			Files:                 diffFiles,
+			RenderedManifests:     rendered,
+			Items:                 buildRemediationItems(handler.ControlOutcomes(), unaddressed, report, renderFailed),
+			UnfixedControls:       unfixed,
+			Report:                summarizeRemediationReport(report, coverage),
+			Degraded:              degraded,
+			Warnings:              boundWarnings(warnings),
+		}
+		return json.MarshalIndent(resp, "", "  ")
 	}
 
 	resp := remediationResponse{

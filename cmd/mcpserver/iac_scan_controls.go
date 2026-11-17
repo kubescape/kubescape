@@ -112,6 +112,12 @@ func (ksServer *KubescapeMcpserver) runIaCScanControlsReport(ctx context.Context
 			return nil, err
 		}
 	} else {
+		// With no control IDs requested, scan the "allcontrols" framework to discover
+		// all fixable issues in the manifest. Unlike a cluster-wide framework scan
+		// (RunFrameworkScan, which rejects "allcontrols" as too heavy because it would
+		// pull resources cluster-wide across every control), local IaC scanning uses
+		// FileResourceHandler bounded strictly to path, so evaluation cost remains
+		// proportional to the local file/directory contents.
 		policyIdentifiers = []cautils.PolicyIdentifier{
 			{Kind: apisv1.KindFramework, Identifier: "allcontrols"},
 		}
