@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 
@@ -17,9 +19,12 @@ import (
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
+	"sigs.k8s.io/yaml"
 )
 
 var (
+	// ErrKustomizeHelmSetup identifies Helm installation or version failures.
+	ErrKustomizeHelmSetup = errors.New("kustomize Helm command is not usable")
 	// ErrKustomizationFileNotRegular is returned when a Kustomization file is not a regular file.
 	ErrKustomizationFileNotRegular = errors.New("kustomization file is not a regular file")
 	// ErrKustomizationFileTooLarge is returned when a Kustomization file exceeds the maximum allowed size.
@@ -481,6 +486,64 @@ func selectedKustomizationFile(path string) string {
 	return ""
 }
 
+// kustomizeHelmFileSystem observes the configurations Kustomize actually reads,
+// including components and remote bases, without changing their contents or errors.
+type kustomizeHelmFileSystem struct {
+	filesys.FileSystem
+	usesHelm       bool
+	generatorFiles map[string]struct{}
+}
+
+func (fs *kustomizeHelmFileSystem) ReadFile(path string) ([]byte, error) {
+	contents, err := fs.FileSystem.ReadFile(path)
+	if err == nil && !fs.usesHelm && IsKustomizeFile(path) {
+		var config types.Kustomization
+		if config.Unmarshal(contents) == nil {
+			config.FixKustomization()
+			fs.usesHelm = len(config.HelmCharts) > 0
+			for _, generator := range config.Generators {
+				if fs.generatorFiles == nil {
+					fs.generatorFiles = map[string]struct{}{}
+				}
+				if !filepath.IsAbs(generator) {
+					generator = filepath.Join(filepath.Dir(path), generator)
+				}
+				fs.generatorFiles[filepath.Clean(generator)] = struct{}{}
+			}
+		}
+	}
+	// Only inspect files selected as generators; a plain resource with the
+	// same kind does not make the build invoke Helm.
+	_, generator := fs.generatorFiles[filepath.Clean(path)]
+	if err == nil && !fs.usesHelm && generator {
+		var config struct {
+			APIVersion string `json:"apiVersion"`
+			Kind       string `json:"kind"`
+		}
+		if yaml.Unmarshal(contents, &config) == nil {
+			fs.usesHelm = config.APIVersion == "builtin" && config.Kind == "HelmChartInflationGenerator"
+		}
+	}
+	return contents, err
+}
+
+// Kustomize flattens component errors into strings. Probe the command separately
+// after a failed Helm build so setup failures retain a reliable classification.
+func validateKustomizeHelmCommand(command string) error {
+	output, err := exec.Command(command, "version", "--short").Output()
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrKustomizeHelmSetup, err)
+	}
+	// Keep the accepted version strings and major versions aligned with
+	// Kustomize's HelmChartInflationGenerator.checkHelmVersion.
+	version := regexp.MustCompile(`v?\d+(\.\d+)+`).FindString(string(output))
+	major := strings.Split(strings.TrimPrefix(version, "v"), ".")[0]
+	if major != "3" && major != "4" {
+		return fmt.Errorf("%w: expected Helm v3 or v4, got %q", ErrKustomizeHelmSetup, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
 // Get Workloads, creates the yaml files(K8s resources) using Kustomize and
 // renders the workloads from the yaml files (k8s resources)
 func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[string][]workloadinterface.IMetadata, []error) {
@@ -505,7 +568,7 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	// right files either way, since the OS follows the symlink itself.
 	kustomizeDirectoryPath = lexicalAbsPath(kustomizeDirectoryPath)
 
-	fSys := filesys.MakeFsOnDisk()
+	fSys := &kustomizeHelmFileSystem{FileSystem: filesys.MakeFsOnDisk()}
 	opts := krusty.MakeDefaultOptions()
 	// Restrict individual files to their Kustomization root. References to base
 	// directories outside that root (e.g. ../base) still get their own loader.
@@ -529,6 +592,9 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	// scanned kustomization renders.
 	resmap, err := newKustomizer().Run(fSys, kustomizeDirectoryPath)
 	if err != nil {
+		if fSys.usesHelm {
+			err = errors.Join(err, validateKustomizeHelmCommand(helmCommand))
+		}
 		return nil, []error{err}
 	}
 	yml, err := resmap.AsYaml()

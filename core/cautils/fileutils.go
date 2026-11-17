@@ -10,7 +10,6 @@ import (
 	"io"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -747,12 +746,8 @@ func loadKustomizeDirectory(ctx context.Context, basePath string) (map[string][]
 
 	if len(errs) > 0 {
 		cause := errors.Join(errs...)
-		// Manifest edits can repair a failed build, but cannot install or make
-		// executable the Helm command used by Kustomize's built-in inflator.
-		var executableError *exec.Error
-		var pathError *os.PathError
-		if !errors.As(cause, &executableError) &&
-			(!errors.As(cause, &pathError) || pathError.Op != "fork/exec") {
+		// Input edits can repair a build, but not the Helm installation.
+		if !errors.Is(cause, ErrKustomizeHelmSetup) {
 			cause = fmt.Errorf("%w: %w", ErrManifestsNotLoaded, cause)
 		}
 		err := fmt.Errorf("failed to render Kustomize resources from %q: %w", newBasePath, cause)
