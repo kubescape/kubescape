@@ -22,6 +22,18 @@ const (
 	gitLabMaxNameLength               = 255
 )
 
+// imageSourceSchemes are the source schemes an image scan input can start with, as
+// sourceSelectors in core/core lists them, each mapped to whether what follows is a
+// local path (true) or an image reference (false).
+var imageSourceSchemes = map[string]bool{
+	"docker-archive": true, "oci-archive": true, "oci-dir": true, "dir": true,
+	"file": true, "sbom": true, "purl": true, "local-file": true,
+	"local-directory": true, "singularity": true, "snap": true,
+	"docker": false, "podman": false, "containerd": false, "oci-registry": false,
+	"oci-model": false, "registry": false, "daemon": false, "pull": false,
+	"image": false,
+}
+
 var _ printer.IPrinter = &GitLabContainerScanningPrinter{}
 
 type GitLabContainerScanningPrinter struct {
@@ -147,10 +159,24 @@ func imageOperatingSystem(data *cautils.ImageScanData) string {
 // (e.g. "nginx" -> "nginx:latest", "localhost:5000/app" -> "localhost:5000/app:latest").
 // This ensures GitLab's location parser identifies the image tag component and does
 // not generate empty-component fingerprint collisions across untagged images.
+//
+// A source scheme is not part of the reference: GitLab keeps only what comes before
+// the last ":" when what follows isn't a version, so "docker-archive:frontend.tar"
+// and "docker-archive:backend.tar" would both be the image "docker-archive". After a
+// daemon or registry scheme comes a reference, normalized as one; after a local
+// source comes a path, kept whole with the tag added.
 func normalizeImageRef(image string) string {
 	image = strings.TrimSpace(image)
 	if image == "" {
 		return image
+	}
+	if scheme, rest, found := strings.Cut(image, ":"); found {
+		if local, known := imageSourceSchemes[strings.ToLower(scheme)]; known {
+			if local {
+				return image + ":latest"
+			}
+			return scheme + ":" + normalizeImageRef(rest)
+		}
 	}
 	ref := image
 	if at := strings.Index(ref, "@"); at != -1 {
