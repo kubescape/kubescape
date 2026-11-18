@@ -178,6 +178,30 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			if len(scanInfo.LabelsToCopy) > 0 || commandFlagChanged(cmd, "labels-to-copy") {
 				return fmt.Errorf("--labels-to-copy is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes workload labels")
 			}
+			if scanInfo.FleetReport != "" || commandFlagChanged(cmd, "fleet-report") {
+				return fmt.Errorf("--fleet-report is not supported for image scans: an image scan evaluates vulnerabilities, not multi-cluster fleet reports")
+			}
+			if scanInfo.ReferenceCluster != "" || commandFlagChanged(cmd, "reference-cluster") {
+				return fmt.Errorf("--reference-cluster is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes clusters")
+			}
+			if commandFlagChanged(cmd, "parallel") {
+				return fmt.Errorf("--parallel is not supported for image scans: an image scan evaluates vulnerabilities, not multi-cluster scans (use --image-scan-concurrency instead)")
+			}
+			if commandFlagChanged(cmd, "retries") {
+				return fmt.Errorf("--retries is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes cluster API servers")
+			}
+			if commandFlagChanged(cmd, "fleet-config") {
+				return fmt.Errorf("--fleet-config is not supported for image scans: an image scan evaluates vulnerabilities, not multi-cluster fleet configurations")
+			}
+			if commandFlagChanged(cmd, "scan-contract") {
+				return fmt.Errorf("--scan-contract is supported for posture scans, not image scans")
+			}
+			if commandFlagChanged(cmd, "contract") {
+				return fmt.Errorf("--contract is supported for posture scans, not image scans")
+			}
+			if commandFlagChanged(cmd, "contract-allow") {
+				return fmt.Errorf("--contract-allow is supported for posture scans, not image scans")
+			}
 			if err := shared.ValidateImageScanAnonymization(scanInfo); err != nil {
 				return err
 			}

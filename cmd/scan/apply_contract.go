@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -22,8 +23,16 @@ import (
 // gates are different: an explicit runner value is a floor that the contract
 // may tighten, but never weaken.
 func loadAndApplyScanContract(cmd *cobra.Command, scanInfo *cautils.ScanInfo, path, name string, allowSections []string) (*contractv1alpha1.SelectedContract, error) {
+	if commandFlagChanged(cmd, "scan-contract") {
+		trimmed := strings.TrimSpace(path)
+		if trimmed == "" {
+			return nil, errors.New("--scan-contract needs a file path")
+		}
+		path = trimmed
+	}
+
 	if path == "" {
-		if name != "" {
+		if name != "" || commandFlagChanged(cmd, "contract") {
 			return nil, fmt.Errorf("--contract requires --scan-contract")
 		}
 		if len(allowSections) > 0 || commandFlagChanged(cmd, "contract-allow") {

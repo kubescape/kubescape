@@ -1,8 +1,10 @@
 package scan
 
 import (
+	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	fleetconfigv1alpha1 "github.com/kubescape/kubescape/v4/core/pkg/fleetconfig/v1alpha1"
@@ -12,6 +14,13 @@ import (
 // applyFleetConfig loads the --fleet-config file into scanInfo, where a flag given on the command line wins over the file.
 // It runs before validation, so a value from the file is checked exactly as the same flag would be.
 func applyFleetConfig(cmd *cobra.Command, scanInfo *cautils.ScanInfo, path string) error {
+	if commandFlagChanged(cmd, "fleet-config") {
+		trimmed := strings.TrimSpace(path)
+		if trimmed == "" {
+			return errors.New("--fleet-config needs a file path")
+		}
+		path = trimmed
+	}
 	if path == "" {
 		return nil
 	}
