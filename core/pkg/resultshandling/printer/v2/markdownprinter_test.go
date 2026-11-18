@@ -407,6 +407,24 @@ func TestMarkdownPrinter_ActionPrint_NegativeScoreRendersNA(t *testing.T) {
 	assert.NotContains(t, out, "**Compliance Score:** -1")
 }
 
+func TestMarkdownPrinter_ActionPrint_FractionalNegativeScoreRendersNA(t *testing.T) {
+	for _, score := range []float32{-0.5, -0.25, -0.1} {
+		session := cautils.NewOPASessionObjMock()
+		session.Report = &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				ComplianceScore: score,
+				Controls:        reportsummary.ControlSummaries{},
+			},
+		}
+
+		out := mdRunActionPrint(t, session)
+
+		assert.Contains(t, out, "# Kubescape Security Report")
+		assert.Contains(t, out, "**Compliance Score:** N/A")
+		assert.NotContains(t, out, "**Compliance Score:** 0%")
+	}
+}
+
 func TestMarkdownPrinter_ActionPrint_PerfectScoreRenders100Percent(t *testing.T) {
 	session := cautils.NewOPASessionObjMock()
 	session.Report = &reporthandlingv2.PostureReport{
