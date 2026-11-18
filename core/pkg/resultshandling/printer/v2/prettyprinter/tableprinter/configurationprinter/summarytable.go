@@ -33,6 +33,9 @@ func ControlCountersForSummary(counters reportsummary.ICounters) []table.Row {
 }
 
 func GetSeverityColumn(controlSummary reportsummary.IControlSummary) string {
+	if controlSummary == nil {
+		return ""
+	}
 	return utils.GetColor(apis.ControlSeverityToInt(controlSummary.GetScoreFactor()))(apis.ControlSeverityToString(controlSummary.GetScoreFactor()))
 }
 
@@ -63,6 +66,10 @@ func GetColumnsAlignments() []table.ColumnConfig {
 }
 
 func GenerateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars, verbose bool) table.Row {
+	if controlSummary == nil {
+		return table.Row{}
+	}
+
 	row := make(table.Row, _summaryRowLen)
 
 	// ignore passed results
@@ -80,6 +87,9 @@ func GenerateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo [
 }
 
 func GetComplianceScoreColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) string {
+	if controlSummary == nil {
+		return ""
+	}
 	if controlSummary.GetStatus().IsSkipped() {
 		return fmt.Sprintf("%s %s", "Action Required", GetInfoColumn(controlSummary, infoToPrintInfo))
 	}
@@ -91,6 +101,9 @@ func GetComplianceScoreColumn(controlSummary reportsummary.IControlSummary, info
 }
 
 func GetInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) string {
+	if controlSummary == nil {
+		return ""
+	}
 	for i := range infoToPrintInfo {
 		if infoToPrintInfo[i].Info == controlSummary.GetStatus().Info() {
 			return infoToPrintInfo[i].Stars
@@ -100,6 +113,9 @@ func GetInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo
 }
 
 func GenerateFooter(summaryDetails *reportsummary.SummaryDetails, short bool) table.Row {
+	if summaryDetails == nil {
+		return table.Row{}
+	}
 	var row table.Row
 	scoreStr := "N/A"
 	if summaryDetails.ComplianceScore >= 0 {

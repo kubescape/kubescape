@@ -8,6 +8,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/stretchr/testify/assert"
 )
 
 // failedCtrl is a tiny helper that returns a ControlSummary that the rendering
@@ -175,4 +176,30 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestCategoryPrintersAndHelpers_NilSafety(t *testing.T) {
+	var buf bytes.Buffer
+
+	// Category table printers with nil summaryDetails
+	assert.NotPanics(t, func() {
+		NewClusterPrinter().PrintCategoriesTables(&buf, nil, nil)
+	})
+	assert.NotPanics(t, func() {
+		NewRepoPrinter(nil).PrintCategoriesTables(&buf, nil, nil)
+	})
+	assert.NotPanics(t, func() {
+		NewWorkloadPrinter().PrintCategoriesTables(&buf, nil, nil)
+	})
+
+	// Helpers with nil controlSummary
+	assert.NotPanics(t, func() {
+		assert.Nil(t, generateCategoryStatusRow(nil))
+	})
+	assert.NotPanics(t, func() {
+		assert.Equal(t, "", getDocsForControl(nil))
+	})
+	assert.NotPanics(t, func() {
+		assert.Equal(t, "", getRunCommandForControl(nil))
+	})
 }

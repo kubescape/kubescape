@@ -191,3 +191,45 @@ func TestPrintSummaryTable(t *testing.T) {
 		})
 	}
 }
+
+func TestPrintSummaryTable_NilSummaryDetails(t *testing.T) {
+	fp := NewFrameworkPrinter(false)
+	f, err := os.CreateTemp("", "print")
+	assert.NoError(t, err)
+	defer f.Close()
+
+	assert.NotPanics(t, func() {
+		fp.PrintSummaryTable(f, nil, nil)
+	})
+
+	f.Seek(0, 0)
+	got, err := io.ReadAll(f)
+	assert.NoError(t, err)
+	assert.Equal(t, "\nKubescape did not scan any resources. Make sure you are scanning valid manifests (Deployments, Pods, etc.)\n", string(got))
+}
+
+func TestPrintSummaryTable_MissingControlSkippedWithoutPanic(t *testing.T) {
+	fp := NewFrameworkPrinter(true)
+	f, err := os.CreateTemp("", "print")
+	assert.NoError(t, err)
+	defer f.Close()
+
+	summaryDetails := &reportsummary.SummaryDetails{
+		Controls: map[string]reportsummary.ControlSummary{
+			"C-0001": {
+				ControlID: "C-0001",
+				Name:      "Control 1",
+				Status:    "passed",
+			},
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		fp.PrintSummaryTable(f, summaryDetails, [][]string{{"C-0001", "C-MISSING"}})
+	})
+}
+
+func TestRenderSeverityCountersSummary_Nil(t *testing.T) {
+	expected := []table.Row{{"Critical", "0"}, {"High", "0"}, {"Medium", "0"}, {"Low", "0"}}
+	assert.Equal(t, expected, renderSeverityCountersSummary(nil))
+}
