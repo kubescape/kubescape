@@ -326,7 +326,10 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 		out[attributeNameFor(name)] = value
 	}
 	if isPodSpecBlockPath(path) {
-		applyProviderPodSpecDefaults(body, evalCtx, out)
+		applyProviderDefaults(body, evalCtx, out, providerPodSpecDefaults)
+	}
+	if takesProviderNamespaceDefault(path) {
+		applyProviderDefaults(body, evalCtx, out, providerNamespaceDefault)
 	}
 
 	grouped := map[string][]*hclsyntax.Block{}
@@ -492,24 +495,73 @@ func podSpecBlockPath(kind string) string {
 	return ""
 }
 
-// isPodSpecBlockPath reports whether path, as hclBodyToMap builds it
-// (<resource type>.<resource name>.<blocks>), is the pod spec block of a typed
-// resource.
-func isPodSpecBlockPath(path string) bool {
+// typedBlockPath splits path, as hclBodyToMap builds it (<resource
+// type>.<resource name>.<blocks>), into the kind of the typed resource and the
+// blocks below it.
+func typedBlockPath(path string) (kind, blocks string, ok bool) {
 	resourceType, rest, ok := strings.Cut(path, ".")
 	if !ok {
-		return false
+		return "", "", false
 	}
-	_, blocks, ok := strings.Cut(rest, ".")
+	_, blocks, ok = strings.Cut(rest, ".")
 	if !ok {
-		return false
+		return "", "", false
 	}
 	gvk, known := typedResourceGVK[resourceType]
 	if !known {
+		return "", "", false
+	}
+	return gvk.kind, blocks, true
+}
+
+// isPodSpecBlockPath reports whether path is the pod spec block of a typed
+// resource.
+func isPodSpecBlockPath(path string) bool {
+	kind, blocks, ok := typedBlockPath(path)
+	if !ok {
 		return false
 	}
-	want := podSpecBlockPath(gvk.kind)
+	want := podSpecBlockPath(kind)
 	return want != "" && blocks == want
+}
+
+// clusterScopedTypedKinds are the typed resource kinds that live in no
+// namespace. The provider gives their metadata no namespace field.
+var clusterScopedTypedKinds = map[string]bool{
+	"Namespace":          true,
+	"ClusterRole":        true,
+	"ClusterRoleBinding": true,
+}
+
+// providerNamespaceDefault is the namespace the provider writes into a block
+// that leaves it out. Its schema defaults namespace to "default" both in the
+// metadata of a namespaced resource and in an RBAC binding's subject.
+//
+// Kubernetes does not do the same for a subject: it reads a ServiceAccount
+// subject without a namespace as one in the RoleBinding's own namespace. So a
+// kubernetes_role_binding in namespace "apps" naming ServiceAccount "ci" binds
+// default/ci, and a cluster role binding naming one binds default/ci where the
+// API server would otherwise reject it.
+var providerNamespaceDefault = map[string]interface{}{
+	"namespace": "default",
+}
+
+// takesProviderNamespaceDefault reports whether path is a block the provider
+// gives a default namespace: the top-level metadata of a namespaced typed
+// resource, or a subject of a role binding. A pod template's metadata is not
+// one, as its pods take the namespace of the resource.
+func takesProviderNamespaceDefault(path string) bool {
+	kind, blocks, ok := typedBlockPath(path)
+	if !ok {
+		return false
+	}
+	switch blocks {
+	case "metadata":
+		return !clusterScopedTypedKinds[kind]
+	case "subject":
+		return kind == "RoleBinding" || kind == "ClusterRoleBinding"
+	}
+	return false
 }
 
 // providerPodSpecDefaults are pod spec fields the provider writes into every pod
@@ -523,12 +575,12 @@ var providerPodSpecDefaults = map[string]interface{}{
 	"automount_service_account_token": true,
 }
 
-// applyProviderPodSpecDefaults fills in providerPodSpecDefaults for the fields
-// the pod spec block leaves out or sets to null, which Terraform treats the same
-// way. A field whose expression could not be evaluated is left out, as every
-// unresolved attribute is, rather than guessed.
-func applyProviderPodSpecDefaults(body *hclsyntax.Body, evalCtx *hcl.EvalContext, out map[string]interface{}) {
-	for name, value := range providerPodSpecDefaults {
+// applyProviderDefaults fills in defaults for the fields the block leaves out
+// or sets to null, which Terraform treats the same way. A field whose
+// expression could not be evaluated is left out, as every unresolved attribute
+// is, rather than guessed.
+func applyProviderDefaults(body *hclsyntax.Body, evalCtx *hcl.EvalContext, out map[string]interface{}, defaults map[string]interface{}) {
+	for name, value := range defaults {
 		field := attributeNameFor(name)
 		if _, set := out[field]; set {
 			continue
