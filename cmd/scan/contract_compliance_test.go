@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -82,7 +83,7 @@ func TestContractPolicyScanEnforcesComplianceFloor(t *testing.T) {
 
 func TestContractPolicyScanEnforcesComplianceFloorAcrossFleet(t *testing.T) {
 	body := contractPolicyBody + "\n      failure:\n        complianceBelow: 80"
-	ks, err := runScoredScan(t, 50, body, "--kube-contexts", "ctx-a,ctx-b")
+	ks, err := runScoredScan(t, 50, body, "--kube-contexts", "ctx-a,ctx-b", "--output", filepath.Join(t.TempDir(), "report"))
 	require.Equal(t, 2, ks.calls)
 	assert.ErrorContains(t, err, "2 of 2 context(s) failed")
 }
