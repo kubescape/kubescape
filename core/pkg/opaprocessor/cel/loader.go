@@ -12,7 +12,6 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
-	"sigs.k8s.io/yaml"
 )
 
 // vapdataFS bakes the vendored cel-admission-library bundle (see vapdata/README.md)
@@ -500,10 +499,8 @@ func controlConfig() (map[string]any, error) {
 			controlConfigErr = fmt.Errorf("read embedded control configuration: %w", err)
 			return
 		}
-		// sigs.k8s.io/yaml decodes via JSON, so numbers, lists and maps come out
-		// as the JSON-shaped types CEL expects (the same shape the apiserver hands
-		// a paramKind object).
-		if err := yaml.Unmarshal(data, &controlConfigVal); err != nil {
+		// Preserve integers as the apiserver does, including inside lists and maps.
+		if err := k8syaml.Unmarshal(data, &controlConfigVal); err != nil {
 			controlConfigErr = fmt.Errorf("parse embedded control configuration: %w", err)
 		}
 	})
