@@ -496,3 +496,70 @@ func TestMapInfoToPrintInfo_IgnoresNonSkippedAndEmptyInfo(t *testing.T) {
 
 	assert.Equal(t, []InfoStars{{Stars: "*", Info: "requires host scanner"}}, MapInfoToPrintInfo(controls))
 }
+
+func TestFrameworksScoresToString(t *testing.T) {
+	tests := []struct {
+		name       string
+		frameworks []reportsummary.IFrameworkSummary
+		expected   string
+	}{
+		{
+			name:       "empty frameworks",
+			frameworks: nil,
+			expected:   "",
+		},
+		{
+			name: "single framework",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: 85.0},
+			},
+			expected: "Framework scanned: nsa\n",
+		},
+		{
+			name: "multiple frameworks with valid scores",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: 85.0},
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: 100.0},
+			},
+			expected: "Frameworks scanned: nsa (compliance score: 85.00), mitre (compliance score: 100.00)\n",
+		},
+		{
+			name: "multiple frameworks with uncalculated sentinel score -1.0",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: -1.0},
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: 85.0},
+			},
+			expected: "Frameworks scanned: nsa (compliance score: N/A), mitre (compliance score: 85.00)\n",
+		},
+		{
+			name: "multiple frameworks with fractional negative score -0.25",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: -0.25},
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: 85.0},
+			},
+			expected: "Frameworks scanned: nsa (compliance score: N/A), mitre (compliance score: 85.00)\n",
+		},
+		{
+			name: "multiple frameworks with genuine zero score",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: 0.0},
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: 85.0},
+			},
+			expected: "Frameworks scanned: nsa (compliance score: 0.00), mitre (compliance score: 85.00)\n",
+		},
+		{
+			name: "all frameworks uncalculated",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: -1.0},
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: -0.5},
+			},
+			expected: "Frameworks scanned: nsa (compliance score: N/A), mitre (compliance score: N/A)\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, FrameworksScoresToString(tt.frameworks))
+		})
+	}
+}

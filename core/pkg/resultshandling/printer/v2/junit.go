@@ -104,7 +104,7 @@ func (jp *JunitPrinter) SetWriter(ctx context.Context, outputFile string) error 
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.JunitResultFormat, outputFile, junitOutputFile)
 	if explicitOutput {
 		var err error
-		jp.writer, err = printer.GetWriterNoFallback(outputFile)
+		jp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	jp.writer = printer.GetWriter(ctx, outputFile)
@@ -127,6 +127,9 @@ func (jp *JunitPrinter) PrintNextSteps() {
 }
 
 func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if err := printer.PrepareOutput(jp.writer); err != nil {
+		return err
+	}
 	var junitResult *JUnitTestSuites
 
 	if opaSessionObj != nil && opaSessionObj.Report != nil {
@@ -561,7 +564,7 @@ func coverageProperties(coverage cautils.ScanCoverage) []JUnitProperty {
 // CloseWriter closes the JUnit output writer, returning any error from flushing or closing.
 func (p *JunitPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		return p.writer.Close()
+		return printer.CloseOutput(p.writer)
 	}
 	return nil
 }

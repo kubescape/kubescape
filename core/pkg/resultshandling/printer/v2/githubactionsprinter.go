@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -73,7 +74,7 @@ func (gp *GitHubActionsPrinter) SetWriter(ctx context.Context, outputFile string
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.GitHubActionsFormat, outputFile, githubActionsOutputFile)
 	if explicitOutput {
 		var err error
-		gp.writer, err = printer.GetWriterNoFallback(outputFile)
+		gp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	gp.writer = printer.GetWriter(ctx, outputFile)
@@ -84,6 +85,9 @@ func (gp *GitHubActionsPrinter) SetWriter(ctx context.Context, outputFile string
 // configuration scans are supported: image findings have no manifest location
 // to anchor an annotation to.
 func (gp *GitHubActionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if err := printer.PrepareOutput(gp.writer); err != nil {
+		return err
+	}
 	if opaSessionObj == nil || opaSessionObj.Report == nil {
 		return fmt.Errorf("github-actions output is only supported for configuration scanning: image findings have no manifest location to annotate")
 	}
@@ -113,11 +117,17 @@ func (gp *GitHubActionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *
 		if emitted == githubActionsMaxAnnotations {
 			break
 		}
-		fmt.Fprintf(&output, "::error file=%s,line=%d,title=%s::%s\n",
-			escapeAnnotationProperty(annotation.file),
-			annotation.line,
-			escapeAnnotationProperty(annotation.title),
-			escapeAnnotationData(annotation.message))
+		if annotation.file != "" && stripAnnotationControls(annotation.file) == annotation.file {
+			fmt.Fprintf(&output, "::error file=%s,line=%d,title=%s::%s\n",
+				escapeAnnotationProperty(annotation.file),
+				annotation.line,
+				escapeAnnotationProperty(annotation.title),
+				escapeAnnotationData(annotation.message))
+		} else {
+			fmt.Fprintf(&output, "::error title=%s::%s\n",
+				escapeAnnotationProperty(annotation.title),
+				escapeAnnotationData(annotation.message))
+		}
 		emitted++
 	}
 
@@ -366,10 +376,21 @@ outerLoop:
 
 func sanitizeMarkdownTableCell(s string) string {
 	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "`", "'")
 	s = strings.ReplaceAll(s, "\r\n", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", " ")
-	return strings.TrimSpace(s)
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if (r < 0x20 && r != '\t') || r == 0x7f {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return strings.TrimFunc(b.String(), func(r rune) bool {
+		return unicode.IsSpace(r) && r != '\t'
+	})
 }
 
 func writeStepSummary(ctx context.Context, summaryPath string, opaSessionObj *cautils.OPASessionObj) error {
@@ -526,9 +547,34 @@ func (gp *GitHubActionsPrinter) collectAnnotations(ctx context.Context, opaSessi
 	return annotations, belowThreshold
 }
 
+// stripAnnotationControls removes non-printable ASCII control characters (except tab, CR, and LF)
+// and DEL to prevent command truncation or terminal sequence injection (CWE-150).
+func stripAnnotationControls(s string) string {
+	hasControl := false
+	for _, r := range s {
+		if (r < 0x20 && r != '\t' && r != '\n' && r != '\r') || r == 0x7f {
+			hasControl = true
+			break
+		}
+	}
+	if !hasControl {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if (r < 0x20 && r != '\t' && r != '\n' && r != '\r') || r == 0x7f {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 // escapeAnnotationData escapes the message portion of a workflow command,
 // where only %, CR and LF break the command syntax.
 func escapeAnnotationData(s string) string {
+	s = stripAnnotationControls(s)
 	s = strings.ReplaceAll(s, "%", "%25")
 	s = strings.ReplaceAll(s, "\r", "%0D")
 	s = strings.ReplaceAll(s, "\n", "%0A")
@@ -549,7 +595,7 @@ func escapeAnnotationProperty(s string) string {
 // flushing or closing.
 func (gp *GitHubActionsPrinter) CloseWriter() error {
 	if gp.writer != nil && gp.writer != os.Stdout {
-		return gp.writer.Close()
+		return printer.CloseOutput(gp.writer)
 	}
 	return nil
 }

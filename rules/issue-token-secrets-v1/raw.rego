@@ -102,7 +102,7 @@ can_issue_token_secret(role) if {
 # names, or when both name the same object. The names are literal: RBAC has no
 # wildcard form for resourceNames. An empty name is the one a plain create is
 # authorized with and is not an object that apply could create, so it never
-# counts as the common name. A create entry that lists "" is a plain create
+# counts as the common name. Neither does "*", which no object can be named. A create entry that lists "" is a plain create
 # under any name, so it reaches whatever object the patch names.
 names_overlap(create_rule, patch_rule) if {
 	grants_unnamed_requests(create_rule)
@@ -121,13 +121,13 @@ names_overlap(create_rule, patch_rule) if {
 
 names_overlap(create_rule, patch_rule) if {
 	name := create_rule.resourceNames[_]
-	name != ""
+	not name in {"", "*"}
 	name in patch_rule.resourceNames
 }
 
 names_an_object(rule) if {
 	name := rule.resourceNames[_]
-	name != ""
+	not name in {"", "*"}
 }
 
 # blanket update or patch over unnamed secrets: overwrite an existing secret and
@@ -234,6 +234,20 @@ is_same_namespace(role, rolebinding) if {
 	role.kind == "Role"
 	role.metadata.namespace == rolebinding.metadata.namespace
 }
+
+# A manifest meant for "kubectl apply -n" may leave out the namespace, and the
+# subject aggregator pairs it with either side; comparing the fields would drop it.
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(rolebinding)
+}
+
+has_namespace(obj) if obj.metadata.namespace != ""
 
 is_same_subjects(subjectVector, subject) if {
 	subjectVector.kind == subject.kind

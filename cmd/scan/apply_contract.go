@@ -65,7 +65,46 @@ func loadAndApplyScanContract(cmd *cobra.Command, scanInfo *cautils.ScanInfo, pa
 	gateResolution := applyContractGateFloors(cmd, scanInfo, effectiveContract)
 	scanInfo.ScanContract = newScanContractMetadata(cmd, selected, path, scanInfo, gateResolution, allowedSections, deniedSections, effectiveContract)
 	selected.Contract = effectiveContract
+	if !scanCommandEnforcesComplianceGate(cmd, scanInfo.View, selected) && omitUnenforcedComplianceGate(scanInfo.ScanContract) {
+		logger.L().Warning("Scan contract compliance gate is not enforced by the security view; it is omitted from the effective contract", helpers.String("view", scanInfo.View))
+	}
 	return selected, nil
+}
+
+// scanCommandEnforcesComplianceGate reports whether the scan that cmd runs
+// enforces the compliance gate. It mirrors the routing in the bare scan
+// command's RunE, so contract provenance and enforcement are decided by the
+// same rule.
+//
+// The framework, control and workload subcommands always enforce it. The bare
+// scan command enforces it for a contract-driven policy scan unless the
+// security view was selected explicitly: security is also the default view, so
+// the resolved view alone cannot tell a plain contract scan from one that asked
+// for the security view's exemption. Any other bare scan keeps its existing
+// routing, where only a non-security view reaches the framework runner.
+//
+// The view is compared normalized because this runs both before RunE, on the
+// view as given, and from RunE, after the view has been lower-cased and trimmed.
+func scanCommandEnforcesComplianceGate(cmd *cobra.Command, view string, selected *contractv1alpha1.SelectedContract) bool {
+	if cmd == nil || cmd.Name() != "scan" {
+		return true
+	}
+	if len(contractPolicyIdentifiers(selected)) > 0 {
+		return !explicitSecurityView(cmd, view)
+	}
+	return normalizedView(view) != string(cautils.SecurityViewType)
+}
+
+// explicitSecurityView reports whether --view security was given on the
+// command line, in any case, as opposed to being the flag's default.
+func explicitSecurityView(cmd *cobra.Command, view string) bool {
+	return commandFlagChanged(cmd, "view") && normalizedView(view) == string(cautils.SecurityViewType)
+}
+
+// normalizedView is the view the scan command routes on, which is the given
+// view lower-cased and trimmed.
+func normalizedView(view string) string {
+	return strings.ToLower(strings.TrimSpace(view))
 }
 
 // validateExplicitRunnerGateFloors preserves the existing CLI validation
@@ -136,7 +175,7 @@ func applyContractOrdinarySettings(cmd *cobra.Command, scanInfo *cautils.ScanInf
 	}
 	if contract.Output != nil {
 		if contract.Output.Formats != nil && !commandFlagChanged(cmd, "format") {
-			scanInfo.Format = strings.Join(*contract.Output.Formats, ",")
+			scanInfo.Format = shared.NormalizeScanFormats(strings.Join(*contract.Output.Formats, ","))
 		}
 		if contract.Output.OmitRawResources != nil && !commandFlagChanged(cmd, "omit-raw-resources") {
 			scanInfo.OmitRawResources = *contract.Output.OmitRawResources

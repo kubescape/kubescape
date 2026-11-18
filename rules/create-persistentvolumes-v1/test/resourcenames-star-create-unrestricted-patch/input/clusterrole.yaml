@@ -1,0 +1,13 @@
+# A create narrowed to "*" reaches no PersistentVolume, even with an unrestricted patch next to it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: named-pv-applier
+rules:
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  resourceNames: ["*"]
+  verbs: ["create"]
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  verbs: ["patch"]

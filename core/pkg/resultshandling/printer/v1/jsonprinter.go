@@ -28,7 +28,7 @@ func (jsonPrinter *JsonPrinter) SetWriter(ctx context.Context, outputFile string
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.JsonFormat, outputFile, jsonOutputFile)
 	if explicitOutput {
 		var err error
-		jsonPrinter.writer, err = printer.GetWriterNoFallback(outputFile)
+		jsonPrinter.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	jsonPrinter.writer = printer.GetWriter(ctx, outputFile)
@@ -44,6 +44,9 @@ func (jsonPrinter *JsonPrinter) PrintNextSteps() {
 }
 
 func (jsonPrinter *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
+	if err := printer.PrepareOutput(jsonPrinter.writer); err != nil {
+		return err
+	}
 	report := cautils.ReportV2ToV1(opaSessionObj)
 
 	var postureReportStr []byte
@@ -71,7 +74,7 @@ func (jsonPrinter *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *
 
 func (p *JsonPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		return p.writer.Close()
+		return printer.CloseOutput(p.writer)
 	}
 	return nil
 }

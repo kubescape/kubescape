@@ -86,6 +86,26 @@ type PathLocationResolver struct {
 	yqlibEvaluator yqlib.Evaluator
 	yamlPath       string
 	yamlNodes      []*yaml.Node
+	// workloadDocuments maps the index the scanner gives a workload to its
+	// document in yamlNodes, -1 for one in a List; see IndexedByWorkload.
+	workloadDocuments []int
+	// unmatched is why an indexed file's workloads couldn't be matched to its
+	// documents. Its workloads then have no location rather than another's.
+	unmatched error
+}
+
+// Option configures a PathLocationResolver.
+type Option func(l *PathLocationResolver, data []byte)
+
+// IndexedByWorkload makes ResolveLocation take the index the scanner gives a
+// workload ("<path>:<n>") rather than a document's position in the file. The two
+// differ once a document yields no workload, such as an empty or comment-only
+// one, or several, as a List does. workloadDocuments maps one to the other for
+// the file's content; cautils.WorkloadDocuments is the scanner's own mapping.
+func IndexedByWorkload(workloadDocuments func(data []byte) ([]int, error)) Option {
+	return func(l *PathLocationResolver, data []byte) {
+		l.workloadDocuments, l.unmatched = workloadDocuments(data)
+	}
 }
 
 // FixPathLocationResolver is the resolver's previous name, kept so code
@@ -106,7 +126,7 @@ type Location struct {
 	Column int
 }
 
-func NewPathLocationResolver(yamlPath string) (*PathLocationResolver, error) {
+func NewPathLocationResolver(yamlPath string, opts ...Option) (*PathLocationResolver, error) {
 	file, err := openManifestFile(yamlPath)
 	if err != nil {
 		return nil, err
@@ -152,11 +172,15 @@ func NewPathLocationResolver(yamlPath string) (*PathLocationResolver, error) {
 	backendLoggerLeveled.SetLevel(logging.ERROR, "")
 	yqlib.GetLogger().SetBackend(backendLoggerLeveled)
 
-	return &PathLocationResolver{
+	resolver := &PathLocationResolver{
 		yamlPath:       yamlPath,
 		yqlibEvaluator: evaluator,
 		yamlNodes:      yamlNodes,
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(resolver, data)
+	}
+	return resolver, nil
 }
 
 // ResolveLocation returns where in the manifest the given path points.
@@ -166,7 +190,24 @@ func NewPathLocationResolver(yamlPath string) (*PathLocationResolver, error) {
 // back up a segment at a time until something exists, so the caller is pointed
 // at the enclosing block. A path that resolves to nothing at all yields the
 // zero Location, which callers read as "no line".
+//
+// With IndexedByWorkload, nodeIndex is the index the scanner gives the workload
+// ("<path>:<n>"), and names its document even when an empty, comment-only or
+// non-Kubernetes document comes before it; a workload inside a List has no
+// document of its own and no location, and neither has one of a file whose
+// workloads can't be matched to its documents. Otherwise, and in a file without
+// workloads, nodeIndex is the document's position in the file.
 func (l *PathLocationResolver) ResolveLocation(path string, nodeIndex int) (Location, error) {
+	if l.unmatched != nil {
+		return Location{}, l.unmatched
+	}
+	if nodeIndex >= 0 && nodeIndex < len(l.workloadDocuments) {
+		document := l.workloadDocuments[nodeIndex]
+		if document < 0 {
+			return Location{}, fmt.Errorf("workload [%d] is inside a List and has no document of its own", nodeIndex)
+		}
+		nodeIndex = document
+	}
 	if nodeIndex < 0 || nodeIndex >= len(l.yamlNodes) {
 		return Location{}, fmt.Errorf("node index [%d] out of range [%d]", nodeIndex, len(l.yamlNodes))
 	}

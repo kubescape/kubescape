@@ -117,6 +117,10 @@ func TestEmbeddedFeed(t *testing.T) {
 	assert.Equal(t, Applicable, ix.Lookup("CVE-2026-3288", "ingress-nginx", "1.14.3", "linux"))
 	assert.Equal(t, NotApplicable, ix.Lookup("CVE-2026-3288", "ingress-nginx", "1.14.4", "linux"))
 	assert.Equal(t, NotApplicable, ix.Lookup("CVE-2026-3288", "ingress-nginx", "1.15.0", "linux"))
+	assert.Equal(t, Applicable, ix.Lookup("CVE-2019-11245", "kubelet", "1.13.6", "linux"))
+	assert.Equal(t, Applicable, ix.Lookup("CVE-2019-11245", "kubelet", "1.14.2", "linux"))
+	assert.Equal(t, NotApplicable, ix.Lookup("CVE-2019-11245", "kubelet", "1.14.3", "linux"))
+	assert.Equal(t, NotApplicable, ix.Lookup("CVE-2019-11245", "kube-apiserver", "1.13.6", "linux"))
 }
 
 func TestEmbeddedFeedFreshness(t *testing.T) {

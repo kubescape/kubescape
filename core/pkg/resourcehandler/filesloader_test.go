@@ -13,6 +13,7 @@ import (
 	gitv5 "github.com/go-git/go-git/v5"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
@@ -1489,4 +1490,143 @@ func TestGetResources_SingleBrokenInputFailsPromptly(t *testing.T) {
 	_, _, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
 	require.Error(t, err, "single broken input must return error")
 	assert.ErrorIs(t, err, cautils.ErrHelmRenderFailed)
+}
+
+func createTestHelmChartHelper(t *testing.T, baseDir, chartName string) string {
+	chartDir := filepath.Join(baseDir, chartName)
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(fmt.Sprintf("apiVersion: v2\nname: %s\nversion: 0.1.0\n", chartName)), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("replicaCount: 1\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "deployment.yaml"), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-deploy
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: demo
+    spec:
+      containers:
+      - name: demo
+        image: nginx:latest
+`), 0o600))
+	return chartDir
+}
+
+func TestGetWorkloadFromHelmChart_WorkspaceContainment(t *testing.T) {
+	wsDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	inWsChart := createTestHelmChartHelper(t, wsDir, "in-ws-chart")
+	outsideChart := createTestHelmChartHelper(t, outsideDir, "outside-chart")
+
+	outsideValFile := filepath.Join(outsideDir, "outside-vals.yaml")
+	require.NoError(t, os.WriteFile(outsideValFile, []byte("replicaCount: 2\n"), 0o600))
+
+	outsideSecretFile := filepath.Join(outsideDir, "secret.txt")
+	require.NoError(t, os.WriteFile(outsideSecretFile, []byte("super-secret\n"), 0o600))
+
+	workloadRelPath := filepath.Join(inWsChart, "templates", "deployment.yaml")
+
+	t.Run("chart outside workspace is rejected", func(t *testing.T) {
+		outsideWlPath := filepath.Join(outsideChart, "templates", "deployment.yaml")
+		_, _, err := getWorkloadFromHelmChart(context.Background(), outsideChart, outsideChart, outsideWlPath, cautils.HelmValueOptions{}, 0, wsDir)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("values file outside workspace is rejected", func(t *testing.T) {
+		valueOpts := cautils.HelmValueOptions{
+			ValueFiles: []string{outsideValFile},
+		}
+		_, _, err := getWorkloadFromHelmChart(context.Background(), inWsChart, inWsChart, workloadRelPath, valueOpts, 0, wsDir)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("set-file outside workspace is rejected", func(t *testing.T) {
+		valueOpts := cautils.HelmValueOptions{
+			FileValues: []string{"secret=" + outsideSecretFile},
+		}
+		_, _, err := getWorkloadFromHelmChart(context.Background(), inWsChart, inWsChart, workloadRelPath, valueOpts, 0, wsDir)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("valid in-workspace chart and files succeed", func(t *testing.T) {
+		inWsValFile := filepath.Join(wsDir, "in-ws-vals.yaml")
+		require.NoError(t, os.WriteFile(inWsValFile, []byte("replicaCount: 3\n"), 0o600))
+
+		valueOpts := cautils.HelmValueOptions{
+			ValueFiles: []string{inWsValFile},
+		}
+		sources, workloads, err := getWorkloadFromHelmChart(context.Background(), inWsChart, inWsChart, workloadRelPath, valueOpts, 0, wsDir)
+		require.NoError(t, err)
+		assert.NotEmpty(t, sources)
+		assert.Len(t, workloads, 1)
+		assert.Equal(t, "demo-deploy", workloads[0].GetName())
+	})
+
+	t.Run("omitted workspace permits outside chart without containment error", func(t *testing.T) {
+		outsideWlPath := filepath.Join(outsideChart, "templates", "deployment.yaml")
+		sources, workloads, err := getWorkloadFromHelmChart(context.Background(), outsideChart, outsideChart, outsideWlPath, cautils.HelmValueOptions{}, 0)
+		require.NoError(t, err)
+		assert.NotEmpty(t, sources)
+		assert.Len(t, workloads, 1)
+	})
+}
+
+func TestGetResources_ChartAndFileRoute_EnforcesWorkspaceContainment(t *testing.T) {
+	wsDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	inWsChart := createTestHelmChartHelper(t, wsDir, "ws-chart")
+	outsideChart := createTestHelmChartHelper(t, outsideDir, "outside-chart")
+
+	t.Run("rejects outside chart path when workspace configured", func(t *testing.T) {
+		scanInfo := &cautils.ScanInfo{
+			InputPatterns: []string{outsideChart},
+			ChartPath:     outsideChart,
+			FilePath:      filepath.Join(outsideChart, "templates", "deployment.yaml"),
+			WorkspaceDir:  wsDir,
+		}
+		session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+
+		_, _, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("rejects outside set-file when workspace configured", func(t *testing.T) {
+		outsideFile := filepath.Join(outsideDir, "stolen.txt")
+		require.NoError(t, os.WriteFile(outsideFile, []byte("payload\n"), 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			InputPatterns:     []string{inWsChart},
+			ChartPath:         inWsChart,
+			FilePath:          filepath.Join(inWsChart, "templates", "deployment.yaml"),
+			WorkspaceDir:      wsDir,
+			HelmSetFileValues: []string{"custom=" + outsideFile},
+		}
+		session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+
+		_, _, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("permits in-workspace chart and files", func(t *testing.T) {
+		scanInfo := &cautils.ScanInfo{
+			InputPatterns: []string{inWsChart},
+			ChartPath:     inWsChart,
+			FilePath:      filepath.Join(inWsChart, "templates", "deployment.yaml"),
+			WorkspaceDir:  wsDir,
+		}
+		session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+
+		_, _, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+		require.NoError(t, err)
+	})
 }

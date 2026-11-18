@@ -219,7 +219,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				if watchMode {
 					return watchSecurityScan(cmd, ks, &scanInfo, policyIdentifiers)
 				}
-				return securityScan(scanInfo, ks, policyIdentifiers)
+				run := runSecurityScanWithCompliance
+				if !scanCommandEnforcesComplianceGate(cmd, scanInfo.View, selectedContract) {
+					run = runSecurityScan
+				}
+				return securityScanWith(scanInfo, ks, policyIdentifiers, run)
 			}
 
 			if scanInfo.View == string(cautils.SecurityViewType) {
@@ -293,7 +297,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.MinSeverity, "min-severity", "", "Only include findings at or above this severity (low, medium, high, critical) in the output. Applies to posture controls and image vulnerabilities. Does not affect exit codes, which are computed on the full unfiltered report")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.MaxSeverity, "max-severity", "", "Only include findings at or below this severity (low, medium, high, critical) in the output. Applies to posture controls and image vulnerabilities. Does not affect exit codes, which are computed on the full unfiltered report")
 
-	scanCmd.PersistentFlags().Float32VarP(&scanInfo.ComplianceThreshold, "compliance-threshold", "", 0, "Compliance threshold is the percent below which the command fails and returns exit code 1. Applies to 'scan framework', 'scan control', 'scan workload', and '--view resource|control'")
+	scanCmd.PersistentFlags().Float32VarP(&scanInfo.ComplianceThreshold, "compliance-threshold", "", 0, "Compliance threshold is the percent below which the command fails and returns exit code 1. Applies to 'scan framework', 'scan control', 'scan workload', '--view resource|control', and scans whose --scan-contract selects a policy unless --view security is given explicitly")
 	scanCmd.PersistentFlags().Float32Var(&scanInfo.FailCoverageThreshold, "fail-coverage-below", 0, "Fail (exit code 1) when the scan coverage score drops below this percentage (0 to disable). The score is the ratio of evaluated controls discounted by 3 points per silent failed GVR pull (a resource type that failed to collect entirely but whose dependent controls still evaluated via other resource types), 2 points per partial GVR pull, and 5 points per degraded policy input, so a scan with every control evaluated can still fail on partial resource collection or fallback policy inputs")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.FailOnDegradedConfig, "fail-on-degraded-config", false, "Fail the scan (exit code 1) if control configurations or exceptions could not be loaded from their configured source and bundled defaults were used instead")
 
@@ -509,13 +513,19 @@ func deriveTimeoutContext(scanInfo *cautils.ScanInfo, ks meta.IKubescape) (conte
 }
 
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+	return securityScanWith(scanInfo, ks, policyIdentifiers, runSecurityScan)
+}
+
+// securityScanWith runs the bare scan command's policy selection with run,
+// once for a single context or once per context of a fleet scan.
+func securityScanWith(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, run fleetRunner) error {
 	if len(scanInfo.KubeContexts) > 0 {
-		return fleetScan(scanInfo, ks, policyIdentifiers, runSecurityScan)
+		return fleetScan(scanInfo, ks, policyIdentifiers, run)
 	}
 
 	ctx, cancel := deriveTimeoutContext(&scanInfo, ks)
 	defer cancel()
-	_, err := runSecurityScan(ctx, &scanInfo, ks, policyIdentifiers)
+	_, err := run(ctx, &scanInfo, ks, policyIdentifiers)
 	return err
 }
 
@@ -523,8 +533,21 @@ func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifie
 // then every threshold/drift enforcement securityScan performs for the
 // single-context path. It's factored out so fleetScan (cmd/scan/fleetscan.go)
 // can run the exact same per-cluster behavior once per requested context,
-// instead of a parallel, divergent copy of this logic.
+// instead of a parallel, divergent copy of this logic. The security view does
+// not enforce the compliance gate.
 func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return runSecurityScanGates(ctx, scanInfo, ks, policyIdentifiers, false)
+}
+
+// runSecurityScanWithCompliance is runSecurityScan plus the compliance gate. A
+// contract-driven policy scan uses it: the contract's failure.complianceBelow
+// and an explicit --compliance-threshold floor are both resolved into
+// scanInfo.ComplianceThreshold and must be enforced, not only reported.
+func runSecurityScanWithCompliance(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return runSecurityScanGates(ctx, scanInfo, ks, policyIdentifiers, true)
+}
+
+func runSecurityScanGates(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, enforceCompliance bool) (*resultshandling.ResultsHandler, error) {
 	results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
 	if err != nil {
 		return nil, err
@@ -539,7 +562,12 @@ func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IK
 		return results, err
 	}
 
+	var complianceErr error
+	if enforceCompliance {
+		complianceErr = enforceComplianceThreshold(results.GetComplianceScore(), scanInfo)
+	}
 	if err := joinGateErrors(
+		complianceErr,
 		enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo),
 		enforceCombinedImageGates(results, scanInfo),
 	); err != nil {

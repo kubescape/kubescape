@@ -776,7 +776,9 @@ func TestConvertYamlToJson(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.jsonObj, convertYamlToJson(tt.yamlObj))
+			got, err := convertYamlToJson(tt.yamlObj)
+			require.NoError(t, err)
+			assert.Equal(t, tt.jsonObj, got)
 		})
 	}
 }
@@ -789,8 +791,9 @@ func TestConvertYamlToJson(t *testing.T) {
 func TestConvertYamlToJson_NestedNonStringKey(t *testing.T) {
 	input := map[string]any{"spec": map[any]any{1: "enabled"}}
 
-	got := convertYamlToJson(input)
-	_, err := json.Marshal(got)
+	got, err := convertYamlToJson(input)
+	require.NoError(t, err)
+	_, err = json.Marshal(got)
 	require.NoError(t, err)
 
 	spec, ok := got.(map[string]any)["spec"].(map[string]any)
@@ -841,6 +844,55 @@ data:
 
 	_, err = json.Marshal(workloads[0].GetObject())
 	assert.NoError(t, err)
+}
+
+func TestConvertYamlToJson_KeyCollisions(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		input any
+		key   string
+	}{
+		{"integer and string", map[any]any{1: "numeric", "1": "string"}, "1"},
+		{"nil and string", map[any]any{nil: "nil", "null": "string"}, "null"},
+		{"boolean and string", map[any]any{true: "boolean", "true": "string"}, "true"},
+		{"nested string map", map[string]any{"data": map[any]any{1: "numeric", "1": "string"}}, "1"},
+		{"nested mixed map", map[any]any{"data": map[any]any{1: "numeric", "1": "string"}}, "1"},
+		{"nested slice", []any{map[any]any{1: "numeric", "1": "string"}}, "1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := convertYamlToJson(tc.input)
+			require.ErrorContains(t, err, "YAML keys collide after conversion to JSON key")
+			assert.Contains(t, err.Error(), strconv.Quote(tc.key))
+			assert.Nil(t, got)
+		})
+	}
+}
+
+func TestReadYamlFile_KeyCollisionSkipsDocument(t *testing.T) {
+	manifest := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: collision
+data:
+  0x1: numeric
+  "1": string
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: valid
+data:
+  2: retained
+`)
+	workloads, err := readYamlFile(manifest)
+	require.ErrorContains(t, err, `document 1: key "data": YAML keys collide after conversion to JSON key "1"`)
+	require.Len(t, workloads, 1)
+	assert.Equal(t, "valid", workloads[0].GetName())
+	assert.Equal(t, map[string]any{"2": "retained"}, workloads[0].GetObject()["data"])
+}
+
+func TestIsListEnvelope_KeyCollisionWithholdsAttribution(t *testing.T) {
+	assert.True(t, isListEnvelope([]byte("apiVersion: v1\nkind: ConfigMap\ndata:\n  0x1: numeric\n  \"1\": string\n")))
 }
 
 func TestIsYaml(t *testing.T) {
@@ -1734,4 +1786,43 @@ spec:
 			b.Fatal("no workloads loaded")
 		}
 	}
+}
+
+// WorkloadDocuments numbers documents as gopkg.in/yaml.v3 does, so a workload
+// after a document that yields none still names its own document.
+func TestWorkloadDocuments(t *testing.T) {
+	pod := func(name string) string {
+		return "apiVersion: v1\nkind: Pod\nmetadata:\n  name: " + name + "\nspec:\n  containers:\n  - name: c\n    image: nginx\n"
+	}
+	list := "apiVersion: v1\nkind: List\nitems:\n- " + strings.ReplaceAll(strings.TrimSuffix(pod("x"), "\n"), "\n", "\n  ") + "\n- " + strings.ReplaceAll(strings.TrimSuffix(pod("y"), "\n"), "\n", "\n  ") + "\n"
+	tests := []struct {
+		name    string
+		content string
+		want    []int
+	}{
+		{name: "one workload per document", content: pod("a") + "---\n" + pod("b"), want: []int{0, 1}},
+		{name: "an empty document", content: pod("a") + "---\n---\n" + pod("b"), want: []int{0, 2}},
+		{name: "a comment-only document", content: pod("a") + "---\n# disabled\n---\n" + pod("b"), want: []int{0, 2}},
+		{name: "a document that isn't a Kubernetes object", content: "replicaCount: 1\n---\n" + pod("a"), want: []int{1}},
+		{name: "a List", content: list + "---\n" + pod("a"), want: []int{-1, -1, 1}},
+		{name: "no workloads", content: "a: 1\n---\nb: 2\n", want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := WorkloadDocuments([]byte(tt.content))
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+
+			// The loader's own count of workloads is what the indexes run over.
+			workloads, _ := readYamlFile([]byte(tt.content))
+			assert.Len(t, got, len(workloads))
+		})
+	}
+
+	// The loader splits documents by lines and doesn't take a lone CR for one,
+	// so it reads other workloads than the documents hold: the mapping refuses
+	// rather than match them up wrongly.
+	loneCR := "values: true\r---\rapiVersion: v1\rkind: Pod\rmetadata:\r  name: a\n---\napiVersion: v1\nkind: Pod\nmetadata:\n  name: b\n"
+	_, err := WorkloadDocuments([]byte(loneCR))
+	assert.ErrorContains(t, err, "the loader reads")
 }

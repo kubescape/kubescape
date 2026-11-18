@@ -390,14 +390,14 @@ func descendantPrefix(rule ignoreRule) string {
 	return prefix
 }
 
-// ignoreRoot resolves the directory a scan input is anchored at. A file or a glob is
-// anchored at its parent directory, so patterns stay relative to the same place.
 // IgnoreRoot is the directory NewScanPathFilter reads the ignore file from for
 // input.
 func IgnoreRoot(input string) string {
 	return ignoreRoot(input)
 }
 
+// ignoreRoot resolves the directory a scan input is anchored at. A file or a glob is
+// anchored at its parent directory, so patterns stay relative to the same place.
 func ignoreRoot(input string, depthOpt ...int) string {
 	if input == "" {
 		return "."

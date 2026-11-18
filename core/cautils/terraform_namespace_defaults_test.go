@@ -1,0 +1,301 @@
+package cautils
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/hashicorp/hcl/v2"
+	"github.com/open-policy-agent/opa/v1/rego"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/zclconf/go-cty/cty"
+)
+
+func TestTakesProviderNamespaceDefault(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want bool
+	}{
+		{"kubernetes_deployment_v1.web.metadata", true},
+		{"kubernetes_pod.web.metadata", true},
+		{"kubernetes_service_account_v1.ci.metadata", true},
+		{"kubernetes_default_service_account_v1.default.metadata", true},
+		{"kubernetes_role_v1.reader.metadata", true},
+		{"kubernetes_role_binding_v1.reader.metadata", true},
+		{"kubernetes_network_policy_v1.deny.metadata", true},
+		{"kubernetes_namespace_v1.apps.metadata", false},
+		{"kubernetes_cluster_role_v1.admin.metadata", false},
+		{"kubernetes_cluster_role_binding_v1.admin.metadata", false},
+		{"kubernetes_deployment_v1.web.spec.template.metadata", false},
+		{"kubernetes_cron_job_v1.backup.spec.job_template.metadata", false},
+		{"kubernetes_role_binding_v1.reader.subject", true},
+		{"kubernetes_role_binding.reader.subject", true},
+		{"kubernetes_cluster_role_binding_v1.admin.subject", true},
+		{"kubernetes_cluster_role_binding.admin.subject", true},
+		{"kubernetes_role_binding_v1.reader.role_ref", false},
+		{"kubernetes_deployment_v1.web.spec", false},
+		{"kubernetes_manifest.web.metadata", false},
+		{"metadata", false},
+		{"kubernetes_pod_v1", false},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			assert.Equal(t, tc.want, takesProviderNamespaceDefault(tc.path))
+		})
+	}
+}
+
+const namespaceDefaultsTerraform = `
+resource "kubernetes_deployment_v1" "web" {
+  metadata {
+    name = "web"
+  }
+  spec {
+    template {
+      metadata {
+        labels = { app = "web" }
+      }
+      spec {
+        container {
+          name  = "web"
+          image = "nginx"
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_service_account_v1" "pinned" {
+  metadata {
+    name      = "pinned"
+    namespace = "apps"
+  }
+}
+
+resource "kubernetes_service_account_v1" "null" {
+  metadata {
+    name      = "null"
+    namespace = null
+  }
+}
+
+resource "kubernetes_service_account_v1" "variable" {
+  metadata {
+    name      = "variable"
+    namespace = var.namespace
+  }
+}
+
+resource "kubernetes_namespace_v1" "apps" {
+  metadata {
+    name = "apps"
+  }
+}
+
+resource "kubernetes_cluster_role_v1" "admin" {
+  metadata {
+    name = "admin"
+  }
+  rule {
+    api_groups = ["*"]
+    resources  = ["*"]
+    verbs      = ["*"]
+  }
+}
+
+resource "kubernetes_cluster_role_binding_v1" "admin" {
+  metadata {
+    name = "admin"
+  }
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "ClusterRole"
+    name      = "admin"
+  }
+  subject {
+    kind = "ServiceAccount"
+    name = "ci"
+  }
+}
+
+resource "kubernetes_role_binding_v1" "reader" {
+  metadata {
+    name      = "reader"
+    namespace = "apps"
+  }
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "Role"
+    name      = "reader"
+  }
+  subject {
+    kind = "ServiceAccount"
+    name = "ci"
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = "deployer"
+    namespace = "apps"
+  }
+  subject {
+    kind      = "Group"
+    name      = "auditors"
+    api_group = "rbac.authorization.k8s.io"
+  }
+}
+`
+
+func TestExtractTypedResourcesDefaultsMetadataNamespace(t *testing.T) {
+	evalCtx := &hcl.EvalContext{Variables: map[string]cty.Value{"var": cty.ObjectVal(map[string]cty.Value{"namespace": cty.StringVal("tools")})}}
+	manifests, errs := extractTypedResources(parseTypedHCL(t, namespaceDefaultsTerraform), evalCtx)
+	require.Empty(t, errs)
+	byName := map[string]map[string]interface{}{}
+	for _, m := range manifests {
+		byName[m["kind"].(string)+"/"+m["metadata"].(map[string]interface{})["name"].(string)] = m
+	}
+	metadata := func(name string) map[string]interface{} {
+		require.Contains(t, byName, name)
+		return byName[name]["metadata"].(map[string]interface{})
+	}
+
+	assert.Equal(t, "default", metadata("Deployment/web")["namespace"], "the provider creates it in the default namespace")
+	assert.Equal(t, "apps", metadata("ServiceAccount/pinned")["namespace"], "an explicit namespace is kept")
+	assert.Equal(t, "default", metadata("ServiceAccount/null")["namespace"], "null is unset to Terraform, so the provider default applies")
+	assert.Equal(t, "tools", metadata("ServiceAccount/variable")["namespace"], "a resolved variable is used as is")
+	assert.Equal(t, "apps", metadata("RoleBinding/reader")["namespace"])
+
+	for _, name := range []string{"Namespace/apps", "ClusterRole/admin", "ClusterRoleBinding/admin"} {
+		assert.NotContains(t, metadata(name), "namespace", "%s is cluster scoped", name)
+	}
+
+	template := podSpecAt(t, byName["Deployment/web"], "spec", "template", "metadata")
+	assert.NotContains(t, template, "namespace", "a pod template takes the namespace of its resource")
+}
+
+func TestExtractTypedResourcesDefaultsSubjectNamespace(t *testing.T) {
+	evalCtx := &hcl.EvalContext{Variables: map[string]cty.Value{"var": cty.ObjectVal(map[string]cty.Value{"namespace": cty.StringVal("tools")})}}
+	manifests, errs := extractTypedResources(parseTypedHCL(t, namespaceDefaultsTerraform), evalCtx)
+	require.Empty(t, errs)
+	subjects := map[string][]interface{}{}
+	for _, m := range manifests {
+		if s, ok := m["subjects"].([]interface{}); ok {
+			subjects[m["kind"].(string)] = s
+		}
+	}
+
+	assert.Equal(t, []interface{}{
+		map[string]interface{}{"kind": "ServiceAccount", "name": "ci", "namespace": "default"},
+	}, subjects["ClusterRoleBinding"], "the provider fills in the namespace a cluster role binding subject needs")
+
+	assert.Equal(t, []interface{}{
+		map[string]interface{}{"kind": "ServiceAccount", "name": "ci", "namespace": "default"},
+		map[string]interface{}{"kind": "ServiceAccount", "name": "deployer", "namespace": "apps"},
+		map[string]interface{}{"kind": "Group", "name": "auditors", "apiGroup": "rbac.authorization.k8s.io", "namespace": "default"},
+	}, subjects["RoleBinding"], "the provider sends default, not the binding's apps namespace, for a subject without one")
+}
+
+func TestExtractTypedResourcesDoesNotGuessAnUnresolvedNamespace(t *testing.T) {
+	src := `
+resource "kubernetes_service_account_v1" "ci" {
+  metadata {
+    name      = "ci"
+    namespace = var.not_declared
+  }
+}
+
+resource "kubernetes_role_binding_v1" "reader" {
+  metadata {
+    name      = "reader"
+    namespace = "apps"
+  }
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "Role"
+    name      = "reader"
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = "ci"
+    namespace = var.not_declared
+  }
+}
+`
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+	require.Len(t, errs, 2, "both unresolved attributes are reported")
+	require.Len(t, manifests, 2)
+	assert.NotContains(t, manifests[0]["metadata"].(map[string]interface{}), "namespace",
+		"a namespace that could not be resolved is left out, not replaced by the default")
+	subject := manifests[1]["subjects"].([]interface{})[0].(map[string]interface{})
+	assert.NotContains(t, subject, "namespace")
+}
+
+// boundServiceAccountRego mirrors how the workload-with-administrative-roles
+// rule (C-0272) ties a binding to a ServiceAccount: by the subject's kind, name
+// and namespace against the ServiceAccount's own.
+const boundServiceAccountRego = `
+package test
+
+import rego.v1
+
+bound contains sa.metadata.name if {
+	sa := input[_]
+	sa.kind == "ServiceAccount"
+	binding := input[_]
+	binding.kind in {"RoleBinding", "ClusterRoleBinding"}
+	subject := binding.subjects[_]
+	subject.kind == "ServiceAccount"
+	subject.name == sa.metadata.name
+	subject.namespace == sa.metadata.namespace
+}
+`
+
+// TestTerraformBindingReachesServiceAccountInDefaultNamespace scans a
+// configuration that, like the provider's own examples, names neither the
+// ServiceAccount's namespace nor its subject's. The provider puts both in
+// default, so the cluster-admin binding applies to that account.
+func TestTerraformBindingReachesServiceAccountInDefaultNamespace(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.tf"), []byte(`
+resource "kubernetes_service_account_v1" "ci" {
+  metadata {
+    name = "ci"
+  }
+}
+
+resource "kubernetes_cluster_role_binding_v1" "ci" {
+  metadata {
+    name = "ci-admin"
+  }
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "ClusterRole"
+    name      = "cluster-admin"
+  }
+  subject {
+    kind = "ServiceAccount"
+    name = "ci"
+  }
+}
+`), 0o600))
+
+	workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
+	require.Empty(t, errs)
+	var input []interface{}
+	for _, list := range workloads {
+		for _, w := range list {
+			input = append(input, w.GetObject())
+		}
+	}
+	require.Len(t, input, 2)
+
+	raw, err := json.Marshal(input)
+	require.NoError(t, err)
+	var decoded interface{}
+	require.NoError(t, json.Unmarshal(raw, &decoded))
+	rs, err := rego.New(rego.Query("data.test.bound"), rego.Module("test.rego", boundServiceAccountRego), rego.Input(decoded)).Eval(context.Background())
+	require.NoError(t, err)
+	require.Len(t, rs, 1)
+	assert.Equal(t, []interface{}{"ci"}, rs[0].Expressions[0].Value, "default/ci holds the cluster-admin binding")
+}

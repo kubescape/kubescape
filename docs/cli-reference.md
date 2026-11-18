@@ -39,7 +39,7 @@ kubescape scan [target] [flags]
 | `--account <id>` | Kubescape SaaS account ID | from cache |
 | `--access-key <key>` | Kubescape SaaS access key | from cache |
 | `--cluster-name <name>` | Custom name for the cluster in reports. Not the same as `--kube-context` | - |
-| `--compliance-threshold <float>` | Fail if compliance score is below threshold. Applies to `scan framework`, `scan control`, and `--view resource\|control` — see [score thresholds](#score-thresholds). | `0` |
+| `--compliance-threshold <float>` | Fail if compliance score is below threshold. Applies to `scan framework`, `scan control`, `--view resource\|control`, and scans whose `--scan-contract` selects a policy — see [score thresholds](#score-thresholds). | `0` |
 | `--controls-config <path>` | Path to controls configuration file | - |
 | `--controls-version <tag>` | Pin the [regolibrary](https://github.com/kubescape/regolibrary/releases) release tag used to download controls. Has no effect when `--account` is set, because the cloud backend is used instead | latest release |
 | `--custom-rules <path>` | Path to user-authored custom rules — see [custom rules](#custom-rules) | - |
@@ -77,7 +77,7 @@ kubescape scan [target] [flags]
 | `--reference-cluster <ctx>` | With `--fleet-report`, the context the other clusters are compared against. Must be one of `--kube-contexts`. | - |
 | `--retries <n>` | With `--kube-contexts`, how many more times to try a cluster whose API server never answered, waiting 2s, then 4s, doubling up to 30s. `0` disables retries. | `2` |
 | `--fleet-config <path>` | Read `--kube-contexts`, `--output`, `--fleet-report`, `--reference-cluster` and `--retries` from a `FleetConfig` file. A flag on the command line overrides the file. See [fleet config file](fleet-scanning.md#fleet-config-file). | - |
-| `-o, --output <path>` | Output file path. For `scan validate-contract`, the destination must not refer to the input contract, including through symbolic or hard links | stdout |
+| `-o, --output <path>` | Output file path. An existing file is only replaced once the scan has a report to write, so a scan that fails before the report is written leaves the file's contents intact (its mode may be tightened to 0600) and never leaves an empty file at a new path. For `scan validate-contract`, the destination must not refer to the input contract, including through symbolic or hard links | stdout |
 | `--release-name <name>` | Helm release name made available as `.Release.Name` when rendering a chart | `release-name` |
 | `--release-namespace <ns>` | Helm release namespace made available as `.Release.Namespace` when rendering a chart | `default` |
 | `--kube-version <version>` | Kubernetes version made available as `.Capabilities.KubeVersion` when rendering a chart, as in `helm template`. A chart whose `kubeVersion` constraint rejects it is not rendered | the newest version the chart's `kubeVersion` allows, up to the Kubernetes version Kubescape is built with; `v1.20` (Helm's library default) when the chart declares none or no such version satisfies it |
@@ -604,11 +604,20 @@ invocations:
 - `kubescape scan framework <name> ...`
 - `kubescape scan control <id> ...`
 - `kubescape scan --view resource ...` or `--view control ...`
+- `kubescape scan --scan-contract <file> ...` when the selected contract has a
+  `policy` section, in every view unless `--view security` is given explicitly.
+  This includes fleet scans with `--kube-contexts`.
 
-The default `kubescape scan [path]` uses `--view security`, which does
-not evaluate against a score threshold. To gate a pipeline on the
-compliance score, use one of the forms above.
+Without such a contract, the default `kubescape scan [path]` uses
+`--view security`, which does not evaluate against a score threshold. To gate
+a pipeline on the compliance score, use one of the forms above.
 `--severity-threshold` and `--fail-coverage-below` apply in every view.
+
+For a contract-driven policy scan the threshold is the stricter of the
+contract's `failure.complianceBelow` and an explicit `--compliance-threshold`.
+Selecting `--view security` explicitly keeps the security view's exemption; the
+report's contract provenance then records the requested floor but no effective
+compliance gate.
 
 `--fail-coverage-below` gates on the **scan coverage score**, not the raw
 ratio of evaluated controls. The score starts from the percentage of controls

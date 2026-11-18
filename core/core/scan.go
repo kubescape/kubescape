@@ -704,10 +704,10 @@ func checkGlobCollision(rawPath string, scanInfo *cautils.ScanInfo, destInfo fs.
 
 // validateScanOutputSafety ensures an output destination does not overwrite an
 // input manifest, baseline report, exceptions file, framework definition, or controls
-// configuration. SetWriter truncates the destination file immediately on open with
-// O_TRUNC, so an alias to any of these input sources would destroy user data before the
-// scan can read or compare it. When traverseDirs is false, recursive directory traversal is
-// deferred to GetOutputPrinters.
+// configuration. The printers truncate the destination file when they write the
+// report, so an alias to any of these input sources would destroy user data.
+// When traverseDirs is false, recursive directory traversal is deferred to
+// GetOutputPrinters.
 func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo, traverseDirs bool) error {
 	if outputFile == "" || outputFile == os.DevNull || scanInfo == nil {
 		return nil

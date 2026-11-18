@@ -407,6 +407,24 @@ func TestMarkdownPrinter_ActionPrint_NegativeScoreRendersNA(t *testing.T) {
 	assert.NotContains(t, out, "**Compliance Score:** -1")
 }
 
+func TestMarkdownPrinter_ActionPrint_FractionalNegativeScoreRendersNA(t *testing.T) {
+	for _, score := range []float32{-0.5, -0.25, -0.1} {
+		session := cautils.NewOPASessionObjMock()
+		session.Report = &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				ComplianceScore: score,
+				Controls:        reportsummary.ControlSummaries{},
+			},
+		}
+
+		out := mdRunActionPrint(t, session)
+
+		assert.Contains(t, out, "# Kubescape Security Report")
+		assert.Contains(t, out, "**Compliance Score:** N/A")
+		assert.NotContains(t, out, "**Compliance Score:** 0%")
+	}
+}
+
 func TestMarkdownPrinter_ActionPrint_PerfectScoreRenders100Percent(t *testing.T) {
 	session := cautils.NewOPASessionObjMock()
 	session.Report = &reporthandlingv2.PostureReport{
@@ -501,11 +519,53 @@ func TestMdEscapeCell(t *testing.T) {
 		{"multi|pipe|in|cell", "multi\\|pipe\\|in\\|cell"},
 		{"", ""},
 		{"no special chars", "no special chars"},
+		{"with\x00null", "withnull"},
+		{"with\x1bescape", "withescape"},
+		{"with\x07bell", "withbell"},
+		{"with\x7fdel", "withdel"},
+		{"with\ttab", "with\ttab"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.input, func(t *testing.T) {
 			assert.Equal(t, tc.want, mdEscapeCell(tc.input))
+		})
+	}
+}
+
+func TestMdEscapeCodeCell(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"normal", "normal"},
+		{"with|pipe", "with\\|pipe"},
+		{"image`with`backticks", "image'with'backticks"},
+		{"image|with|pipe`and`ticks\r\n", "image\\|with\\|pipe'and'ticks"},
+		{"\x1b[31mimage`tag`\x00", "[31mimage'tag'"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			assert.Equal(t, tc.want, mdEscapeCodeCell(tc.input))
+		})
+	}
+}
+
+func TestMdEscapeInline(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"image:v1", "image:v1"},
+		{"image`tag", "image'tag"},
+		{"img`with`backtick\nand\r\nnewlines", "img'with'backtick and newlines"},
+		{"\x00bad`inline\x1b", "bad'inline"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			assert.Equal(t, tc.want, mdEscapeInline(tc.input))
 		})
 	}
 }
@@ -986,4 +1046,46 @@ func TestMarkdownPrinter_ActionPrint_NeutralizesNewlinesInControlIDs(t *testing.
 	assert.NotContains(t, out, "C-0088\r\n")
 	assert.Contains(t, out, "C-0099 \\| evil \\|")
 	assert.Contains(t, out, "C-0088 \\| leaked")
+}
+
+func TestMarkdownPrinter_ActionPrint_ImageScanBacktickAndControlSanitization(t *testing.T) {
+	imageScanData := []cautils.ImageScanData{
+		{
+			Image:    "registry.example.com/app`evil`\x1b[31m|pipe:v1",
+			Platform: "linux/amd64",
+			Matches: match.NewMatches(
+				mdImageMatch("CVE-2026-TICK", "High", "pkg`name", "1.0", vulnerability.FixStateFixed, "2.0"),
+			),
+		},
+	}
+
+	out := mdRunImageActionPrint(t, imageScanData)
+
+	// Image targets table: backticks neutralized to single quotes and control characters stripped
+	assert.Contains(t, out, "`registry.example.com/app'evil'[31m\\|pipe:v1 [linux/amd64]`")
+	assert.NotContains(t, out, "`registry.example.com/app`evil`")
+	assert.NotContains(t, out, "\x1b")
+
+	// Vulnerabilities table:
+	assert.Contains(t, out, "| `registry.example.com/app'evil'[31m\\|pipe:v1 [linux/amd64]` |")
+}
+
+func TestMarkdownPrinter_ActionPrint_NeutralizesNewlinesInFailedControlHeading(t *testing.T) {
+	session := mdSessionFixture()
+
+	injectedControlID := "C-0099`hack`"
+	ctrl := reportsummary.ControlSummary{
+		ControlID:   injectedControlID,
+		Name:        "Dangerous Control\n## Rogue Section",
+		ScoreFactor: 9.0,
+		StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+	}
+	failedStatus := &apis.StatusInfo{InnerStatus: apis.StatusFailed}
+	ctrl.Append(failedStatus, mdResourceID1)
+	session.Report.SummaryDetails.Controls[injectedControlID] = ctrl
+
+	out := mdRunActionPrint(t, session)
+
+	assert.NotContains(t, out, "\n## Rogue Section\n", "newline in control name must not produce a rogue heading")
+	assert.Contains(t, out, "### Dangerous Control ## Rogue Section — Critical (`C-0099'hack'`)")
 }

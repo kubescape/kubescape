@@ -210,6 +210,33 @@ func effectiveFailure(cmd *cobra.Command, scanInfo *cautils.ScanInfo, contract *
 	return failure
 }
 
+// omitUnenforcedComplianceGate removes the compliance gate's effective value
+// from contract provenance for a scan that does not enforce it, so the report
+// never describes an unenforced gate as effective. The contract value and the
+// runner floor stay in the gate resolution: they record what was requested.
+// It reports whether an effective value was removed.
+func omitUnenforcedComplianceGate(metadata *reporthandlingv2.ScanContractMetadata) bool {
+	if metadata == nil {
+		return false
+	}
+	omitted := false
+	if metadata.GateResolution != nil && metadata.GateResolution.ComplianceBelow.Effective != nil {
+		metadata.GateResolution.ComplianceBelow.Effective = nil
+		omitted = true
+	}
+	if settings := metadata.Effective; settings != nil && settings.Failure != nil && settings.Failure.ComplianceBelow != nil {
+		settings.Failure.ComplianceBelow = nil
+		omitted = true
+		if *settings.Failure == (reporthandlingv2.ScanContractFailure{}) {
+			settings.Failure = nil
+		}
+		if settings.Policy == nil && settings.Scope == nil && settings.Evaluation == nil && settings.Failure == nil && settings.Output == nil {
+			metadata.Effective = nil
+		}
+	}
+	return omitted
+}
+
 func ordinaryCLIOverrides(cmd *cobra.Command, contract contractv1alpha1.Contract, scanInfo *cautils.ScanInfo) *reporthandlingv2.ScanContractCLIOverrides {
 	overrides := &reporthandlingv2.ScanContractCLIOverrides{}
 

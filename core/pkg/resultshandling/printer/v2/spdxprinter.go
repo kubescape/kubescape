@@ -32,7 +32,7 @@ func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.SPDXFormat, outputFile, spdxOutputFile)
 	if explicitOutput {
 		var err error
-		sp.writer, err = printer.GetWriterNoFallback(outputFile)
+		sp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	sp.writer = printer.GetWriter(ctx, outputFile)
@@ -42,6 +42,9 @@ func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
 func (sp *SPDXPrinter) Score(score float32) {}
 
 func (sp *SPDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if err := printer.PrepareOutput(sp.writer); err != nil {
+		return err
+	}
 	if len(imageScanData) == 0 {
 		logger.L().Ctx(ctx).Error("spdx-json output requires scanned images")
 		return fmt.Errorf("spdx-json output requires scanned images")
@@ -99,7 +102,7 @@ func (sp *SPDXPrinter) PrintNextSteps() {}
 // CloseWriter closes the SPDX output writer, returning any error from flushing or closing.
 func (sp *SPDXPrinter) CloseWriter() error {
 	if sp.writer != nil && sp.writer != os.Stdout {
-		return sp.writer.Close()
+		return printer.CloseOutput(sp.writer)
 	}
 	return nil
 }

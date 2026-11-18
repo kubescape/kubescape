@@ -78,5 +78,9 @@ func newEnv() (*cel.Env, error) {
 	// StoredExpressions is the mode for compiling an already-authored policy
 	// (the VAP YAML we load from cel-admission-library), as opposed to
 	// NewExpressions which is used when validating a brand new policy.
-	return extended.Env(environment.StoredExpressions)
+	env, err := extended.Env(environment.StoredExpressions)
+	if err != nil {
+		return nil, err
+	}
+	return env.Extend(cel.CustomTypeAdapter(jsonNumberAdapter{Adapter: env.CELTypeAdapter()}))
 }

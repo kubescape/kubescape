@@ -102,6 +102,9 @@ func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) e
 }
 
 func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if err := printer.PrepareOutput(pp.writer); err != nil {
+		return err
+	}
 	hasReport := opaSessionObj != nil && opaSessionObj.Report != nil
 	hasImages := len(imageScanData) > 0
 
@@ -210,7 +213,7 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) error
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.PrettyFormat, outputFile, prettyOutputFile)
 
 	if explicitOutput {
-		writer, err := printer.GetWriterNoFallback(outputFile)
+		writer, err := printer.GetPrinterWriterNoFallback(outputFile)
 		if err != nil {
 			return err
 		}
@@ -486,7 +489,7 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 // CloseWriter closes the pretty-printer output writer, returning any error from flushing or closing.
 func (p *PrettyPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		return p.writer.Close()
+		return printer.CloseOutput(p.writer)
 	}
 	return nil
 }

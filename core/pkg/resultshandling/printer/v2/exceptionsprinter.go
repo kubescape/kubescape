@@ -49,7 +49,7 @@ func (ep *ExceptionsPrinter) SetWriter(ctx context.Context, outputFile string) e
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.ExceptionsFormat, outputFile, exceptionsOutputFile)
 	if explicitOutput {
 		var err error
-		ep.writer, err = printer.GetWriterNoFallback(outputFile)
+		ep.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	ep.writer = printer.GetWriter(ctx, outputFile)
@@ -61,6 +61,9 @@ func (ep *ExceptionsPrinter) Score(float32) {}
 func (ep *ExceptionsPrinter) PrintNextSteps() {}
 
 func (ep *ExceptionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
+	if err := printer.PrepareOutput(ep.writer); err != nil {
+		return err
+	}
 	if opaSessionObj == nil {
 		return fmt.Errorf("failed to write exceptions: no data provided")
 	}
@@ -132,7 +135,7 @@ func buildExceptionPolicies(ctx context.Context, opaSessionObj *cautils.OPASessi
 // flushing or closing.
 func (ep *ExceptionsPrinter) CloseWriter() error {
 	if ep.writer != nil && ep.writer != os.Stdout {
-		return ep.writer.Close()
+		return printer.CloseOutput(ep.writer)
 	}
 	return nil
 }

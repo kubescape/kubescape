@@ -40,23 +40,24 @@ func (r versionRange) contains(v semver) bool {
 	return true
 }
 
-const versionPattern = `v?\d+\.\d+(?:\.\d+)?`
+const versionPattern = `(?i:v)?\d+\.\d+(?:\.\d+)?`
 
 var (
 	affectedHeader = regexp.MustCompile(`(?i)^(?:#+\s*|\*\*)affected versions\b`)
 	fixedHeader    = regexp.MustCompile(`(?i)^(?:#+\s*|\*\*)fixed versions?\b`)
 	anyHeader      = regexp.MustCompile(`^(?:#+\s|\*\*[^*]+\*\*\s*:?\s*$)`)
-	affectedLine   = regexp.MustCompile(`^(?:[-*]\s*)?(?i:kubernetes\s+)?([a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*)*):?\s+(.+?)\s*(?:\([^)]*\))?$`)
-	fixedLine      = regexp.MustCompile(`^(?:[-*]\s*)?(?i:kubernetes\s+)?([a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*)*):?\s+(?:>=\s*)?v?(\d+\.\d+\.\d+)\+?(?:\s|$)`)
+	affectedLine   = regexp.MustCompile(`(?i)^(?:[-*]\s*)?(?:kubernetes\s+)?([a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*)*):?\s+(.+?)\s*(?:\([^)]*\))?$`)
+	fixedLine      = regexp.MustCompile(`(?i)^(?:[-*]\s*)?(?:kubernetes\s+)?([a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*)*):?\s+(?:>=\s*)?v?(\d+\.\d+\.\d+)\+?(?:\s|$)`)
 	boundRange     = regexp.MustCompile(`^(<=|>=|<|>|=)\s*(` + versionPattern + `)$`)
-	spanRange      = regexp.MustCompile(`^(` + versionPattern + `)\s*(?:\\?-|to)\s*(` + versionPattern + `)$`)
+	spanRange      = regexp.MustCompile(`(?i)^(` + versionPattern + `)\s*(?:\\?-|to)\s*(` + versionPattern + `)$`)
 	exactRange     = regexp.MustCompile(`^(` + versionPattern + `)$`)
 )
 
 // parseVersion parses a feed version. Minor-only versions such as "v1.30"
 // report full=false and mean the whole minor series.
 func parseVersion(s string) (v semver, full bool, err error) {
-	parts := strings.Split(strings.TrimPrefix(s, "v"), ".")
+	trimmed := strings.TrimPrefix(strings.TrimPrefix(s, "v"), "V")
+	parts := strings.Split(trimmed, ".")
 	if len(parts) < 2 || len(parts) > 3 {
 		return semver{}, false, fmt.Errorf("invalid version %q", s)
 	}
@@ -169,6 +170,7 @@ func parseAffected(lines []string) (map[string][]versionRange, error) {
 			return nil, err
 		}
 		for _, c := range strings.Split(m[1], "/") {
+			c = strings.ToLower(strings.TrimSpace(c))
 			if c == "kubernetes" {
 				return nil, fmt.Errorf("no component named in %q", line)
 			}
@@ -198,6 +200,7 @@ func parseFixed(lines []string) map[string][]semver {
 			continue
 		}
 		for _, c := range strings.Split(m[1], "/") {
+			c = strings.ToLower(strings.TrimSpace(c))
 			if c != "kubernetes" {
 				fixed[c] = append(fixed[c], v)
 			}

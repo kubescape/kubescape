@@ -124,7 +124,7 @@ func (h *harness) file(name string) string {
 	h.t.Helper()
 	p := filepath.Join(h.dir, name)
 	require.NoError(h.t, os.WriteFile(p, []byte("kind: Pod\n"), 0o600))
-	h.docs.open(uriFromPath(p), p, 1)
+	h.docs.open(uriFromPath(p), p, 1, false)
 	return p
 }
 
@@ -133,7 +133,7 @@ func (h *harness) save(path string) {
 	h.t.Helper()
 	d, ok := h.docs.saved(path)
 	require.True(h.t, ok)
-	h.c.saved(path, d.version)
+	h.c.saved(d)
 }
 
 func (h *harness) nextPublish() *protocol.PublishDiagnosticsParams {
@@ -315,6 +315,50 @@ func TestADocumentWithUnsavedChangesIsLeftAlone(t *testing.T) {
 	assert.Empty(t, h.barrier())
 }
 
+func TestPendingSaveDoesNotBelongToAReopenedDocument(t *testing.T) {
+	for _, dirty := range []bool{false, true} {
+		name := "clean"
+		if dirty {
+			name = "unsaved changes"
+		}
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "pod.yaml")
+			docs := newDocumentStore()
+			docs.open(uriFromPath(path), path, 1, false)
+			require.True(t, docs.change(path, 2))
+			saved, ok := docs.saved(path)
+			require.True(t, ok)
+			var published []*protocol.PublishDiagnosticsParams
+			c := newCoordinator(docs, []string{filepath.Dir(path)}, func(context.Context, []string) (scanFindings, error) {
+				return findingsFor(true, map[string][]protocol.Diagnostic{path: {diag("disk finding")}}), nil
+			}, func(_ context.Context, p *protocol.PublishDiagnosticsParams) error {
+				published = append(published, p)
+				return nil
+			})
+			c.saved(saved)
+			_, ok = docs.close(path)
+			require.True(t, ok)
+			docs.open(uriFromPath(path), path, 1, false)
+			if dirty {
+				require.True(t, docs.change(path, 2))
+			}
+
+			// Run the pending scan only after reopening, as if the close and
+			// reopen happened before the save's debounce expired.
+			c.scanOnce(context.Background())
+			if dirty {
+				assert.Empty(t, published, "a previous lifecycle's save cannot authorize disk findings for an unsaved buffer")
+				return
+			}
+			require.Len(t, published, 1, "a clean reopened document still receives disk findings")
+			assert.Equal(t, []string{"disk finding"}, messages(published[0]))
+			version, ok := published[0].Version.Get()
+			require.True(t, ok)
+			assert.Equal(t, int32(1), version)
+		})
+	}
+}
+
 func TestClosingADocumentClearsItsDiagnostics(t *testing.T) {
 	var path string
 	scan := newFakeScan(func(int, []string) (scanFindings, error) {
@@ -375,7 +419,7 @@ func TestNothingIsPublishedForADocumentClosedAndReopenedDuringAScan(t *testing.T
 	h.c.closed(d)
 	assert.Equal(t, uriFromPath(target), string(h.nextPublish().URI), "the close's own empty list")
 
-	h.docs.open(uriFromPath(target), target, 1)
+	h.docs.open(uriFromPath(target), target, 1, false)
 	close(proceed)
 
 	p := h.nextPublish()
@@ -395,8 +439,8 @@ func TestSymlinkAndRealFileOpenConcurrentlyTrackVersionsIndependently(t *testing
 	require.NoError(t, os.Symlink(realFile, symFile))
 
 	// Open both real and symlink documents with different versions.
-	h.docs.open(uriFromPath(realFile), realFile, 1)
-	h.docs.open(uriFromPath(symFile), symFile, 2)
+	h.docs.open(uriFromPath(realFile), realFile, 1, false)
+	h.docs.open(uriFromPath(symFile), symFile, 2, false)
 
 	h.save(realFile)
 
@@ -551,7 +595,7 @@ func TestADocumentOutsideTheWorkspaceIsNotTouched(t *testing.T) {
 	inside := h.file("pod.yaml")
 	outside := filepath.Join(t.TempDir(), "elsewhere.yaml")
 	require.NoError(t, os.WriteFile(outside, []byte("kind: Pod\n"), 0o600))
-	h.docs.open(uriFromPath(outside), outside, 1)
+	h.docs.open(uriFromPath(outside), outside, 1, false)
 	h.c.published[pathKey(outside)] = struct{}{} // it has diagnostics
 
 	h.save(inside)

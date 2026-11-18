@@ -55,7 +55,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		helmValueOpts := helmValueOptionsFromScanInfo(scanInfo)
 		if scanInfo.ChartPath != "" && scanInfo.FilePath != "" {
 			// A chart-and-file input names one workload, leaving nothing to narrow.
-			input.sources, input.workloads, err = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath, helmValueOpts, cloneDepth)
+			input.sources, input.workloads, err = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath, helmValueOpts, cloneDepth, scanInfo.WorkspaceDir)
 		} else {
 			pathFilter, filterErr := pathFilterFromScanInfo(ctx, scanInfo.InputPatterns[path], scanInfo)
 			if filterErr != nil {
@@ -401,8 +401,8 @@ func pathFilterFromScanInfo(ctx context.Context, input string, scanInfo *cautils
 	return filter, nil
 }
 
-func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath string, helmValueOpts cautils.HelmValueOptions, depthOpt ...int) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
-	clonedRepo := cautils.GetClonedPath(path, depthOpt...)
+func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath string, helmValueOpts cautils.HelmValueOptions, cloneDepth int, workspaceOpt ...string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
+	clonedRepo := cautils.GetClonedPath(path, cloneDepth)
 
 	if clonedRepo != "" {
 		// if the repo was cloned, add the workload path to the cloned repo
@@ -415,7 +415,7 @@ func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath 
 	// Get repo root
 	repoRoot, gitRepo := extractGitRepo(clonedRepo)
 
-	helmSourceToWorkloads, helmSourceToChart, _, err := cautils.LoadResourcesFromHelmCharts(ctx, helmPath, helmValueOpts)
+	helmSourceToWorkloads, helmSourceToChart, _, err := cautils.LoadResourcesFromHelmChartsFiltered(ctx, helmPath, helmValueOpts, nil, nil, workspaceOpt...)
 	if err != nil {
 		return nil, nil, err
 	}

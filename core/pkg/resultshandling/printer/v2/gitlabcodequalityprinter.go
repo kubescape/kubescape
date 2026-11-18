@@ -73,7 +73,7 @@ func (cp *GitLabCodeQualityPrinter) SetWriter(ctx context.Context, outputFile st
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.GitLabCodeQualityFormat, outputFile, gitLabCodeQualityOutputFile)
 	if explicitOutput {
 		var err error
-		cp.writer, err = printer.GetWriterNoFallback(outputFile)
+		cp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	cp.writer = printer.GetWriter(ctx, outputFile)
@@ -81,6 +81,9 @@ func (cp *GitLabCodeQualityPrinter) SetWriter(ctx context.Context, outputFile st
 }
 
 func (cp *GitLabCodeQualityPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if err := printer.PrepareOutput(cp.writer); err != nil {
+		return err
+	}
 	if opaSessionObj == nil || opaSessionObj.Report == nil {
 		return fmt.Errorf("gitlab-codequality output is only supported for configuration scanning: image findings have no repository file to anchor to")
 	}
@@ -264,7 +267,7 @@ func codeQualitySeverity(scoreFactor float32) string {
 
 func (cp *GitLabCodeQualityPrinter) CloseWriter() error {
 	if cp.writer != nil && cp.writer != os.Stdout {
-		return cp.writer.Close()
+		return printer.CloseOutput(cp.writer)
 	}
 	return nil
 }

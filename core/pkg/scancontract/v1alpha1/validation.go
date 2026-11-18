@@ -3,7 +3,6 @@ package v1alpha1
 import (
 	"fmt"
 	"math"
-	"slices"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -126,7 +125,8 @@ func validateContract(name string, contract Contract, options LoadOptions) error
 		}
 		if contract.Output.Formats != nil {
 			for _, format := range *contract.Output.Formats {
-				if !slices.Contains(options.SupportedFormats, format) {
+				trimmed := strings.TrimSpace(format)
+				if !containsFold(options.SupportedFormats, trimmed) {
 					return fmt.Errorf("%s.output.formats contains unsupported format %q; supported formats: %s", prefix, format, strings.Join(options.SupportedFormats, ", "))
 				}
 			}

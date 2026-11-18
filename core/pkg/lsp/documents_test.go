@@ -13,7 +13,7 @@ func TestDocumentStoreOpenLifecycleAndOpenID(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pod.yaml")
 	uri := uriFromPath(path)
 
-	store.open(uri, path, 1)
+	store.open(uri, path, 1, false)
 	doc1, ok := store.get(path)
 	require.True(t, ok)
 	assert.Equal(t, uri, doc1.uri)
@@ -47,9 +47,22 @@ func TestDocumentStoreOpenLifecycleAndOpenID(t *testing.T) {
 	assert.False(t, ok)
 
 	// Reopen the same path at version 1: must get a new distinct openID.
-	store.open(uri, path, 1)
+	store.open(uri, path, 1, false)
 	docReopened, ok := store.get(path)
 	require.True(t, ok)
 	assert.Equal(t, int32(1), docReopened.version)
+	assert.False(t, docReopened.dirty)
 	assert.Greater(t, docReopened.openID, doc1.openID)
+
+	// Open document with dirty flag: stored atomically with dirty state.
+	dirtyPath := filepath.Join(t.TempDir(), "dirty.yaml")
+	dirtyURI := uriFromPath(dirtyPath)
+	store.open(dirtyURI, dirtyPath, 3, true)
+	docDirty, ok := store.get(dirtyPath)
+	require.True(t, ok)
+	assert.Equal(t, dirtyURI, docDirty.uri)
+	assert.Equal(t, dirtyPath, docDirty.path)
+	assert.Equal(t, int32(3), docDirty.version)
+	assert.True(t, docDirty.dirty)
+	assert.Greater(t, docDirty.openID, docReopened.openID)
 }

@@ -137,12 +137,14 @@ func getPrometheusDefaultScanCommand(scanID, resultsFile, frameworksParam string
 	scanInfo.Submit.SetBool(false)                       // deliberate opt-out, not left at the default - never flipped into submit mode by backend auto-detection
 	scanInfo.Local = true                                // do not submit results every scan
 	scanInfo.FrameworkScan = true
-	scanInfo.HostSensorEnabled.SetBool(false)                // disable host scanner
-	scanInfo.ScanID = scanID                                 // scan ID
-	scanInfo.FailThreshold = 100                             // Do not fail scanning
-	scanInfo.ComplianceThreshold = 0                         // Do not fail scanning
-	scanInfo.Output = resultsFile                            // results output
-	scanInfo.Format = envToString("KS_FORMAT", "prometheus") // default output format is prometheus
+	scanInfo.HostSensorEnabled.SetBool(false) // disable host scanner
+	scanInfo.ScanID = scanID                  // scan ID
+	scanInfo.FailThreshold = 100              // Do not fail scanning
+	scanInfo.ComplianceThreshold = 0          // Do not fail scanning
+	scanInfo.Output = resultsFile             // results output
+	// Always Prometheus: Metrics reads the Prometheus results file, and KS_FORMAT
+	// is the default for the other REST endpoints, not for scrape output.
+	scanInfo.Format = printer.PrometheusFormat
 
 	var policyIdentifiers []cautils.PolicyIdentifier
 	// Check if specific frameworks are requested via query parameter

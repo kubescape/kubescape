@@ -321,7 +321,10 @@ func (d *reportDecryptor) decryptResource(resource rawObject, context string) (s
 	}
 
 	newID := workload.GetID()
-	if strings.HasPrefix(oldID, "path=") {
+	// An RBAC User or Group subject has no sourcePath of its own: its ID is made
+	// from its related objects', which can start it with "path=", and GetID has
+	// already made it again from their restored sourcePaths.
+	if strings.HasPrefix(oldID, "path=") && !isRBACSubject(workload) {
 		// File-scan IDs include the restored sourcePath, including its document index.
 		if path, ok := workload.GetObject()[localworkload.PathKey].(string); !ok || path == "" {
 			return "", "", fmt.Errorf("cannot restore %s.resourceID: local resource has no valid sourcePath", context)
@@ -985,6 +988,25 @@ func hasUsableWorkloadID(workload workloadinterface.IMetadata) bool {
 	return strings.TrimSpace(workload.GetApiVersion()) != "" &&
 		strings.TrimSpace(workload.GetKind()) != "" &&
 		strings.TrimSpace(workload.GetName()) != ""
+}
+
+// isRBACSubject reports whether workload represents an RBAC User or Group subject
+// with apiGroup "rbac.authorization.k8s.io".
+func isRBACSubject(workload workloadinterface.IMetadata) bool {
+	rego, ok := workload.(*objectsenvelopes.RegoResponseVectorObject)
+	if !ok {
+		return false
+	}
+	kind := rego.GetKind()
+	if kind != "User" && kind != "Group" {
+		return false
+	}
+	apiGroup, _ := rego.GetObject()["apiGroup"].(string)
+	if apiGroup == "" {
+		apiGroup = rego.GetApiVersion()
+	}
+	group, _, _ := strings.Cut(apiGroup, "/")
+	return group == "rbac.authorization.k8s.io"
 }
 
 // validateNoEncryptedValues fails closed if any ciphertext remains outside the

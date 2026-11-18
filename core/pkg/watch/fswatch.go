@@ -34,10 +34,13 @@ const vcsDir = ".git"
 
 // FileWatcherOptions configures a FileWatcher.
 type FileWatcherOptions struct {
-	// AcceptDependencies, when set, accepts dependency files regardless of
-	// extension (e.g. Kustomize patch files and generator inputs) for
-	// rendered-input directory watches, keeping editor-file and path exclusions.
-	AcceptDependencies bool
+	// AcceptDependencies, when set, reports whether dependency files are
+	// accepted regardless of extension (e.g. Kustomize patch files and
+	// generator inputs) for rendered-input directory watches, keeping
+	// editor-file and path exclusions. It is called as files change rather than
+	// once, so a directory that becomes, or stops being, a rendered-input
+	// directory is classified as it is when the change is seen.
+	AcceptDependencies func() bool
 
 	// Exclude, when set, reports whether a path is kept out of the watch. It is
 	// called with absolute paths. Excluded directories are not watched, and an
@@ -397,8 +400,10 @@ func (w *FileWatcher) handle(event fsnotify.Event) error {
 	}
 	if filepath.Base(name) == cautils.IgnoreFileName && filepath.Dir(name) == w.root {
 		// The scan reads its exclusions from this file, so what it excludes may have
-		// changed: a directory it no longer excludes is watched from now on, and the
-		// scan runs again. Exclude is expected to read the file as it is now.
+		// changed: a directory it now excludes is no longer watched, one it no
+		// longer excludes is watched from now on, and the scan runs again. Exclude
+		// is expected to read the file as it is now.
+		w.dropExcluded()
 		if _, err := w.registerTree(w.root, true); err != nil {
 			return err
 		}
@@ -657,6 +662,37 @@ func (w *FileWatcher) unregister(dir string) {
 	}
 }
 
+// dropExcluded forgets the directories that are now excluded, with what is
+// below them, including those still waiting to be registered.
+func (w *FileWatcher) dropExcluded() {
+	for dir := range w.dirs {
+		if dir != w.root && w.skipDir(dir) {
+			w.unregister(dir)
+		}
+	}
+	for dir := range w.pending {
+		if w.excludedBelowRoot(dir) {
+			delete(w.pending, dir)
+		}
+	}
+}
+
+// excludedBelowRoot reports whether path, or a directory between it and the
+// root, is skipped.
+func (w *FileWatcher) excludedBelowRoot(path string) bool {
+	for dir := path; dir != w.root; {
+		if w.skipDir(dir) {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
+	return false
+}
+
 func (w *FileWatcher) skipDir(path string) bool {
 	return filepath.Base(path) == vcsDir || (w.opts.Exclude != nil && w.opts.Exclude(path, true))
 }
@@ -675,8 +711,8 @@ func (w *FileWatcher) relevantFile(path string) bool {
 	if isEditorOrTempFile(path) {
 		return false
 	}
-	if !w.opts.AcceptDependencies {
-		if !cautils.IsYaml(path) && !cautils.IsJson(path) && !cautils.IsKustomizeFile(path) && !isTerraformOrHelmFile(path) && !isPatchFile(path) {
+	if !cautils.IsYaml(path) && !cautils.IsJson(path) && !cautils.IsKustomizeFile(path) && !isTerraformOrHelmFile(path) && !isPatchFile(path) {
+		if w.opts.AcceptDependencies == nil || !w.opts.AcceptDependencies() {
 			return false
 		}
 	}

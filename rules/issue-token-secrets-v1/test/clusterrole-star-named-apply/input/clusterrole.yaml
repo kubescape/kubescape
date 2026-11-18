@@ -1,0 +1,10 @@
+# resourceNames: ["*"] names a secret literally called "*", which cannot exist, so apply creates nothing.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: named-secret-applier
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["*"]
+  verbs: ["create", "patch"]

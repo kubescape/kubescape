@@ -150,7 +150,7 @@ func (gp *GitLabSASTPrinter) SetWriter(ctx context.Context, outputFile string) e
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.GitLabSASTFormat, outputFile, gitLabSASTOutputFile)
 	if explicitOutput {
 		var err error
-		gp.writer, err = printer.GetWriterNoFallback(outputFile)
+		gp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	gp.writer = printer.GetWriter(ctx, outputFile)
@@ -164,6 +164,9 @@ func (gp *GitLabSASTPrinter) PrintNextSteps() {
 // ActionPrint writes a GitLab SAST report for a configuration scan, or a GitLab Dependency Scanning
 // report for an image scan (#2782)
 func (gp *GitLabSASTPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if err := printer.PrepareOutput(gp.writer); err != nil {
+		return err
+	}
 	// GitLab expects SAST and dependency scanning in separate artifacts. A
 	// successful SAST report must not silently discard image vulnerabilities.
 	if opaSessionObj != nil && opaSessionObj.Report != nil && len(imageScanData) > 0 {
@@ -516,7 +519,7 @@ func kubescapeVersion() string {
 // CloseWriter closes the GitLab SAST output writer, returning any error from flushing or closing.
 func (gp *GitLabSASTPrinter) CloseWriter() error {
 	if gp.writer != nil && gp.writer != os.Stdout {
-		return gp.writer.Close()
+		return printer.CloseOutput(gp.writer)
 	}
 	return nil
 }

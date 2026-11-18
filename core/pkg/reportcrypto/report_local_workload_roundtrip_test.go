@@ -597,3 +597,82 @@ func TestEncryptedMixedEnvelopeReportRoundTrip(t *testing.T) {
 		assert.Equal(t, wantKinds, kinds, stage)
 	}
 }
+
+// A User or Group subject carries the apiGroup of RBAC, so the ID made from it
+// and its file-scanned bindings starts with their "path=" one. The subject has
+// no sourcePath of its own, and its ID is restored from its related objects.
+func TestEncryptedFileScanRBACSubjectWithAnAPIGroupRoundTrip(t *testing.T) {
+	for _, kind := range []string{"User", "Group"} {
+		t.Run(kind, func(t *testing.T) {
+			subject := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
+				"apiGroup": "rbac.authorization.k8s.io",
+				"kind":     kind,
+				"name":     "jane@acme.example",
+				"relatedObjects": []any{
+					map[string]any{
+						"apiVersion": "rbac.authorization.k8s.io/v1",
+						"kind":       "RoleBinding",
+						"sourcePath": "/home/alice/acme-repo/rbac.yaml:1",
+						"metadata":   map[string]any{"name": "read-pods", "namespace": "default"},
+						"subjects":   []any{map[string]any{"apiGroup": "rbac.authorization.k8s.io", "kind": kind, "name": "jane@acme.example"}},
+						"roleRef":    map[string]any{"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "pod-reader"},
+					},
+					map[string]any{
+						"apiVersion": "rbac.authorization.k8s.io/v1",
+						"kind":       "Role",
+						"sourcePath": "/home/alice/acme-repo/rbac.yaml:0",
+						"metadata":   map[string]any{"name": "pod-reader", "namespace": "default"},
+					},
+				},
+			})
+			originalID := subject.GetID()
+			require.True(t, strings.HasPrefix(originalID, "path="), originalID)
+
+			decryptedJSON, err := reportcrypto.DecryptReport(encryptedReport(t, subject), []byte(exceptionTestMasterKey))
+
+			require.NoError(t, err)
+			decryptedID, _, _ := soleResource(t, decryptedJSON)
+			assert.Equal(t, originalID, decryptedID)
+		})
+	}
+}
+
+// A non-RBAC-subject object matching IsTypeRegoResponseVector (kind, name, relatedObjects)
+// whose ID starts with "path=" must have a valid sourcePath, and is rejected
+// when sourcePath is missing.
+func TestDecryptReportRejectsNonRBACSubjectWithoutSourcePath(t *testing.T) {
+	tests := []struct {
+		name     string
+		kind     string
+		apiGroup string
+	}{
+		{name: "Widget", kind: "Widget"},
+		{name: "CustomResource", kind: "CustomResource"},
+		{name: "User with non-RBAC apiGroup", kind: "User", apiGroup: "acme.example.com"},
+		{name: "Group with non-RBAC apiGroup", kind: "Group", apiGroup: "acme.example.com"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var report map[string]any
+			require.NoError(t, json.Unmarshal(encryptedFileScanReport(t), &report))
+			res := report["resources"].([]any)[0].(map[string]any)
+			object := map[string]any{
+				"kind":           tt.kind,
+				"name":           "example",
+				"relatedObjects": []any{},
+			}
+			if tt.apiGroup != "" {
+				object["apiGroup"] = tt.apiGroup
+			}
+			res["object"] = object
+
+			encrypted, err := json.Marshal(report)
+			require.NoError(t, err)
+
+			decrypted, err := reportcrypto.DecryptReport(encrypted, []byte(exceptionTestMasterKey))
+			require.ErrorContains(t, err, "cannot restore resources[0].resourceID: local resource has no valid sourcePath")
+			assert.Nil(t, decrypted)
+		})
+	}
+}

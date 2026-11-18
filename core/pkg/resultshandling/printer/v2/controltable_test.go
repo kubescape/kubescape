@@ -79,6 +79,54 @@ func TestGetComplianceScoreColumnDoesNotRoundFractionalScoreToPerfect(t *testing
 	assert.Equal(t, "99%", getComplianceScoreColumn(controlSummary, nil))
 }
 
+func TestGetComplianceScoreColumn_UncalculatedSentinelScores(t *testing.T) {
+	tests := []struct {
+		name     string
+		score    float32
+		expected string
+	}{
+		{
+			name:     "sentinel -1.0 renders N/A",
+			score:    -1.0,
+			expected: "N/A",
+		},
+		{
+			name:     "fractional negative -0.5 renders N/A",
+			score:    -0.5,
+			expected: "N/A",
+		},
+		{
+			name:     "near-zero negative -0.25 renders N/A",
+			score:    -0.25,
+			expected: "N/A",
+		},
+		{
+			name:     "near-zero negative -0.1 renders N/A",
+			score:    -0.1,
+			expected: "N/A",
+		},
+		{
+			name:     "genuine zero renders 0%",
+			score:    0.0,
+			expected: "0%",
+		},
+		{
+			name:     "valid positive score renders percentage",
+			score:    85.0,
+			expected: "85%",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := &reportsummary.ControlSummary{
+				ComplianceScore: &tt.score,
+			}
+			assert.Equal(t, tt.expected, getComplianceScoreColumn(ctrl, nil))
+		})
+	}
+}
+
 func Test_generateTableRow_UTF8(t *testing.T) {
 	name := strings.Repeat("a", 69) + "é" + strings.Repeat("b", 20)
 	ctrl := &reportsummary.ControlSummary{

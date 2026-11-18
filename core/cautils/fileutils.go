@@ -1470,6 +1470,46 @@ func hasGlobMeta(path string) bool {
 	return strings.ContainsAny(path, magicChars)
 }
 
+// WorkloadDocuments maps the workloads read from a YAML file, by the index the
+// loader gives them ("<path>:<n>"), to the documents they come from, numbered
+// as gopkg.in/yaml.v3 decodes the file. The two differ once a document yields
+// no workload, such as an empty or comment-only one or one that isn't a
+// Kubernetes object, or yields several, as a List does. A workload that came
+// out of a List maps to -1: it has no document of its own.
+func WorkloadDocuments(data []byte) ([]int, error) {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	var documents []int
+	for i := 0; ; i++ {
+		var node yaml.Node
+		if err := decoder.Decode(&node); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			return nil, fmt.Errorf("document %d: %w", i, err)
+		}
+		doc, err := yaml.Marshal(&node)
+		if err != nil {
+			return nil, fmt.Errorf("document %d: %w", i, err)
+		}
+		// The loader keeps the workloads of a document that also reports an
+		// error, so they are counted here too.
+		workloads, _ := readYamlFile(doc)
+		document := i
+		if len(workloads) > 0 && isListEnvelope(doc) {
+			document = -1
+		}
+		for range workloads {
+			documents = append(documents, document)
+		}
+	}
+	// The loader splits the file into documents on its own, by lines. Where it
+	// doesn't split as the decoder does, as with lone CR line breaks, it reads
+	// other workloads than the documents hold, and they can't be matched up.
+	if loaded, _ := readYamlFile(data); len(loaded) != len(documents) {
+		return nil, fmt.Errorf("the loader reads %d workloads from the file and its documents hold %d", len(loaded), len(documents))
+	}
+	return documents, nil
+}
+
 func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err error) {
 	yamlObjs = []workloadinterface.IMetadata{}
 	defer func() {
@@ -1494,7 +1534,11 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err 
 			parseErrs = append(parseErrs, fmt.Errorf("document %d: %w", i+1, unmarshalErr))
 			continue
 		}
-		j := convertYamlToJson(t)
+		j, conversionErr := convertYamlToJson(t)
+		if conversionErr != nil {
+			parseErrs = append(parseErrs, fmt.Errorf("document %d: %w", i+1, conversionErr))
+			continue
+		}
 		if j == nil {
 			continue
 		}
@@ -1878,7 +1922,7 @@ func restoreTypedListItemTypeMeta(list *unstructured.UnstructuredList, listKind 
 	}
 }
 
-func convertYamlToJson(i any) any {
+func convertYamlToJson(i any) (any, error) {
 	switch x := i.(type) {
 	case map[any]any:
 		m2 := make(map[string]any, len(x))
@@ -1892,9 +1936,16 @@ func convertYamlToJson(i any) any {
 			default:
 				keyStr = fmt.Sprintf("%v", k)
 			}
-			m2[keyStr] = convertYamlToJson(v)
+			if _, exists := m2[keyStr]; exists {
+				return nil, fmt.Errorf("YAML keys collide after conversion to JSON key %q", keyStr)
+			}
+			converted, err := convertYamlToJson(v)
+			if err != nil {
+				return nil, fmt.Errorf("key %q: %w", keyStr, err)
+			}
+			m2[keyStr] = converted
 		}
-		return m2
+		return m2, nil
 	case map[string]any:
 		// Recurse into values: yaml.v3 decodes a nested mapping with a
 		// non-string key (e.g. `1:` or an unquoted YAML 1.1 `on:`) as
@@ -1902,16 +1953,24 @@ func convertYamlToJson(i any) any {
 		// would otherwise survive and break json.Marshal when OPA builds its
 		// input (issue #2833).
 		for k, v := range x {
-			x[k] = convertYamlToJson(v)
+			converted, err := convertYamlToJson(v)
+			if err != nil {
+				return nil, fmt.Errorf("key %q: %w", k, err)
+			}
+			x[k] = converted
 		}
-		return x
+		return x, nil
 	case []any:
 		for i, v := range x {
-			x[i] = convertYamlToJson(v)
+			converted, err := convertYamlToJson(v)
+			if err != nil {
+				return nil, fmt.Errorf("index %d: %w", i, err)
+			}
+			x[i] = converted
 		}
-		return x
+		return x, nil
 	}
-	return i
+	return i, nil
 }
 
 // removedButRealKinds are built-in Kubernetes kinds the bundled client-go scheme

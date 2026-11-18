@@ -486,3 +486,17 @@ func TestManifestCache_HoldsOneManifestAtATime(t *testing.T) {
 
 	assert.NotSame(t, second, caches.get("/repo/a.yaml"), "returning to a manifest does not resurrect its cache")
 }
+
+// The printers read a resource's line with the index the scanner gives it, which
+// counts workloads, so the resolver they share maps that index to the
+// workload's document even after an empty one.
+func TestFixCacheLocationResolverIsIndexedByWorkload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pods.yaml")
+	content := "apiVersion: v1\nkind: Pod\nmetadata:\n  name: a\n---\n---\napiVersion: v1\nkind: Pod\nmetadata:\n  name: b\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+	location, err := newFixReportCache().locationResolver(path, "test").ResolveLocation("metadata.name", 1)
+
+	require.NoError(t, err)
+	assert.Equal(t, 10, location.Line, "Pod/b's name")
+}

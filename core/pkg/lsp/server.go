@@ -9,6 +9,7 @@ package lsp
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -146,6 +147,9 @@ func (s *server) Initialize(_ context.Context, params *protocol.InitializeParams
 // workspaceRoots are the folders the client opened, from workspaceFolders or,
 // failing that, rootUri. Only local folders can be scanned.
 func workspaceRoots(params *protocol.InitializeParams) []string {
+	if params == nil {
+		return nil
+	}
 	var roots []string
 	if folders, ok := params.WorkspaceFolders.Get(); ok {
 		for _, f := range folders {
@@ -179,6 +183,7 @@ func (s *server) Initialized(context.Context, *protocol.InitializedParams) error
 		return errors.New("no client to publish diagnostics to")
 	}
 	s.coord = newCoordinator(s.docs, s.roots, s.scan, client.PublishDiagnostics)
+	s.coord.notify = client.ShowMessage
 	if s.debounce > 0 {
 		s.coord.debounce = s.debounce
 	}
@@ -233,6 +238,8 @@ func (s *server) Exit(context.Context) error {
 	return nil
 }
 
+var didOpenBeforeReverifyHook func(path string)
+
 func (s *server) DidOpen(_ context.Context, params *protocol.DidOpenTextDocumentParams) error {
 	if s.ready() == nil {
 		return nil
@@ -243,8 +250,35 @@ func (s *server) DidOpen(_ context.Context, params *protocol.DidOpenTextDocument
 		logger.L().Debug("ignoring a document that is not a local file", helpers.String("uri", string(item.URI)), helpers.Error(err))
 		return nil
 	}
-	s.docs.open(string(item.URI), path, item.Version)
+	// A document can open with changes that aren't saved yet, as when an editor
+	// restores one after a restart. Its lines aren't the file's, so it is left
+	// as it is until it is saved, like a document changed since its last save.
+	dirty := !matchesDisk(path, item.Text)
+	s.docs.open(string(item.URI), path, item.Version, dirty)
+	if didOpenBeforeReverifyHook != nil {
+		didOpenBeforeReverifyHook(path)
+	}
+	// If an external process wrote to the file on disk between the initial disk
+	// comparison and registration, re-verify and mark the document dirty so it
+	// is not left observed as clean while differing from disk.
+	if !dirty && !matchesDisk(path, item.Text) {
+		s.docs.change(path, item.Version)
+	}
 	return nil
+}
+
+// matchesDisk reports whether text is what the file at path holds. A byte order
+// mark, which editors leave out of the text they send, and Windows line endings
+// don't count as differences.
+func matchesDisk(path, text string) bool {
+	data, err := readBounded(path)
+	if err != nil {
+		return false
+	}
+	normalize := func(s string) string {
+		return strings.ReplaceAll(strings.TrimPrefix(s, "\ufeff"), "\r\n", "\n")
+	}
+	return normalize(string(data)) == normalize(text)
 }
 
 func (s *server) DidChange(_ context.Context, params *protocol.DidChangeTextDocumentParams) error {
@@ -270,7 +304,7 @@ func (s *server) DidSave(_ context.Context, params *protocol.DidSaveTextDocument
 		return nil
 	}
 	if d, open := s.docs.saved(path); open {
-		coord.saved(path, d.version)
+		coord.saved(d)
 	}
 	return nil
 }
