@@ -190,13 +190,19 @@ func prepareFleetE2E(t testing.TB, servers map[string]string) string {
 // scanFleetE2E runs the real fleet scan, with local policies and no backend, writing its reports next to fleetReport.
 func scanFleetE2E(t testing.TB, fleetReport string, args ...string) fleetRun {
 	t.Helper()
+	return scanFleetE2EWith(t, fleetReport, []string{"framework", "nsa"}, args...)
+}
+
+// scanFleetE2EWith is scanFleetE2E for the given subcommand and its arguments; an empty command runs the bare scan command.
+func scanFleetE2EWith(t testing.TB, fleetReport string, command []string, args ...string) fleetRun {
+	t.Helper()
 	dir := filepath.Dir(fleetReport)
 	policies := filepath.Join("..", "..", "core", "cautils", "getter", "testdata")
-	args = append([]string{"framework", "nsa",
-		"--output=" + filepath.Join(dir, "report.json"), "--format=json", "--fleet-report=" + fleetReport,
-		"--keep-local", "--use-from=" + filepath.Join(policies, "NSA.json"),
-		"--controls-config=" + filepath.Join(policies, "controls-inputs.json"), "--exceptions=" + filepath.Join(policies, "exceptions.json"),
-	}, args...)
+	args = append(append(slices.Clone(command),
+		"--output="+filepath.Join(dir, "report.json"), "--format=json", "--fleet-report="+fleetReport,
+		"--keep-local", "--use-from="+filepath.Join(policies, "NSA.json"),
+		"--controls-config="+filepath.Join(policies, "controls-inputs.json"), "--exceptions="+filepath.Join(policies, "exceptions.json"),
+	), args...)
 
 	var run fleetRun
 	run.summary = captureStdout(t, func() {
