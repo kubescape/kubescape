@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -516,6 +517,54 @@ func TestADocumentOpenedWithUnsavedChangesIsDirty(t *testing.T) {
 
 	assert.False(t, open("apiVersion: v1\nkind: Pod\n").dirty, "the text on disk, but for its byte order mark and line endings")
 	assert.True(t, open("# restored, not saved\napiVersion: v1\nkind: Pod\n").dirty)
+}
+
+func TestDidOpenWithUnsavedChangesIsNeverObservedClean(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pod.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("apiVersion: v1\nkind: Pod\n"), 0o600))
+	srv := newServer(nil, 0)
+	srv.state = stateReady
+	srv.coord = newCoordinator(srv.docs, nil, nil, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var observedClean atomic.Bool
+	var wg sync.WaitGroup
+
+	// Reader goroutines continuously inspect the document store.
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for ctx.Err() == nil {
+				if d, ok := srv.docs.get(path); ok && !d.dirty {
+					observedClean.Store(true)
+				}
+				for _, d := range srv.docs.snapshot() {
+					if d.path == path && !d.dirty {
+						observedClean.Store(true)
+					}
+				}
+			}
+		}()
+	}
+
+	// Writer opens with unsaved text and closes repeatedly.
+	for i := 0; i < 50 && ctx.Err() == nil; i++ {
+		item := protocol.TextDocumentItem{
+			URI:        uri.URI(uriFromPath(path)),
+			LanguageID: "yaml",
+			Version:    int32(i + 1),
+			Text:       "# unsaved edit\napiVersion: v1\nkind: Pod\n",
+		}
+		require.NoError(t, srv.DidOpen(ctx, &protocol.DidOpenTextDocumentParams{TextDocument: item}))
+		srv.docs.close(path)
+	}
+	cancel()
+	wg.Wait()
+
+	assert.False(t, observedClean.Load(), "document with unsaved text should never be visible as clean")
 }
 
 // A manifest elsewhere in the workspace that doesn't parse is left as it is; it
