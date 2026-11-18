@@ -44,7 +44,7 @@ func (mp *MarkdownPrinter) SetWriter(ctx context.Context, outputFile string) err
 	}
 	if explicitOutput {
 		var err error
-		mp.writer, err = printer.GetWriterNoFallback(outputFile)
+		mp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	mp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, markdownTempPattern)
@@ -55,6 +55,9 @@ func (mp *MarkdownPrinter) Score(score float32) {
 }
 
 func (mp *MarkdownPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if err := printer.PrepareOutput(mp.writer); err != nil {
+		return err
+	}
 	hasReport := opaSessionObj != nil && opaSessionObj.Report != nil
 	if !hasReport && len(imageScanData) > 0 {
 		if err := mdWriteImageScanReport(mp.writer, imageScanData); err != nil {
@@ -109,7 +112,7 @@ func (mp *MarkdownPrinter) PrintNextSteps() {}
 // CloseWriter closes the Markdown output writer, returning any error from flushing or closing.
 func (mp *MarkdownPrinter) CloseWriter() error {
 	if mp.writer != nil && mp.writer != os.Stdout {
-		return mp.writer.Close()
+		return printer.CloseOutput(mp.writer)
 	}
 	return nil
 }

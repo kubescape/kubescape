@@ -40,7 +40,7 @@ func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) e
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.PrometheusFormat, outputFile, prometheusOutputFile)
 	if explicitOutput {
 		var err error
-		pp.writer, err = printer.GetWriterNoFallback(outputFile)
+		pp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	pp.writer = printer.GetWriter(ctx, outputFile)
@@ -92,6 +92,9 @@ func (pp *PrometheusPrinter) generateImagePrometheusFormat(imageScanData []cauti
 
 // ActionPrint writes posture scan results and container image vulnerability metrics in Prometheus format.
 func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if err := printer.PrepareOutput(pp.writer); err != nil {
+		return err
+	}
 	var metrics *Metrics
 
 	hasPosture := opaSessionObj != nil && (opaSessionObj.Report != nil || len(opaSessionObj.ResourcesResult) > 0)
@@ -122,7 +125,7 @@ func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 // CloseWriter closes the Prometheus output writer, returning any error from flushing or closing.
 func (p *PrometheusPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		return p.writer.Close()
+		return printer.CloseOutput(p.writer)
 	}
 	return nil
 }

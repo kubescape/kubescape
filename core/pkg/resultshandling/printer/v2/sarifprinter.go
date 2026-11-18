@@ -96,7 +96,7 @@ func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) error 
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.SARIFFormat, outputFile, sarifOutputFile)
 	if explicitOutput {
 		var err error
-		sp.writer, err = printer.GetWriterNoFallback(outputFile)
+		sp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	sp.writer = printer.GetWriter(ctx, outputFile)
@@ -687,6 +687,9 @@ func (sp *SARIFPrinter) PrintNextSteps() {
 // it streams the configuration run and appends any container image vulnerability runs.
 // For standalone image scans, it generates a multi-run vulnerability report.
 func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if err := printer.PrepareOutput(sp.writer); err != nil {
+		return err
+	}
 	if opaSessionObj == nil || opaSessionObj.Report == nil {
 		if len(imageScanData) == 0 {
 			return fmt.Errorf("failed to write results in sarif format: no data provided")
@@ -1254,7 +1257,7 @@ func hashArtifactChange(artifactChange *sarif.ArtifactChange) [32]byte {
 // CloseWriter closes the SARIF output writer, returning any error from flushing or closing.
 func (p *SARIFPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		return p.writer.Close()
+		return printer.CloseOutput(p.writer)
 	}
 	return nil
 }

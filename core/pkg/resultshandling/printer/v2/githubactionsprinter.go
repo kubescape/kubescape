@@ -73,7 +73,7 @@ func (gp *GitHubActionsPrinter) SetWriter(ctx context.Context, outputFile string
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.GitHubActionsFormat, outputFile, githubActionsOutputFile)
 	if explicitOutput {
 		var err error
-		gp.writer, err = printer.GetWriterNoFallback(outputFile)
+		gp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	gp.writer = printer.GetWriter(ctx, outputFile)
@@ -84,6 +84,9 @@ func (gp *GitHubActionsPrinter) SetWriter(ctx context.Context, outputFile string
 // configuration scans are supported: image findings have no manifest location
 // to anchor an annotation to.
 func (gp *GitHubActionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if err := printer.PrepareOutput(gp.writer); err != nil {
+		return err
+	}
 	if opaSessionObj == nil || opaSessionObj.Report == nil {
 		return fmt.Errorf("github-actions output is only supported for configuration scanning: image findings have no manifest location to annotate")
 	}
@@ -549,7 +552,7 @@ func escapeAnnotationProperty(s string) string {
 // flushing or closing.
 func (gp *GitHubActionsPrinter) CloseWriter() error {
 	if gp.writer != nil && gp.writer != os.Stdout {
-		return gp.writer.Close()
+		return printer.CloseOutput(gp.writer)
 	}
 	return nil
 }

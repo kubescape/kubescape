@@ -46,7 +46,7 @@ func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) error {
 	}
 	if explicitOutput {
 		var err error
-		pp.writer, err = printer.GetWriterNoFallback(outputFile)
+		pp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	// The implicit PDF destination must never fall back to stdout. Preserve
@@ -74,6 +74,9 @@ func (pp *PdfPrinter) PrintNextSteps() {
 // A combined scan has both posture results and image CVEs. Both sections go
 // into one PDF. Image-only scans keep the image-scan header.
 func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if err := printer.PrepareOutput(pp.writer); err != nil {
+		return err
+	}
 	var outBuff []byte
 	var err error
 
@@ -280,7 +283,7 @@ func getSeverityColor(severity string) *props.Color {
 // CloseWriter closes the PDF output writer, returning any error from flushing or closing.
 func (p *PdfPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		return p.writer.Close()
+		return printer.CloseOutput(p.writer)
 	}
 	return nil
 }

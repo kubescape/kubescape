@@ -75,7 +75,7 @@ func (cp *GitLabContainerScanningPrinter) SetWriter(ctx context.Context, outputF
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.GitLabContainerScanningFormat, outputFile, gitLabContainerScanningOutputFile)
 	if explicitOutput {
 		var err error
-		cp.writer, err = printer.GetWriterNoFallback(outputFile)
+		cp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	cp.writer = printer.GetWriter(ctx, outputFile)
@@ -85,6 +85,9 @@ func (cp *GitLabContainerScanningPrinter) SetWriter(ctx context.Context, outputF
 func (cp *GitLabContainerScanningPrinter) ActionPrint(ctx context.Context, _ *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if len(imageScanData) == 0 {
 		return fmt.Errorf("gitlab-container-scanning output requires scanned images: run %q or add --scan-images", cautils.ExecName()+" scan image")
+	}
+	if err := printer.PrepareOutput(cp.writer); err != nil {
+		return err
 	}
 
 	startedAt := time.Now().UTC()
@@ -272,7 +275,7 @@ func truncateRunes(value string, limit int) string {
 
 func (cp *GitLabContainerScanningPrinter) CloseWriter() error {
 	if cp.writer != nil && cp.writer != os.Stdout {
-		return cp.writer.Close()
+		return printer.CloseOutput(cp.writer)
 	}
 	return nil
 }
