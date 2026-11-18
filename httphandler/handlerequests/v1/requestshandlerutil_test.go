@@ -1,8 +1,10 @@
 package v1
 
 import (
+	"bytes"
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -251,4 +253,52 @@ func TestWatchForScan_GracefulShutdown(t *testing.T) {
 	default:
 		t.Fatal("Shutdown returned without joining the worker")
 	}
+}
+
+func TestOpenBoundedResultFile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Empty path
+	_, err := openBoundedResultFile("", 1024)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+
+	// Directory path
+	_, err = openBoundedResultFile(dir, 1024)
+	assert.ErrorContains(t, err, "is not a regular file")
+
+	// Non-existent path
+	_, err = openBoundedResultFile(filepath.Join(dir, "missing.json"), 1024)
+	assert.Error(t, err)
+
+	// Valid small file
+	filePath := filepath.Join(dir, "valid.json")
+	require.NoError(t, os.WriteFile(filePath, []byte(`{"status":"ok"}`), 0600))
+	data, err := openBoundedResultFile(filePath, 1024)
+	require.NoError(t, err)
+	assert.Equal(t, `{"status":"ok"}`, string(data))
+
+	// Oversized file
+	oversizedPath := filepath.Join(dir, "oversized.json")
+	require.NoError(t, os.WriteFile(oversizedPath, bytes.Repeat([]byte("a"), 2048), 0600))
+	_, err = openBoundedResultFile(oversizedPath, 1024)
+	assert.ErrorContains(t, err, "exceeds maximum allowed size")
+}
+
+func TestReadResultsFile_OversizedRejected(t *testing.T) {
+	dir := t.TempDir()
+
+	oldOutputDir := OutputDir
+	OutputDir = dir
+	defer func() { OutputDir = oldOutputDir }()
+
+	validUUID := "123e4567-e89b-12d3-a456-426614174000"
+	targetFile := filepath.Join(dir, validUUID+".json")
+
+	// Write oversized content (> 32 MiB by temporarily testing via small limit or writing past limit)
+	// Using openBoundedResultFile with custom limit is tested above; here test that readResultsFile fails if file exceeds limit
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "1024")
+	require.NoError(t, os.WriteFile(targetFile, bytes.Repeat([]byte("x"), 2048), 0600))
+
+	_, err := readResultsFile(validUUID)
+	assert.ErrorContains(t, err, "file 123e4567-e89b-12d3-a456-426614174000 not found")
 }

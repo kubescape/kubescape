@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -388,6 +389,50 @@ func (e *ScanFailedError) Error() string {
 	return e.Message
 }
 
+// openBoundedResultFile opens path for reading, verifies it is a regular file, and
+// reads up to limit bytes. O_NONBLOCK prevents opening a FIFO from waiting for a
+// writer, and descriptor-based validation ensures a path swapped after stat cannot slip past (CWE-400).
+func openBoundedResultFile(path string, limit int64) ([]byte, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	cleaned := filepath.Clean(path)
+	statInfo, err := os.Stat(cleaned)
+	if err != nil {
+		return nil, err
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%q is not a regular file", path)
+	}
+
+	file, err := os.OpenFile(cleaned, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%q is not a regular file", path)
+	}
+
+	if limit <= 0 {
+		limit = cautils.GetMaxFileSize()
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("file %q exceeds maximum allowed size (%d bytes)", path, limit)
+	}
+	return data, nil
+}
+
 func readResultsFile(fileID string) (json.RawMessage, error) {
 	parsedUUID, err := uuid.Parse(fileID)
 	if err != nil {
@@ -396,6 +441,7 @@ func readResultsFile(fileID string) (json.RawMessage, error) {
 	}
 	cleanID := parsedUUID.String()
 
+	limit := cautils.GetMaxFileSize()
 	extensions := []string{"", ".json"}
 
 	// Failed artifacts win over success artifacts. HandleResults writes the
@@ -404,7 +450,7 @@ func readResultsFile(fileID string) (json.RawMessage, error) {
 	// success file is stale data that must not mask the failure.
 	for _, ext := range extensions {
 		path := filepath.Join(FailedOutputDir, cleanID+ext)
-		f, err := os.ReadFile(path)
+		f, err := openBoundedResultFile(path, limit)
 		if err == nil {
 			return nil, &ScanFailedError{Message: string(f)}
 		}
@@ -412,7 +458,7 @@ func readResultsFile(fileID string) (json.RawMessage, error) {
 
 	for _, ext := range extensions {
 		path := filepath.Join(OutputDir, cleanID+ext)
-		f, err := os.ReadFile(path)
+		f, err := openBoundedResultFile(path, limit)
 		if err == nil {
 			// Retain the existing structural validation against PostureReport,
 			// then return the original JSON so additive output fields survive.
