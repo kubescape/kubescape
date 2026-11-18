@@ -502,9 +502,16 @@ The policy is evaluated only against the resources its `matchConstraints`
 target. A file may hold more than one policy separated by `---`, as in a
 manifest passed to `kubectl apply`; each document becomes its own
 `custom-<metadata.name>` control. Policies that narrow with
-`namespaceSelector`, or that take params other than the bundled
-`ControlConfiguration`, are refused because the offline scan cannot guarantee
-the inputs admission uses.
+`namespaceSelector` are refused because the offline scan cannot guarantee the
+namespace labels admission uses.
+
+A policy that declares a `paramKind` is not always refused. When the scan has a
+single matching `ValidatingAdmissionPolicyBinding` whose `paramRef` names a
+parameter object it can resolve, that object supplies `params` even when its
+kind is not the bundled `ControlConfiguration`. The non-bundled kind is refused
+only when parameter resolution falls back to the bundled
+`ControlConfiguration` — with no binding, or a binding that names no object —
+because the scan cannot supply the inputs admission uses.
 
 Every custom rule becomes a control named `custom-<rule>` in the report.
 
