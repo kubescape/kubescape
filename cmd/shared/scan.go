@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -251,6 +252,28 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := validateImageRiskGateScope(scanInfo); err != nil {
 		return err
 	}
+	for _, flag := range []struct {
+		name string
+		val  *string
+		err  string
+	}{
+		{"output", &scanInfo.Output, "output file path cannot be empty"},
+		{"controls-config", &scanInfo.ControlsInputs, "--controls-config needs a file path"},
+		{"exceptions", &scanInfo.UseExceptions, "--exceptions needs a file path"},
+		{"use-artifacts-from", &scanInfo.UseArtifactsFrom, "--use-artifacts-from needs a directory path"},
+		{"custom-rules", &scanInfo.CustomRules, "--custom-rules needs a path"},
+	} {
+		if commandFlagChanged(cmd, flag.name) {
+			trimmed := strings.TrimSpace(*flag.val)
+			if trimmed == "" {
+				return errors.New(flag.err)
+			}
+			*flag.val = trimmed
+		} else if *flag.val != "" {
+			*flag.val = strings.TrimSpace(*flag.val)
+		}
+	}
+
 	ApplyDBAgeGatePresence(cmd, scanInfo)
 	return nil
 }
@@ -305,6 +328,19 @@ func ApplyDBAgeGatePresence(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
 	} else if flag := cmd.InheritedFlags().Lookup("max-db-age"); flag != nil {
 		scanInfo.MaxDBAgeSet = flag.Changed
 	}
+}
+
+func commandFlagChanged(cmd *cobra.Command, name string) bool {
+	if cmd == nil {
+		return false
+	}
+	if f := cmd.Flags().Lookup(name); f != nil {
+		return f.Changed
+	}
+	if f := cmd.InheritedFlags().Lookup(name); f != nil {
+		return f.Changed
+	}
+	return false
 }
 
 func ValidateExcludeControls(scanInfo *cautils.ScanInfo) error {
