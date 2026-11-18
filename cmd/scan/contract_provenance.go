@@ -210,6 +210,27 @@ func effectiveFailure(cmd *cobra.Command, scanInfo *cautils.ScanInfo, contract *
 	return failure
 }
 
+// dropUnenforcedComplianceGate removes the compliance gate from the effective
+// settings and the gate resolution when the scan won't enforce it, so the
+// report doesn't describe a floor the exit code ignores. The contract and
+// runner values stay so the report still shows what was asked for.
+func dropUnenforcedComplianceGate(metadata *reporthandlingv2.ScanContractMetadata) {
+	if metadata == nil {
+		return
+	}
+	if metadata.GateResolution != nil {
+		metadata.GateResolution.ComplianceBelow.Effective = nil
+	}
+	if metadata.Effective == nil || metadata.Effective.Failure == nil {
+		return
+	}
+	failure := metadata.Effective.Failure
+	failure.ComplianceBelow = nil
+	if failure.SeverityAtLeast == nil && failure.CoverageBelow == nil && failure.DegradedPolicyInput == nil {
+		metadata.Effective.Failure = nil
+	}
+}
+
 func ordinaryCLIOverrides(cmd *cobra.Command, contract contractv1alpha1.Contract, scanInfo *cautils.ScanInfo) *reporthandlingv2.ScanContractCLIOverrides {
 	overrides := &reporthandlingv2.ScanContractCLIOverrides{}
 

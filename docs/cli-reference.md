@@ -39,7 +39,7 @@ kubescape scan [target] [flags]
 | `--account <id>` | Kubescape SaaS account ID | from cache |
 | `--access-key <key>` | Kubescape SaaS access key | from cache |
 | `--cluster-name <name>` | Custom name for the cluster in reports. Not the same as `--kube-context` | - |
-| `--compliance-threshold <float>` | Fail if compliance score is below threshold. Applies to `scan framework`, `scan control`, and `--view resource\|control` — see [score thresholds](#score-thresholds). | `0` |
+| `--compliance-threshold <float>` | Fail if compliance score is below threshold. Applies to `scan framework`, `scan control`, `--view resource\|control`, and scans driven by a scan contract's `policy` — see [score thresholds](#score-thresholds). | `0` |
 | `--controls-config <path>` | Path to controls configuration file | - |
 | `--controls-version <tag>` | Pin the [regolibrary](https://github.com/kubescape/regolibrary/releases) release tag used to download controls. Has no effect when `--account` is set, because the cloud backend is used instead | latest release |
 | `--custom-rules <path>` | Path to user-authored custom rules — see [custom rules](#custom-rules) | - |
@@ -604,10 +604,17 @@ invocations:
 - `kubescape scan framework <name> ...`
 - `kubescape scan control <id> ...`
 - `kubescape scan --view resource ...` or `--view control ...`
+- `kubescape scan --scan-contract <file> ...` when the contract sets `policy`
 
 The default `kubescape scan [path]` uses `--view security`, which does
 not evaluate against a score threshold. To gate a pipeline on the
 compliance score, use one of the forms above.
+
+A contract with `policy` enforces its `failure.complianceBelow` floor, and an
+explicit `--compliance-threshold`, even in the default view. Passing
+`--view security` explicitly keeps the security view's exemption. The report
+then leaves `complianceBelow` out of the effective settings and the gate
+resolution, so provenance doesn't claim a floor the exit code ignores.
 `--severity-threshold` and `--fail-coverage-below` apply in every view.
 
 `--fail-coverage-below` gates on the **scan coverage score**, not the raw
