@@ -715,8 +715,24 @@ func (w *FileWatcher) relevantFile(path string) bool {
 		if w.opts.AcceptDependencies == nil || !w.opts.AcceptDependencies() {
 			return false
 		}
+		if !w.mayBeDependency(path) {
+			return false
+		}
 	}
 	return w.opts.Exclude == nil || !w.opts.Exclude(path, false)
+}
+
+// mayBeDependency reports whether a path without a manifest's extension can be
+// a file a render reads. A dependency is a file: a directory that is watched
+// reports what changes in it through its own watch, and one that isn't, .git
+// or one the scan excludes, holds nothing the scan reads. A path that is gone
+// can't be looked at, so it counts unless it is skipped as a directory would be.
+func (w *FileWatcher) mayBeDependency(path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return !w.skipDir(path)
+	}
+	return !info.IsDir()
 }
 
 func isEditorOrTempFile(path string) bool {
