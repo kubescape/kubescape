@@ -41,6 +41,13 @@ type coordinator struct {
 	scan     func(ctx context.Context, paths []string) (scanFindings, error)
 	docs     *documentStore
 	publish  func(ctx context.Context, params *protocol.PublishDiagnosticsParams) error
+	// notify shows the user a message; nil shows nothing. A failed scan is
+	// reported through it, so that an editor showing no findings is not taken
+	// for a clean scan.
+	notify func(ctx context.Context, params *protocol.ShowMessageParams) error
+	// lastFailure is the error last reported, so the same failure is shown once,
+	// not on every save, until a scan succeeds. Only the run goroutine uses it.
+	lastFailure string
 	// roots are the workspace folders, with none contained in another. With none
 	// at all, the open documents are what is scanned.
 	roots []string
@@ -184,9 +191,11 @@ func (c *coordinator) scanOnce(ctx context.Context) {
 	if err != nil {
 		if scanCtx.Err() == nil { // not a cancellation, which is routine
 			logger.L().Ctx(ctx).Warning("the scan failed; the diagnostics are left as they were", helpers.Error(err))
+			c.reportFailure(ctx, err)
 		}
 		return
 	}
+	c.lastFailure = ""
 	if !current || !findings.complete {
 		return
 	}
@@ -308,3 +317,24 @@ func canonical(path string) string {
 }
 
 func canonicalKey(path string) string { return pathKey(canonical(path)) }
+
+// reportFailure tells the user that a scan failed, unless that failure was the
+// last one reported.
+func (c *coordinator) reportFailure(ctx context.Context, err error) {
+	msg := err.Error()
+	if c.notify == nil || msg == c.lastFailure {
+		return
+	}
+	params := &protocol.ShowMessageParams{
+		Type:    protocol.MessageTypeWarning,
+		Message: "Kubescape could not scan the workspace, so the findings shown may be out of date: " + msg,
+	}
+	if nerr := c.notify(ctx, params); nerr != nil {
+		// Not recorded as shown, so the next failed scan tries again.
+		if ctx.Err() == nil {
+			logger.L().Ctx(ctx).Warning("could not show the scan failure", helpers.Error(nerr))
+		}
+		return
+	}
+	c.lastFailure = msg
+}
