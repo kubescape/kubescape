@@ -397,8 +397,10 @@ func (w *FileWatcher) handle(event fsnotify.Event) error {
 	}
 	if filepath.Base(name) == cautils.IgnoreFileName && filepath.Dir(name) == w.root {
 		// The scan reads its exclusions from this file, so what it excludes may have
-		// changed: a directory it no longer excludes is watched from now on, and the
-		// scan runs again. Exclude is expected to read the file as it is now.
+		// changed: a directory it now excludes is no longer watched, one it no
+		// longer excludes is watched from now on, and the scan runs again. Exclude
+		// is expected to read the file as it is now.
+		w.dropExcluded()
 		if _, err := w.registerTree(w.root, true); err != nil {
 			return err
 		}
@@ -655,6 +657,37 @@ func (w *FileWatcher) unregister(dir string) {
 			_ = w.fs.Remove(watched)
 		}
 	}
+}
+
+// dropExcluded forgets the directories that are now excluded, with what is
+// below them, including those still waiting to be registered.
+func (w *FileWatcher) dropExcluded() {
+	for dir := range w.dirs {
+		if dir != w.root && w.skipDir(dir) {
+			w.unregister(dir)
+		}
+	}
+	for dir := range w.pending {
+		if w.excludedBelowRoot(dir) {
+			delete(w.pending, dir)
+		}
+	}
+}
+
+// excludedBelowRoot reports whether path, or a directory between it and the
+// root, is skipped.
+func (w *FileWatcher) excludedBelowRoot(path string) bool {
+	for dir := path; dir != w.root; {
+		if w.skipDir(dir) {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
+	return false
 }
 
 func (w *FileWatcher) skipDir(path string) bool {
