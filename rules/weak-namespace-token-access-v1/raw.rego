@@ -35,7 +35,7 @@ deny contains msga if {
 	})
 
 	msga := {
-		"alertMessage": sprintf("Subject: %s-%s can access secrets in unprivileged namespace %s and so obtain a service account token that may carry broader permissions over the cluster", [subjectVector.kind, subjectVector.name, rolebinding.metadata.namespace]),
+		"alertMessage": sprintf("Subject: %s-%s can access secrets in %s and so obtain a service account token that may carry broader permissions over the cluster", [subjectVector.kind, subjectVector.name, namespace_phrase(rolebinding)]),
 		"alertScore": 3,
 		"packagename": "armo_builtins",
 		"reviewPaths": finalpath,
@@ -77,7 +77,7 @@ deny contains msga if {
 	})
 
 	msga := {
-		"alertMessage": sprintf("Subject: %s-%s can mint service account tokens in unprivileged namespace %s and so act as a service account that may carry broader permissions over the cluster", [subjectVector.kind, subjectVector.name, rolebinding.metadata.namespace]),
+		"alertMessage": sprintf("Subject: %s-%s can mint service account tokens in %s and so act as a service account that may carry broader permissions over the cluster", [subjectVector.kind, subjectVector.name, namespace_phrase(rolebinding)]),
 		"alertScore": 3,
 		"packagename": "armo_builtins",
 		"reviewPaths": finalpath,
@@ -183,7 +183,7 @@ binds_unprivileged_namespace(role, rolebinding) if {
 	is_same_namespace(role, rolebinding)
 
 	rolebinding.kind == "RoleBinding"
-	not rolebinding.metadata.namespace in {"kube-system"}
+	not in_privileged_namespace(rolebinding)
 }
 
 matched_paths(rule, i, j, k, p, matches) := finalpath if {
@@ -207,6 +207,20 @@ is_same_namespace(role, rolebinding) if {
 	role.kind == "Role"
 	role.metadata.namespace == rolebinding.metadata.namespace
 }
+
+# A manifest meant for "kubectl apply -n" may leave out the namespace, and the
+# subject aggregator pairs it with either side; comparing the fields would drop it.
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(rolebinding)
+}
+
+has_namespace(obj) if obj.metadata.namespace != ""
 
 is_same_subjects(subjectVector, subject) if {
 	subjectVector.kind == subject.kind
@@ -241,3 +255,15 @@ resource_names(rule) := names if {
 	names := object.get(rule, "resourceNames", [])
 	names != null
 } else := []
+
+# namespace_phrase names where a RoleBinding grants its role in an alert. A
+# manifest without a namespace grants it in whichever namespace it is applied
+# to, which the manifest alone cannot tell.
+namespace_phrase(rolebinding) := sprintf("unprivileged namespace %s", [rolebinding.metadata.namespace]) if {
+	has_namespace(rolebinding)
+} else := "the namespace the RoleBinding is applied to"
+
+# Negating the membership test directly fails for a RoleBinding without a
+# namespace, because "not" over an undefined value in an "in" expression is
+# false, so it is kept in its own rule.
+in_privileged_namespace(rolebinding) if rolebinding.metadata.namespace in {"kube-system"}
