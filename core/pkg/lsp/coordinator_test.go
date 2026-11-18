@@ -324,7 +324,7 @@ func TestPendingSaveDoesNotBelongToAReopenedDocument(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "pod.yaml")
 			docs := newDocumentStore()
-			docs.open(uriFromPath(path), path, 1)
+			docs.open(uriFromPath(path), path, 1, false)
 			require.True(t, docs.change(path, 2))
 			saved, ok := docs.saved(path)
 			require.True(t, ok)
@@ -338,7 +338,7 @@ func TestPendingSaveDoesNotBelongToAReopenedDocument(t *testing.T) {
 			c.saved(saved)
 			_, ok = docs.close(path)
 			require.True(t, ok)
-			docs.open(uriFromPath(path), path, 1)
+			docs.open(uriFromPath(path), path, 1, false)
 			if dirty {
 				require.True(t, docs.change(path, 2))
 			}
