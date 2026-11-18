@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
 
 // session is a client talking to a server over pipes, frame by frame.
@@ -217,8 +218,20 @@ func (s *session) manifest(name string) (string, string) {
 	return p, uriFromPath(p)
 }
 
+// open opens uri with the text on disk, as an editor does for a file it has no
+// unsaved changes to.
 func (s *session) open(uri string, version int) {
-	s.notify("textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": uri, "languageId": "yaml", "version": version, "text": "kind: Pod\n"}})
+	text := "kind: Pod\n" // for a document that isn't a file on disk
+	if path, err := pathFromURI(uri); err == nil {
+		if data, err := os.ReadFile(path); err == nil {
+			text = string(data)
+		}
+	}
+	s.openWith(uri, version, text)
+}
+
+func (s *session) openWith(uri string, version int, text string) {
+	s.notify("textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": uri, "languageId": "yaml", "version": version, "text": text}})
 }
 
 func (s *session) result() result {
@@ -481,6 +494,28 @@ users: [{name: u, user: {token: t}}]
 
 	require.Nil(t, s.call("shutdown", nil)["error"])
 	assert.Zero(t, apiRequests.Load(), "the cluster was never asked anything")
+}
+
+// A document can open with changes that aren't saved, as when an editor restores
+// one after a restart. Its lines aren't the file's, so it is dirty until it is
+// saved, and the findings read from the file aren't put on it.
+func TestADocumentOpenedWithUnsavedChangesIsDirty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pod.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("\xef\xbb\xbfapiVersion: v1\r\nkind: Pod\r\n"), 0o600))
+	srv := newServer(nil, 0)
+	srv.state = stateReady
+	srv.coord = newCoordinator(srv.docs, nil, nil, nil)
+	open := func(text string) document {
+		t.Helper()
+		item := protocol.TextDocumentItem{URI: uri.URI(uriFromPath(path)), LanguageID: "yaml", Version: 1, Text: text}
+		require.NoError(t, srv.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: item}))
+		d, ok := srv.docs.get(path)
+		require.True(t, ok)
+		return d
+	}
+
+	assert.False(t, open("apiVersion: v1\nkind: Pod\n").dirty, "the text on disk, but for its byte order mark and line endings")
+	assert.True(t, open("# restored, not saved\napiVersion: v1\nkind: Pod\n").dirty)
 }
 
 // A manifest elsewhere in the workspace that doesn't parse is left as it is; it
