@@ -158,6 +158,8 @@ Get detailed information about a specific CVE in a manifest, including affected 
 
 Correlate known image vulnerabilities (from already-scanned `VulnerabilityManifest` objects) with how reachable each workload is: its NetworkPolicy ingress exposure and its external exposure through a Service, Ingress, or Gateway API route. With `include_identity` it also reports the ServiceAccount each vulnerable workload runs as and what the existing RBAC escalation analysis finds for it.
 
+StatefulSets use the labels of live Pods matched by controller UID, including Pods still present during scale-down. This requires permission to **list Pods** in the requested namespace, or cluster-wide when no namespace is supplied; a failed Pod list returns a tool error. If no owned Pods are present, analysis uses the pod template and generated identity labels. When the result depends on whether the cluster generates the Pod index label, it reports the widest exposure with an explicit uncertainty warning.
+
 **Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
