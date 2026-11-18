@@ -2053,3 +2053,12 @@ func TestGetScanCommand_Subcommands_NilKubescape(t *testing.T) {
 		})
 	}
 }
+
+func TestScanCmd_RejectsWhitespaceFilePath(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"--file-path", "   "})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.EqualError(t, err, "--file-path needs a file path")
+}

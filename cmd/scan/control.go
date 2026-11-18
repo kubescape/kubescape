@@ -52,7 +52,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 					return fmt.Errorf("requires at least one control name")
 				}
 			}
-			if scanInfo.FilePath != "" && len(args) > 1 {
+			if strings.TrimSpace(scanInfo.FilePath) != "" && len(args) > 1 {
 				return fmt.Errorf("usage: use either --file-path or positional input paths, not both")
 			}
 			return nil
@@ -61,7 +61,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if ks == nil {
 				return errors.New("uninitialized kubescape interface")
 			}
-			if scanInfo.FilePath != "" && len(args) > 1 {
+			if strings.TrimSpace(scanInfo.FilePath) != "" && len(args) > 1 {
 				return fmt.Errorf("usage: use either --file-path or positional input paths, not both")
 			}
 			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ScanFormats); err != nil {

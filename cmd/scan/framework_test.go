@@ -119,6 +119,17 @@ func TestGetFrameworkCmd_RunERejectsAmbiguousFilePathAndPositionalInputs(t *test
 	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
 }
 
+func TestGetFrameworkCmd_RejectsWhitespaceFilePath(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getFrameworkCmd(mockKubescape, &scanInfo)
+	cmd.SetArgs([]string{"nsa", "--file-path", "   "})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.EqualError(t, err, "--file-path needs a file path")
+}
+
 // Regression: a --custom-rules control carried no base score, so it summarized
 // as "Unknown" severity, which enforceSeverityThresholds counts as exceeding
 // every threshold. Any failing custom rule then failed a
