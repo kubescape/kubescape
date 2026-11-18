@@ -321,7 +321,11 @@ func (d *reportDecryptor) decryptResource(resource rawObject, context string) (s
 	}
 
 	newID := workload.GetID()
-	if strings.HasPrefix(oldID, "path=") {
+	// An RBAC subject has no sourcePath of its own: its ID is made from its
+	// related objects', which can start it with "path=", and GetID has already
+	// made it again from their restored sourcePaths.
+	_, isSubject := workload.(*objectsenvelopes.RegoResponseVectorObject)
+	if strings.HasPrefix(oldID, "path=") && !isSubject {
 		// File-scan IDs include the restored sourcePath, including its document index.
 		if path, ok := workload.GetObject()[localworkload.PathKey].(string); !ok || path == "" {
 			return "", "", fmt.Errorf("cannot restore %s.resourceID: local resource has no valid sourcePath", context)
