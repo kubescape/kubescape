@@ -237,6 +237,8 @@ func (s *server) Exit(context.Context) error {
 	return nil
 }
 
+var didOpenBeforeReverifyHook func(path string)
+
 func (s *server) DidOpen(_ context.Context, params *protocol.DidOpenTextDocumentParams) error {
 	if s.ready() == nil {
 		return nil
@@ -252,6 +254,15 @@ func (s *server) DidOpen(_ context.Context, params *protocol.DidOpenTextDocument
 	// as it is until it is saved, like a document changed since its last save.
 	dirty := !matchesDisk(path, item.Text)
 	s.docs.open(string(item.URI), path, item.Version, dirty)
+	if didOpenBeforeReverifyHook != nil {
+		didOpenBeforeReverifyHook(path)
+	}
+	// If an external process wrote to the file on disk between the initial disk
+	// comparison and registration, re-verify and mark the document dirty so it
+	// is not left observed as clean while differing from disk.
+	if !dirty && !matchesDisk(path, item.Text) {
+		s.docs.change(path, item.Version)
+	}
 	return nil
 }
 

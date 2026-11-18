@@ -567,6 +567,43 @@ func TestDidOpenWithUnsavedChangesIsNeverObservedClean(t *testing.T) {
 	assert.False(t, observedClean.Load(), "document with unsaved text should never be visible as clean")
 }
 
+func TestDidOpenWithExternalDiskWriteDuringRegistrationBecomesDirty(t *testing.T) {
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "1048576")
+	path := filepath.Join(t.TempDir(), "pod.yaml")
+	initialContent := []byte("apiVersion: v1\nkind: Pod\n")
+	require.NoError(t, os.WriteFile(path, initialContent, 0o600))
+
+	srv := newServer(nil, 0)
+	srv.state = stateReady
+	srv.coord = newCoordinator(srv.docs, nil, nil, nil)
+
+	// Simulate an external process modifying the file on disk after document
+	// registration and before re-verification.
+	didOpenBeforeReverifyHook = func(p string) {
+		if p == path {
+			d, ok := srv.docs.get(path)
+			require.True(t, ok)
+			require.False(t, d.dirty, "document must be registered clean before simulated disk write")
+			require.NoError(t, os.WriteFile(path, []byte("apiVersion: v1\nkind: Pod\n# externally written line\n"), 0o600))
+		}
+	}
+	defer func() {
+		didOpenBeforeReverifyHook = nil
+	}()
+
+	item := protocol.TextDocumentItem{
+		URI:        uri.URI(uriFromPath(path)),
+		LanguageID: "yaml",
+		Version:    1,
+		Text:       string(initialContent),
+	}
+	require.NoError(t, srv.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{TextDocument: item}))
+
+	d, ok := srv.docs.get(path)
+	require.True(t, ok)
+	assert.True(t, d.dirty, "document must be marked dirty when an external write changes the file during open")
+}
+
 // A manifest elsewhere in the workspace that doesn't parse is left as it is; it
 // doesn't hold back the diagnostics of the others.
 func TestAManifestThatDoesNotParseDoesNotHoldBackTheOthers(t *testing.T) {
