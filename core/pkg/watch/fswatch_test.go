@@ -1173,6 +1173,45 @@ func TestFileWatcherWatchesWhatTheIgnoreFileNoLongerExcludes(t *testing.T) {
 	assert.Len(t, w.changes, 1, "an edit to the ignore file is signalled")
 }
 
+func TestFileWatcherStopsWatchingWhatTheIgnoreFileNowExcludes(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	extra := filepath.Join(root, "extra")
+	nested := filepath.Join(extra, "nested")
+	kept := filepath.Join(root, "kept")
+	write(t, filepath.Join(nested, "api.yaml"), "kind: Pod\n")
+	write(t, filepath.Join(kept, "api.yaml"), "kind: Pod\n")
+	var excluded atomic.Bool
+	w, err := newFileWatcher(root, FileWatcherOptions{Exclude: func(path string, isDir bool) bool {
+		return excluded.Load() && isDir && path == extra
+	}})
+	require.NoError(t, err)
+	defer w.fs.Close()
+	require.Contains(t, w.dirs, extra)
+	require.Contains(t, w.dirs, nested)
+	made := filepath.Join(extra, "made")
+	w.pending[nested] = struct{}{}
+	w.pending[made] = struct{}{}
+
+	excluded.Store(true)
+	ignoreFile := filepath.Join(root, cautils.IgnoreFileName)
+	write(t, ignoreFile, "extra/\n")
+	require.NoError(t, w.handle(fsnotify.Event{Name: ignoreFile, Op: fsnotify.Write}))
+
+	assert.NotContains(t, w.dirs, extra, "a directory the ignore file now excludes is still watched")
+	assert.NotContains(t, w.dirs, nested, "and so are the directories below it")
+	assert.NotContains(t, w.pending, nested, "and one waiting to be registered")
+	assert.NotContains(t, w.pending, made, "and one below it that was not registered yet")
+	assert.Contains(t, w.dirs, root)
+	assert.Contains(t, w.dirs, kept)
+	assert.Len(t, w.changes, 1, "an edit to the ignore file is signalled")
+
+	require.NoError(t, os.RemoveAll(extra))
+	<-w.changes
+	require.NoError(t, w.handle(fsnotify.Event{Name: extra, Op: fsnotify.Remove}))
+	assert.Empty(t, w.changes, "removing an excluded directory is signalled")
+}
+
 func TestFileWatcherSingleFileIgnoreChanges(t *testing.T) {
 	t.Parallel()
 	for _, op := range []fsnotify.Op{fsnotify.Create, fsnotify.Write, fsnotify.Remove, fsnotify.Rename} {
