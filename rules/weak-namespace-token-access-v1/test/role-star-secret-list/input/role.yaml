@@ -1,0 +1,11 @@
+# A list narrowed to resourceNames: ["*"] only matches a metadata.name=* field selector, and no secret has that name.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: named-secret-lister
+  namespace: build
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["*"]
+  verbs: ["list"]

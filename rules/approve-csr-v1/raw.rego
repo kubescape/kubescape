@@ -128,7 +128,7 @@ csr_patch_rule(rule) if {
 # or when both name the same object. The names are literal: RBAC has no wildcard
 # form for resourceNames. An empty name is the one a plain create is authorized
 # with and is not an object that apply could create, so it never counts as the
-# common name.
+# common name. Neither does "*", which no object can be named.
 names_overlap(create_rule, patch_rule) if {
 	unnamed(create_rule)
 	unnamed(patch_rule)
@@ -146,7 +146,7 @@ names_overlap(create_rule, patch_rule) if {
 
 names_overlap(create_rule, patch_rule) if {
 	name := create_rule.resourceNames[_]
-	name != ""
+	not name in {"", "*"}
 	name in patch_rule.resourceNames
 }
 
@@ -155,7 +155,7 @@ unnamed(rule) if count(resource_names(rule)) == 0
 
 names_an_object(rule) if {
 	name := rule.resourceNames[_]
-	name != ""
+	not name in {"", "*"}
 }
 
 # An omitted or empty resourceNames list is unrestricted, and "" is the name a
