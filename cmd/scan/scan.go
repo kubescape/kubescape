@@ -217,8 +217,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				// failures should not print command usage.
 				cmd.SilenceUsage = true
 				// The contract picks its own policies, so its compliance floor and an
-				// explicit --compliance-threshold apply here, unlike the default security view.
-				scanInfo.EnforceCompliance = true
+				// explicit --compliance-threshold apply here, unlike the default security
+				// view. Asking for --view security keeps that view's exemption.
+				scanInfo.EnforceCompliance = !(commandFlagChanged(cmd, "view") && scanInfo.View == string(cautils.SecurityViewType))
 				if watchMode {
 					return watchSecurityScan(cmd, ks, &scanInfo, policyIdentifiers)
 				}

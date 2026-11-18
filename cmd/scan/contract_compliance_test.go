@@ -61,7 +61,7 @@ func TestContractPolicyScanEnforcesComplianceFloor(t *testing.T) {
 		{name: "explicit flag not met without a contract floor", score: 50, args: []string{"--compliance-threshold", "80"}, wantErr: true},
 		{name: "explicit flag stricter than contract floor", score: 70, failure: "complianceBelow: 40", args: []string{"--compliance-threshold", "80"}, wantErr: true},
 		{name: "resource view", score: 50, failure: "complianceBelow: 80", args: []string{"--view", "resource"}, wantErr: true},
-		{name: "explicit security view", score: 50, failure: "complianceBelow: 80", args: []string{"--view", "security"}, wantErr: true},
+		{name: "explicit security view stays exempt", score: 50, failure: "complianceBelow: 80", args: []string{"--view", "security"}},
 		{name: "no floor configured", score: 0},
 	}
 	for _, tt := range tests {
