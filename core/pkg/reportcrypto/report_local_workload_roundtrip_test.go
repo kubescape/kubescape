@@ -636,3 +636,43 @@ func TestEncryptedFileScanRBACSubjectWithAnAPIGroupRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+// A non-RBAC-subject object matching IsTypeRegoResponseVector (kind, name, relatedObjects)
+// whose ID starts with "path=" must have a valid sourcePath, and is rejected
+// when sourcePath is missing.
+func TestDecryptReportRejectsNonRBACSubjectWithoutSourcePath(t *testing.T) {
+	tests := []struct {
+		name     string
+		kind     string
+		apiGroup string
+	}{
+		{name: "Widget", kind: "Widget"},
+		{name: "CustomResource", kind: "CustomResource"},
+		{name: "User with non-RBAC apiGroup", kind: "User", apiGroup: "acme.example.com"},
+		{name: "Group with non-RBAC apiGroup", kind: "Group", apiGroup: "acme.example.com"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var report map[string]any
+			require.NoError(t, json.Unmarshal(encryptedFileScanReport(t), &report))
+			res := report["resources"].([]any)[0].(map[string]any)
+			object := map[string]any{
+				"kind":           tt.kind,
+				"name":           "example",
+				"relatedObjects": []any{},
+			}
+			if tt.apiGroup != "" {
+				object["apiGroup"] = tt.apiGroup
+			}
+			res["object"] = object
+
+			encrypted, err := json.Marshal(report)
+			require.NoError(t, err)
+
+			decrypted, err := reportcrypto.DecryptReport(encrypted, []byte(exceptionTestMasterKey))
+			require.ErrorContains(t, err, "cannot restore resources[0].resourceID: local resource has no valid sourcePath")
+			assert.Nil(t, decrypted)
+		})
+	}
+}
