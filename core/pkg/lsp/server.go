@@ -147,6 +147,9 @@ func (s *server) Initialize(_ context.Context, params *protocol.InitializeParams
 // workspaceRoots are the folders the client opened, from workspaceFolders or,
 // failing that, rootUri. Only local folders can be scanned.
 func workspaceRoots(params *protocol.InitializeParams) []string {
+	if params == nil {
+		return nil
+	}
 	var roots []string
 	if folders, ok := params.WorkspaceFolders.Get(); ok {
 		for _, f := range folders {
