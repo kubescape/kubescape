@@ -575,6 +575,32 @@ var providerPodSpecDefaults = map[string]interface{}{
 	"automount_service_account_token": true,
 }
 
+// hasUnresolvableVariables reports whether any variable traversal referenced in
+// expr cannot be resolved in evalCtx. This prevents expressions that wrap
+// unresolvable references in try(...) from having provider defaults applied
+// when try() suppresses diagnostics and evaluates to null.
+func hasUnresolvableVariables(expr hcl.Expression, evalCtx *hcl.EvalContext) bool {
+	if expr == nil {
+		return false
+	}
+	vars := expr.Variables()
+	if len(vars) == 0 {
+		return false
+	}
+	if evalCtx == nil {
+		return true
+	}
+	for _, traversal := range vars {
+		if traversal.IsRelative() {
+			continue
+		}
+		if _, diags := traversal.TraverseAbs(evalCtx); diags.HasErrors() {
+			return true
+		}
+	}
+	return false
+}
+
 // applyProviderDefaults fills in defaults for the fields the block leaves out
 // or sets to null, which Terraform treats the same way. A field whose
 // expression could not be evaluated is left out, as every unresolved attribute
@@ -586,6 +612,9 @@ func applyProviderDefaults(body *hclsyntax.Body, evalCtx *hcl.EvalContext, out m
 			continue
 		}
 		if attr, declared := body.Attributes[name]; declared {
+			if hasUnresolvableVariables(attr.Expr, evalCtx) {
+				continue
+			}
 			if _, diags := attr.Expr.Value(evalCtx); diags.HasErrors() {
 				continue
 			}
