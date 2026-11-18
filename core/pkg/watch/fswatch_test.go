@@ -811,7 +811,7 @@ func TestFileWatcherRelevantFile(t *testing.T) {
 	}
 
 	wWithDeps := &FileWatcher{opts: FileWatcherOptions{
-		AcceptDependencies: true,
+		AcceptDependencies: func() bool { return true },
 		Exclude: func(path string, isDir bool) bool {
 			return !isDir && filepath.Base(path) == "excluded.yaml"
 		},
@@ -829,6 +829,26 @@ func TestFileWatcherRelevantFile(t *testing.T) {
 	for _, tt := range depTests {
 		assert.Equal(t, tt.want, wWithDeps.relevantFile(filepath.Join("/tmp", "x", tt.name)), tt.name)
 	}
+}
+
+// A dependency file is relevant only while the directory is a rendered-input
+// directory: a kustomization that appears or is removed changes the answer
+// without the watcher being made again.
+func TestFileWatcherRelevantFileFollowsKustomization(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dependency := filepath.Join(root, "settings.properties")
+	write(t, dependency, "key=value\n")
+	w := &FileWatcher{opts: FileWatcherOptions{
+		AcceptDependencies: func() bool { return cautils.IsKustomizeDirectory(root) },
+	}}
+
+	assert.False(t, w.relevantFile(dependency), "without a kustomization the file is not one a scan reads")
+	kustomization := filepath.Join(root, "kustomization.yaml")
+	write(t, kustomization, "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n")
+	assert.True(t, w.relevantFile(dependency), "the kustomization makes it a dependency")
+	require.NoError(t, os.Remove(kustomization))
+	assert.False(t, w.relevantFile(dependency), "removing the kustomization makes it irrelevant again")
 }
 
 func TestFileWatcherBurstsLeaveOneSignalAndNeverBlock(t *testing.T) {
