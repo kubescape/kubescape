@@ -247,13 +247,11 @@ func (s *server) DidOpen(_ context.Context, params *protocol.DidOpenTextDocument
 		logger.L().Debug("ignoring a document that is not a local file", helpers.String("uri", string(item.URI)), helpers.Error(err))
 		return nil
 	}
-	s.docs.open(string(item.URI), path, item.Version)
 	// A document can open with changes that aren't saved yet, as when an editor
 	// restores one after a restart. Its lines aren't the file's, so it is left
 	// as it is until it is saved, like a document changed since its last save.
-	if !matchesDisk(path, item.Text) {
-		s.docs.change(path, item.Version)
-	}
+	dirty := !matchesDisk(path, item.Text)
+	s.docs.open(string(item.URI), path, item.Version, dirty)
 	return nil
 }
 

@@ -124,7 +124,7 @@ func (h *harness) file(name string) string {
 	h.t.Helper()
 	p := filepath.Join(h.dir, name)
 	require.NoError(h.t, os.WriteFile(p, []byte("kind: Pod\n"), 0o600))
-	h.docs.open(uriFromPath(p), p, 1)
+	h.docs.open(uriFromPath(p), p, 1, false)
 	return p
 }
 
@@ -419,7 +419,7 @@ func TestNothingIsPublishedForADocumentClosedAndReopenedDuringAScan(t *testing.T
 	h.c.closed(d)
 	assert.Equal(t, uriFromPath(target), string(h.nextPublish().URI), "the close's own empty list")
 
-	h.docs.open(uriFromPath(target), target, 1)
+	h.docs.open(uriFromPath(target), target, 1, false)
 	close(proceed)
 
 	p := h.nextPublish()
@@ -439,8 +439,8 @@ func TestSymlinkAndRealFileOpenConcurrentlyTrackVersionsIndependently(t *testing
 	require.NoError(t, os.Symlink(realFile, symFile))
 
 	// Open both real and symlink documents with different versions.
-	h.docs.open(uriFromPath(realFile), realFile, 1)
-	h.docs.open(uriFromPath(symFile), symFile, 2)
+	h.docs.open(uriFromPath(realFile), realFile, 1, false)
+	h.docs.open(uriFromPath(symFile), symFile, 2, false)
 
 	h.save(realFile)
 
@@ -563,7 +563,7 @@ func TestADocumentOutsideTheWorkspaceIsNotTouched(t *testing.T) {
 	inside := h.file("pod.yaml")
 	outside := filepath.Join(t.TempDir(), "elsewhere.yaml")
 	require.NoError(t, os.WriteFile(outside, []byte("kind: Pod\n"), 0o600))
-	h.docs.open(uriFromPath(outside), outside, 1)
+	h.docs.open(uriFromPath(outside), outside, 1, false)
 	h.c.published[pathKey(outside)] = struct{}{} // it has diagnostics
 
 	h.save(inside)

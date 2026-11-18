@@ -39,11 +39,11 @@ func pathKey(path string) string {
 	return path
 }
 
-func (s *documentStore) open(uri, path string, version int32) {
+func (s *documentStore) open(uri, path string, version int32, dirty bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.nextID++
-	s.docs[pathKey(path)] = document{uri: uri, path: path, version: version, openID: s.nextID}
+	s.docs[pathKey(path)] = document{uri: uri, path: path, version: version, dirty: dirty, openID: s.nextID}
 }
 
 // change records a new version and marks the document dirty. It reports whether
