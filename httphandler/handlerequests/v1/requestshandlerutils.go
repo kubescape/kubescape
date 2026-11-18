@@ -389,6 +389,8 @@ func (e *ScanFailedError) Error() string {
 	return e.Message
 }
 
+var errResultFileTooLarge = errors.New("file exceeds maximum allowed size")
+
 // openBoundedResultFile opens path for reading, verifies it is a regular file, and
 // reads up to limit bytes. O_NONBLOCK prevents opening a FIFO from waiting for a
 // writer, and descriptor-based validation ensures a path swapped after stat cannot slip past (CWE-400).
@@ -428,7 +430,7 @@ func openBoundedResultFile(path string, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("file %q exceeds maximum allowed size (%d bytes)", path, limit)
+		return data[:limit], fmt.Errorf("%w: %q exceeds maximum allowed size (%d bytes)", errResultFileTooLarge, path, limit)
 	}
 	return data, nil
 }
@@ -453,6 +455,13 @@ func readResultsFile(fileID string) (json.RawMessage, error) {
 		f, err := openBoundedResultFile(path, limit)
 		if err == nil {
 			return nil, &ScanFailedError{Message: string(f)}
+		}
+		if errors.Is(err, errResultFileTooLarge) {
+			msg := string(f)
+			if msg == "" {
+				msg = err.Error()
+			}
+			return nil, &ScanFailedError{Message: msg}
 		}
 	}
 

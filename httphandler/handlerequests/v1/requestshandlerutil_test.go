@@ -3,6 +3,7 @@ package v1
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -301,4 +302,36 @@ func TestReadResultsFile_OversizedRejected(t *testing.T) {
 
 	_, err := readResultsFile(validUUID)
 	assert.ErrorContains(t, err, "file 123e4567-e89b-12d3-a456-426614174000 not found")
+}
+
+func TestReadResultsFile_OversizedFailedArtifactPreservesPrecedence(t *testing.T) {
+	outDir := t.TempDir()
+	failedDir := t.TempDir()
+
+	oldOutputDir, oldFailedDir := OutputDir, FailedOutputDir
+	OutputDir, FailedOutputDir = outDir, failedDir
+	defer func() {
+		OutputDir, FailedOutputDir = oldOutputDir, oldFailedDir
+	}()
+
+	validUUID := "123e4567-e89b-12d3-a456-426614174001"
+	failedFile := filepath.Join(failedDir, validUUID+".json")
+	successFile := filepath.Join(outDir, validUUID+".json")
+
+	// Create a stale success report in OutputDir
+	require.NoError(t, os.WriteFile(successFile, []byte(`{"customerGUID":"stale"}`), 0600))
+
+	// Create an oversized failure message in FailedOutputDir (> 1024 bytes)
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "1024")
+	oversizedMsg := "fatal error: " + string(bytes.Repeat([]byte("e"), 2048))
+	require.NoError(t, os.WriteFile(failedFile, []byte(oversizedMsg), 0600))
+
+	_, err := readResultsFile(validUUID)
+	require.Error(t, err)
+
+	// Must return a *ScanFailedError, NOT stale success and NOT "file not found"
+	scanFailed, isScanFailed := errors.AsType[*ScanFailedError](err)
+	require.True(t, isScanFailed, "expected *ScanFailedError, got: %T (%v)", err, err)
+	assert.Contains(t, scanFailed.Message, "fatal error:")
+	assert.LessOrEqual(t, len(scanFailed.Message), 1024, "returned error message must be bounded to the limit")
 }
