@@ -786,9 +786,34 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 		// Github Code Scanning considers results not associated to a file path
 		// meaningless and invalid when uploading, and the location written to the
 		// report is the relative path alone, so a base path cannot stand in for a
-		// missing one
+		// missing one. For live cluster scans, synthesize a stable virtual location
+		// so external consumers (DefectDojo, GitLab, etc.) do not drop findings.
 		if relPath == "" {
-			continue
+			if isClusterScan(opaSessionObj) {
+				if rsrc, ok := opaSessionObj.GetResource(resourceID); ok && rsrc != nil {
+					ns := rsrc.GetNamespace()
+					if ns == "" {
+						ns = "_cluster"
+					}
+					kind := strings.ToLower(rsrc.GetKind())
+					if kind == "" {
+						kind = "resource"
+					}
+					name := strings.ToLower(rsrc.GetName())
+					if name == "" {
+						name = "unnamed"
+					}
+					relPath = fmt.Sprintf("cluster/%s/%s/%s.yaml", ns, kind, name)
+				} else {
+					cleanID := strings.Trim(strings.ReplaceAll(resourceID, "//", "/"), "/")
+					if cleanID == "" {
+						cleanID = "unknown"
+					}
+					relPath = fmt.Sprintf("cluster/resources/%s.yaml", cleanID)
+				}
+			} else {
+				continue
+			}
 		}
 
 		failed = append(failed, scannedResource{

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
@@ -976,6 +977,139 @@ func TestPrintConfigurationScan_SkipsResourcesWithoutRelativePath(t *testing.T) 
 			assert.Empty(t, report.Runs[0].Results, "a result with no file location must not be emitted")
 		})
 	}
+}
+
+// TestPrintConfigurationScan_ClusterScanSynthesizesVirtualLocation verifies that
+// during a live cluster scan (where resources have no local manifest file or RelativePath),
+// findings are not dropped, and canonical virtual paths like
+// cluster/<namespace>/<kind>/<name>.yaml are synthesized.
+func TestPrintConfigurationScan_ClusterScanSynthesizesVirtualLocation(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.Metadata = &reporthandlingv2.Metadata{
+		ScanMetadata: reporthandlingv2.ScanMetadata{
+			ScanningTarget: reporthandlingv2.Cluster,
+		},
+	}
+	// Mimic a live cluster scan where ResourceSource is empty (no local files)
+	session.ResourceSource = map[string]reporthandling.Source{}
+
+	// 1. Namespaced workload
+	deployObj := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "my-app",
+			"namespace": "production",
+		},
+	})
+	deployID := deployObj.GetID()
+	session.SetResource(deployObj)
+
+	// 2. Cluster-scoped workload (no namespace)
+	clusterRoleObj := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRole",
+		"metadata": map[string]any{
+			"name": "cluster-admin-role",
+		},
+	})
+	clusterRoleID := clusterRoleObj.GetID()
+	session.SetResource(clusterRoleObj)
+
+	// 3. Fallback: resourceID not in catalog
+	fallbackID := "custom.io/v1/unknown-resource"
+
+	const control1 = "C-0057"
+	const control2 = "C-0012"
+	const control3 = "C-0001"
+
+	session.ResourcesResult[deployID] = resourcesresults.Result{
+		ResourceID: deployID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: control1,
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			},
+		},
+	}
+	session.ResourcesResult[clusterRoleID] = resourcesresults.Result{
+		ResourceID: clusterRoleID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: control2,
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			},
+		},
+	}
+	session.ResourcesResult[fallbackID] = resourcesresults.Result{
+		ResourceID: fallbackID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: control3,
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			},
+		},
+	}
+
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				control1: reportsummary.ControlSummary{
+					ControlID:   control1,
+					Name:        "Privileged container",
+					Description: "Do not run privileged containers",
+					ScoreFactor: 8.0,
+				},
+				control2: reportsummary.ControlSummary{
+					ControlID:   control2,
+					Name:        "Cluster-admin binding",
+					Description: "Minimize cluster-admin permissions",
+					ScoreFactor: 9.0,
+				},
+				control3: reportsummary.ControlSummary{
+					ControlID:   control3,
+					Name:        "Generic rule",
+					Description: "Generic rule description",
+					ScoreFactor: 5.0,
+				},
+			},
+		},
+	}
+
+	tmp, err := os.CreateTemp("", "sarif-cluster-*.sarif")
+	require.NoError(t, err)
+	defer func() {
+		assert.NoError(t, os.Remove(tmp.Name()))
+	}()
+
+	sp := NewSARIFPrinter(false)
+	sp.writer = tmp
+	require.NoError(t, sp.printConfigurationScan(context.Background(), session))
+	require.NoError(t, tmp.Close())
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Runs, 1)
+
+	// Findings must NOT be dropped! All 3 findings must be present.
+	results := report.Runs[0].Results
+	require.Len(t, results, 3, "cluster scan findings must not be dropped from SARIF report")
+
+	uriByRule := make(map[string]string)
+	for _, res := range results {
+		require.NotEmpty(t, res.Locations)
+		require.NotNil(t, res.Locations[0].PhysicalLocation)
+		require.NotNil(t, res.Locations[0].PhysicalLocation.ArtifactLocation)
+		uri := *res.Locations[0].PhysicalLocation.ArtifactLocation.URI
+		uriByRule[*res.RuleID] = uri
+	}
+
+	assert.Equal(t, "cluster/production/deployment/my-app.yaml", uriByRule[control1])
+	assert.Equal(t, "cluster/_cluster/clusterrole/cluster-admin-role.yaml", uriByRule[control2])
+	assert.Equal(t, "cluster/resources/custom.io/v1/unknown-resource.yaml", uriByRule[control3])
 }
 
 // TestPrintConfigurationScan_PopulatesInvocations is the regression test for
