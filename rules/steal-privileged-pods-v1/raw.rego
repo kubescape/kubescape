@@ -95,11 +95,13 @@ can_remove_pods(role, rolebinding) if {
 
 # update/patch on pods: rewrite a pod's labels so its controller treats it as
 # lost and schedules a replacement elsewhere. resourceNames does not blunt this
-# — the labels being rewritten belong to the named pod itself.
+# — the labels being rewritten belong to the named pod itself — as long as it
+# names a pod at all (see names_a_pod).
 removes_pods(rule, _) if {
 	core_api_group(rule)
 	targets(rule, "pods")
 	update_patch_or_wildcard(rule.verbs)
+	names_a_pod(rule)
 }
 
 # update/patch on pods/status reaches the same labels through the subresource.
@@ -107,6 +109,7 @@ removes_pods(rule, _) if {
 	core_api_group(rule)
 	targets_subresource(rule, "pods/status")
 	update_patch_or_wildcard(rule.verbs)
+	names_a_pod(rule)
 }
 
 # The remaining verbs act on a whole object rather than its contents, so
@@ -191,6 +194,17 @@ update_patch_or_wildcard(verbs) if verbs[_] in {"update", "patch", "*"}
 # that in fact holds unrestricted access.
 unrestricted_rule(rule) if {
 	count(resource_names(rule)) == 0
+}
+
+# An update or patch is authorized with the name of the pod it changes, which is
+# never empty, and resourceNames is matched literally, with no wildcard, so "*"
+# only names a pod called "*", which no pod can be. An entry narrowed to those
+# two alone reaches no pod.
+names_a_pod(rule) if unrestricted_rule(rule)
+
+names_a_pod(rule) if {
+	some name in resource_names(rule)
+	not name in {"", "*"}
 }
 
 pairs_with(role, rolebinding) if {
