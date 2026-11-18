@@ -542,11 +542,13 @@ func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IK
 		return results, err
 	}
 
+	var complianceErr error
 	if scanInfo.EnforceCompliance && results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-		return results, fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
+		complianceErr = gateFailure(fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold))
 	}
 
 	if err := joinGateErrors(
+		complianceErr,
 		enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo),
 		enforceCombinedImageGates(results, scanInfo),
 	); err != nil {
