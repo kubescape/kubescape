@@ -109,11 +109,17 @@ func FrameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 	} else if len(frameworks) > 1 {
 		var p strings.Builder
 		p.WriteString("Frameworks scanned: ")
-		i := 0
-		for ; i < len(frameworks)-1; i++ {
-			fmt.Fprintf(&p, "%s (compliance score: %s), ", frameworks[i].GetName(), cautils.ComplianceScoreToString(frameworks[i].GetComplianceScore(), 2))
+		for i, fw := range frameworks {
+			scoreStr := "N/A"
+			if fw.GetComplianceScore() >= 0 {
+				scoreStr = cautils.ComplianceScoreToString(fw.GetComplianceScore(), 2)
+			}
+			separator := ", "
+			if i == len(frameworks)-1 {
+				separator = "\n"
+			}
+			fmt.Fprintf(&p, "%s (compliance score: %s)%s", fw.GetName(), scoreStr, separator)
 		}
-		fmt.Fprintf(&p, "%s (compliance score: %s)\n", frameworks[i].GetName(), cautils.ComplianceScoreToString(frameworks[i].GetComplianceScore(), 2))
 		return p.String()
 	}
 	return ""

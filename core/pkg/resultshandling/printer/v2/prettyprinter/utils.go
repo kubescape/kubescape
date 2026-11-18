@@ -2,6 +2,7 @@ package prettyprinter
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"sort"
@@ -310,13 +311,17 @@ func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
 	}
 }
 
-func printComplianceScore(writer *os.File, frameworks []reportsummary.IFrameworkSummary) {
+func printComplianceScore(writer io.Writer, frameworks []reportsummary.IFrameworkSummary) {
 	txt := "Compliance Score"
 	cautils.SectionHeadingDisplay(writer, txt)
 	cautils.SimpleDisplay(writer, "The compliance score is calculated by multiplying control failures by the number of failures against supported compliance frameworks. Remediate controls, or configure your cluster baseline with exceptions, to improve this score.\n\n")
 
 	for _, fw := range frameworks {
-		cautils.StarDisplay(writer, "%s: %s", fw.GetName(), gchalk.WithBrightYellow().Bold(fmt.Sprintf("%s%%\n", cautils.ComplianceScoreToString(fw.GetComplianceScore(), 2))))
+		scoreStr := "N/A"
+		if fw.GetComplianceScore() >= 0 {
+			scoreStr = fmt.Sprintf("%s%%", cautils.ComplianceScoreToString(fw.GetComplianceScore(), 2))
+		}
+		cautils.StarDisplay(writer, "%s: %s\n", fw.GetName(), gchalk.WithBrightYellow().Bold(scoreStr))
 	}
 
 	cautils.SimpleDisplay(writer, fmt.Sprintf("\nView a full compliance report by running %s or %s\n", getCallToActionString("'$ kubescape scan framework nsa'"), getCallToActionString("'$ kubescape scan framework mitre'")))
