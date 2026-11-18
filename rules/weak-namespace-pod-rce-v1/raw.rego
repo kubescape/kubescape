@@ -118,6 +118,7 @@ binds_unprivileged_namespace(role, rolebinding) if {
 
 	rolebinding.kind == "RoleBinding"
 	not in_privileged_namespace(rolebinding)
+	not in_privileged_namespace(role)
 }
 
 matched_paths(rule, i, j, k, p, verbs, api_groups, resources) := finalpath if {
@@ -161,7 +162,10 @@ is_same_namespace(role, rolebinding) if {
 	not has_namespace(rolebinding)
 }
 
-has_namespace(obj) if obj.metadata.namespace != ""
+has_namespace(obj) if {
+	is_string(obj.metadata.namespace)
+	obj.metadata.namespace != ""
+}
 
 is_same_subjects(subjectVector, subject) if {
 	subjectVector.kind == subject.kind
@@ -204,7 +208,7 @@ namespace_phrase(rolebinding) := sprintf("unprivileged namespace %s", [rolebindi
 	has_namespace(rolebinding)
 } else := "the namespace the RoleBinding is applied to"
 
-# Negating the membership test directly fails for a RoleBinding without a
+# Negating the membership test directly fails for an object without a
 # namespace, because "not" over an undefined value in an "in" expression is
 # false, so it is kept in its own rule.
-in_privileged_namespace(rolebinding) if rolebinding.metadata.namespace in {"kube-system"}
+in_privileged_namespace(obj) if obj.metadata.namespace in {"kube-system"}
