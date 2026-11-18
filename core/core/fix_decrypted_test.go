@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
 
@@ -24,16 +25,17 @@ func TestFixDecryptedFileScanReport(t *testing.T) {
 		name      string
 		inputFile string
 		files     map[string]string
+		wantNames []string
 	}{
-		{"YAML", "pod.yaml", map[string]string{"pod.yaml": podManifest("web", false)}},
-		{"JSON", "pod.json", map[string]string{"pod.json": `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"web","namespace":"default"},"spec":{"containers":[{"name":"c","image":"nginx"}]}}`}},
+		{"YAML", "pod.yaml", map[string]string{"pod.yaml": podManifest("web", false)}, []string{"web"}},
+		{"JSON", "pod.json", map[string]string{"pod.json": `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"web","namespace":"default"},"spec":{"containers":[{"name":"c","image":"nginx"}]}}`}, []string{"web"}},
 		{"directory with matching identities", "", map[string]string{
 			"one.yaml": podManifest("web", false),
 			"two.yaml": podManifest("web", false),
-		}},
+		}, []string{"web", "web"}},
 		{"multiple YAML documents", "", map[string]string{
 			"pods.yaml": podManifest("web", false) + "---\n" + podManifest("worker", false),
-		}},
+		}, []string{"web", "worker"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			input := t.TempDir()
@@ -68,11 +70,14 @@ func TestFixDecryptedFileScanReport(t *testing.T) {
 			require.False(t, rescanned.Degraded)
 			var report reporthandlingv2.PostureReport
 			require.NoError(t, json.Unmarshal(rescanned.JSON, &report))
-			require.NotEmpty(t, report.Results)
+			require.Len(t, report.Results, len(tc.wantNames), "remediation must retain every resource")
+			names := make([]string, 0, len(report.Results))
 			for _, result := range report.Results {
+				names = append(names, path.Base(result.ResourceID))
 				require.Len(t, result.AssociatedControls, 1)
 				assert.Equal(t, apis.StatusPassed, result.AssociatedControls[0].Status.InnerStatus)
 			}
+			assert.ElementsMatch(t, tc.wantNames, names)
 		})
 	}
 }
