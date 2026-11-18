@@ -73,3 +73,39 @@ func TestCompletionRejectsInvalidArguments(t *testing.T) {
 		})
 	}
 }
+
+func TestCompletionHelpExamples(t *testing.T) {
+	var output bytes.Buffer
+
+	root := &cobra.Command{Use: "kubescape"}
+	root.AddCommand(GetCompletionCmd())
+	root.SetOut(&output)
+	root.SetErr(io.Discard)
+	root.SetArgs([]string{"completion", "--help"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("show completion help: %v", err)
+	}
+
+	help := output.String()
+
+	expectedExamples := []string{
+		"Generate completion scripts for Bash, Zsh, Fish, and PowerShell.",
+		"echo 'source <(kubescape completion bash)' >> ~/.bashrc",
+		`completion zsh > "${fpath[1]}/_`,
+		"completion fish > ~/.config/fish/completions/",
+		"completion powershell >> $PROFILE",
+	}
+
+	for _, example := range expectedExamples {
+		if !strings.Contains(help, example) {
+			t.Errorf("completion help is missing expected example %q", example)
+		}
+	}
+
+	brokenZshExample := `completion zsh)' >> "${fpath[1]}/_`
+
+	if strings.Contains(help, brokenZshExample) {
+		t.Error("completion help still contains the incorrect persistent Zsh instruction")
+	}
+}
