@@ -206,7 +206,7 @@ func mdWriteFailedSection(ctx context.Context, w io.Writer, controls []reportsum
 		}
 
 		severity := apis.ControlSeverityToString(ctrl.GetScoreFactor())
-		ew.printf("### %s — %s (`%s`)\n\n", ctrl.GetName(), severity, ctrl.GetID())
+		ew.printf("### %s — %s (`%s`)\n\n", mdEscapeCell(ctrl.GetName()), severity, mdEscapeCodeCell(ctrl.GetID()))
 
 		if rem := strings.TrimSpace(ctrl.GetRemediation()); rem != "" {
 			ew.printf("%s\n\n", mdBlockquote("**Remediation:** "+rem))
@@ -290,7 +290,7 @@ func mdWriteImageTargets(w io.Writer, images []string) error {
 	ew.printf("| Image |\n")
 	ew.printf("|---|\n")
 	for _, image := range images {
-		ew.printf("| `%s` |\n", mdEscapeCell(image))
+		ew.printf("| `%s` |\n", mdEscapeCodeCell(image))
 	}
 	ew.printf("\n")
 	return ew.err
@@ -359,7 +359,7 @@ func mdWriteImageVulnerabilities(w io.Writer, cves []imageprinter.CVE) error {
 			mdEscapeCell(cve.Package),
 			mdEscapeCell(cve.Version),
 			mdEscapeCell(mdFixedIn(cve)),
-			mdEscapeCell(cve.Image),
+			mdEscapeCodeCell(cve.Image),
 		)
 	}
 	return ew.err
@@ -444,14 +444,27 @@ func mdStatusLabel(status apis.IStatus) string {
 	}
 }
 
-// mdEscapeCell neutralizes pipe delimiters and line breaks (\r\n, \n, \r)
-// so table cell contents cannot break out of Markdown table rows (CWE-150).
+// mdEscapeCell neutralizes pipe delimiters and line breaks (\r\n, \n, \r),
+// and strips ASCII control characters so table cell contents cannot
+// break out of Markdown table rows or inject terminal control codes (CWE-150).
 func mdEscapeCell(s string) string {
 	s = strings.ReplaceAll(s, "|", "\\|")
 	s = strings.ReplaceAll(s, "\r\n", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.Map(func(r rune) rune {
+		if (r < 0x20 && r != '\t') || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
 	return strings.TrimSpace(s)
+}
+
+// mdEscapeCodeCell neutralizes cell boundaries and replaces backticks with single quotes
+// so contents cannot break out of backtick-delimited code spans in table cells (CWE-150 / CWE-116).
+func mdEscapeCodeCell(s string) string {
+	return strings.ReplaceAll(mdEscapeCell(s), "`", "'")
 }
 
 func mdBlockquote(s string) string {
@@ -467,8 +480,20 @@ func mdBlockquote(s string) string {
 	return strings.Join(lines, "\n")
 }
 
+// mdEscapeInline neutralizes backticks and control characters so inline code
+// spans cannot be prematurely terminated (CWE-150 / CWE-116).
 func mdEscapeInline(s string) string {
-	return strings.ReplaceAll(s, "`", "\\`")
+	s = strings.ReplaceAll(s, "`", "'")
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.Map(func(r rune) rune {
+		if (r < 0x20 && r != '\t') || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+	return strings.TrimSpace(s)
 }
 
 func mdWriteCoverageSection(w io.Writer, opaSessionObj *cautils.OPASessionObj) error {
