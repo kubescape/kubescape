@@ -45,7 +45,7 @@ deny contains msga if {
 		removes_pods(rule, rolebinding)
 		some field, values in {
 			"resources": {"pods", "pods/eviction", "pods/status", "nodes", "*/eviction", "*/status", "*"},
-			"verbs": {"create", "delete", "update", "patch", "*"},
+			"verbs": {"create", "delete", "deletecollection", "update", "patch", "*"},
 			"apiGroups": {"", "*"},
 		}
 		value := rule[field][l]
@@ -121,6 +121,16 @@ removes_pods(rule, _) if {
 	unrestricted_rule(rule)
 	targets(rule, "pods")
 	verb_or_wildcard(rule.verbs, "delete")
+}
+
+# deletecollection on pods removes every pod the request selects. The request
+# carries an empty name, and resourceNames is matched literally, so an entry
+# listing "" admits it just as an unrestricted one does.
+removes_pods(rule, _) if {
+	core_api_group(rule)
+	admits_unnamed_requests(rule)
+	targets(rule, "pods")
+	verb_or_wildcard(rule.verbs, "deletecollection")
 }
 
 # evict a pod through the eviction subresource.
@@ -206,6 +216,10 @@ names_a_pod(rule) if {
 	some name in resource_names(rule)
 	not name in {"", "*"}
 }
+
+admits_unnamed_requests(rule) if unrestricted_rule(rule)
+
+admits_unnamed_requests(rule) if "" in resource_names(rule)
 
 pairs_with(role, rolebinding) if {
 	endswith(role.kind, "Role")
