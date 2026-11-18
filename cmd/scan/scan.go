@@ -220,7 +220,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				// explicit --compliance-threshold apply here, unlike the default security
 				// view. Asking for --view security keeps that view's exemption, and the
 				// report then doesn't claim the compliance gate as effective.
-				scanInfo.EnforceCompliance = !(commandFlagChanged(cmd, "view") && strings.EqualFold(scanInfo.View, string(cautils.SecurityViewType)))
+				scanInfo.EnforceCompliance = !commandFlagChanged(cmd, "view") || !strings.EqualFold(scanInfo.View, string(cautils.SecurityViewType))
 				if !scanInfo.EnforceCompliance {
 					dropUnenforcedComplianceGate(scanInfo.ScanContract)
 				}
