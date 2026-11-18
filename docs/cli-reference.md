@@ -474,13 +474,46 @@ kubescape scan ./manifests --custom-rules ./myrules/no-root.rego
 A bare rule is matched against every resource kind, so it must filter input
 itself. Prefer a rule directory when the rule targets specific kinds.
 
+A **ValidatingAdmissionPolicy** YAML file is accepted too, so a guardrail can be
+scanned locally before it is applied to a cluster:
+
+```yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: disallow-host-ipc
+spec:
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+  validations:
+    - expression: "!has(object.spec.hostIPC) || !object.spec.hostIPC"
+      message: "hostIPC is forbidden"
+```
+
+```bash
+kubescape scan ./manifests --custom-rules ./myrules/disallow-host-ipc.yaml
+```
+
+The policy is evaluated only against the resources its `matchConstraints`
+target. A file may hold more than one policy separated by `---`, as in a
+manifest passed to `kubectl apply`; each document becomes its own
+`custom-<metadata.name>` control. Policies that narrow with
+`namespaceSelector`, or that take params other than the bundled
+`ControlConfiguration`, are refused because the offline scan cannot guarantee
+the inputs admission uses.
+
 Every custom rule becomes a control named `custom-<rule>` in the report.
 
 #### Custom rule severity
 
 A custom rule is **medium** severity (base score `5`) unless it says otherwise.
-Either layout can declare its own severity with a `# @baseScore <1-10>` comment
-anywhere in its Rego source:
+Any layout can declare its own severity with a `# @baseScore <1-10>` comment
+anywhere in its source. In a multi-document VAP file each policy can declare its
+own score; a document without one is medium:
 
 ```rego
 package armo_builtins

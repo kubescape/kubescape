@@ -641,3 +641,71 @@ metadata:
 	assert.Nil(t, vap)
 	assert.Contains(t, err.Error(), "expected admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy")
 }
+
+func TestParseVAP_RejectsNoMetadataName(t *testing.T) {
+	doc := []byte(`apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+spec:
+  validations:
+    - expression: "true"
+`)
+	vap, err := ParseVAP(doc)
+	require.Error(t, err)
+	assert.Nil(t, vap)
+	assert.Contains(t, err.Error(), "declares no metadata.name")
+}
+
+func TestParseVAPDocuments_MultiplePolicies(t *testing.T) {
+	doc := []byte(`apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: test-policy-1
+spec:
+  validations:
+    - expression: "true"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: test-policy-2
+spec:
+  validations:
+    - expression: "false"
+`)
+	documents, err := ParseVAPDocuments(doc)
+	require.NoError(t, err)
+	require.Len(t, documents, 2)
+	assert.Equal(t, "test-policy-1", documents[0].VAP.PolicyName)
+	assert.Equal(t, "test-policy-2", documents[1].VAP.PolicyName)
+	assert.Contains(t, string(documents[0].Raw), "test-policy-1")
+	assert.NotContains(t, string(documents[0].Raw), "test-policy-2")
+	assert.Contains(t, string(documents[1].Raw), "test-policy-2")
+}
+
+func TestParseVAPDocuments_ErrorNamesFailingDocument(t *testing.T) {
+	doc := []byte(`apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: test-policy
+spec:
+  validations:
+    - expression: "true"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: not-a-policy
+`)
+	documents, err := ParseVAPDocuments(doc)
+	require.Error(t, err)
+	assert.Nil(t, documents)
+	assert.Contains(t, err.Error(), "document 2:")
+	assert.Contains(t, err.Error(), "expected admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy")
+}
+
+func TestParseVAPDocuments_EmptyStreamRejected(t *testing.T) {
+	documents, err := ParseVAPDocuments([]byte("\n---\n   \n"))
+	require.Error(t, err)
+	assert.Nil(t, documents)
+	assert.Contains(t, err.Error(), "empty document")
+}
