@@ -189,7 +189,7 @@ func loadManifest(path string) *manifest {
 	m := &manifest{lines: splitLines(string(data))}
 	// A resolver that cannot be made leaves the diagnostics at the fallback
 	// position: the findings are still real.
-	m.resolver, _ = locationresolver.NewPathLocationResolver(path)
+	m.resolver, _ = locationresolver.NewPathLocationResolver(path, locationresolver.IndexedByWorkload(cautils.WorkloadDocuments))
 	return m
 }
 

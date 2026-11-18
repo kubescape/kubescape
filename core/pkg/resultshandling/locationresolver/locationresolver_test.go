@@ -3,8 +3,10 @@ package locationresolver
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -257,4 +259,59 @@ func TestGetMaxFileSize_InvalidFallback(t *testing.T) {
 		t.Setenv(maxFileSizeEnvVar, "0")
 		assert.Equal(t, int64(defaultMaxFileSize), getMaxFileSize())
 	})
+}
+
+// The scanner numbers a file's workloads ("<path>:<n>"), skipping documents that
+// yield none, so the location of a workload after an empty or comment-only
+// document is in its own document, not the one before it.
+func TestResolveLocationOfAWorkloadAfterADocumentWithout(t *testing.T) {
+	pod := func(name, image string) string {
+		return "apiVersion: v1\nkind: Pod\nmetadata:\n  name: " + name + "\nspec:\n  containers:\n  - name: c\n    image: " + image + "\n"
+	}
+	for name, between := range map[string]string{
+		"an empty document":       "---\n---\n",
+		"a comment-only document": "---\n# disabled\n---\n",
+		"a values-style document": "---\nreplicaCount: 1\n---\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			content := pod("a", "a-image") + between + pod("b", "b-image")
+			resolver := newWorkloadResolverFor(t, content)
+
+			location, err := resolver.ResolveLocation("spec.containers[0].image", 1)
+
+			require.NoError(t, err)
+			require.Positive(t, location.Line)
+			lines := strings.Split(content, "\n")
+			assert.Equal(t, "    image: b-image", lines[location.Line-1], "line %d", location.Line)
+		})
+	}
+}
+
+// A file without workloads is still indexed by document, and a workload inside
+// a List has no document of its own to point into.
+func TestResolveLocationWithoutWorkloadsAndInAList(t *testing.T) {
+	location, err := newWorkloadResolverFor(t, "a: 1\n---\nb: 2\n").ResolveLocation("b", 1)
+	require.NoError(t, err)
+	assert.Equal(t, 3, location.Line)
+
+	list := "apiVersion: v1\nkind: List\nitems:\n- apiVersion: v1\n  kind: Pod\n  metadata:\n    name: x\n"
+	_, err = newWorkloadResolverFor(t, list).ResolveLocation("metadata.name", 0)
+	assert.ErrorContains(t, err, "inside a List")
+
+	// Nor has a workload of a file the loader splits differently from the
+	// decoder, here at lone CR line breaks.
+	loneCR := "values: true\r---\rapiVersion: v1\rkind: Pod\rmetadata:\r  name: a\n---\napiVersion: v1\nkind: Pod\nmetadata:\n  name: b\n"
+	_, err = newWorkloadResolverFor(t, loneCR).ResolveLocation("metadata.name", 0)
+	assert.ErrorContains(t, err, "the loader reads")
+}
+
+// newWorkloadResolverFor is newResolverFor indexed by workload, as the
+// consumers of scan results make it.
+func newWorkloadResolverFor(t *testing.T, manifest string) *PathLocationResolver {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "d.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(manifest), 0o600))
+	resolver, err := NewPathLocationResolver(path, IndexedByWorkload(cautils.WorkloadDocuments))
+	require.NoError(t, err)
+	return resolver
 }

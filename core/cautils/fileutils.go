@@ -1470,6 +1470,46 @@ func hasGlobMeta(path string) bool {
 	return strings.ContainsAny(path, magicChars)
 }
 
+// WorkloadDocuments maps the workloads read from a YAML file, by the index the
+// loader gives them ("<path>:<n>"), to the documents they come from, numbered
+// as gopkg.in/yaml.v3 decodes the file. The two differ once a document yields
+// no workload, such as an empty or comment-only one or one that isn't a
+// Kubernetes object, or yields several, as a List does. A workload that came
+// out of a List maps to -1: it has no document of its own.
+func WorkloadDocuments(data []byte) ([]int, error) {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	var documents []int
+	for i := 0; ; i++ {
+		var node yaml.Node
+		if err := decoder.Decode(&node); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			return nil, fmt.Errorf("document %d: %w", i, err)
+		}
+		doc, err := yaml.Marshal(&node)
+		if err != nil {
+			return nil, fmt.Errorf("document %d: %w", i, err)
+		}
+		// The loader keeps the workloads of a document that also reports an
+		// error, so they are counted here too.
+		workloads, _ := readYamlFile(doc)
+		document := i
+		if len(workloads) > 0 && isListEnvelope(doc) {
+			document = -1
+		}
+		for range workloads {
+			documents = append(documents, document)
+		}
+	}
+	// The loader splits the file into documents on its own, by lines. Where it
+	// doesn't split as the decoder does, as with lone CR line breaks, it reads
+	// other workloads than the documents hold, and they can't be matched up.
+	if loaded, _ := readYamlFile(data); len(loaded) != len(documents) {
+		return nil, fmt.Errorf("the loader reads %d workloads from the file and its documents hold %d", len(loaded), len(documents))
+	}
+	return documents, nil
+}
+
 func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err error) {
 	yamlObjs = []workloadinterface.IMetadata{}
 	defer func() {
