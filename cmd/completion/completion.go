@@ -15,14 +15,20 @@ var completionCmdExamples = fmt.Sprintf(`
 
   # Enable ZSH shell autocompletion
   $ source <(%[1]s completion zsh)
-  $ echo 'source <(%[1]s completion zsh)' >> "${fpath[1]}/_%[1]s"
+  $ %[1]s completion zsh > "${fpath[1]}/_%[1]s"
+
+  # Enable FISH shell autocompletion
+  $ %[1]s completion fish > ~/.config/fish/completions/%[1]s.fish
+
+  # Enable PowerShell shell autocompletion
+  PS> %[1]s completion powershell >> $PROFILE
 `, cautils.ExecName())
 
 func GetCompletionCmd() *cobra.Command {
 	completionCmd := &cobra.Command{
 		Use:                   "completion [bash|zsh|fish|powershell]",
-		Short:                 "Generate autocompletion script",
-		Long:                  "To load completions",
+		Short:                 "Generate shell completion scripts",
+		Long:                  "Generate completion scripts for Bash, Zsh, Fish, and PowerShell.\n\nUse the examples below to enable completion in your shell.",
 		Example:               completionCmdExamples,
 		DisableFlagsInUseLine: true,
 		ValidArgs:             []string{"bash", "zsh", "fish", "powershell"},
