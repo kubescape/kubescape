@@ -508,7 +508,7 @@ func (fs *kustomizeHelmFileSystem) CleanedAbs(path string) (filesys.ConfirmedDir
 	directory, file, err := fs.FileSystem.CleanedAbs(path)
 	if err == nil && file != "" {
 		resolved := directory.Join(file)
-		if IsKustomizeFile(path) {
+		if IsKustomizeFile(path) || IsKustomizeFile(resolved) {
 			if fs.kustomizationFiles == nil {
 				fs.kustomizationFiles = map[string]string{}
 			}
@@ -549,10 +549,24 @@ func (fs *kustomizeHelmFileSystem) ReadFile(path string) ([]byte, error) {
 	}
 	// Only inspect files selected as generators; a plain resource with the
 	// same kind does not make the build invoke Helm.
-	if _, generator := fs.generatorFiles[path]; generator {
+	if fs.isGeneratorFile(path) {
 		fs.observeGenerators(contents)
 	}
 	return contents, err
+}
+
+func (fs *kustomizeHelmFileSystem) isGeneratorFile(path string) bool {
+	cleaned := filepath.Clean(path)
+	if _, ok := fs.generatorFiles[cleaned]; ok {
+		return true
+	}
+	for gen := range fs.generatorFiles {
+		rel, err := filepath.Rel(gen, cleaned)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // observeGenerators returns whether contents is a valid inline resource map.
@@ -588,6 +602,56 @@ func validateKustomizeHelmCommand(command string) error {
 		return fmt.Errorf("%w: expected Helm v3 or v4, got %q", ErrKustomizeHelmSetup, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func isKustomizeHelmError(err error, helmCommand string) bool {
+	if err == nil {
+		return false
+	}
+	if helmCommand == "" {
+		helmCommand = "helm"
+	}
+	cmdBase := filepath.Base(helmCommand)
+
+	var execErr *exec.Error
+	if errors.As(err, &execErr) && (execErr.Name == helmCommand || filepath.Base(execErr.Name) == cmdBase) {
+		return true
+	}
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) && (pathErr.Path == helmCommand || filepath.Base(pathErr.Path) == cmdBase) {
+		return true
+	}
+
+	errLower := strings.ToLower(err.Error())
+	cmdLower := strings.ToLower(helmCommand)
+	baseLower := strings.ToLower(cmdBase)
+
+	helmMarkers := []string{
+		"helmchartinflationgenerator",
+		"requires helm v3 or v4",
+		"cannot find version string in",
+		"error reading helm output",
+		"failed to set helm annotation",
+		"cannot create tmp dir to write helm values",
+		"unable to run: '" + cmdLower,
+		"unable to run: \"" + cmdLower,
+		"unable to run: '" + baseLower,
+		"unable to run: \"" + baseLower,
+		"is '" + cmdLower + "' installed?",
+		"is \"" + cmdLower + "\" installed?",
+		"is '" + baseLower + "' installed?",
+		"is \"" + baseLower + "\" installed?",
+		"exec: \"" + cmdLower + "\":",
+		"exec: \"" + baseLower + "\":",
+		"exec: '" + cmdLower + "':",
+		"exec: '" + baseLower + "':",
+	}
+	for _, marker := range helmMarkers {
+		if strings.Contains(errLower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // Get Workloads, creates the yaml files(K8s resources) using Kustomize and
@@ -638,7 +702,7 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	// scanned kustomization renders.
 	resmap, err := newKustomizer().Run(fSys, kustomizeDirectoryPath)
 	if err != nil {
-		if fSys.usesHelm {
+		if fSys.usesHelm || isKustomizeHelmError(err, helmCommand) {
 			err = errors.Join(err, validateKustomizeHelmCommand(helmCommand))
 		}
 		return nil, []error{err}
