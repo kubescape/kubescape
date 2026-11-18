@@ -7,6 +7,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1017,4 +1018,59 @@ func TestDecryptReportRestoresNamespaceSummaries(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, cautils.ClusterScopedNamespace, clusterScoped["namespace"],
 		"the cluster-scoped entry is never encrypted and must pass through unchanged")
+}
+
+func TestIsRBACSubject(t *testing.T) {
+	assert.False(t, isRBACSubject(nil))
+
+	deployment, err := workloadinterface.NewWorkload([]byte(`{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"web"}}`))
+	require.NoError(t, err)
+	assert.False(t, isRBACSubject(deployment))
+
+	widget := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
+		"kind":           "Widget",
+		"name":           "custom",
+		"relatedObjects": []any{},
+	})
+	assert.False(t, isRBACSubject(widget))
+
+	userRBAC := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
+		"apiGroup":       "rbac.authorization.k8s.io",
+		"kind":           "User",
+		"name":           "alice",
+		"relatedObjects": []any{},
+	})
+	assert.True(t, isRBACSubject(userRBAC))
+
+	groupRBAC := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
+		"apiGroup":       "rbac.authorization.k8s.io",
+		"kind":           "Group",
+		"name":           "devs",
+		"relatedObjects": []any{},
+	})
+	assert.True(t, isRBACSubject(groupRBAC))
+
+	userWithAPIVersion := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
+		"apiVersion":     "rbac.authorization.k8s.io/v1",
+		"kind":           "User",
+		"name":           "alice",
+		"relatedObjects": []any{},
+	})
+	assert.True(t, isRBACSubject(userWithAPIVersion))
+
+	userNonRBAC := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
+		"apiGroup":       "custom.auth.io",
+		"kind":           "User",
+		"name":           "alice",
+		"relatedObjects": []any{},
+	})
+	assert.False(t, isRBACSubject(userNonRBAC))
+
+	serviceAccount := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
+		"kind":           "ServiceAccount",
+		"name":           "default",
+		"namespace":      "kube-system",
+		"relatedObjects": []any{},
+	})
+	assert.False(t, isRBACSubject(serviceAccount))
 }
