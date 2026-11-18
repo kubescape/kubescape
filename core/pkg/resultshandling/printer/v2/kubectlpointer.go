@@ -29,8 +29,23 @@ var kubectlName = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$
 // isClusterScan reports whether the scan read its resources from a live
 // cluster, as opposed to manifest files, a Helm chart or a repository.
 func isClusterScan(opaSessionObj *cautils.OPASessionObj) bool {
-	return opaSessionObj != nil && opaSessionObj.Metadata != nil &&
-		opaSessionObj.Metadata.ScanMetadata.ScanningTarget == v2.Cluster
+	if opaSessionObj == nil || opaSessionObj.Metadata == nil {
+		return false
+	}
+	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget != v2.Cluster {
+		return false
+	}
+	// If any resource in the session came from a manifest file, this is a manifest
+	// scan (e.g. test fixtures using NewOPASessionObjMock with local files), not a live cluster scan.
+	for _, src := range opaSessionObj.ResourceSource {
+		if src.RelativePath != "" || src.Path != "" {
+			return false
+		}
+	}
+	if ctx := opaSessionObj.Metadata.ContextMetadata; ctx.DirectoryContextMetadata != nil || ctx.FileContextMetadata != nil || ctx.RepoContextMetadata != nil {
+		return false
+	}
+	return true
 }
 
 // jsonPathExpr turns a parsed path into the JSONPath expression kubectl reads

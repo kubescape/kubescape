@@ -748,7 +748,9 @@ func (sp *SARIFPrinter) configurationResult(ctx context.Context, opaSessionObj *
 	if rsrc != nil {
 		kind = rsrc.GetKind()
 	}
-	collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath, kind, sp.showSecrets)
+	if !resource.isVirtual && cache != nil {
+		collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath, kind, sp.showSecrets)
+	}
 	return r, true
 }
 
@@ -788,8 +790,10 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 		// report is the relative path alone, so a base path cannot stand in for a
 		// missing one. For live cluster scans, synthesize a stable virtual location
 		// so external consumers (DefectDojo, GitLab, etc.) do not drop findings.
+		var isVirtual bool
 		if relPath == "" {
 			if isClusterScan(opaSessionObj) {
+				isVirtual = true
 				if rsrc, ok := opaSessionObj.GetResource(resourceID); ok && rsrc != nil {
 					ns := rsrc.GetNamespace()
 					if ns == "" {
@@ -799,17 +803,21 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 					if kind == "" {
 						kind = "resource"
 					}
-					name := strings.ToLower(rsrc.GetName())
+					name := rsrc.GetName()
 					if name == "" {
 						name = "unnamed"
 					}
-					relPath = fmt.Sprintf("cluster/%s/%s/%s.yaml", ns, kind, name)
+					relPath = fmt.Sprintf("cluster/%s/%s/%s.yaml", url.PathEscape(ns), url.PathEscape(kind), url.PathEscape(name))
 				} else {
 					cleanID := strings.Trim(strings.ReplaceAll(resourceID, "//", "/"), "/")
 					if cleanID == "" {
 						cleanID = "unknown"
 					}
-					relPath = fmt.Sprintf("cluster/resources/%s.yaml", cleanID)
+					parts := strings.Split(cleanID, "/")
+					for i, p := range parts {
+						parts[i] = url.PathEscape(p)
+					}
+					relPath = fmt.Sprintf("cluster/resources/%s.yaml", strings.Join(parts, "/"))
 				}
 			} else {
 				continue
@@ -820,6 +828,7 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 			resourceID: resourceID,
 			relPath:    filepath.ToSlash(relPath),
 			absPath:    filepath.Join(effectiveBasePath(resourceSource, basePath), relPath),
+			isVirtual:  isVirtual,
 		})
 	}
 
@@ -887,8 +896,12 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 		if stream.err != nil {
 			return fmt.Errorf("failed to write SARIF report: %w", stream.err)
 		}
-		cache := caches.get(resource.absPath)
-		locationResolver := cache.locationResolver(resource.absPath, "SARIF")
+		var cache *fixReportCache
+		var locationResolver *locationresolver.PathLocationResolver
+		if !resource.isVirtual {
+			cache = caches.get(resource.absPath)
+			locationResolver = cache.locationResolver(resource.absPath, "SARIF")
+		}
 
 		for _, toPin := range sortedSARIFControls(opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls) {
 			if stream.err != nil {

@@ -1016,12 +1016,24 @@ func TestPrintConfigurationScan_ClusterScanSynthesizesVirtualLocation(t *testing
 	clusterRoleID := clusterRoleObj.GetID()
 	session.SetResource(clusterRoleObj)
 
-	// 3. Fallback: resourceID not in catalog
-	fallbackID := "custom.io/v1/unknown-resource"
+	// 3. Workload with mixed-case and reserved characters (#) in name
+	specialObj := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRole",
+		"metadata": map[string]any{
+			"name": "Audit#Ops",
+		},
+	})
+	specialID := specialObj.GetID()
+	session.SetResource(specialObj)
+
+	// 4. Fallback: resourceID not in catalog (with reserved character)
+	fallbackID := "custom.io/v1/unknown#resource"
 
 	const control1 = "C-0057"
 	const control2 = "C-0012"
 	const control3 = "C-0001"
+	const control4 = "C-0002"
 
 	session.ResourcesResult[deployID] = resourcesresults.Result{
 		ResourceID: deployID,
@@ -1041,11 +1053,20 @@ func TestPrintConfigurationScan_ClusterScanSynthesizesVirtualLocation(t *testing
 			},
 		},
 	}
+	session.ResourcesResult[specialID] = resourcesresults.Result{
+		ResourceID: specialID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: control3,
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			},
+		},
+	}
 	session.ResourcesResult[fallbackID] = resourcesresults.Result{
 		ResourceID: fallbackID,
 		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
 			{
-				ControlID: control3,
+				ControlID: control4,
 				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
 			},
 		},
@@ -1068,6 +1089,12 @@ func TestPrintConfigurationScan_ClusterScanSynthesizesVirtualLocation(t *testing
 				},
 				control3: reportsummary.ControlSummary{
 					ControlID:   control3,
+					Name:        "Audit role permissions",
+					Description: "Check audit role permissions",
+					ScoreFactor: 7.0,
+				},
+				control4: reportsummary.ControlSummary{
+					ControlID:   control4,
 					Name:        "Generic rule",
 					Description: "Generic rule description",
 					ScoreFactor: 5.0,
@@ -1094,22 +1121,26 @@ func TestPrintConfigurationScan_ClusterScanSynthesizesVirtualLocation(t *testing
 	require.NoError(t, json.Unmarshal(raw, &report))
 	require.Len(t, report.Runs, 1)
 
-	// Findings must NOT be dropped! All 3 findings must be present.
+	// Findings must NOT be dropped! All 4 findings must be present.
 	results := report.Runs[0].Results
-	require.Len(t, results, 3, "cluster scan findings must not be dropped from SARIF report")
+	require.Len(t, results, 4, "cluster scan findings must not be dropped from SARIF report")
 
 	uriByRule := make(map[string]string)
 	for _, res := range results {
 		require.NotEmpty(t, res.Locations)
 		require.NotNil(t, res.Locations[0].PhysicalLocation)
 		require.NotNil(t, res.Locations[0].PhysicalLocation.ArtifactLocation)
+		require.NotNil(t, res.Locations[0].PhysicalLocation.Region)
+		assert.Equal(t, 1, *res.Locations[0].PhysicalLocation.Region.StartLine, "virtual locations must default to line 1")
+		assert.Equal(t, 1, *res.Locations[0].PhysicalLocation.Region.StartColumn, "virtual locations must default to column 1")
 		uri := *res.Locations[0].PhysicalLocation.ArtifactLocation.URI
 		uriByRule[*res.RuleID] = uri
 	}
 
 	assert.Equal(t, "cluster/production/deployment/my-app.yaml", uriByRule[control1])
 	assert.Equal(t, "cluster/_cluster/clusterrole/cluster-admin-role.yaml", uriByRule[control2])
-	assert.Equal(t, "cluster/resources/custom.io/v1/unknown-resource.yaml", uriByRule[control3])
+	assert.Equal(t, "cluster/_cluster/clusterrole/Audit%23Ops.yaml", uriByRule[control3], "case preserved and # percent-encoded")
+	assert.Equal(t, "cluster/resources/custom.io/v1/unknown%23resource.yaml", uriByRule[control4], "fallback ID percent-encoded")
 }
 
 // TestPrintConfigurationScan_PopulatesInvocations is the regression test for
