@@ -572,8 +572,10 @@ func TestASkippedFolderKeepsTheDiagnosticsOfItsFiles(t *testing.T) {
 		return f, nil
 	})
 	h := newHarness(t, scan, true)
-	require.NoError(t, os.Mkdir(filepath.Join(h.dir, "app"), 0o700))
-	pod, other = h.file(filepath.Join("app", "pod.yaml")), h.file("other.yaml")
+	// Capitals in the path: the skipped folder is kept as a key, lowercased where
+	// the file system ignores case.
+	require.NoError(t, os.Mkdir(filepath.Join(h.dir, "App"), 0o700))
+	pod, other = h.file(filepath.Join("App", "Pod.yaml")), h.file("other.yaml")
 	h.save(other)
 	h.nextPublish()
 	h.nextPublish()
@@ -587,6 +589,19 @@ func TestASkippedFolderKeepsTheDiagnosticsOfItsFiles(t *testing.T) {
 	_, kept := h.c.published[pathKey(pod)]
 	h.c.pubMu.Unlock()
 	assert.True(t, kept, "the pod's diagnostics are left as they are")
+}
+
+// The unreliable paths are keys, lowercased where the file system ignores case
+// (pathKey), so a file is found inside one whatever the case of its own path.
+func TestInsideAnyComparesKeys(t *testing.T) {
+	app := filepath.Join(t.TempDir(), "App")
+	require.NoError(t, os.Mkdir(app, 0o700))
+	pod := filepath.Join(app, "Pod.yaml")
+	require.NoError(t, os.WriteFile(pod, []byte("kind: Pod\n"), 0o600))
+
+	assert.True(t, insideAny(map[string]struct{}{pathKey(app): {}}, pod), "a file inside a skipped folder")
+	assert.True(t, insideAny(map[string]struct{}{pathKey(pod): {}}, pod), "a skipped file is inside itself")
+	assert.False(t, insideAny(map[string]struct{}{pathKey(app): {}}, filepath.Join(filepath.Dir(app), "Other.yaml")))
 }
 
 func TestADocumentOutsideTheWorkspaceIsNotTouched(t *testing.T) {
