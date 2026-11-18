@@ -507,7 +507,11 @@ func isListEnvelope(doc []byte) bool {
 	if err := yaml.Unmarshal(doc, &decoded); err != nil {
 		return true
 	}
-	obj, ok := convertYamlToJson(decoded).(map[string]any)
+	converted, err := convertYamlToJson(decoded)
+	if err != nil {
+		return true
+	}
+	obj, ok := converted.(map[string]any)
 	if !ok {
 		return false
 	}
