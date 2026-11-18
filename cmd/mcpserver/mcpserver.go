@@ -1083,6 +1083,8 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		return mcp.NewToolResultText(string(result)), nil
 	case "create_admission_policy_binding":
 		return ksServer.CreateAdmissionPolicyBinding(ctx, arguments)
+	case "explain_control":
+		return ksServer.ExplainControl(ctx, arguments)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -1115,6 +1117,7 @@ func registerTools(ksServer *KubescapeMcpserver) {
 	createPolicyListingTools(ksServer)
 	createAdvancedTools(ksServer)
 	createSecretExposureTools(ksServer)
+	createExplainControlTools(ksServer)
 }
 
 // validateMCPOptions validates and normalizes the transport and port arguments before
