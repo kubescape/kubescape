@@ -25,6 +25,7 @@ import (
 )
 
 func TestGetPrometheusDefaultScanCommand(t *testing.T) {
+	t.Setenv("KS_FORMAT", "json") // must not affect the metrics scan
 	tests := []struct {
 		name             string
 		frameworksParam  string
@@ -281,26 +282,36 @@ func TestMetrics_CleansUpResultsFile(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
-func TestMetrics_CleansUpResultsFileWithConfiguredFormat(t *testing.T) {
-	withTempOutputDirs(t)
-	t.Setenv("KS_FORMAT", "json")
+// TestMetrics_IgnoresConfiguredFormat guards against KS_FORMAT, the REST API's
+// default output format, changing what the metrics scan writes: the handler
+// only reads the Prometheus results file.
+func TestMetrics_IgnoresConfiguredFormat(t *testing.T) {
+	for _, format := range []string{"json", "junit", "yaml", "pretty-printer", "sarif", "github-actions", "json,prometheus"} {
+		t.Run(format, func(t *testing.T) {
+			withTempOutputDirs(t)
+			t.Setenv("KS_FORMAT", format)
 
-	defer func(o scanner) { scanImpl = o }(scanImpl)
-	scanImpl = func(_ context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
-		resolved, _ := printer.ResolveOutputFile(scanInfo.Format, scanInfo.Output, "")
-		require.NoError(t, os.WriteFile(resolved, []byte("{}"), 0o600))
-		return nil, nil
+			defer func(o scanner) { scanImpl = o }(scanImpl)
+			scanImpl = func(_ context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+				assert.Equal(t, printer.PrometheusFormat, scanInfo.Format)
+				resolved, _ := printer.ResolveOutputFile(scanInfo.Format, scanInfo.Output, "")
+				require.NoError(t, os.WriteFile(resolved, []byte("# metrics\n"), 0o600))
+				return nil, nil
+			}
+
+			h := NewHTTPHandler(false)
+			rq := httptest.NewRequest(http.MethodGet, "/v1/metrics", nil)
+			w := httptest.NewRecorder()
+
+			h.Metrics(w, rq)
+
+			require.Equal(t, http.StatusOK, w.Result().StatusCode)
+			assert.Equal(t, "# metrics\n", w.Body.String())
+			entries, err := os.ReadDir(OutputDir)
+			require.NoError(t, err)
+			assert.Empty(t, entries)
+		})
 	}
-
-	h := NewHTTPHandler(false)
-	rq := httptest.NewRequest(http.MethodGet, "/v1/metrics", nil)
-	w := httptest.NewRecorder()
-
-	h.Metrics(w, rq)
-
-	entries, err := os.ReadDir(OutputDir)
-	require.NoError(t, err)
-	assert.Empty(t, entries)
 }
 
 func TestMetrics_CleansUpResultsFileOnDisconnect(t *testing.T) {

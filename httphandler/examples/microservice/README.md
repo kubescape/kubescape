@@ -165,7 +165,7 @@ Configure the microservice using environment variables in your deployment:
 | `KS_ACCOUNT` | Default account ID |
 | `KS_EXCLUDE_NAMESPACES` | Default namespaces to exclude |
 | `KS_INCLUDE_NAMESPACES` | Default namespaces to include |
-| `KS_FORMAT` | Default output format |
+| `KS_FORMAT` | Default output format for scan requests (`GET /v1/metrics` always uses `prometheus`) |
 | `KS_LOGGER_LEVEL` | Log level (`debug`, `info`, `warning`, `error`) |
 
 ---

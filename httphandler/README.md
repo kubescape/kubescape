@@ -367,7 +367,7 @@ Configure the HTTP handler using environment variables:
 | `KS_EXCLUDE_NAMESPACES` | Default namespaces to exclude | `kube-system,kube-public` |
 | `KS_INCLUDE_NAMESPACES` | Default namespaces to include | `production,staging` |
 | `KS_NAMESPACE_FILTERS_FILE` | Optional JSON file supplying live namespace defaults for scan and metrics requests | `/etc/namespace-filters/namespaceFilters.json` |
-| `KS_FORMAT` | Default output format | `json` |
+| `KS_FORMAT` | Default output format for scan requests (`GET /v1/metrics` always uses `prometheus`) | `json` |
 | `KS_LOGGER_NAME` | Logger name | `kubescape` |
 | `KS_LOGGER_LEVEL` | Log level | `info`, `debug`, `warning`, `error` |
 | `KS_DOWNLOAD_ARTIFACTS` | Download artifacts on each scan | `true`, `false` |
