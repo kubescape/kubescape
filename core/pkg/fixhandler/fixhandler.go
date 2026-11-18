@@ -2154,7 +2154,7 @@ func FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int
 	}
 
 	isStringValue := true
-	if _, err := strconv.ParseBool(value); err == nil {
+	if isYAMLBoolean(value) {
 		isStringValue = false
 	} else if f, err := strconv.ParseFloat(value, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
 		isStringValue = false

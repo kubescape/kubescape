@@ -280,13 +280,112 @@ func Test_fixPathToValidYamlExpression(t *testing.T) {
 		want string
 	}{
 		{
-			name: "fix path with boolean value",
+			name: "fix path with boolean true value",
 			args: args{
 				fixPath:             "spec.template.spec.containers[0].securityContext.privileged",
 				value:               "true",
 				documentIndexInYaml: 2,
 			},
 			want: "select(di==2).spec.template.spec.containers[0].securityContext.privileged |= true",
+		},
+		{
+			name: "fix path with boolean false value",
+			args: args{
+				fixPath:             "spec.template.spec.containers[0].securityContext.privileged",
+				value:               "false",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).spec.template.spec.containers[0].securityContext.privileged |= false",
+		},
+		{
+			name: "fix path with uppercase boolean value",
+			args: args{
+				fixPath:             "spec.template.spec.containers[0].securityContext.privileged",
+				value:               "TRUE",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).spec.template.spec.containers[0].securityContext.privileged |= TRUE",
+		},
+		{
+			name: "fix path with titlecase True boolean value",
+			args: args{
+				fixPath:             "spec.template.spec.containers[0].securityContext.privileged",
+				value:               "True",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).spec.template.spec.containers[0].securityContext.privileged |= True",
+		},
+		{
+			name: "fix path with titlecase False boolean value",
+			args: args{
+				fixPath:             "spec.template.spec.containers[0].securityContext.privileged",
+				value:               "False",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).spec.template.spec.containers[0].securityContext.privileged |= False",
+		},
+		{
+			name: "fix path with uppercase FALSE boolean value",
+			args: args{
+				fixPath:             "spec.template.spec.containers[0].securityContext.privileged",
+				value:               "FALSE",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).spec.template.spec.containers[0].securityContext.privileged |= FALSE",
+		},
+		{
+			name: "fix path with mixed-case tRuE string value",
+			args: args{
+				fixPath:             "metadata.labels.tier",
+				value:               "tRuE",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).metadata.labels.tier |= \"tRuE\"",
+		},
+		{
+			name: "fix path with mixed-case fAlSe string value",
+			args: args{
+				fixPath:             "metadata.labels.tier",
+				value:               "fAlSe",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).metadata.labels.tier |= \"fAlSe\"",
+		},
+		{
+			name: "fix path with single letter t string value",
+			args: args{
+				fixPath:             "metadata.labels.tier",
+				value:               "t",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).metadata.labels.tier |= \"t\"",
+		},
+		{
+			name: "fix path with single letter f string value",
+			args: args{
+				fixPath:             "metadata.labels.tier",
+				value:               "f",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).metadata.labels.tier |= \"f\"",
+		},
+		{
+			name: "fix path with single letter uppercase T string value",
+			args: args{
+				fixPath:             "metadata.labels.tier",
+				value:               "T",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).metadata.labels.tier |= \"T\"",
+		},
+		{
+			name: "fix path with single letter uppercase F string value",
+			args: args{
+				fixPath:             "metadata.labels.tier",
+				value:               "F",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).metadata.labels.tier |= \"F\"",
 		},
 		{
 			name: "fix path with string value",
