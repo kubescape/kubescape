@@ -152,3 +152,77 @@ func TestSettleControlStatus(t *testing.T) {
 	SettleControlStatus(summary, &plain)
 	require.Equal(t, apis.StatusInfo{InnerStatus: apis.StatusFailed}, plain.Status)
 }
+
+func TestEffectiveStatus_NilSafety(t *testing.T) {
+	summary := summaryWith(map[string][]string{"NSA": {"C-1"}})
+
+	t.Run("ControlStatus nil control", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			status := ControlStatus(summary, nil)
+			require.NotNil(t, status)
+			require.Equal(t, apis.StatusUnknown, status.Status())
+		})
+	})
+
+	t.Run("RuleStatus nil rule", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			status := RuleStatus(summary, "C-1", nil)
+			require.NotNil(t, status)
+			require.Equal(t, apis.StatusUnknown, status.Status())
+		})
+	})
+
+	t.Run("FrameworkRuleStatus nil rule", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			status := FrameworkRuleStatus(summary, "NSA", "C-1", nil)
+			require.NotNil(t, status)
+			require.Equal(t, apis.StatusUnknown, status.Status())
+
+			statusNoFw := FrameworkRuleStatus(summary, "", "C-1", nil)
+			require.NotNil(t, statusNoFw)
+			require.Equal(t, apis.StatusUnknown, statusNoFw.Status())
+		})
+	})
+
+	t.Run("ResourceStatus nil result", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			status := ResourceStatus(summary, nil)
+			require.NotNil(t, status)
+			require.Equal(t, apis.StatusUnknown, status.Status())
+		})
+	})
+
+	t.Run("FailedRules nil rules or exceptions", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			ctrl := resourcesresults.ResourceAssociatedControl{}
+			failing := FailedRules(summary, ctrl)
+			require.Empty(t, failing.ResourceAssociatedRules)
+		})
+	})
+
+	t.Run("EvidenceControl nil control", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			ctrl := resourcesresults.ResourceAssociatedControl{}
+			evidence := EvidenceControl(summary, ctrl)
+			require.Equal(t, ctrl, evidence)
+		})
+	})
+
+	t.Run("ControlIDsByStatus nil result", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			lists := ControlIDsByStatus(summary, nil)
+			require.NotNil(t, lists)
+			require.Empty(t, lists.All())
+		})
+	})
+
+	t.Run("SettleControlStatus nil control", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			SettleControlStatus(summary, nil)
+		})
+	})
+
+	t.Run("hasException nil control", func(t *testing.T) {
+		require.False(t, hasException(nil))
+	})
+}
