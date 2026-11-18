@@ -258,6 +258,13 @@ func (e *Evaluator) activationFor(ctx context.Context, obj, namespaceObject map[
 	activation := stubBindings(obj, namespaceObject)
 	activation["object"] = normalizeNullFields(obj)
 	activation["params"] = params
+	// CEL aggregate equality can hide nested errors. Validate each binding once;
+	// rechecking on every list or map access makes comprehensions quadratic.
+	for name, value := range activation {
+		if err := jsonNumberError(value); err != nil {
+			activation[name] = err
+		}
+	}
 	activation["variables"] = e.lazyVariables(ctx, variables, activation, budget)
 	return activation
 }
