@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
 	"github.com/kubescape/go-logger"
@@ -444,21 +445,27 @@ func mdStatusLabel(status apis.IStatus) string {
 	}
 }
 
-// mdEscapeCell neutralizes pipe delimiters and line breaks (\r\n, \n, \r),
-// and strips ASCII control characters so table cell contents cannot
-// break out of Markdown table rows or inject terminal control codes (CWE-150).
-func mdEscapeCell(s string) string {
-	s = strings.ReplaceAll(s, "|", "\\|")
+// mdSanitizeText collapses line breaks to spaces, strips C0 (except tab) and C1
+// control characters, and trims surrounding whitespace (CWE-150).
+func mdSanitizeText(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", " ")
 	s = strings.Map(func(r rune) rune {
-		if (r < 0x20 && r != '\t') || r == 0x7f {
+		if unicode.IsControl(r) && r != '\t' {
 			return -1
 		}
 		return r
 	}, s)
 	return strings.TrimSpace(s)
+}
+
+// mdEscapeCell neutralizes pipe delimiters and line breaks (\r\n, \n, \r),
+// and strips control characters (C0 except tab, and C1) so table cell contents
+// cannot break out of Markdown table rows or inject control codes (CWE-150).
+func mdEscapeCell(s string) string {
+	s = strings.ReplaceAll(s, "|", "\\|")
+	return mdSanitizeText(s)
 }
 
 // mdEscapeCodeCell neutralizes cell boundaries and replaces backticks with single quotes
@@ -484,16 +491,7 @@ func mdBlockquote(s string) string {
 // spans cannot be prematurely terminated (CWE-150 / CWE-116).
 func mdEscapeInline(s string) string {
 	s = strings.ReplaceAll(s, "`", "'")
-	s = strings.ReplaceAll(s, "\r\n", " ")
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", " ")
-	s = strings.Map(func(r rune) rune {
-		if (r < 0x20 && r != '\t') || r == 0x7f {
-			return -1
-		}
-		return r
-	}, s)
-	return strings.TrimSpace(s)
+	return mdSanitizeText(s)
 }
 
 func mdWriteCoverageSection(w io.Writer, opaSessionObj *cautils.OPASessionObj) error {
