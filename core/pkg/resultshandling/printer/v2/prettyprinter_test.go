@@ -675,3 +675,64 @@ func TestActionPrint_PrettyPrinter_NoDataDoesNotLogOutputFile(t *testing.T) {
 
 	assert.NotContains(t, log, "Scan results saved")
 }
+
+func TestPrettyPrinter_printResults_NilSafety(t *testing.T) {
+	pp, _ := newTestPrettyPrinterFile(t)
+
+	t.Run("nil summary does not panic", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			pp.printResults(nil, nil, nil, [][]string{{"C-0001"}})
+		})
+	})
+
+	t.Run("missing control in summary does not panic", func(t *testing.T) {
+		summary := &reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{},
+		}
+		assert.NotPanics(t, func() {
+			pp.printResults(summary, nil, nil, [][]string{{"C-9999"}})
+		})
+	})
+}
+
+func TestPrettyPrinter_printSummary_NilSafety(t *testing.T) {
+	pp, _ := newTestPrettyPrinterFile(t)
+
+	t.Run("nil controlSummary does not panic", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			pp.printSummary(nil)
+		})
+	})
+
+	t.Run("controlSummary with nil NumberOfResources does not panic", func(t *testing.T) {
+		mock := &mockNilResourcesControlSummary{
+			ControlSummary: reportsummary.ControlSummary{
+				ControlID: "C-0001",
+				Name:      "test-control",
+			},
+		}
+		assert.NotPanics(t, func() {
+			pp.printSummary(mock)
+		})
+	})
+}
+
+func TestPrettyPrinter_printTitle_NilSafety(t *testing.T) {
+	pp, _ := newTestPrettyPrinterFile(t)
+
+	t.Run("nil controlSummary does not panic", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			pp.printTitle(nil)
+		})
+	})
+
+	t.Run("controlSummary with nil Status does not panic", func(t *testing.T) {
+		ctrl := &reportsummary.ControlSummary{
+			ControlID: "C-0001",
+			Name:      "test-control",
+		}
+		assert.NotPanics(t, func() {
+			pp.printTitle(ctrl)
+		})
+	})
+}

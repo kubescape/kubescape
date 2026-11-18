@@ -1495,6 +1495,18 @@ func Test_mapInfoToPrintInfo_stableMarkers(t *testing.T) {
 	}
 }
 
+func Test_mapInfoToPrintInfo_NilStatusSafety(t *testing.T) {
+	controls := reportsummary.ControlSummaries{
+		"C-0001": reportsummary.ControlSummary{
+			ControlID: "C-0001",
+		},
+	}
+	assert.NotPanics(t, func() {
+		res := mapInfoToPrintInfo(controls)
+		assert.Empty(t, res)
+	})
+}
+
 func TestFilterBySeverity(t *testing.T) {
 	report := &PostureReportWithSeverity{
 		SummaryDetails: SummaryDetailsWithSeverity{

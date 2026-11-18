@@ -559,3 +559,10 @@ func TestCollectSkippedControls_FillMissingDescriptionAndRemediation(t *testing.
 		assert.Equal(t, "configuration: initial skip reason", results[0].reason)
 	})
 }
+
+func TestListResultSummaryFromCatalog_NilSafety(t *testing.T) {
+	assert.NotPanics(t, func() {
+		res := listResultSummaryFromCatalog(nil, nil)
+		assert.Nil(t, res)
+	})
+}

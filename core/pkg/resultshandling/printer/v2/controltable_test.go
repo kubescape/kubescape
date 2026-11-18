@@ -204,3 +204,67 @@ func mockSummaryDetails() (*reportsummary.SummaryDetails, error) {
 
 	return v, nil
 }
+
+type mockNilResourcesControlSummary struct {
+	reportsummary.ControlSummary
+}
+
+func (m *mockNilResourcesControlSummary) NumberOfResources() reportsummary.ICounters {
+	return nil
+}
+
+func Test_generateTableRow_NilSafety(t *testing.T) {
+	t.Run("nil control summary returns nil", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			row := generateTableRow(nil, nil)
+			assert.Nil(t, row)
+		})
+	})
+
+	t.Run("nil NumberOfResources does not panic", func(t *testing.T) {
+		mock := &mockNilResourcesControlSummary{
+			ControlSummary: reportsummary.ControlSummary{
+				ControlID: "C-0001",
+				Name:      "test-control",
+			},
+		}
+		assert.NotPanics(t, func() {
+			row := generateTableRow(mock, nil)
+			require.NotNil(t, row)
+			assert.Equal(t, "C-0001", row.ref)
+			assert.Equal(t, "", row.counterFailed)
+			assert.Equal(t, "", row.counterAll)
+		})
+	})
+}
+
+func Test_getInfoColumn_NilSafety(t *testing.T) {
+	assert.NotPanics(t, func() {
+		assert.Equal(t, "", getInfoColumn(nil, nil))
+	})
+	assert.NotPanics(t, func() {
+		ctrl := &reportsummary.ControlSummary{}
+		assert.Equal(t, "", getInfoColumn(ctrl, nil))
+	})
+}
+
+func Test_getComplianceScoreColumn_NilSafety(t *testing.T) {
+	assert.NotPanics(t, func() {
+		assert.Equal(t, "N/A", getComplianceScoreColumn(nil, nil))
+	})
+	assert.NotPanics(t, func() {
+		ctrl := &reportsummary.ControlSummary{}
+		assert.Equal(t, "N/A", getComplianceScoreColumn(ctrl, nil))
+	})
+	assert.NotPanics(t, func() {
+		score := float32(0.0)
+		ctrl := &reportsummary.ControlSummary{ComplianceScore: &score}
+		assert.Equal(t, "0%", getComplianceScoreColumn(ctrl, nil))
+	})
+}
+
+func Test_getSeverityColumn_NilSafety(t *testing.T) {
+	assert.NotPanics(t, func() {
+		assert.Equal(t, "", getSeverityColumn(nil))
+	})
+}

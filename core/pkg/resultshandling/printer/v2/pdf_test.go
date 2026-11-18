@@ -553,3 +553,25 @@ func TestPdfPrinter_ActionPrint_NilReportNoData(t *testing.T) {
 	err := pp.ActionPrint(context.Background(), session, nil)
 	assert.ErrorContains(t, err, "failed to print results, missing data")
 }
+
+func TestPdfPrinter_getTableObjects_NilSafety(t *testing.T) {
+	pp := NewPdfPrinter()
+	t.Run("nil summary details returns empty slice", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			objs := pp.getTableObjects(nil, [][]string{{"C-0001"}}, nil)
+			require.NotNil(t, objs)
+			assert.Empty(t, *objs)
+		})
+	})
+
+	t.Run("missing control in summary details does not panic", func(t *testing.T) {
+		summary := &reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{},
+		}
+		assert.NotPanics(t, func() {
+			objs := pp.getTableObjects(summary, [][]string{{"C-9999"}}, nil)
+			require.NotNil(t, objs)
+			assert.Empty(t, *objs)
+		})
+	})
+}

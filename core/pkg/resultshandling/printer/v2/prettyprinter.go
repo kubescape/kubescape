@@ -229,9 +229,15 @@ func (pp *PrettyPrinter) Score(_ float32) {
 }
 
 func (pp *PrettyPrinter) printResults(summary *reportsummary.SummaryDetails, catalog cautils.ResourceCatalog, resourcesResult map[string]resourcesresults.Result, sortedControlIDs [][]string) {
+	if summary == nil {
+		return
+	}
 	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
 		for _, c := range sortedControlID {
 			controlSummary := summary.Controls.GetControl(reportsummary.EControlCriteriaID, c)
+			if controlSummary == nil {
+				continue
+			}
 			pp.printTitle(controlSummary)
 			pp.printResources(summary, controlSummary, catalog, resourcesResult)
 			pp.printSummary(controlSummary)
@@ -240,12 +246,22 @@ func (pp *PrettyPrinter) printResults(summary *reportsummary.SummaryDetails, cat
 }
 
 func (prettyPrinter *PrettyPrinter) printSummary(controlSummary reportsummary.IControlSummary) {
+	if controlSummary == nil {
+		return
+	}
+	var passed, skipped, failed, all int
+	if numRes := controlSummary.NumberOfResources(); numRes != nil {
+		passed = numRes.Passed()
+		skipped = numRes.Skipped()
+		failed = numRes.Failed()
+		all = numRes.All()
+	}
 	cautils.SimpleDisplay(prettyPrinter.writer, "Summary - ")
-	cautils.SuccessDisplay(prettyPrinter.writer, "Passed:%v   ", controlSummary.NumberOfResources().Passed())
-	cautils.WarningDisplay(prettyPrinter.writer, "Action Required:%v   ", controlSummary.NumberOfResources().Skipped())
-	cautils.FailureDisplay(prettyPrinter.writer, "Failed:%v   ", controlSummary.NumberOfResources().Failed())
-	cautils.InfoDisplay(prettyPrinter.writer, "Total:%v\n", controlSummary.NumberOfResources().All())
-	if controlSummary.GetStatus().IsFailed() {
+	cautils.SuccessDisplay(prettyPrinter.writer, "Passed:%v   ", passed)
+	cautils.WarningDisplay(prettyPrinter.writer, "Action Required:%v   ", skipped)
+	cautils.FailureDisplay(prettyPrinter.writer, "Failed:%v   ", failed)
+	cautils.InfoDisplay(prettyPrinter.writer, "Total:%v\n", all)
+	if status := controlSummary.GetStatus(); status != nil && status.IsFailed() {
 		cautils.DescriptionDisplay(prettyPrinter.writer, "Remediation: %v\n", controlSummary.GetRemediation())
 	}
 	cautils.DescriptionDisplay(prettyPrinter.writer, "\n")
@@ -253,12 +269,21 @@ func (prettyPrinter *PrettyPrinter) printSummary(controlSummary reportsummary.IC
 }
 
 func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.IControlSummary) {
+	if controlSummary == nil {
+		return
+	}
 	cautils.InfoDisplay(prettyPrinter.writer, "[control: %s - %s] ", controlSummary.GetName(), cautils.GetControlLink(controlSummary.GetID()))
 	statusDetails := ""
 	if controlSummary.GetSubStatus() != apis.SubStatusUnknown {
 		statusDetails = fmt.Sprintf(" (%s)", controlSummary.GetSubStatus())
 	}
-	switch controlSummary.GetStatus().Status() {
+	var status apis.ScanningStatus
+	var statusInfo string
+	if s := controlSummary.GetStatus(); s != nil {
+		status = s.Status()
+		statusInfo = s.Info()
+	}
+	switch status {
 	case apis.StatusSkipped:
 		cautils.InfoDisplay(prettyPrinter.writer, "action required%s %v\n", statusDetails, emoji.ConfusedFace)
 	case apis.StatusFailed:
@@ -267,13 +292,15 @@ func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.ICon
 		cautils.SuccessDisplay(prettyPrinter.writer, "passed%s %v\n", statusDetails, emoji.ThumbsUp)
 	}
 	cautils.DescriptionDisplay(prettyPrinter.writer, "Description: %s\n", controlSummary.GetDescription())
-	if controlSummary.GetStatus().Info() != "" {
-		cautils.WarningDisplay(prettyPrinter.writer, "Reason: %v\n", controlSummary.GetStatus().Info())
+	if statusInfo != "" {
+		cautils.WarningDisplay(prettyPrinter.writer, "Reason: %v\n", statusInfo)
 	}
 }
 
 func (pp *PrettyPrinter) printResources(summary *reportsummary.SummaryDetails, controlSummary reportsummary.IControlSummary, catalog cautils.ResourceCatalog, resourcesResult map[string]resourcesresults.Result) {
-
+	if controlSummary == nil {
+		return
+	}
 	workloadsSummary := listResultSummaryFromCatalog(controlSummary, catalog)
 	// --show-evidence asks for the evidence, so it enables the evidence on its
 	// own here. Gating this on --verbose alone left the flag unread on the
