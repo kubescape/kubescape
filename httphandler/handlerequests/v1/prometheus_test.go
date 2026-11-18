@@ -17,6 +17,8 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/core"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -52,6 +54,10 @@ func TestGetPrometheusDefaultScanCommand(t *testing.T) {
 		},
 	}
 
+	// KS_FORMAT is the REST API's default output format; the metrics scan
+	// must keep producing Prometheus output regardless.
+	t.Setenv("KS_FORMAT", "json")
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			scanID := "1234"
@@ -60,7 +66,7 @@ func TestGetPrometheusDefaultScanCommand(t *testing.T) {
 
 			assert.Equal(t, scanID, scanInfo.ScanID)
 			assert.Equal(t, outputFile, scanInfo.Output)
-			assert.Equal(t, "prometheus", scanInfo.Format)
+			assert.Equal(t, printer.PrometheusFormat, scanInfo.Format)
 			assert.False(t, scanInfo.Submit.GetBool())
 			assert.True(t, scanInfo.Local)
 			assert.True(t, scanInfo.FrameworkScan)
@@ -281,14 +287,15 @@ func TestMetrics_CleansUpResultsFile(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
-func TestMetrics_CleansUpResultsFileWithConfiguredFormat(t *testing.T) {
+func TestMetrics_IgnoresConfiguredFormatAndCleansUp(t *testing.T) {
 	withTempOutputDirs(t)
 	t.Setenv("KS_FORMAT", "json")
 
 	defer func(o scanner) { scanImpl = o }(scanImpl)
 	scanImpl = func(_ context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+		// write wherever the configured format's printer would write
 		resolved, _ := printer.ResolveOutputFile(scanInfo.Format, scanInfo.Output, "")
-		require.NoError(t, os.WriteFile(resolved, []byte("{}"), 0o600))
+		require.NoError(t, os.WriteFile(resolved, []byte("# metrics\n"), 0o600))
 		return nil, nil
 	}
 
@@ -298,9 +305,74 @@ func TestMetrics_CleansUpResultsFileWithConfiguredFormat(t *testing.T) {
 
 	h.Metrics(w, rq)
 
+	require.Equal(t, http.StatusOK, w.Result().StatusCode, "body=%s", w.Body.String())
+	assert.Equal(t, "# metrics\n", w.Body.String())
 	entries, err := os.ReadDir(OutputDir)
 	require.NoError(t, err)
 	assert.Empty(t, entries)
+}
+
+// TestMetrics_AlwaysServesPrometheusOutput runs the real output printers
+// (only the cluster scan is stubbed) and checks that KS_FORMAT, the REST API's
+// default output format, never changes what /v1/metrics writes or serves.
+func TestMetrics_AlwaysServesPrometheusOutput(t *testing.T) {
+	tests := []struct {
+		name     string
+		unset    bool
+		ksFormat string
+	}{
+		{name: "unset", unset: true},
+		{name: "prometheus", ksFormat: "prometheus"},
+		{name: "json", ksFormat: "json"},
+		{name: "junit", ksFormat: "junit"},
+		{name: "yaml", ksFormat: "yaml"},
+		{name: "pretty-printer", ksFormat: "pretty-printer"},
+		{name: "json,prometheus", ksFormat: "json,prometheus"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			withTempOutputDirs(t)
+			t.Setenv("KS_FORMAT", tt.ksFormat) // restores the original value on cleanup
+			if tt.unset {
+				require.NoError(t, os.Unsetenv("KS_FORMAT"))
+			}
+
+			originalScanImpl, originalRunKubescapeScan := scanImpl, runKubescapeScan
+			t.Cleanup(func() { scanImpl, runKubescapeScan = originalScanImpl, originalRunKubescapeScan })
+
+			runKubescapeScan = func(ctx context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+				printers, err := core.GetOutputPrinters(scanInfo, ctx, "")
+				if err != nil {
+					return nil, err
+				}
+				results := resultshandling.NewResultsHandler(nil, printers, &noOpPrinter{})
+				results.SetData(cautils.NewOPASessionObjMock())
+				return results, nil
+			}
+
+			var written []string
+			var wantFile string
+			scanImpl = func(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier, scanID string, skipPersistence bool) (*reporthandlingv2.PostureReport, error) {
+				report, err := scan(ctx, scanInfo, policyIdentifiers, scanID, skipPersistence)
+				resolved, _ := printer.ResolveOutputFile(printer.PrometheusFormat, scanInfo.Output, "")
+				wantFile = filepath.Base(resolved)
+				entries, _ := os.ReadDir(OutputDir)
+				for _, e := range entries {
+					written = append(written, e.Name())
+				}
+				return report, err
+			}
+
+			h := NewHTTPHandler(false)
+			w := httptest.NewRecorder()
+			h.Metrics(w, httptest.NewRequest(http.MethodGet, "/v1/metrics?skipPersistence=true", nil))
+
+			require.Equal(t, http.StatusOK, w.Result().StatusCode, "body=%s", w.Body.String())
+			assert.Contains(t, w.Body.String(), "# HELP kubescape_")
+			assert.Equal(t, []string{wantFile}, written, "metrics scan must write only the Prometheus results file")
+		})
+	}
 }
 
 func TestMetrics_CleansUpResultsFileOnDisconnect(t *testing.T) {
