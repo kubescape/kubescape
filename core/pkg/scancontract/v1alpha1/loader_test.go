@@ -270,6 +270,25 @@ func TestLoadRejectsInvalidContractValues(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsCaseInsensitiveAndPaddedOutputFormats(t *testing.T) {
+	for _, formats := range []string{
+		"formats: [JSON, SARIF]",
+		"formats: [Json, Sarif]",
+		"formats: [Pretty-Printer, JSON]",
+		"formats: [\" json \", \" sarif \"]",
+	} {
+		t.Run(formats, func(t *testing.T) {
+			input := strings.Replace(validContract, "formats: [json, sarif]", formats, 1)
+			options := testOptions()
+			options.ContractName = "ci"
+			selected, err := Load([]byte(input), options)
+			require.NoError(t, err)
+			require.NotNil(t, selected.Contract.Output)
+			require.NotNil(t, selected.Contract.Output.Formats)
+		})
+	}
+}
+
 func TestLoadFile_Valid(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "contract.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(validContract), 0o600))
