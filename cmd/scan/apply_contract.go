@@ -136,7 +136,7 @@ func applyContractOrdinarySettings(cmd *cobra.Command, scanInfo *cautils.ScanInf
 	}
 	if contract.Output != nil {
 		if contract.Output.Formats != nil && !commandFlagChanged(cmd, "format") {
-			scanInfo.Format = strings.Join(*contract.Output.Formats, ",")
+			scanInfo.Format = shared.NormalizeScanFormats(strings.Join(*contract.Output.Formats, ","))
 		}
 		if contract.Output.OmitRawResources != nil && !commandFlagChanged(cmd, "omit-raw-resources") {
 			scanInfo.OmitRawResources = *contract.Output.OmitRawResources

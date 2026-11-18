@@ -104,6 +104,16 @@ func TestScanContractAppliesOrdinarySettings(t *testing.T) {
 	require.Equal(t, []cautils.PolicyIdentifier{{Identifier: "nsa", Kind: apisv1.KindFramework}}, policies)
 }
 
+func TestScanContractAppliesCaseInsensitiveAndPaddedFormats(t *testing.T) {
+	scanInfo, _, err := executeCapturedScan(t, `
+      output:
+        formats: [JSON, " sarif "]`, ".")
+
+	require.ErrorIs(t, err, errContractScanReached)
+	require.NotNil(t, scanInfo)
+	assert.Equal(t, "json,sarif", scanInfo.Format)
+}
+
 func TestExplicitCLIOverridesOrdinaryContractSettings(t *testing.T) {
 	scanInfo, _, err := executeCapturedScan(t, `
       policy:
