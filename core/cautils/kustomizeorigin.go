@@ -1,13 +1,16 @@
 package cautils
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
@@ -61,12 +64,15 @@ type originPlan struct {
 	// wrapper has to repeat so that the resources carry what the plain build
 	// would have given them.
 	preserved []string
+	// allowedRoots are the directory roots that resources in this plan may originate from.
+	allowedRoots []string
 }
 
-// originModeFor reads the scanned kustomization's buildMetadata and decides how
-// its resources' origin can be learned. Kustomize hands the outermost
-// kustomization's buildMetadata to every kustomization below it, so a wrapper
-// that set its own list would replace the scanned one.
+// originModeFor inspects the scanned kustomization and its configuration graph
+// (referenced bases and components included) to decide how its resources'
+// origins can be learned safely. Kustomize hands the outermost kustomization's
+// buildMetadata to every kustomization below it, so a wrapper that set its own
+// list would replace the scanned one.
 //
 //   - Nothing requested: use the wrapper.
 //   - Only managedByLabel: use the wrapper and repeat the option, so the label is
@@ -75,33 +81,419 @@ type originPlan struct {
 //   - Anything else, transformerAnnotations in particular: no wrapper. Its
 //     annotation holds paths that are relative to the build's root, which the
 //     wrapper changes, so the wrapper would hand a rule different input.
+//
+// Whatever the mode, anything in the graph that could alter or forge origin
+// metadata and cannot be proven safe (see inspectKustomizationNode) yields
+// originUnavailable, so file attribution falls back to the directory.
 func originModeFor(directory string) originPlan {
+	safe, preserved, ownOrigins, allowedRoots := inspectKustomizationGraph(directory)
+	if !safe {
+		return originPlan{mode: originUnavailable}
+	}
+	if ownOrigins {
+		return originPlan{mode: originOwn, allowedRoots: allowedRoots}
+	}
+	return originPlan{mode: originWrapper, preserved: preserved, allowedRoots: allowedRoots}
+}
+
+func inspectKustomizationGraph(directory string) (safe bool, preserved []string, ownOrigins bool, allowedRoots []string) {
 	file := selectedKustomizationFile(directory)
 	if file == "" {
-		return originPlan{mode: originUnavailable}
+		return false, nil, false, nil
 	}
-	contents, err := readKustomizationFile(file)
+	absFile, err := filepath.Abs(file)
 	if err != nil {
-		return originPlan{mode: originUnavailable}
-	}
-	var kustomization types.Kustomization
-	if err := kustomization.Unmarshal(contents); err != nil {
-		return originPlan{mode: originUnavailable}
+		return false, nil, false, nil
 	}
 
-	options := kustomization.BuildMetadata
-	switch {
-	case len(options) == 0:
-		return originPlan{mode: originWrapper}
-	case slices.Contains(options, types.OriginAnnotations):
-		return originPlan{mode: originOwn}
+	visited := map[string]struct{}{}
+	visiting := map[string]struct{}{}
+	var allowedDirs []string
+	cleanDir := filepath.Clean(directory)
+	allowedDirs = append(allowedDirs, cleanDir)
+
+	safe, preserved, ownOrigins = inspectKustomizationNode(absFile, true, visited, visiting, &allowedDirs)
+	if !safe {
+		return false, nil, false, nil
 	}
-	for _, option := range options {
-		if option != types.ManagedByLabelOption {
-			return originPlan{mode: originUnavailable}
+	slices.Sort(allowedDirs)
+	allowedRoots = slices.Compact(allowedDirs)
+	return safe, preserved, ownOrigins, allowedRoots
+}
+
+func inspectKustomizationNode(file string, isRoot bool, visited, visiting map[string]struct{}, allowedDirs *[]string) (bool, []string, bool) {
+	canonical, err := filepath.EvalSymlinks(file)
+	if err != nil {
+		return false, nil, false
+	}
+	dir := filepath.Dir(canonical)
+	*allowedDirs = append(*allowedDirs, dir)
+
+	if _, inStack := visiting[canonical]; inStack {
+		return false, nil, false
+	}
+	if _, done := visited[canonical]; done {
+		return true, nil, false
+	}
+	visiting[canonical] = struct{}{}
+	defer delete(visiting, canonical)
+
+	contents, err := readKustomizationFile(canonical)
+	if err != nil {
+		return false, nil, false
+	}
+	var k types.Kustomization
+	if err := k.Unmarshal(contents); err != nil {
+		return false, nil, false
+	}
+	k.FixKustomization()
+
+	var preserved []string
+	var ownOrigins bool
+	if isRoot {
+		options := k.BuildMetadata
+		if slices.Contains(options, types.OriginAnnotations) {
+			ownOrigins = true
+		} else {
+			for _, option := range options {
+				if option == types.ManagedByLabelOption {
+					preserved = append(preserved, option)
+				} else {
+					return false, nil, false
+				}
+			}
 		}
 	}
-	return originPlan{mode: originWrapper, preserved: slices.Clone(options)}
+
+	if len(k.Replacements) > 0 ||
+		len(k.Transformers) > 0 ||
+		len(k.Generators) > 0 ||
+		len(k.Validators) > 0 ||
+		len(k.Vars) > 0 || //nolint:staticcheck
+		len(k.Configurations) > 0 ||
+		len(k.Crds) > 0 ||
+		len(k.OpenAPI) > 0 ||
+		len(k.HelmCharts) > 0 {
+		return false, nil, false
+	}
+
+	if k.CommonAnnotations != nil {
+		if _, ok := k.CommonAnnotations[kustomizeOriginAnnotation]; ok {
+			return false, nil, false
+		}
+	}
+
+	if k.GeneratorOptions != nil && k.GeneratorOptions.Annotations != nil {
+		if _, ok := k.GeneratorOptions.Annotations[kustomizeOriginAnnotation]; ok {
+			return false, nil, false
+		}
+	}
+	for _, gen := range k.ConfigMapGenerator {
+		if gen.Options != nil && gen.Options.Annotations != nil {
+			if _, ok := gen.Options.Annotations[kustomizeOriginAnnotation]; ok {
+				return false, nil, false
+			}
+		}
+	}
+	for _, gen := range k.SecretGenerator {
+		if gen.Options != nil && gen.Options.Annotations != nil {
+			if _, ok := gen.Options.Annotations[kustomizeOriginAnnotation]; ok {
+				return false, nil, false
+			}
+		}
+	}
+
+	for _, patch := range k.Patches {
+		if !isPatchProvablySafe(dir, patch) {
+			return false, nil, false
+		}
+	}
+	for _, patch := range k.PatchesJson6902 { //nolint:staticcheck
+		p := types.Patch{
+			Path: patch.Path,
+		}
+		if patch.Target != nil {
+			p.Target = &types.Selector{
+				Gvk:       patch.Target.Gvk,
+				Namespace: patch.Target.Namespace,
+				Name:      patch.Target.Name,
+			}
+		}
+		if !isPatchProvablySafe(dir, p) {
+			return false, nil, false
+		}
+	}
+	for _, patch := range k.PatchesStrategicMerge { //nolint:staticcheck
+		strPatch := string(patch)
+		p := types.Patch{
+			Patch: strPatch,
+		}
+		if !strings.Contains(strPatch, "\n") && (strings.HasSuffix(strPatch, ".yaml") || strings.HasSuffix(strPatch, ".yml")) {
+			p.Path = strPatch
+			p.Patch = ""
+		}
+		if !isPatchProvablySafe(dir, p) {
+			return false, nil, false
+		}
+	}
+
+	references := make([]string, 0, len(k.Resources)+len(k.Components)+len(k.Bases))
+	references = append(references, k.Resources...)
+	references = append(references, k.Components...)
+	references = append(references, k.Bases...) //nolint:staticcheck
+
+	for _, ref := range references {
+		if ref == "" {
+			continue
+		}
+		if isRemoteReference(ref) {
+			return false, nil, false
+		}
+		refPath := ref
+		if !filepath.IsAbs(refPath) {
+			refPath = filepath.Join(dir, refPath)
+		}
+		refCanonical, err := filepath.EvalSymlinks(refPath)
+		if err != nil {
+			return false, nil, false
+		}
+		info, err := os.Stat(refCanonical)
+		if err != nil {
+			return false, nil, false
+		}
+		if info.IsDir() {
+			// A referenced directory is trusted only if it is inspected too: it must
+			// hold a kustomization that passes the same checks, and it becomes an
+			// allowed origin root only because this walk visited it. References are
+			// not confined to a project boundary: Kustomize builds them regardless,
+			// so what matters for attribution is that every configuration that
+			// shaped the output was inspected.
+			childFile := selectedKustomizationFile(refCanonical)
+			if childFile == "" {
+				return false, nil, false
+			}
+			*allowedDirs = append(*allowedDirs, refCanonical)
+			childSafe, _, _ := inspectKustomizationNode(childFile, false, visited, visiting, allowedDirs)
+			if !childSafe {
+				return false, nil, false
+			}
+		} else if info.Mode().IsRegular() {
+			if !pathcontainment.IsPathContained(dir, refCanonical) {
+				return false, nil, false
+			}
+			if manifestHasOriginAnnotation(refCanonical) {
+				return false, nil, false
+			}
+		} else {
+			return false, nil, false
+		}
+	}
+
+	visited[canonical] = struct{}{}
+	return true, preserved, ownOrigins
+}
+
+func manifestHasOriginAnnotation(file string) bool {
+	bytesContent, err := os.ReadFile(file)
+	if err != nil {
+		return true
+	}
+	docs, err := splitYAMLDocuments(bytesContent)
+	if err != nil {
+		return true
+	}
+	for _, doc := range docs {
+		if len(bytes.TrimSpace(doc)) == 0 {
+			continue
+		}
+		var parsed map[string]any
+		if err := kyaml.Unmarshal(doc, &parsed); err != nil {
+			return true
+		}
+		if objectHasOriginAnnotation(parsed) {
+			return true
+		}
+	}
+	return false
+}
+
+func objectHasOriginAnnotation(obj map[string]any) bool {
+	if meta, ok := obj["metadata"].(map[string]any); ok {
+		if annos, ok := meta["annotations"].(map[string]any); ok {
+			if _, hasOrigin := annos[kustomizeOriginAnnotation]; hasOrigin {
+				return true
+			}
+		}
+	}
+	if items, ok := obj["items"].([]any); ok {
+		for _, item := range items {
+			if itemMap, ok := item.(map[string]any); ok {
+				if objectHasOriginAnnotation(itemMap) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func isRemoteReference(ref string) bool {
+	if strings.Contains(ref, "://") ||
+		strings.HasPrefix(ref, "git::") ||
+		strings.HasPrefix(ref, "git@") ||
+		strings.Contains(ref, "?ref=") ||
+		strings.Contains(ref, "?version=") ||
+		strings.Contains(ref, "?submodules=") ||
+		strings.Contains(ref, ".git//") ||
+		strings.HasSuffix(ref, ".git") ||
+		strings.Contains(ref, ".git?") {
+		return true
+	}
+	lower := strings.ToLower(ref)
+	if strings.HasPrefix(lower, "github.com/") ||
+		strings.HasPrefix(lower, "gitlab.com/") ||
+		strings.HasPrefix(lower, "bitbucket.org/") ||
+		strings.HasPrefix(lower, "dev.azure.com/") ||
+		strings.HasPrefix(lower, "source.developers.google.com/") {
+		return true
+	}
+	if strings.Contains(ref, "@") && strings.Contains(ref, ":") {
+		return true
+	}
+	return false
+}
+
+func isPatchProvablySafe(baseDir string, patch types.Patch) bool {
+	if patch.Target != nil {
+		if patch.Target.AnnotationSelector != "" || patch.Target.LabelSelector != "" {
+			return false
+		}
+	}
+	if patch.Options != nil && (patch.Options.AllowNameChange || patch.Options.AllowKindChange) {
+		return false
+	}
+
+	content := patch.Patch
+	if patch.Path != "" {
+		if isRemoteReference(patch.Path) {
+			return false
+		}
+		patchFilePath := patch.Path
+		if !filepath.IsAbs(patchFilePath) {
+			patchFilePath = filepath.Join(baseDir, patchFilePath)
+		}
+		cleanPath := filepath.Clean(patchFilePath)
+		canonPatch, err := filepath.EvalSymlinks(cleanPath)
+		if err != nil {
+			return false
+		}
+		if !pathcontainment.IsPathContained(baseDir, canonPatch) {
+			return false
+		}
+		bytesContent, err := os.ReadFile(canonPatch)
+		if err != nil {
+			return false
+		}
+		content = string(bytesContent)
+	}
+
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return false
+	}
+
+	docs, err := splitYAMLDocuments([]byte(content))
+	if err != nil || len(docs) == 0 {
+		return false
+	}
+
+	for _, doc := range docs {
+		if len(bytes.TrimSpace(doc)) == 0 {
+			continue
+		}
+		if !isPatchDocumentProvablySafe(doc) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func isPatchDocumentProvablySafe(doc []byte) bool {
+	docStr := strings.TrimSpace(string(doc))
+	if docStr == "" {
+		return true
+	}
+
+	var jsonOps []struct {
+		Op   string `json:"op"`
+		Path string `json:"path"`
+		From string `json:"from"`
+	}
+	if err := json.Unmarshal(doc, &jsonOps); err == nil && len(jsonOps) > 0 {
+		for _, op := range jsonOps {
+			switch op.Op {
+			case "add", "replace", "remove":
+			default:
+				return false
+			}
+			if op.From != "" {
+				return false
+			}
+			if !strings.HasPrefix(op.Path, "/spec/") {
+				return false
+			}
+		}
+		return true
+	}
+
+	var yamlOps []map[string]any
+	if err := kyaml.Unmarshal(doc, &yamlOps); err == nil && len(yamlOps) > 0 {
+		for _, op := range yamlOps {
+			opName, _ := op["op"].(string)
+			switch opName {
+			case "add", "replace", "remove":
+			default:
+				return false
+			}
+			if from, _ := op["from"].(string); from != "" {
+				return false
+			}
+			opPath, _ := op["path"].(string)
+			if !strings.HasPrefix(opPath, "/spec/") {
+				return false
+			}
+		}
+		return true
+	}
+
+	var smp map[string]any
+	if err := kyaml.Unmarshal(doc, &smp); err == nil && len(smp) > 0 {
+		if _, hasDelete := smp["$patch"]; hasDelete {
+			return false
+		}
+		for key, val := range smp {
+			switch key {
+			case "apiVersion", "kind":
+			case "metadata":
+				meta, ok := val.(map[string]any)
+				if !ok {
+					return false
+				}
+				for mKey := range meta {
+					if mKey != "name" && mKey != "namespace" {
+						return false
+					}
+				}
+			case "spec":
+			default:
+				return false
+			}
+		}
+		return true
+	}
+
+	return false
 }
 
 // originRenderer is renderWithOrigins, as a variable so a test can make it fail
@@ -180,19 +572,13 @@ func originFilesFor(newKustomizer func() *krusty.Kustomizer, directory string, p
 	case originOwn:
 		// The kustomization asked for origin annotations, so the plain build
 		// carries them, relative to the directory. They stay where they are.
-		untransformed := untransformedOriginFiles(newKustomizer, directory)
-		if untransformed == nil || !sameResources(plain, untransformed) {
-			return nil
-		}
 		files := make([]string, len(plain))
 		for i := range plain {
-			if file := takeKustomizeOrigin(plain[i].GetObject(), directory, false); file == untransformed[plain[i].GetID()] {
-				files[i] = file
-			}
+			files[i] = takeKustomizeOrigin(plain[i].GetObject(), directory, false, plan.allowedRoots...)
 		}
 		return files
 	case originWrapper:
-		return wrapperOriginFiles(newKustomizer, directory, plan.preserved, plain)
+		return wrapperOriginFiles(newKustomizer, directory, plan.preserved, plan.allowedRoots, plain)
 	}
 	return nil
 }
@@ -200,7 +586,7 @@ func originFilesFor(newKustomizer func() *krusty.Kustomizer, directory string, p
 // wrapperOriginFiles is originFilesFor for a kustomization that did not ask for
 // origin annotations: render it through the wrapper, take the files from there,
 // and trust them only if the wrapper rendered the same resources.
-func wrapperOriginFiles(newKustomizer func() *krusty.Kustomizer, directory string, preserved []string, plain []workloadinterface.IMetadata) []string {
+func wrapperOriginFiles(newKustomizer func() *krusty.Kustomizer, directory string, preserved []string, allowedRoots []string, plain []workloadinterface.IMetadata) []string {
 	rendered, base, ok := originRenderer(newKustomizer, directory, preserved)
 	if !ok {
 		return nil
@@ -209,85 +595,14 @@ func wrapperOriginFiles(newKustomizer func() *krusty.Kustomizer, directory strin
 	if err != nil || len(annotated) != len(plain) {
 		return nil
 	}
-	untransformed := untransformedOriginFiles(newKustomizer, directory)
-	if untransformed == nil || !sameResources(plain, untransformed) {
-		return nil
-	}
 	files := make([]string, len(annotated))
 	for i := range annotated {
-		files[i] = takeKustomizeOrigin(annotated[i].GetObject(), base, true)
+		files[i] = takeKustomizeOrigin(annotated[i].GetObject(), base, true, allowedRoots...)
 		if !reflect.DeepEqual(annotated[i].GetObject(), plain[i].GetObject()) {
-			return nil
-		}
-		if files[i] != untransformed[plain[i].GetID()] {
 			return nil
 		}
 	}
 	return files
-}
-
-type untransformedOriginFS struct {
-	filesys.FileSystem
-}
-
-func (f untransformedOriginFS) ReadFile(path string) ([]byte, error) {
-	content, err := f.FileSystem.ReadFile(path)
-	if err != nil || !IsKustomizeFile(path) {
-		return content, err
-	}
-	var k types.Kustomization
-	if err := k.Unmarshal(content); err != nil {
-		return content, nil
-	}
-	k.Patches = nil
-	k.PatchesStrategicMerge = nil //nolint:staticcheck
-	k.PatchesJson6902 = nil       //nolint:staticcheck
-	k.CommonAnnotations = nil
-	k.Labels = nil
-	k.Replacements = nil
-	k.Transformers = nil
-	k.Configurations = nil
-	k.Vars = nil //nolint:staticcheck
-	if !slices.Contains(k.BuildMetadata, types.OriginAnnotations) {
-		k.BuildMetadata = append(slices.Clone(k.BuildMetadata), types.OriginAnnotations)
-	}
-	stripped, err := json.Marshal(k)
-	if err != nil {
-		return content, nil
-	}
-	return stripped, nil
-}
-
-func untransformedOriginFiles(newKustomizer func() *krusty.Kustomizer, directory string) map[string]string {
-	resMap, err := newKustomizer().Run(untransformedOriginFS{FileSystem: filesys.MakeFsOnDisk()}, directory)
-	if err != nil {
-		return nil
-	}
-	yml, err := resMap.AsYaml()
-	if err != nil {
-		return nil
-	}
-	workloads, err := ReadFile(yml, YAML_FILE_FORMAT)
-	if err != nil {
-		return nil
-	}
-	origins := make(map[string]string, len(workloads))
-	for i := range workloads {
-		origins[workloads[i].GetID()] = takeKustomizeOrigin(workloads[i].GetObject(), directory, true)
-	}
-	return origins
-}
-
-func sameResources(plain []workloadinterface.IMetadata, untransformed map[string]string) bool {
-	if len(plain) != len(untransformed) {
-		return false
-	}
-	for i := range plain {
-		if _, ok := untransformed[plain[i].GetID()]; !ok {
-			return false
-		}
-	}
-	return true
 }
 
 // takeKustomizeOrigin returns the local file that Kustomize's origin annotation
@@ -299,7 +614,9 @@ func sameResources(plain []workloadinterface.IMetadata, untransformed map[string
 // is not the source.
 //
 // baseDir is the directory the annotation's path is relative to.
-func takeKustomizeOrigin(obj map[string]any, baseDir string, remove bool) string {
+// allowedRoots are the directory roots that the resolved file must be contained within.
+// If allowedRoots is empty, baseDir is used as the single allowed root.
+func takeKustomizeOrigin(obj map[string]any, baseDir string, remove bool, allowedRoots ...string) string {
 	metadata, _ := obj["metadata"].(map[string]any)
 	annotations, _ := metadata["annotations"].(map[string]any)
 	raw, ok := annotations[kustomizeOriginAnnotation].(string)
@@ -326,8 +643,28 @@ func takeKustomizeOrigin(obj map[string]any, baseDir string, remove bool) string
 	}
 
 	file := filepath.Clean(filepath.Join(baseDir, filepath.FromSlash(relative)))
-	info, err := os.Stat(file)
+	canonFile, err := filepath.EvalSymlinks(file)
+	if err != nil {
+		return ""
+	}
+	info, err := os.Stat(canonFile)
 	if err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
+
+	roots := allowedRoots
+	if len(roots) == 0 {
+		roots = []string{baseDir}
+	}
+
+	contained := false
+	for _, root := range roots {
+		if root != "" && pathcontainment.IsPathContained(root, canonFile) {
+			contained = true
+			break
+		}
+	}
+	if !contained {
 		return ""
 	}
 	return file
