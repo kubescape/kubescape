@@ -183,6 +183,7 @@ func (s *server) Initialized(context.Context, *protocol.InitializedParams) error
 		return errors.New("no client to publish diagnostics to")
 	}
 	s.coord = newCoordinator(s.docs, s.roots, s.scan, client.PublishDiagnostics)
+	s.coord.notify = client.ShowMessage
 	if s.debounce > 0 {
 		s.coord.debounce = s.debounce
 	}
