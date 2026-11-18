@@ -270,7 +270,7 @@ resource "kubernetes_deployment" "app" {
 	require.Empty(t, errs, "meta-arguments must be stripped before evaluation, not left to fail")
 
 	want := map[string]interface{}{
-		"metadata": map[string]interface{}{"name": "app"},
+		"metadata": map[string]interface{}{"name": "app", "namespace": "default"},
 		"spec":     map[string]interface{}{"replicas": json.Number("2")},
 	}
 	assert.Equal(t, want, out)
@@ -391,7 +391,7 @@ resource "kubernetes_foo_bar" "unsupported" {
 
 	assert.Equal(t, "v1", manifests[1]["apiVersion"])
 	assert.Equal(t, "Pod", manifests[1]["kind"])
-	assert.Equal(t, map[string]interface{}{"name": "custom-name"}, manifests[1]["metadata"], "explicit metadata.name must be preserved")
+	assert.Equal(t, map[string]interface{}{"name": "custom-name", "namespace": "default"}, manifests[1]["metadata"], "explicit metadata.name must be preserved")
 
 	assert.Equal(t, "rbac.authorization.k8s.io/v1", manifests[2]["apiVersion"])
 	assert.Equal(t, "RoleBinding", manifests[2]["kind"])
@@ -620,7 +620,7 @@ resource "kubernetes_pod_v1" "pod_with_host_aliases" {
 	// 2. kubernetes_default_service_account_v1 maps to v1/ServiceAccount with multiple secrets
 	assert.Equal(t, "v1", manifests[1]["apiVersion"])
 	assert.Equal(t, "ServiceAccount", manifests[1]["kind"])
-	assert.Equal(t, map[string]interface{}{"name": "custom-default"}, manifests[1]["metadata"])
+	assert.Equal(t, map[string]interface{}{"name": "custom-default", "namespace": "default"}, manifests[1]["metadata"])
 	assert.Equal(t, []interface{}{
 		map[string]interface{}{"name": "s1"},
 		map[string]interface{}{"name": "s2"},
@@ -814,11 +814,11 @@ resource "kubernetes_network_policy_v1" "np_v1" {
 
 	assert.Equal(t, "batch/v1", manifests[1]["apiVersion"])
 	assert.Equal(t, "CronJob", manifests[1]["kind"])
-	assert.Equal(t, map[string]interface{}{"name": "backup"}, manifests[1]["metadata"])
+	assert.Equal(t, map[string]interface{}{"name": "backup", "namespace": "default"}, manifests[1]["metadata"])
 
 	assert.Equal(t, "networking.k8s.io/v1beta1", manifests[2]["apiVersion"])
 	assert.Equal(t, "Ingress", manifests[2]["kind"])
-	assert.Equal(t, map[string]interface{}{"name": "web-ingress"}, manifests[2]["metadata"])
+	assert.Equal(t, map[string]interface{}{"name": "web-ingress", "namespace": "default"}, manifests[2]["metadata"])
 
 	ingSpec, ok := manifests[2]["spec"].(map[string]interface{})
 	require.True(t, ok)
@@ -903,7 +903,7 @@ resource "kubernetes_network_policy_v1" "np_v1" {
 
 	assert.Equal(t, "networking.k8s.io/v1", manifests[4]["apiVersion"])
 	assert.Equal(t, "NetworkPolicy", manifests[4]["kind"])
-	assert.Equal(t, map[string]interface{}{"name": "allow-dns"}, manifests[4]["metadata"])
+	assert.Equal(t, map[string]interface{}{"name": "allow-dns", "namespace": "default"}, manifests[4]["metadata"])
 
 	for i, m := range manifests {
 		data, err := json.Marshal(m)
