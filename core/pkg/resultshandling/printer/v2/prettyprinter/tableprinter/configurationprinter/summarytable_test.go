@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
@@ -308,4 +309,36 @@ func TestGenerateFooter_ShortVsFullDiffer(t *testing.T) {
 	short := GenerateFooter(&sd, true)
 	full := GenerateFooter(&sd, false)
 	assert.NotEqual(t, len(short), len(full), "short and full footers should have different column counts")
+}
+
+func TestSummaryTableHelpers_NilSafety(t *testing.T) {
+	assert.NotPanics(t, func() {
+		row := GenerateRow(nil, nil, false)
+		assert.Equal(t, table.Row{}, row)
+	})
+
+	assert.NotPanics(t, func() {
+		footer := GenerateFooter(nil, false)
+		assert.Equal(t, table.Row{}, footer)
+	})
+
+	assert.NotPanics(t, func() {
+		footerShort := GenerateFooter(nil, true)
+		assert.Equal(t, table.Row{}, footerShort)
+	})
+
+	assert.NotPanics(t, func() {
+		sev := GetSeverityColumn(nil)
+		assert.Equal(t, "", sev)
+	})
+
+	assert.NotPanics(t, func() {
+		score := GetComplianceScoreColumn(nil, nil)
+		assert.Equal(t, "", score)
+	})
+
+	assert.NotPanics(t, func() {
+		info := GetInfoColumn(nil, nil)
+		assert.Equal(t, "", info)
+	})
 }

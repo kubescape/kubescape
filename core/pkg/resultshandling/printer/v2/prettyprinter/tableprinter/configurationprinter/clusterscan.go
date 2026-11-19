@@ -23,6 +23,9 @@ func (cp *ClusterPrinter) PrintSummaryTable(_ io.Writer, _ *reportsummary.Summar
 }
 
 func (cp *ClusterPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, _ [][]string) {
+	if summaryDetails == nil {
+		return
+	}
 
 	categoriesToCategoryControls := bucketControlsByCategory(summaryDetails.ListControls())
 

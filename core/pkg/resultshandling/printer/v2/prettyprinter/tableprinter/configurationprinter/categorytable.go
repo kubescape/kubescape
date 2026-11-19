@@ -56,6 +56,9 @@ func getCountingTypeAlignments() []table.ColumnConfig {
 
 // returns a row for status type table based on the control summary
 func generateCategoryStatusRow(controlSummary reportsummary.IControlSummary) table.Row {
+	if controlSummary == nil {
+		return nil
+	}
 
 	// show only passed, failed and action required controls
 	status := controlSummary.GetStatus()
