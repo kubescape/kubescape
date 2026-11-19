@@ -811,7 +811,7 @@ func TestFileWatcherRelevantFile(t *testing.T) {
 	}
 
 	wWithDeps := &FileWatcher{opts: FileWatcherOptions{
-		AcceptDependencies: func() bool { return true },
+		AcceptDependencies: func(string) bool { return true },
 		Exclude: func(path string, isDir bool) bool {
 			return !isDir && filepath.Base(path) == "excluded.yaml"
 		},
@@ -840,7 +840,7 @@ func TestFileWatcherRelevantFileFollowsKustomization(t *testing.T) {
 	dependency := filepath.Join(root, "settings.properties")
 	write(t, dependency, "key=value\n")
 	w := &FileWatcher{opts: FileWatcherOptions{
-		AcceptDependencies: func() bool { return cautils.IsKustomizeDirectory(root) },
+		AcceptDependencies: func(string) bool { return cautils.IsKustomizeDirectory(root) },
 	}}
 
 	assert.False(t, w.relevantFile(dependency), "without a kustomization the file is not one a scan reads")
