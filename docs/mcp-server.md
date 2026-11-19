@@ -376,6 +376,68 @@ List the security controls with their IDs, names and the frameworks they belong 
 }
 ```
 
+#### `explain_control`
+
+Explain a Kubescape security control by ID, returning its metadata (name, description, severity, remediation guidance, and whether it has an auto-fix available through `kubescape fix`) and optionally including failing resources and specific failed paths from a local manifest (`path`) or an existing posture report JSON (`report_path`).
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `control_id` | string | Yes | The control ID to explain (e.g. `C-0017`) |
+| `path` | string | No | Path to a local YAML manifest file or directory to scan for control failures. Mutually exclusive with `report_path` |
+| `report_path` | string | No | Path to an existing Kubescape posture report JSON file to extract control failures from. Mutually exclusive with `path` |
+| `base_path` | string | No | Optional base directory that files referenced in `report_path` must stay inside |
+
+**Response Fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `control_id` | string | Canonical ID of the control |
+| `name` | string | Control name |
+| `severity` | string | Control severity (`Low`, `Medium`, `High`, `Critical`) |
+| `description` | string | Detailed explanation of what the control checks |
+| `remediation` | string | Actionable guidance on how to fix failures |
+| `auto_fix_available` | boolean | Whether Kubescape provides automatic remediation via `kubescape fix` |
+| `failing_resources` | array | Present when scan context is provided (`path` or `report_path`). Lists failing resources and specific failed paths |
+| `degraded` | boolean | Present only when true: indicates the scan did not fully complete or rule processing partially failed |
+| `not_evaluated` | boolean | Present only when true: indicates this control could not be evaluated during the scan |
+| `not_evaluated_reason` | string | Diagnostic reason why the control was not evaluated |
+
+**Example Response** (`control_id: "C-0017"`):
+```json
+{
+  "control_id": "C-0017",
+  "name": "Immutable container filesystem",
+  "severity": "Low",
+  "description": "Mutable container filesystem can be abused to inject malicious code or data into containers. Use immutable (read-only) filesystem to limit potential attacks.",
+  "remediation": "Set the filesystem of the container to read-only when possible (pod securityContext, readOnlyRootFilesystem: true). If containers application needs to write into the filesystem, it is recommended to mount secondary filesystems for specific directories where application require write access.",
+  "auto_fix_available": true
+}
+```
+
+**Example Response with scan context** (`control_id: "C-0017", path: "deployment.yaml"`):
+```json
+{
+  "control_id": "C-0017",
+  "name": "Immutable container filesystem",
+  "severity": "Low",
+  "description": "Mutable container filesystem can be abused to inject malicious code or data into containers. Use immutable (read-only) filesystem to limit potential attacks.",
+  "remediation": "Set the filesystem of the container to read-only when possible (pod securityContext, readOnlyRootFilesystem: true). If containers application needs to write into the filesystem, it is recommended to mount secondary filesystems for specific directories where application require write access.",
+  "auto_fix_available": true,
+  "failing_resources": [
+    {
+      "resource_id": "path=4057414033/api=apps/v1/default/Deployment/nginx",
+      "kind": "Deployment",
+      "name": "nginx",
+      "namespace": "default",
+      "file_path": "deployment.yaml",
+      "failed_paths": [
+        "spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem"
+      ]
+    }
+  ]
+}
+```
+
 #### `validate_scan_selection`
 
 Check, without running a scan, whether control identifiers resolve the way `scan_controls` resolves them. Run it before an expensive scan to find typos and ambiguous section numbers in one pass. It is read-only and needs no cluster access.
