@@ -213,6 +213,17 @@ func TestSetCachedConfig_ClusterName(t *testing.T) {
 	require.NoError(t, ks.SetCachedConfig(setConfig))
 	persisted := readPersistedConfig(t)
 	assert.Equal(t, "test-account", persisted.AccountID)
+	assert.Equal(t, "production-cluster", persisted.ClusterName)
+
+	// Verify reading back from a fresh config instance
+	freshKS := NewKubescape(context.Background())
+	var buf bytes.Buffer
+	require.NoError(t, freshKS.ViewCachedConfig(&metav1.ViewConfig{
+		Key:          "clusterName",
+		OutputFormat: "text",
+		Writer:       &buf,
+	}))
+	assert.Equal(t, "production-cluster\n", buf.String())
 }
 
 func TestViewCachedConfig_FullJSON(t *testing.T) {

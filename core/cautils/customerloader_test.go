@@ -516,6 +516,25 @@ func TestUpdateConfigFile_ClusterNameStripped(t *testing.T) {
 	assert.Equal(t, "ddd", configObj.ClusterName, "ClusterName must be restored on the in-memory object after write")
 }
 
+func TestUpdateConfigFile_ExplicitClusterNamePersisted(t *testing.T) {
+	originalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	defer func() { getter.DefaultLocalStore = originalStore }()
+
+	configObj := mockConfigObj()
+	configObj.ExplicitClusterName = true
+	require.NoError(t, updateConfigFile(configObj))
+
+	dat, err := os.ReadFile(ConfigFileFullPath())
+	require.NoError(t, err)
+	require.NotEmpty(t, dat, "config file must not be empty after write")
+
+	var raw map[string]string
+	require.NoError(t, json.Unmarshal(dat, &raw))
+	assert.Equal(t, "ddd", raw["clusterName"], "explicit clusterName must be persisted in JSON")
+	assert.Equal(t, "aaa", raw["accountID"], "accountID must be present in the persisted JSON")
+}
+
 func TestUpdateConfigFile_PropagatesMarshalError(t *testing.T) {
 	originalStore := getter.DefaultLocalStore
 	getter.DefaultLocalStore = t.TempDir()

@@ -68,11 +68,12 @@ func ConfigFileFullPath() string { return getter.GetDefaultPath(configFileName +
 // ======================================================================================
 
 type ConfigObj struct {
-	AccountID      string `json:"accountID,omitempty"`
-	ClusterName    string `json:"clusterName,omitempty"`
-	CloudReportURL string `json:"cloudReportURL,omitempty"`
-	CloudAPIURL    string `json:"cloudAPIURL,omitempty"`
-	AccessKey      string `json:"accessKey,omitempty"`
+	AccountID           string `json:"accountID,omitempty"`
+	ClusterName         string `json:"clusterName,omitempty"`
+	CloudReportURL      string `json:"cloudReportURL,omitempty"`
+	CloudAPIURL         string `json:"cloudAPIURL,omitempty"`
+	AccessKey           string `json:"accessKey,omitempty"`
+	ExplicitClusterName bool   `json:"-"`
 }
 
 // Config - convert ConfigObj to config file
@@ -104,6 +105,7 @@ func (co *ConfigObj) updateEmptyFields(inCO *ConfigObj) error {
 	}
 	if co.ClusterName == "" && inCO.ClusterName != "" {
 		co.ClusterName = inCO.ClusterName
+		co.ExplicitClusterName = inCO.ExplicitClusterName
 	}
 
 	return nil
@@ -376,11 +378,14 @@ var configMarshal = func(v any) ([]byte, error) {
 }
 
 // marshalConfigObj serializes co for persistence, stripping ClusterName from a
-// snapshot because it is runtime-only and must not be saved. Serializing the
+// snapshot unless it was explicitly configured, because auto-derived runtime
+// cluster contexts must not be saved to the configuration file. Serializing the
 // snapshot keeps the shared runtime config unchanged for concurrent readers.
 func marshalConfigObj(co *ConfigObj) ([]byte, error) {
 	snapshot := *co
-	snapshot.ClusterName = ""
+	if !snapshot.ExplicitClusterName {
+		snapshot.ClusterName = ""
+	}
 	return configMarshal(&snapshot)
 }
 
@@ -511,7 +516,13 @@ func loadConfigFromFile(configObj *ConfigObj) error {
 		}
 		return err
 	}
-	return readConfig(dat, configObj)
+	if err := readConfig(dat, configObj); err != nil {
+		return err
+	}
+	if configObj.ClusterName != "" {
+		configObj.ExplicitClusterName = true
+	}
+	return nil
 }
 func readConfig(dat []byte, configObj *ConfigObj) error {
 
