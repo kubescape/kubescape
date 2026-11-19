@@ -7,13 +7,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -189,9 +193,89 @@ func failedOutcome(kubeContext string, err error, elapsed time.Duration) fleetOu
 	return fleetOutcome{cluster: newClusterResult(kubeContext, nil, err, elapsed), err: err}
 }
 
+var (
+	// ErrFleetFileNotRegular is returned when a fleet child file is not a regular file.
+	ErrFleetFileNotRegular = errors.New("fleet child file is not a regular file")
+	// ErrFleetFileTooLarge is returned when a fleet child file exceeds the maximum allowed size.
+	ErrFleetFileTooLarge = errors.New("fleet child file exceeds maximum size limit")
+)
+
+func getMaxFleetChildFileSize() int64 {
+	if v, ok := os.LookupEnv(cautils.MaxFileSizeEnvVar); ok {
+		trimmed := strings.TrimSpace(v)
+		if trimmed != "" {
+			if parsed, err := strconv.ParseInt(trimmed, 10, 64); err == nil && parsed > 0 && parsed != math.MaxInt64 {
+				return parsed
+			}
+			logger.L().Warning("invalid KUBESCAPE_MAX_FILE_SIZE, using default", helpers.String("value", v), helpers.Int("default", int(cautils.DefaultMaxFileSize)))
+		}
+	}
+	return cautils.DefaultMaxFileSize
+}
+
+func openFleetChildFile(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	cleaned := filepath.Clean(path)
+	statInfo, err := os.Stat(cleaned)
+	if err != nil {
+		return nil, err
+	}
+	if statInfo.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrFleetFileNotRegular)
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrFleetFileNotRegular, path)
+	}
+
+	file, err := os.OpenFile(cleaned, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		_ = file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrFleetFileNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, fmt.Errorf("%w: %q", ErrFleetFileNotRegular, path)
+	}
+	return file, nil
+}
+
+func readFleetChildFile(path string) ([]byte, error) {
+	file, err := openFleetChildFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+
+	limit := getMaxFleetChildFileSize()
+
+	info, err := file.Stat()
+	if err == nil && info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrFleetFileTooLarge, path, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrFleetFileTooLarge, path, limit)
+	}
+	return data, nil
+}
+
 // readChildCluster reads the one cluster a child's result holds.
 func readChildCluster(path, kubeContext string) (fleet.ClusterResult, error) {
-	contents, err := os.ReadFile(path)
+	contents, err := readFleetChildFile(path)
 	if err != nil {
 		return fleet.ClusterResult{}, err
 	}
@@ -209,12 +293,12 @@ func readChildCluster(path, kubeContext string) (fleet.ClusterResult, error) {
 
 // childFailure finds the child's own "<context>: <error>" line, which its fleet summary prints on failure.
 func childFailure(logPath, kubeContext string) string {
-	file, err := os.Open(logPath)
+	file, err := openFleetChildFile(logPath)
 	if err != nil {
 		return "the scan failed"
 	}
 	defer file.Close()
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(io.LimitReader(file, getMaxFleetChildFileSize()))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		if message, ok := strings.CutPrefix(scanner.Text(), kubeContext+": "); ok {
@@ -242,7 +326,7 @@ func csvField(value string) string {
 
 // lastLines returns the end of a child's log, for errors that left no report behind.
 func lastLines(path string, n int) string {
-	contents, err := os.ReadFile(path)
+	contents, err := readFleetChildFile(path)
 	if err != nil {
 		return ""
 	}
