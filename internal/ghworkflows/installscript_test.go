@@ -25,22 +25,20 @@ func TestInstallScriptReportsLatestVersionLookupFailure(t *testing.T) {
 	installScript := filepath.Join(repoRoot, "install.sh")
 
 	tempDir := t.TempDir()
-	fakeBin := filepath.Join(tempDir, "bin")
 	homeDir := filepath.Join(tempDir, "home")
 
-	for _, dir := range []string{fakeBin, homeDir} {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.MkdirAll(homeDir, 0700); err != nil {
+		t.Fatal(err)
 	}
 
 	// Simulate GitHub API rate limiting.
-	fakeCurl := filepath.Join(fakeBin, "curl")
-	curlScript := `#!/bin/sh
-printf '%s\n' '{"message":"API rate limit exceeded"}'
+	bashEnv := filepath.Join(tempDir, "bash_env")
+	bashEnvScript := `curl() {
+    printf '%s\n' '{"message":"API rate limit exceeded"}'
+}
 `
 
-	if err := os.WriteFile(fakeCurl, []byte(curlScript), 0755); err != nil {
+	if err := os.WriteFile(bashEnv, []byte(bashEnvScript), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -48,8 +46,8 @@ printf '%s\n' '{"message":"API rate limit exceeded"}'
 
 	cmd.Env = replaceEnvValueForInstallTest(
 		os.Environ(),
-		"PATH",
-		fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"BASH_ENV",
+		bashEnv,
 	)
 	cmd.Env = replaceEnvValueForInstallTest(cmd.Env, "HOME", homeDir)
 
