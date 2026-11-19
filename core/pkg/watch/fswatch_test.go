@@ -1292,7 +1292,7 @@ func TestFileWatcherDependenciesAreFiles(t *testing.T) {
 	security := filepath.Join(root, "security")
 	write(t, security, "readOnlyRootFilesystem: false")
 	require.NoError(t, w.handle(fsnotify.Event{Name: security, Op: fsnotify.Write}))
-	assert.Len(t, w.changes, 1, "an edit to a dependency file is signalled")
+	require.Len(t, w.changes, 1, "an edit to a dependency file is signalled")
 	<-w.changes
 
 	require.NoError(t, os.Remove(security))
@@ -1324,4 +1324,82 @@ func TestFileWatcherSingleFileIgnoreChanges(t *testing.T) {
 			assert.Len(t, w.changes, 1, "changing the scan's ignore file must trigger a rescan")
 		})
 	}
+}
+
+// The removal of a dependency file is signalled even when its path no longer
+// says it was a file: it is named like a directory the scan excludes, or a
+// directory of that name took its place before the removal was handled.
+func TestFileWatcherSignalsRemovedDependencyFiles(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		before  bool // the file exists when the watch starts, rather than being written after
+		replace bool // a directory of the same name is made before the removal is handled
+	}{
+		{name: "named like an excluded directory, seen when the watch started", before: true},
+		{name: "named like an excluded directory, written while watching"},
+		{name: "replaced by a directory before its removal is handled", before: true, replace: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			dep := filepath.Join(root, "extra")
+			if tc.before {
+				write(t, dep, "readOnlyRootFilesystem: false")
+			}
+			w, err := newFileWatcher(root, FileWatcherOptions{
+				Exclude:            func(path string, isDir bool) bool { return isDir && path == dep }, // extra/
+				AcceptDependencies: func(string) bool { return true },
+			})
+			require.NoError(t, err)
+			defer w.fs.Close()
+
+			if !tc.before {
+				write(t, dep, "readOnlyRootFilesystem: false")
+				require.NoError(t, w.handle(fsnotify.Event{Name: dep, Op: fsnotify.Write}))
+				require.Len(t, w.changes, 1, "an edit to the dependency file is signalled")
+				<-w.changes
+			}
+
+			require.NoError(t, os.Remove(dep))
+			if tc.replace {
+				require.NoError(t, os.Mkdir(dep, 0o755))
+			}
+			require.NoError(t, w.handle(fsnotify.Event{Name: dep, Op: fsnotify.Remove}))
+			require.Len(t, w.changes, 1, "the removal of a dependency file is signalled")
+			<-w.changes
+
+			// Once its removal is handled the path is forgotten: a directory under
+			// the name, or the excluded one, is not a dependency.
+			require.NoError(t, w.handle(fsnotify.Event{Name: dep, Op: fsnotify.Write}))
+			assert.Empty(t, w.changes, "what is under the name now is not a dependency file")
+		})
+	}
+}
+
+// A dependency file that cannot be looked at, for a reason other than being
+// gone, is still signalled, and stays remembered until it is known to be gone.
+func TestFileWatcherKeepsADependencyThatCannotBeInspected(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	dep := filepath.Join(sub, "settings")
+	write(t, dep, "key=value")
+	w := &FileWatcher{root: root}
+	require.True(t, w.mayBeDependency(dep))
+	require.Contains(t, w.depFiles, dep)
+
+	// sub becomes a file, so dep can't be inspected: not "does not exist" but
+	// "not a directory" (except where the platform reports that as missing).
+	require.NoError(t, os.RemoveAll(sub))
+	write(t, sub, "now a file")
+	if _, err := os.Lstat(dep); err == nil || errors.Is(err, fs.ErrNotExist) {
+		t.Skipf("this platform reports %q as missing, not as uninspectable: %v", dep, err)
+	}
+	assert.True(t, w.mayBeDependency(dep), "a dependency that can't be inspected still counts")
+	assert.Contains(t, w.depFiles, dep, "and stays remembered")
+
+	require.NoError(t, os.Remove(sub))
+	assert.True(t, w.mayBeDependency(dep), "its removal counts")
+	assert.NotContains(t, w.depFiles, dep, "and once it is known to be gone it is forgotten")
 }
