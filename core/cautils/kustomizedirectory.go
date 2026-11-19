@@ -617,8 +617,11 @@ func isKustomizeHelmError(err error, helmCommand string) bool {
 	if errors.As(err, &execErr) && (execErr.Name == helmCommand || filepath.Base(execErr.Name) == cmdBase) {
 		return true
 	}
+	// Only a failure to start the command is Helm's. kustomize reports a missing
+	// resource or base as a path error too, and one named like the command (a
+	// directory called helm, say) is not about Helm.
 	var pathErr *os.PathError
-	if errors.As(err, &pathErr) && (pathErr.Path == helmCommand || filepath.Base(pathErr.Path) == cmdBase) {
+	if errors.As(err, &pathErr) && pathErr.Op == "fork/exec" && (pathErr.Path == helmCommand || filepath.Base(pathErr.Path) == cmdBase) {
 		return true
 	}
 
