@@ -104,6 +104,11 @@ type FileWatcher struct {
 	dirs    map[string]struct{} // watched directories; owned by the goroutine once started
 	changes chan struct{}
 
+	// depFiles are the paths last seen as dependency files of a rendered root, so
+	// their removal is recognised after the path is gone or is a directory.
+	// Owned by the goroutine once started, like dirs; made on first use.
+	depFiles map[string]struct{}
+
 	pending map[string]struct{} // directories that appeared, to be registered once settleDelay has passed
 	settle  *time.Timer
 	settleC <-chan time.Time // nil unless the timer is running
@@ -663,6 +668,11 @@ func (w *FileWatcher) unregister(dir string) {
 			_ = w.fs.Remove(watched)
 		}
 	}
+	for path := range w.depFiles {
+		if strings.HasPrefix(path, prefix) {
+			delete(w.depFiles, path)
+		}
+	}
 }
 
 // dropExcluded forgets the directories that are now excluded, with what is
@@ -728,14 +738,32 @@ func (w *FileWatcher) relevantFile(path string) bool {
 // mayBeDependency reports whether a path without a manifest's extension can be
 // a file a render reads. A dependency is a file: a directory that is watched
 // reports what changes in it through its own watch, and one that isn't, .git
-// or one the scan excludes, holds nothing the scan reads. A path that is gone
-// can't be looked at, so it counts unless it is skipped as a directory would be.
+// or one the scan excludes, holds nothing the scan reads.
+//
+// A path last seen as a dependency file still counts once it is gone, or is a
+// directory by the time its removal is handled: what the render read was
+// removed, whatever the name means now. Without that, a removed file named like
+// an excluded directory (a file "extra" with "extra/" excluded) would not
+// count, nor one replaced by a directory of the same name before its removal
+// was seen. A path that is gone and was never seen can't be looked at, so it
+// counts unless it is skipped as a directory would be.
 func (w *FileWatcher) mayBeDependency(path string) bool {
 	info, err := os.Lstat(path)
+	if err == nil && !info.IsDir() {
+		if w.depFiles == nil {
+			w.depFiles = make(map[string]struct{})
+		}
+		w.depFiles[path] = struct{}{}
+		return true
+	}
+	if _, was := w.depFiles[path]; was {
+		delete(w.depFiles, path)
+		return true
+	}
 	if err != nil {
 		return !w.skipDir(path)
 	}
-	return !info.IsDir()
+	return false
 }
 
 func isEditorOrTempFile(path string) bool {
