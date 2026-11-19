@@ -1,8 +1,11 @@
 package v1
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -251,4 +254,84 @@ func TestWatchForScan_GracefulShutdown(t *testing.T) {
 	default:
 		t.Fatal("Shutdown returned without joining the worker")
 	}
+}
+
+func TestOpenBoundedResultFile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Empty path
+	_, err := openBoundedResultFile("", 1024)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+
+	// Directory path
+	_, err = openBoundedResultFile(dir, 1024)
+	assert.ErrorContains(t, err, "is not a regular file")
+
+	// Non-existent path
+	_, err = openBoundedResultFile(filepath.Join(dir, "missing.json"), 1024)
+	assert.Error(t, err)
+
+	// Valid small file
+	filePath := filepath.Join(dir, "valid.json")
+	require.NoError(t, os.WriteFile(filePath, []byte(`{"status":"ok"}`), 0600))
+	data, err := openBoundedResultFile(filePath, 1024)
+	require.NoError(t, err)
+	assert.Equal(t, `{"status":"ok"}`, string(data))
+
+	// Oversized file
+	oversizedPath := filepath.Join(dir, "oversized.json")
+	require.NoError(t, os.WriteFile(oversizedPath, bytes.Repeat([]byte("a"), 2048), 0600))
+	_, err = openBoundedResultFile(oversizedPath, 1024)
+	assert.ErrorContains(t, err, "exceeds maximum allowed size")
+}
+
+func TestReadResultsFile_OversizedRejected(t *testing.T) {
+	dir := t.TempDir()
+
+	oldOutputDir := OutputDir
+	OutputDir = dir
+	defer func() { OutputDir = oldOutputDir }()
+
+	validUUID := "123e4567-e89b-12d3-a456-426614174000"
+	targetFile := filepath.Join(dir, validUUID+".json")
+
+	// Write oversized content (> 32 MiB by temporarily testing via small limit or writing past limit)
+	// Using openBoundedResultFile with custom limit is tested above; here test that readResultsFile fails if file exceeds limit
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "1024")
+	require.NoError(t, os.WriteFile(targetFile, bytes.Repeat([]byte("x"), 2048), 0600))
+
+	_, err := readResultsFile(validUUID)
+	assert.ErrorContains(t, err, "file 123e4567-e89b-12d3-a456-426614174000 not found")
+}
+
+func TestReadResultsFile_OversizedFailedArtifactPreservesPrecedence(t *testing.T) {
+	outDir := t.TempDir()
+	failedDir := t.TempDir()
+
+	oldOutputDir, oldFailedDir := OutputDir, FailedOutputDir
+	OutputDir, FailedOutputDir = outDir, failedDir
+	defer func() {
+		OutputDir, FailedOutputDir = oldOutputDir, oldFailedDir
+	}()
+
+	validUUID := "123e4567-e89b-12d3-a456-426614174001"
+	failedFile := filepath.Join(failedDir, validUUID+".json")
+	successFile := filepath.Join(outDir, validUUID+".json")
+
+	// Create a stale success report in OutputDir
+	require.NoError(t, os.WriteFile(successFile, []byte(`{"customerGUID":"stale"}`), 0600))
+
+	// Create an oversized failure message in FailedOutputDir (> 1024 bytes)
+	t.Setenv("KUBESCAPE_MAX_FILE_SIZE", "1024")
+	oversizedMsg := "fatal error: " + string(bytes.Repeat([]byte("e"), 2048))
+	require.NoError(t, os.WriteFile(failedFile, []byte(oversizedMsg), 0600))
+
+	_, err := readResultsFile(validUUID)
+	require.Error(t, err)
+
+	// Must return a *ScanFailedError, NOT stale success and NOT "file not found"
+	scanFailed, isScanFailed := errors.AsType[*ScanFailedError](err)
+	require.True(t, isScanFailed, "expected *ScanFailedError, got: %T (%v)", err, err)
+	assert.Contains(t, scanFailed.Message, "fatal error:")
+	assert.LessOrEqual(t, len(scanFailed.Message), 1024, "returned error message must be bounded to the limit")
 }

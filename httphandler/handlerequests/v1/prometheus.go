@@ -118,7 +118,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 
 	// read prometheus format results file
 	resolvedFile, _ := printer.ResolveOutputFile(printer.PrometheusFormat, resultsFile, "")
-	f, err := os.ReadFile(resolvedFile)
+	f, err := openBoundedResultFile(resolvedFile, cautils.GetMaxFileSize())
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		results.Type = utilsapisv1.ErrorScanResponseType
