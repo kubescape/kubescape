@@ -907,8 +907,10 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 		}
 	}
 
-	// local git repo
-	if _, err := NewLocalGitRepository(input); err == nil {
+	// local git repo. A glob is probed through the directory it reads from: on
+	// Windows a path containing '*' cannot be opened, so go-git cannot walk up from it.
+	gitProbe, _ := GlobInputRoot(input)
+	if _, err := NewLocalGitRepository(gitProbe); err == nil {
 		return ContextGitLocal
 	}
 
@@ -982,10 +984,12 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 			BasePath: basePath,
 			HostName: getHostname(),
 		}
-		// add repo context for submitting
+		// add repo context for submitting. A glob is identified by the directory
+		// it reads from, so it shares the identity of a scan of that directory.
+		repoInput, _ := GlobInputRoot(input)
 		contextMetadata.RepoContextMetadata = &reporthandlingv2.RepoContextMetadata{
 			Provider:      "none",
-			Repo:          fmt.Sprintf("path@%s", getAbsPath(input)),
+			Repo:          fmt.Sprintf("path@%s", getAbsPath(repoInput)),
 			Owner:         getHostname(),
 			Branch:        "none",
 			DefaultBranch: "none",
@@ -1008,7 +1012,8 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 		}
 	case ContextGitLocal:
 		// local
-		repoContext, err := metadataGitLocal(input)
+		gitInput, _ := GlobInputRoot(input)
+		repoContext, err := metadataGitLocal(gitInput)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("in setContextMetadata", helpers.Interface("case", ContextGitLocal), helpers.Error(err))
 		}
