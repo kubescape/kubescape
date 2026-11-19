@@ -1259,6 +1259,47 @@ func TestFileWatcherStopsWatchingWhatTheIgnoreFileNowExcludes(t *testing.T) {
 	assert.Empty(t, w.changes, "removing an excluded directory is signalled")
 }
 
+// In a rendered root (a kustomization or Terraform directory), a file with any
+// name can be one the render reads, but a directory isn't: a watched one reports
+// what changes in it through its own watch, and .git and the directories the
+// scan excludes hold nothing it reads. On Windows the root's watch reports a
+// write to a directory whose entries change, such as .git on every commit.
+func TestFileWatcherDependenciesAreFiles(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	extra := filepath.Join(root, "extra")
+	git := filepath.Join(root, ".git")
+	write(t, filepath.Join(extra, "api.yaml"), "kind: Pod")
+	write(t, filepath.Join(git, "HEAD"), "ref: refs/heads/main")
+	w, err := newFileWatcher(root, FileWatcherOptions{
+		Exclude:            func(path string, isDir bool) bool { return isDir && path == extra }, // extra/
+		AcceptDependencies: func() bool { return true },
+	})
+	require.NoError(t, err)
+	defer w.fs.Close()
+	require.NotContains(t, w.dirs, extra)
+
+	require.NoError(t, w.handle(fsnotify.Event{Name: git, Op: fsnotify.Write}))
+	assert.Empty(t, w.changes, "git updating .git is not an edit to the input")
+
+	require.NoError(t, w.handle(fsnotify.Event{Name: extra, Op: fsnotify.Write}))
+	assert.Empty(t, w.changes, "a change in an excluded directory is not an edit to the input")
+
+	require.NoError(t, os.RemoveAll(extra))
+	require.NoError(t, w.handle(fsnotify.Event{Name: extra, Op: fsnotify.Remove}))
+	assert.Empty(t, w.changes, "removing an excluded directory is not an edit to the input")
+
+	security := filepath.Join(root, "security")
+	write(t, security, "readOnlyRootFilesystem: false")
+	require.NoError(t, w.handle(fsnotify.Event{Name: security, Op: fsnotify.Write}))
+	assert.Len(t, w.changes, 1, "an edit to a dependency file is signalled")
+	<-w.changes
+
+	require.NoError(t, os.Remove(security))
+	require.NoError(t, w.handle(fsnotify.Event{Name: security, Op: fsnotify.Remove}))
+	assert.Len(t, w.changes, 1, "and so is its removal")
+}
+
 func TestFileWatcherSingleFileIgnoreChanges(t *testing.T) {
 	t.Parallel()
 	for _, op := range []fsnotify.Op{fsnotify.Create, fsnotify.Write, fsnotify.Remove, fsnotify.Rename} {
