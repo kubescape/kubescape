@@ -65,6 +65,23 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 		Short:   fmt.Sprintf("Download %s", strings.Join(core.DownloadSupportCommands(), ",")),
 		Long:    ``,
 		Example: downloadExample,
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) == 1 && normalizeDownloadTarget(args[0]) == core.TargetControlsInputs {
+				return nil, cobra.ShellCompDirectiveDefault
+			}
+
+			if len(args) > 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+
+			var suggestions []string
+			for _, target := range core.DownloadSupportCommands() {
+				if strings.HasPrefix(strings.ToLower(target), strings.ToLower(toComplete)) {
+					suggestions = append(suggestions, target)
+				}
+			}
+			return suggestions, cobra.ShellCompDirectiveNoFileComp
+		},
 		Args: func(cmd *cobra.Command, args []string) error {
 			supported := strings.Join(core.DownloadSupportCommands(), ",")
 			if len(args) < 1 {

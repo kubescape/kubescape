@@ -566,3 +566,32 @@ func TestGetListCmd_NilKubescape(t *testing.T) {
 	err := cmd.Execute()
 	require.EqualError(t, err, "uninitialized kubescape interface")
 }
+
+func TestGetListCmd_TargetCompletion(t *testing.T) {
+	cmd := GetListCmd(nil)
+
+	require.NotNil(t, cmd.ValidArgsFunction)
+
+	suggestions, directive := cmd.ValidArgsFunction(cmd, nil, "")
+	assert.Equal(t, core.ListSupportActions(), suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "fr")
+	assert.Equal(t, []string{"frameworks"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+}
+
+func TestGetListCmd_FormatCompletion(t *testing.T) {
+	cmd := GetListCmd(nil)
+
+	completion, ok := cmd.GetFlagCompletionFunc("format")
+	require.True(t, ok)
+
+	suggestions, directive := completion(cmd, nil, "")
+	assert.Equal(t, core.ListSupportFormats(), suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = completion(cmd, nil, "j")
+	assert.Equal(t, []string{"json"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+}
