@@ -882,7 +882,22 @@ func TestSanitizeMarkdownTableCell_StripsControlsAndBackticks(t *testing.T) {
 		{
 			name:     "strips non-printable ascii controls and del",
 			input:    "bad\x00control\x01bytes\x08and\x1b[31mescapes\x7f",
-			expected: "badcontrolbytesand[31mescapes",
+			expected: "badcontrolbytesand\\[31mescapes",
+		},
+		{
+			name:     "escapes markdown formatting characters (*, _, <, >, [, ], ~)",
+			input:    "error in *.yaml* and _value_ and <nil> and [selector] and ~~strikethrough~~ and path\\to\\file",
+			expected: "error in \\*.yaml\\* and \\_value\\_ and \\<nil\\> and \\[selector\\] and \\~\\~strikethrough\\~\\~ and path\\\\to\\\\file",
+		},
+		{
+			name:     "escapes standalone asterisk and underscore",
+			input:    "* and _",
+			expected: "\\* and \\_",
+		},
+		{
+			name:     "escapes angle-bracket tags to prevent html swallowing",
+			input:    "resource <default/pod> failed <nil>",
+			expected: "resource \\<default/pod\\> failed \\<nil\\>",
 		},
 		{
 			name:     "preserves tab and unicode",
@@ -941,7 +956,7 @@ func TestGenerateStepSummary_SanitizesBackticksAndControlsInTables(t *testing.T)
 	}
 
 	summary := generateStepSummaryWithBudget(session, 1024*1024)
-	assert.Contains(t, summary, "failed with 'syntax error'and[31mcolor[0m")
+	assert.Contains(t, summary, "failed with 'syntax error'and\\[31mcolor\\[0m")
 	assert.Contains(t, summary, "manifests/'app'.yaml")
 	assert.Contains(t, summary, "unsupported 'kind'withcontrol")
 	assert.NotContains(t, summary, "`")
@@ -949,6 +964,33 @@ func TestGenerateStepSummary_SanitizesBackticksAndControlsInTables(t *testing.T)
 	assert.NotContains(t, summary, "\x1b")
 	assert.NotContains(t, summary, "\x08")
 	assert.NotContains(t, summary, "\x7f")
+}
+
+func TestGenerateStepSummary_EscapesMarkdownCharactersInTables(t *testing.T) {
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     50.0,
+		EvaluatedControls: 1,
+		TotalControls:     2,
+		Degraded:          true,
+		FailedGVRPulls: []cautils.FailedGVRPull{
+			{
+				GVR:   "apps/v1/deployments",
+				Error: "failed with *.yaml* and <nil> and [selector]",
+			},
+		},
+		SkippedManifests: []cautils.SkippedManifest{
+			{
+				Path:   "manifests/pod_test.yaml",
+				Reason: "skipped because of ~~deprecated~~ and <custom-tag>",
+			},
+		},
+	}
+
+	summary := generateStepSummaryWithBudget(session, 1024*1024)
+	assert.Contains(t, summary, "failed with \\*.yaml\\* and \\<nil\\> and \\[selector\\]")
+	assert.Contains(t, summary, "manifests/pod\\_test.yaml")
+	assert.Contains(t, summary, "skipped because of \\~\\~deprecated\\~\\~ and \\<custom-tag\\>")
 }
 
 func TestGitHubActionsPrinter_FilePathWithControls_EmitsWithoutLocation(t *testing.T) {

@@ -374,16 +374,28 @@ outerLoop:
 	return sb.String()
 }
 
+var mdTableCellReplacer = strings.NewReplacer(
+	"\\", "\\\\",
+	"|", "\\|",
+	"`", "'",
+	"*", "\\*",
+	"_", "\\_",
+	"<", "\\<",
+	">", "\\>",
+	"[", "\\[",
+	"]", "\\]",
+	"~", "\\~",
+)
+
 func sanitizeMarkdownTableCell(s string) string {
-	s = strings.ReplaceAll(s, "|", "\\|")
-	s = strings.ReplaceAll(s, "`", "'")
+	s = mdTableCellReplacer.Replace(s)
 	s = strings.ReplaceAll(s, "\r\n", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", " ")
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range s {
-		if (r < 0x20 && r != '\t') || r == 0x7f {
+		if (unicode.IsControl(r) && r != '\t') || r == 0x7f {
 			continue
 		}
 		b.WriteRune(r)
