@@ -194,9 +194,11 @@ func FileScanRootPath(filePath string) string {
 // repository root when input sits inside a worktree, and input's own absolute path
 // otherwise. Scan metadata and the resource sources built in the file loader must
 // derive their anchor the same way, or the report's base path and its resources'
-// relative paths no longer compose.
+// relative paths no longer compose. A glob input is anchored at the directory it
+// reads from (GlobInputRoot), the same directory the file loader anchors it at.
 func ScanRootPath(input string) string {
-	absPath := getAbsPath(input)
+	anchor, _ := GlobInputRoot(input)
+	absPath := getAbsPath(anchor)
 	if root, err := GetGitRootDir(absPath); err == nil {
 		return root
 	}
