@@ -157,6 +157,7 @@ type ScanInfo struct {
 	Namespace                 string                       // target namespace for workload scans
 	NamespaceDefaulted        bool                         // true when target namespace for workload scans was defaulted to "default"
 	WorkspaceDir              string                       // Workspace root directory for containment enforcement
+	MaxParallelResourcePulls  int                          // Maximum parallel resource pulls from the Kubernetes API (defaults to 8, or KUBESCAPE_MAX_PARALLEL_PULLS)
 	InputPatterns             []string                     // Yaml files input patterns
 	Silent                    bool                         // Silent mode - Do not print progress logs
 	FailThreshold             float32                      // DEPRECATED - Failure score threshold

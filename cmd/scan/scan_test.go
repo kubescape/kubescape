@@ -2020,6 +2020,37 @@ func TestGetScanCommand_GitCloneDepthReachesScanInfo(t *testing.T) {
 	}
 }
 
+func TestGetScanCommand_MaxParallelPullsFlagRegistered(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	f := cmd.PersistentFlags().Lookup("max-parallel-pulls")
+	require.NotNil(t, f, "--max-parallel-pulls flag must be registered on the scan command")
+	assert.Equal(t, "int", f.Value.Type(), "--max-parallel-pulls must be an integer flag")
+	assert.Equal(t, "0", f.DefValue, "--max-parallel-pulls default must be 0 (fallback to env or default 8)")
+}
+
+func TestGetScanCommand_MaxParallelPullsFlagParsed(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	err := cmd.PersistentFlags().Set("max-parallel-pulls", "4")
+	require.NoError(t, err)
+
+	f := cmd.PersistentFlags().Lookup("max-parallel-pulls")
+	assert.Equal(t, "4", f.Value.String())
+}
+
+func TestGetScanCommand_MaxParallelPullsValidation(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--max-parallel-pulls=-1"})
+	err := cmd.Execute()
+	require.ErrorContains(t, err, "invalid --max-parallel-pulls -1: must be zero or positive")
+}
+
 func TestGetScanCommand_NilKubescape(t *testing.T) {
 	cmd := GetScanCommand(nil)
 	require.NotNil(t, cmd)
