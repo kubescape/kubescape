@@ -54,11 +54,14 @@ func LoadCustomRules(path string) (*reporthandling.Framework, error) {
 	if !info.IsDir() {
 		ext := strings.ToLower(filepath.Ext(path))
 		if ext == ".yaml" || ext == ".yml" {
-			control, err := controlFromYAMLFile(path)
+			controls, err := controlsFromYAMLFile(path)
 			if err != nil {
 				return nil, err
 			}
-			return customFramework([]reporthandling.Control{control}), nil
+			if err := rejectDuplicateControls(controls); err != nil {
+				return nil, err
+			}
+			return customFramework(controls), nil
 		}
 		if !strings.HasSuffix(path, ".rego") {
 			return nil, fmt.Errorf("custom rules path %q is not a .rego, .yaml, or .yml file or directory", path)
@@ -113,11 +116,11 @@ func LoadCustomRules(path string) (*reporthandling.Framework, error) {
 		return nil, err
 	}
 	for _, file := range yamlFiles {
-		control, err := controlFromYAMLFile(file)
+		fileControls, err := controlsFromYAMLFile(file)
 		if err != nil {
 			return nil, err
 		}
-		controls = append(controls, control)
+		controls = append(controls, fileControls...)
 	}
 
 	if len(controls) == 0 {
@@ -257,31 +260,48 @@ func controlFromRegoFile(file string) (reporthandling.Control, error) {
 	}, nil
 }
 
-func controlFromYAMLFile(file string) (reporthandling.Control, error) {
+// controlsFromYAMLFile turns every ValidatingAdmissionPolicy document in one
+// YAML file into its own control. A file holds one policy in the common case,
+// but a bundle separated by `---` is accepted too, so a user can keep the
+// manifest they already apply to a cluster. Each rule keeps only its own
+// document, which the CEL evaluator parses independently at scan time.
+func controlsFromYAMLFile(file string) ([]reporthandling.Control, error) {
 	raw, err := ruledir.ReadFile(file)
 	if err != nil {
-		return reporthandling.Control{}, fmt.Errorf("read custom rule %q: %w", file, err)
+		return nil, fmt.Errorf("read custom rule %q: %w", file, err)
 	}
 
-	vap, err := cel.ParseVAP(raw)
+	documents, err := cel.ParseVAPDocuments(raw)
 	if err != nil {
-		return reporthandling.Control{}, fmt.Errorf("custom rule %q: %w", file, err)
+		return nil, fmt.Errorf("custom rule %q: %w", file, err)
 	}
 
-	baseScore, err := baseScoreFromRego(string(raw))
-	if err != nil {
-		return reporthandling.Control{}, fmt.Errorf("custom rule %q: %w", file, err)
+	controls := make([]reporthandling.Control, 0, len(documents))
+	for i, document := range documents {
+		// Severity is per document: a bundle can mix a critical guardrail with
+		// a low-severity lint, and each keeps the annotation it declares.
+		baseScore, err := baseScoreFromRego(string(document.Raw))
+		if err != nil {
+			if len(documents) > 1 {
+				return nil, fmt.Errorf("custom rule %q, document %d: %w", file, i+1, err)
+			}
+			return nil, fmt.Errorf("custom rule %q: %w", file, err)
+		}
+		controls = append(controls, controlFromVAP(file, document, baseScore))
 	}
+	return controls, nil
+}
 
-	name := vap.PolicyName
-	if name == "" {
-		name = strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
-	}
+// controlFromVAP builds the control for one document out of a custom rules
+// file. ParseVAPDocuments guarantees the policy has a name, so the control ID
+// is stable and meaningful in the report.
+func controlFromVAP(file string, document cel.VAPDocument, baseScore float32) reporthandling.Control {
+	name := document.VAP.PolicyName
 	controlID := customControlPrefix + name
 	description := fmt.Sprintf("User-authored custom CEL rule from %s", file)
 
 	rule := reporthandling.PolicyRule{
-		Rule:         string(raw),
+		Rule:         string(document.Raw),
 		Match:        matchAllKinds(),
 		RuleLanguage: reporthandling.CELLanguage,
 		Description:  description,
@@ -298,7 +318,7 @@ func controlFromYAMLFile(file string) (reporthandling.Control, error) {
 		PortalBase: armotypes.PortalBase{
 			Name: controlID,
 		},
-	}, nil
+	}
 }
 
 // baseScoreFromRego reads the "# @baseScore <n>" annotation a rule may use to
