@@ -499,7 +499,9 @@ kubescape scan ./manifests --custom-rules ./myrules/disallow-host-ipc.yaml
 ```
 
 The policy is evaluated only against the resources its `matchConstraints`
-target. A file may hold more than one policy separated by `---`, as in a
+target. Every policy document must declare a `metadata.name` (nameless policies
+are rejected with an error; Kubescape does not derive control IDs from file names).
+A file may hold more than one policy separated by `---`, as in a
 manifest passed to `kubectl apply`; each document becomes its own
 `custom-<metadata.name>` control. Policies that narrow with
 `namespaceSelector` are refused because the offline scan cannot guarantee the
@@ -507,11 +509,15 @@ namespace labels admission uses.
 
 A policy that declares a `paramKind` is not always refused. When the scan has a
 single matching `ValidatingAdmissionPolicyBinding` whose `paramRef` names a
-parameter object it can resolve, that object supplies `params` even when its
-kind is not the bundled `ControlConfiguration`. The non-bundled kind is refused
-only when parameter resolution falls back to the bundled
-`ControlConfiguration` — with no binding, or a binding that names no object —
-because the scan cannot supply the inputs admission uses.
+parameter object it can resolve, and that binding covers the resource matched by
+the policy, that object supplies `params` even when its kind is not the bundled
+`ControlConfiguration`. Conversely, non-bundled kinds are refused when parameter
+resolution falls back to the bundled `ControlConfiguration` — when there is no
+binding, the binding does not cover the matched resource, or the binding names no
+object — because the scan cannot supply the inputs admission uses. (Policies
+matched by multiple bindings, or bindings that select parameters dynamically via
+`spec.paramRef.selector`, are also refused before resolution to preserve
+admission parity.)
 
 Every custom rule becomes a control named `custom-<rule>` in the report.
 
@@ -533,9 +539,11 @@ deny[msga] { ... }
 The base score is bucketed the same way as a built-in control — `1-3` low,
 `4-6` medium, `7-8` high, `9-10` critical — so it drives the report's severity
 column, `--min-severity`/`--max-severity` and `--severity-threshold`. A value
-outside `1-10`, a malformed value, or duplicate annotations in the same file
-fail the scan rather than defaulting, because a rule whose severity cannot be
-determined is treated as exceeding every `--severity-threshold`.
+outside `1-10`, a malformed value, or duplicate annotations within a single
+policy document (or rule file) fail the scan rather than defaulting, because a
+rule whose severity cannot be determined is treated as exceeding every
+`--severity-threshold`. Distinct documents in a multi-document bundle may each
+declare their own `@baseScore`.
 
 
 ### API group matching in SecurityExceptions
