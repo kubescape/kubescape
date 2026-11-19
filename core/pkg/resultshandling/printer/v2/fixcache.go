@@ -58,6 +58,8 @@ type scannedResource struct {
 	relPath string
 	// absPath is the native filesystem path used to read the manifest.
 	absPath string
+	// isVirtual marks resources synthesized without a local manifest file (e.g. cluster scans).
+	isVirtual bool
 }
 
 // groupByManifest orders failed resources so every resource of one manifest is
