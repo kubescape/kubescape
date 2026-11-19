@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -55,6 +57,10 @@ func (a *OperatorAdapter) OperatorScan(ctx ...context.Context) (string, error) {
 	}
 	names, err := CreateOperatorCommands(c, a.dyn, a.namespace, *payload)
 	if err != nil {
+		if len(names) > 0 {
+			return "", fmt.Errorf("already created OperatorCommands in namespace %q: %s; they may still run, so check their status before retrying: %w",
+				a.namespace, strings.Join(names, ", "), err)
+		}
 		return "", err
 	}
 	timeout := a.timeout
