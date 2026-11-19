@@ -44,7 +44,6 @@ Welcome to the Kubescape documentation. This directory contains detailed guides 
 |----------|-------------|
 | [Security Self-Assessment](security/self-assessment.md) | Evidence-backed security assessment; currently incomplete pending maintainer review |
 | [Environment Dependencies Policy](environment-dependencies-policy.md) | Policy on external dependencies |
-| [Roadmap](roadmap.md) | Project roadmap (see centralized governance repo) |
 
 ## 📁 Subdirectories
 
