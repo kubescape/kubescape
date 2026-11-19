@@ -173,6 +173,45 @@ func TestApplyHidesTheIgnoreFileOfASkippedInput(t *testing.T) {
 	}
 }
 
+// Each path in a reason is replaced once. The pseudonym of an input named "src"
+// contains "src", and must not be replaced again.
+func TestApplyReplacesEachPathInASkippedReasonOnce(t *testing.T) {
+	t.Chdir(t.TempDir())
+	require.NoError(t, os.Mkdir("src", 0o700))
+	ignoreFile := filepath.Join("src", cautils.IgnoreFileName)
+	pseudonym, err := NewMappingTransformer().Transform("src", "src")
+	require.NoError(t, err)
+	hiddenIgnoreFile := pseudonym + string(filepath.Separator) + cautils.IgnoreFileName
+
+	for name, tc := range map[string]struct{ reason, want string }{
+		"ignore file": {
+			reason: "failed to load input: " + ignoreFile + `: invalid exclusion pattern: "["`,
+			want:   "failed to load input: " + hiddenIgnoreFile + `: invalid exclusion pattern: "["`,
+		},
+		"quoted ignore file": {
+			reason: "failed to load input: " + strconv.Quote(ignoreFile) + " is a directory, not a file",
+			want:   "failed to load input: " + strconv.Quote(hiddenIgnoreFile) + " is a directory, not a file",
+		},
+		"quoted input": {
+			reason: "file too large: " + strconv.Quote("src") + " size 99 exceeds limit 10 bytes",
+			want:   "file too large: " + strconv.Quote(pseudonym) + " size 99 exceeds limit 10 bytes",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			skipped := func() []cautils.SkippedManifest {
+				return []cautils.SkippedManifest{{Path: "src", Reason: tc.reason}}
+			}
+			session := skippedManifestsSession()
+			session.SkippedManifests, session.ScanCoverage.SkippedManifests = skipped(), skipped()
+			require.NoError(t, Apply(&resultshandling.ResultsHandler{ScanData: session}))
+
+			assert.Equal(t, pseudonym, session.SkippedManifests[0].Path)
+			assert.Equal(t, tc.want, session.SkippedManifests[0].Reason)
+			assert.Equal(t, tc.want, session.ScanCoverage.SkippedManifests[0].Reason)
+		})
+	}
+}
+
 // Without --hide the paths are the user's own debugging information and must
 // reach the report unchanged.
 func TestSkippedManifestPathsKeptWithoutHide(t *testing.T) {
