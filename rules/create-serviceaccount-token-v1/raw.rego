@@ -87,7 +87,10 @@ is_same_namespace(role, rolebinding) if {
 	not has_namespace(rolebinding)
 }
 
-has_namespace(obj) if obj.metadata.namespace != ""
+has_namespace(obj) if {
+	is_string(obj.metadata.namespace)
+	obj.metadata.namespace != ""
+}
 
 is_same_subjects(subjectVector, subject) if {
 	subjectVector.kind == subject.kind

@@ -263,7 +263,10 @@ is_same_namespace(role, rolebinding) if {
 	not has_namespace(rolebinding)
 }
 
-has_namespace(obj) if obj.metadata.namespace != ""
+has_namespace(obj) if {
+	is_string(obj.metadata.namespace)
+	obj.metadata.namespace != ""
+}
 
 is_same_subjects(subjectVector, subject) if {
 	subjectVector.kind == subject.kind
@@ -295,13 +298,27 @@ is_same_subjects(subjectVector, subject) if {
 # apiGroup alone: two ServiceAccounts of the same name in different namespaces
 # share an apiGroup and would be merged into one identity. Both qualifiers are
 # read with a default instead, which keeps namespace-less subjects such as users
-# and groups comparable without conflating namespaced ones.
+# and groups comparable without conflating namespaced ones. An unqualified
+# ServiceAccount subject of a RoleBinding takes that binding's namespace.
 is_same_subject_vector(subjectVector, other) if {
 	subjectVector.kind == other.kind
 	subjectVector.name == other.name
-	object.get(subjectVector, "namespace", "") == object.get(other, "namespace", "")
+	subject_namespace(subjectVector) == subject_namespace(other)
 	object.get(subjectVector, "apiGroup", "") == object.get(other, "apiGroup", "")
 }
+
+subject_namespace(vector) := ns if {
+	ns := vector.namespace
+	is_string(ns)
+	ns != ""
+} else := ns if {
+	vector.kind == "ServiceAccount"
+	binding := vector.relatedObjects[_]
+	binding.kind == "RoleBinding"
+	ns := binding.metadata.namespace
+	is_string(ns)
+	ns != ""
+} else := ""
 
 # resource_names is a rule's resourceNames with an absent or null list read as
 # the empty list. Kubernetes treats all three alike: ResourceNameMatches matches
