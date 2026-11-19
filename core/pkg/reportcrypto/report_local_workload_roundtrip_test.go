@@ -704,6 +704,36 @@ func TestDecryptReportNonRBACVectorEmptyNameWithValidSourcePath(t *testing.T) {
 	decrypted, err := reportcrypto.DecryptReport(encrypted, []byte(exceptionTestMasterKey))
 	require.NoError(t, err)
 	require.NotNil(t, decrypted)
+
+	var out reportResources
+	require.NoError(t, json.Unmarshal(decrypted, &out))
+	require.NotEmpty(t, out.Resources)
+	require.NotEmpty(t, out.Results)
+
+	byID := make(map[string]map[string]any, len(out.Resources))
+	var widgetID string
+	var widgetObj map[string]any
+	for _, r := range out.Resources {
+		byID[r.ResourceID] = r.Object
+		if r.Object["kind"] == "Widget" {
+			widgetID = r.ResourceID
+			widgetObj = r.Object
+		}
+	}
+	require.NotEmpty(t, widgetID, "widget resource must be present in decrypted report")
+	assert.Equal(t, "Widget", widgetObj["kind"])
+	assert.Equal(t, "", widgetObj["name"])
+	assert.Equal(t, "/path/to/widget.yaml", widgetObj[localworkload.PathKey])
+
+	var referencingResults int
+	for _, result := range out.Results {
+		if result.ResourceID == widgetID {
+			referencingResults++
+		}
+		_, exists := byID[result.ResourceID]
+		assert.True(t, exists, "result %q must name a resource in the report", result.ResourceID)
+	}
+	assert.Equal(t, 1, referencingResults, "the result must reference the retained widget resource")
 }
 
 // A non-RBAC RegoResponseVectorObject with a valid own sourcePath retains its
