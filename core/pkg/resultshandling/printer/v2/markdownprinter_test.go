@@ -586,6 +586,7 @@ func TestMdEscapeInline(t *testing.T) {
 	}{
 		{"image:v1", "image:v1"},
 		{"image`tag", "image'tag"},
+		{"C-0099|local", "C-0099|local"},
 		{"img`with`backtick\nand\r\nnewlines", "img'with'backtick and newlines"},
 		{"\x00bad`inline\x1b", "bad'inline"},
 		{"\u0080bad`inline\u009b", "bad'inline"},
@@ -1094,8 +1095,13 @@ func TestMarkdownPrinter_ActionPrint_ImageScanBacktickAndControlSanitization(t *
 	assert.NotContains(t, out, "`registry.example.com/app`evil`")
 	assert.NotContains(t, out, "\x1b")
 
-	// Vulnerabilities table:
-	assert.Contains(t, out, "| `registry.example.com/app'evil'[31m\\|pipe:v1 [linux/amd64]` |")
+	// Vulnerabilities table: scoped to the vulnerabilities section so the Images table cannot satisfy it
+	vulnIdx := strings.Index(out, "## Vulnerabilities")
+	require.True(t, vulnIdx != -1, "expected ## Vulnerabilities section")
+	vulnSection := out[vulnIdx:]
+	assert.Contains(t, vulnSection, "| `registry.example.com/app'evil'[31m\\|pipe:v1 [linux/amd64]` |")
+	assert.NotContains(t, vulnSection, "`evil`")
+	assert.NotContains(t, vulnSection, "\x1b")
 }
 
 func TestMarkdownPrinter_ActionPrint_NeutralizesNewlinesInFailedControlHeading(t *testing.T) {
@@ -1116,4 +1122,28 @@ func TestMarkdownPrinter_ActionPrint_NeutralizesNewlinesInFailedControlHeading(t
 
 	assert.NotContains(t, out, "\n## Rogue Section\n", "newline in control name must not produce a rogue heading")
 	assert.Contains(t, out, "### Dangerous Control ## Rogue Section — Critical (`C-0099'hack'`)")
+}
+
+func TestMarkdownPrinter_ActionPrint_FailedControlHeadingPreservesPipeInControlID(t *testing.T) {
+	session := mdSessionFixture()
+
+	controlID := "C-0099|local"
+	ctrl := reportsummary.ControlSummary{
+		ControlID:   controlID,
+		Name:        "Custom Control",
+		ScoreFactor: 9.0,
+		StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+	}
+	failedStatus := &apis.StatusInfo{InnerStatus: apis.StatusFailed}
+	ctrl.Append(failedStatus, mdResourceID1)
+	session.Report.SummaryDetails.Controls[controlID] = ctrl
+
+	out := mdRunActionPrint(t, session)
+
+	// Heading code span outside table must preserve pipe without literal backslash escaping
+	assert.Contains(t, out, "### Custom Control — Critical (`C-0099|local`)")
+	assert.NotContains(t, out, "### Custom Control — Critical (`C-0099\\|local`)")
+
+	// Summary table cell must still escape pipe to preserve table structure
+	assert.Contains(t, out, "| Critical | Custom Control | C-0099\\|local |")
 }

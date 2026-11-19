@@ -207,7 +207,7 @@ func mdWriteFailedSection(ctx context.Context, w io.Writer, controls []reportsum
 		}
 
 		severity := apis.ControlSeverityToString(ctrl.GetScoreFactor())
-		ew.printf("### %s — %s (`%s`)\n\n", mdEscapeCell(ctrl.GetName()), severity, mdEscapeCodeCell(ctrl.GetID()))
+		ew.printf("### %s — %s (`%s`)\n\n", mdEscapeCell(ctrl.GetName()), severity, mdEscapeInline(ctrl.GetID()))
 
 		if rem := strings.TrimSpace(ctrl.GetRemediation()); rem != "" {
 			ew.printf("%s\n\n", mdBlockquote("**Remediation:** "+rem))
