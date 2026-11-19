@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -66,15 +67,66 @@ func (ksServer *KubescapeMcpserver) callStorageTool(ctx context.Context, name st
 		}
 		req := mcp.CallToolRequest{}
 		req.Params.Name = name
-		req.Params.Arguments = trimStringArguments(arguments)
+		trimmed := trimStringArguments(arguments)
+		req.Params.Arguments = trimmed
 		res, err = t.Handler(ctx, req)
 		var toolErr *toolResultError
 		if errors.As(err, &toolErr) {
 			return toolErr.result, true, nil
 		}
+		res = addStorageReadErrorDetails(res, name, trimmed)
 		return res, true, err
 	}
 	return nil, false, nil
+}
+
+// Storage's shared handlers classify read failures, but currently omit the requested
+// object from their structured errors.
+func addStorageReadErrorDetails(res *mcp.CallToolResult, tool string, args map[string]any) *mcp.CallToolResult {
+	if res == nil || !res.IsError || len(res.Content) != 1 {
+		return res
+	}
+
+	content, ok := res.Content[0].(mcp.TextContent)
+	if !ok {
+		return res
+	}
+	var e ToolError
+	if json.Unmarshal([]byte(content.Text), &e) != nil || (e.Code != ErrCodeRBACDenied && e.Code != ErrCodeResourceNotFound) {
+		return res
+	}
+
+	resourceType := map[string]any{
+		"list_vulnerability_manifests": "VulnerabilityManifest", "list_vulnerabilities_in_manifest": "VulnerabilityManifest",
+		"list_vulnerability_matches_for_cve": "VulnerabilityManifest", "list_sboms": "SBOMSyft",
+		"list_sbom_packages": "SBOMSyft", "list_configuration_security_scan_manifests": "WorkloadConfigurationScan",
+		"get_configuration_security_scan_manifest": "WorkloadConfigurationScan", "list_container_profiles": "ContainerProfile",
+		"get_container_profile": "ContainerProfile",
+	}[tool]
+
+	if resourceType == "" {
+		return res
+	}
+
+	if e.Details == nil {
+		e.Details = make(map[string]any)
+	}
+	e.Details["resource_type"] = resourceType
+	if namespace, ok := args["namespace"].(string); ok && namespace != "" {
+		e.Details["namespace"] = namespace
+	}
+
+	for _, key := range []string{"manifest_name", "sbom_name", "profile_name"} {
+		if value, ok := args[key].(string); ok && value != "" {
+			e.Details["name"] = value
+			if _, exists := e.Details["namespace"]; !exists &&
+				(resourceType == "VulnerabilityManifest" || resourceType == "SBOMSyft") {
+				e.Details["namespace"] = defaultDataNamespace
+			}
+			break
+		}
+	}
+	return mcpToolError(e.Code, e.Message, e.Details)
 }
 
 // trimStringArguments returns arguments with the spaces around each string
