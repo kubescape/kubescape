@@ -230,6 +230,9 @@ func isKindToBeGrouped(kind string) bool {
 }
 
 func listResultSummaryFromCatalog(controlSummary reportsummary.IControlSummary, catalog cautils.ResourceCatalog) []WorkloadSummary {
+	if controlSummary == nil {
+		return nil
+	}
 	resourceIds := helpersv1.GetAllListsFromPool()
 	defer helpersv1.PutAllListsToPool(resourceIds)
 

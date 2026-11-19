@@ -24,11 +24,19 @@ type TableRow struct {
 
 // generateTableRow is responsible for generating the row that will be printed in the table
 func generateTableRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) *TableRow {
+	if controlSummary == nil {
+		return nil
+	}
+	var failedResources, allResources string
+	if numRes := controlSummary.NumberOfResources(); numRes != nil {
+		failedResources = fmt.Sprintf("%d", numRes.Failed())
+		allResources = fmt.Sprintf("%d", numRes.All())
+	}
 	tableRow := &TableRow{
 		ref:             controlSummary.GetID(),
 		name:            utils.TruncateName(controlSummary.GetName(), controlNameMaxLength),
-		counterFailed:   fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed()),
-		counterAll:      fmt.Sprintf("%d", controlSummary.NumberOfResources().All()),
+		counterFailed:   failedResources,
+		counterAll:      allResources,
 		severity:        apis.ControlSeverityToString(controlSummary.GetScoreFactor()),
 		complianceScore: getComplianceScoreColumn(controlSummary, infoToPrintInfo),
 	}
@@ -37,6 +45,9 @@ func generateTableRow(controlSummary reportsummary.IControlSummary, infoToPrintI
 }
 
 func getInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
+	if controlSummary == nil || controlSummary.GetStatus() == nil {
+		return ""
+	}
 	for i := range infoToPrintInfo {
 		if infoToPrintInfo[i].info == controlSummary.GetStatus().Info() {
 			return infoToPrintInfo[i].stars
@@ -46,7 +57,10 @@ func getInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo
 }
 
 func getComplianceScoreColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
-	if controlSummary.GetStatus().IsSkipped() {
+	if controlSummary == nil {
+		return "N/A"
+	}
+	if status := controlSummary.GetStatus(); status != nil && status.IsSkipped() {
 		return fmt.Sprintf("%s %s", "Action Required", getInfoColumn(controlSummary, infoToPrintInfo))
 	}
 	rawScore := controlSummary.GetComplianceScore()
@@ -57,6 +71,9 @@ func getComplianceScoreColumn(controlSummary reportsummary.IControlSummary, info
 }
 
 func getSeverityColumn(controlSummary reportsummary.IControlSummary) string {
+	if controlSummary == nil {
+		return ""
+	}
 	return getColor(apis.ControlSeverityToInt(controlSummary.GetScoreFactor()))(apis.ControlSeverityToString(controlSummary.GetScoreFactor()))
 }
 

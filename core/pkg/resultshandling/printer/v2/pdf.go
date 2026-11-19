@@ -181,8 +181,13 @@ func (pp *PdfPrinter) generatePdfAt(summaryDetails *reportsummary.SummaryDetails
 
 	template := pdf.NewReportTemplate()
 	template.GenerateHeader(utils.FrameworksScoresToString(summaryDetails.ListFrameworks()), reportTime.Format(time.DateTime))
+	var failedCount, allCount int
+	if numRes := summaryDetails.NumberOfResources(); numRes != nil {
+		failedCount = numRes.Failed()
+		allCount = numRes.All()
+	}
 	err := template.GenerateTable(pp.getTableObjects(summaryDetails, sortedControlIDs, infoToPrintInfo),
-		summaryDetails.NumberOfResources().Failed(), summaryDetails.NumberOfResources().All(), summaryDetails.ComplianceScore)
+		failedCount, allCount, summaryDetails.ComplianceScore)
 
 	if err != nil {
 		return nil, err
@@ -257,9 +262,19 @@ func (pp *PdfPrinter) getFormattedInformation(infoMap []infoStars) []string {
 // The markers are taken from the caller so the table and the legend share one list.
 func (pp *PdfPrinter) getTableObjects(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, infoToPrintInfoMap []infoStars) *[]pdf.TableObject {
 	var controls []pdf.TableObject
+	if summaryDetails == nil {
+		return &controls
+	}
 	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
 		for _, c := range sortedControlID {
-			row := generateTableRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c), infoToPrintInfoMap)
+			ctrl := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c)
+			if ctrl == nil {
+				continue
+			}
+			row := generateTableRow(ctrl, infoToPrintInfoMap)
+			if row == nil {
+				continue
+			}
 			controls = append(controls, *pdf.NewTableRow(
 				row.ref, row.name, row.counterFailed, row.counterAll, row.severity, row.complianceScore, getSeverityColor,
 			))
