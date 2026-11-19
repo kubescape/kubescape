@@ -108,8 +108,17 @@ func watchRoots(inputs []string) []string {
 // kustomization it finds below root, not only one at root, and a kustomization
 // reads the files at or below its own directory.
 func inKustomizationBelow(root, path string) bool {
-	root = filepath.Clean(root)
-	for dir := filepath.Dir(filepath.Clean(path)); ; dir = filepath.Dir(dir) {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+
+	root = filepath.Clean(absRoot)
+	for dir := filepath.Dir(filepath.Clean(absPath)); ; dir = filepath.Dir(dir) {
 		if cautils.IsKustomizeDirectory(dir) {
 			return true
 		}
