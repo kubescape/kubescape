@@ -1984,3 +1984,83 @@ func TestListTestsSuite_KeepsDistinctFrameworkNamesDistinct(t *testing.T) {
 	assert.Equal(t, "Team%01A/C-0001", suites[1].TestCases[0].Classname)
 	assert.NotEqual(t, suites[0].TestCases[0].Classname, suites[1].TestCases[0].Classname, "frameworks differing by control characters must have distinct classnames")
 }
+
+func TestJunitActionPrint_NilWriterReturnsError(t *testing.T) {
+	jp := NewJunitPrinter(false)
+	session := cautils.NewOPASessionObjMock()
+
+	require.NotPanics(t, func() {
+		err := jp.ActionPrint(context.Background(), session, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestTestsCases_NilSafety(t *testing.T) {
+	t.Run("nil controls returns nil without panic", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			cases := testsCases(nil, nil, "Kubescape")
+			assert.Nil(t, cases)
+		})
+	})
+
+	t.Run("nil control status does not panic", func(t *testing.T) {
+		controls := reportsummary.ControlSummaries{
+			"C-0001": reportsummary.ControlSummary{
+				ControlID: "C-0001",
+				Name:      "Test Control",
+			},
+		}
+		require.NotPanics(t, func() {
+			cases := testsCases(nil, &controls, "Kubescape")
+			require.Len(t, cases, 1)
+			assert.Equal(t, "Kubescape/C-0001", cases[0].Classname)
+			assert.Nil(t, cases[0].Failure)
+			assert.Nil(t, cases[0].SkipMessage)
+		})
+	})
+
+	t.Run("nil results with failed status does not panic", func(t *testing.T) {
+		ctrl := &reportsummary.ControlSummary{
+			ControlID:  "C-0001",
+			Name:       "Failed Control",
+			StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		}
+		ctrl.Append(&apis.StatusInfo{InnerStatus: apis.StatusFailed}, "res-1")
+		controls := reportsummary.ControlSummaries{
+			"C-0001": *ctrl,
+		}
+		require.NotPanics(t, func() {
+			cases := testsCases(nil, &controls, "Kubescape")
+			require.Len(t, cases, 1)
+			assert.NotNil(t, cases[0].Failure)
+		})
+	})
+}
+
+func TestResourceToString_NilResourceDoesNotPanic(t *testing.T) {
+	assert.Empty(t, resourceToString(nil, "path/to/file"))
+}
+
+func TestTestsSuites_NilSafety(t *testing.T) {
+	t.Run("nil session does not panic", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			res := testsSuites(nil)
+			require.NotNil(t, res)
+			assert.Empty(t, res.Suites)
+		})
+	})
+
+	t.Run("session with nil report does not panic", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			res := testsSuites(&cautils.OPASessionObj{})
+			require.NotNil(t, res)
+			assert.Empty(t, res.Suites)
+		})
+	})
+}
+
+func TestFrameworkContainsControl_NilSafety(t *testing.T) {
+	assert.False(t, frameworkContainsControl(nil, "fw", "C-0001"))
+	assert.False(t, frameworkContainsControl(&cautils.OPASessionObj{}, "fw", "C-0001"))
+}

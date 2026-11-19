@@ -129,6 +129,9 @@ func (jp *JunitPrinter) PrintNextSteps() {
 }
 
 func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if jp.writer == nil {
+		return fmt.Errorf("failed to write junit results: output writer is nil")
+	}
 	if err := printer.PrepareOutput(jp.writer); err != nil {
 		return err
 	}
@@ -192,6 +195,9 @@ func aggregateSuiteCounts(suites []JUnitTestSuite) (tests, failures, errors, ski
 
 // testsSuites builds the root JUnitTestSuites document aggregating child suites.
 func testsSuites(results *cautils.OPASessionObj) *JUnitTestSuites {
+	if results == nil || results.Report == nil {
+		return &JUnitTestSuites{Name: "Kubescape Scanning"}
+	}
 	suites := listTestsSuite(results)
 	tests, failures, errs, skipped := aggregateSuiteCounts(suites)
 	return &JUnitTestSuites{
@@ -206,6 +212,9 @@ func testsSuites(results *cautils.OPASessionObj) *JUnitTestSuites {
 
 // listTestsSuite generates JUnit test suites for framework or control scans.
 func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
+	if results == nil || results.Report == nil {
+		return nil
+	}
 	var testSuites []JUnitTestSuite
 	timestamp := iso8601Timestamp(results.Report.ReportGenerationTime)
 	skippedControls := collectSkippedControls(results)
@@ -355,7 +364,7 @@ func frameworkContainsControl(results *cautils.OPASessionObj, fwName, controlID 
 	if results == nil {
 		return false
 	}
-	if len(results.Report.SummaryDetails.Frameworks) == 1 {
+	if results.Report != nil && len(results.Report.SummaryDetails.Frameworks) == 1 {
 		return true
 	}
 	for _, p := range results.Policies {
@@ -455,14 +464,20 @@ func imageTestCases(cves []imageprinter.CVE, platform string) []JUnitTestCase {
 	return testCases
 }
 func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControlsSummaries, classname string) []JUnitTestCase {
+	if controls == nil {
+		return nil
+	}
 	var testCases []JUnitTestCase
 
-	controlIDs := controls.ListControlsIDs(nil).All()
-	sortedIDs := make([]string, 0, len(controlIDs))
-	for cID := range controlIDs {
-		sortedIDs = append(sortedIDs, cID)
+	var sortedIDs []string
+	if list := controls.ListControlsIDs(nil); list != nil {
+		controlIDs := list.All()
+		sortedIDs = make([]string, 0, len(controlIDs))
+		for cID := range controlIDs {
+			sortedIDs = append(sortedIDs, cID)
+		}
+		sort.Strings(sortedIDs)
 	}
-	sort.Strings(sortedIDs)
 
 	for _, cID := range sortedIDs {
 		testCase := JUnitTestCase{}
@@ -477,25 +492,33 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 		// to keep findings from colliding in CI reporters.
 		testCase.Classname = xmlSanitizeID(classname) + "/" + xmlSanitizeID(cID)
 
-		if control.GetStatus().IsFailed() {
+		status := control.GetStatus()
+		if status != nil && status.IsFailed() {
 			resources := map[string]any{}
-			for rId, status := range control.ListResourcesIDs(nil).All() {
-				if status != apis.StatusFailed {
-					continue
-				}
+			if resList := control.ListResourcesIDs(nil); resList != nil {
+				for rId, s := range resList.All() {
+					if s != apis.StatusFailed {
+						continue
+					}
 
-				resource, ok := results.GetResource(rId)
-				if !ok || resource == nil {
-					logger.L().Debug("resource missing from AllResources, reporting by ID",
-						helpers.String("resourceID", rId))
-					resources[fmt.Sprintf("resourceID: %s", rId)] = nil
-					continue
+					var resource workloadinterface.IMetadata
+					if results != nil {
+						resource, _ = results.GetResource(rId)
+					}
+					if resource == nil {
+						logger.L().Debug("resource missing from AllResources, reporting by ID",
+							helpers.String("resourceID", rId))
+						resources[fmt.Sprintf("resourceID: %s", rId)] = nil
+						continue
+					}
+					sourcePath := ""
+					if results != nil && results.ResourceSource != nil {
+						if ResourceSourcePath, ok := results.ResourceSource[rId]; ok {
+							sourcePath = BestSourcePath(ResourceSourcePath)
+						}
+					}
+					resources[resourceToString(resource, sourcePath)] = nil
 				}
-				sourcePath := ""
-				if ResourceSourcePath, ok := results.ResourceSource[rId]; ok {
-					sourcePath = BestSourcePath(ResourceSourcePath)
-				}
-				resources[resourceToString(resource, sourcePath)] = nil
 			}
 			resourcesStr := shared.MapStringToSlice(resources)
 			sort.Strings(resourcesStr)
@@ -505,11 +528,10 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 			testCaseFailure.Contents = xmlSanitize(fmt.Sprintf("Remediation: %s\nMore details: %s\n\n%s", control.GetRemediation(), cautils.GetControlLink(control.GetID()), strings.Join(resourcesStr, "\n")))
 
 			testCase.Failure = &testCaseFailure
-		} else if control.GetStatus().IsSkipped() {
+		} else if status != nil && status.IsSkipped() {
 			testCase.SkipMessage = &JUnitSkipMessage{
-				Message: xmlSanitize(buildSkipMessage(control.GetStatus())),
+				Message: xmlSanitize(buildSkipMessage(status)),
 			}
-
 		}
 		testCases = append(testCases, testCase)
 	}
@@ -517,6 +539,9 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 }
 
 func resourceToString(resource workloadinterface.IMetadata, sourcePath string) string {
+	if resource == nil {
+		return ""
+	}
 	sep := "; "
 	s := ""
 	s += fmt.Sprintf("apiVersion: %s", resource.GetApiVersion()) + sep
