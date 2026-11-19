@@ -126,17 +126,22 @@ func inspectKustomizationNode(file string, isRoot bool, visited, visiting map[st
 	if err != nil {
 		return false, nil, false
 	}
-	dir := filepath.Dir(canonical)
-	*allowedDirs = append(*allowedDirs, dir)
-
-	if _, inStack := visiting[canonical]; inStack {
+	loaderDir, err := filepath.EvalSymlinks(filepath.Dir(file))
+	if err != nil {
 		return false, nil, false
 	}
-	if _, done := visited[canonical]; done {
+	dir := loaderDir
+	*allowedDirs = append(*allowedDirs, loaderDir, filepath.Dir(canonical))
+
+	nodeKey := loaderDir + "|" + canonical
+	if _, inStack := visiting[nodeKey]; inStack {
+		return false, nil, false
+	}
+	if _, done := visited[nodeKey]; done {
 		return true, nil, false
 	}
-	visiting[canonical] = struct{}{}
-	defer delete(visiting, canonical)
+	visiting[nodeKey] = struct{}{}
+	defer delete(visiting, nodeKey)
 
 	contents, err := readKustomizationFile(canonical)
 	if err != nil {
@@ -209,17 +214,7 @@ func inspectKustomizationNode(file string, isRoot bool, visited, visiting map[st
 		}
 	}
 	for _, patch := range k.PatchesJson6902 { //nolint:staticcheck
-		p := types.Patch{
-			Path: patch.Path,
-		}
-		if patch.Target != nil {
-			p.Target = &types.Selector{
-				Gvk:       patch.Target.Gvk,
-				Namespace: patch.Target.Namespace,
-				Name:      patch.Target.Name,
-			}
-		}
-		if !isPatchProvablySafe(dir, p) {
+		if !isPatchProvablySafe(dir, patch) {
 			return false, nil, false
 		}
 	}
@@ -228,7 +223,7 @@ func inspectKustomizationNode(file string, isRoot bool, visited, visiting map[st
 		p := types.Patch{
 			Patch: strPatch,
 		}
-		if !strings.Contains(strPatch, "\n") && (strings.HasSuffix(strPatch, ".yaml") || strings.HasSuffix(strPatch, ".yml")) {
+		if !strings.Contains(strPatch, "\n") {
 			p.Path = strPatch
 			p.Patch = ""
 		}
@@ -289,7 +284,7 @@ func inspectKustomizationNode(file string, isRoot bool, visited, visiting map[st
 		}
 	}
 
-	visited[canonical] = struct{}{}
+	visited[nodeKey] = struct{}{}
 	return true, preserved, ownOrigins
 }
 
@@ -360,6 +355,10 @@ func isRemoteReference(ref string) bool {
 	if strings.Contains(ref, "@") && strings.Contains(ref, ":") {
 		return true
 	}
+	// Kustomize tries Git before a local directory and accepts scp-like and shorthand forms (git@host:org/repo, github.com:org/repo, gh:org/repo). No trusted local path contains a colon.
+	if strings.Contains(ref, ":") && !(filepath.IsAbs(ref) && len(ref) > 1 && ref[1] == ':') {
+		return true
+	}
 	return false
 }
 
@@ -425,31 +424,17 @@ func isPatchDocumentProvablySafe(doc []byte) bool {
 		return true
 	}
 
-	var jsonOps []struct {
-		Op   string `json:"op"`
-		Path string `json:"path"`
-		From string `json:"from"`
-	}
-	if err := json.Unmarshal(doc, &jsonOps); err == nil && len(jsonOps) > 0 {
-		for _, op := range jsonOps {
-			switch op.Op {
-			case "add", "replace", "remove":
-			default:
-				return false
+	var ops []map[string]any
+	if err := kyaml.Unmarshal(doc, &ops); err == nil && len(ops) > 0 {
+		for _, op := range ops {
+			for key := range op {
+				switch strings.ToLower(key) {
+				case "op", "path", "from", "value":
+					if key != strings.ToLower(key) {
+						return false // Kustomize reads exact keys; case-differing keys are ambiguous
+					}
+				}
 			}
-			if op.From != "" {
-				return false
-			}
-			if !strings.HasPrefix(op.Path, "/spec/") {
-				return false
-			}
-		}
-		return true
-	}
-
-	var yamlOps []map[string]any
-	if err := kyaml.Unmarshal(doc, &yamlOps); err == nil && len(yamlOps) > 0 {
-		for _, op := range yamlOps {
 			opName, _ := op["op"].(string)
 			switch opName {
 			case "add", "replace", "remove":

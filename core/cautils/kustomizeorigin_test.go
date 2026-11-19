@@ -184,6 +184,7 @@ func TestTakeKustomizeOrigin(t *testing.T) {
 	base := t.TempDir()
 	file := filepath.Join(base, "deploy.yaml")
 	require.NoError(t, os.WriteFile(file, []byte("kind: Deployment\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(filepath.Dir(base), "deploy.yaml"), []byte("kind: Deployment\n"), 0o600))
 	require.NoError(t, os.Mkdir(filepath.Join(base, "dir"), 0o755))
 
 	object := func(annotations map[string]any) map[string]any {
@@ -580,17 +581,27 @@ patches:
 		rawWls, err := ReadFile(rawYml, YAML_FILE_FORMAT)
 		require.NoError(t, err)
 		require.Len(t, rawWls, 2)
+		byAppLabel := map[string]workloadinterface.IMetadata{}
 		for _, wl := range rawWls {
 			meta, _ := wl.GetObject()["metadata"].(map[string]any)
-			annos, _ := meta["annotations"].(map[string]any)
-			if wl.GetName() == "a" {
-				// Transformed resource 'a' (originally 'b') carries forged origin 'a.yaml'
-				assert.Contains(t, annos[kustomizeOriginAnnotation], "path: a.yaml")
-			} else if wl.GetName() == "b" {
-				// Transformed resource 'b' (originally 'a') carries forged origin 'b.yaml'
-				assert.Contains(t, annos[kustomizeOriginAnnotation], "path: b.yaml")
-			}
+			labels, _ := meta["labels"].(map[string]any)
+			appLabel, _ := labels["app"].(string)
+			byAppLabel[appLabel] = wl
 		}
+		require.Contains(t, byAppLabel, "a")
+		require.Contains(t, byAppLabel, "b")
+
+		wlA := byAppLabel["a"]
+		assert.Equal(t, "b", wlA.GetName())
+		metaA, _ := wlA.GetObject()["metadata"].(map[string]any)
+		annosA, _ := metaA["annotations"].(map[string]any)
+		assert.Contains(t, annosA[kustomizeOriginAnnotation], "path: b.yaml")
+
+		wlB := byAppLabel["b"]
+		assert.Equal(t, "a", wlB.GetName())
+		metaB, _ := wlB.GetObject()["metadata"].(map[string]any)
+		annosB, _ := metaB["annotations"].(map[string]any)
+		assert.Contains(t, annosB[kustomizeOriginAnnotation], "path: a.yaml")
 
 		// 2. Verify that Kubescape detects ambiguous transformations, suppresses attribution, and falls back to directory
 		require.Equal(t, originUnavailable, originModeFor(swapDir).mode)
@@ -1101,17 +1112,29 @@ patches:
 		rawWls, err := ReadFile(rawWrapperYml, YAML_FILE_FORMAT)
 		require.NoError(t, err)
 		require.Len(t, rawWls, 2)
+		byAppLabel := map[string]workloadinterface.IMetadata{}
 		for _, wl := range rawWls {
 			meta, _ := wl.GetObject()["metadata"].(map[string]any)
-			annos, _ := meta["annotations"].(map[string]any)
-			if wl.GetName() == "a" {
-				assert.Contains(t, annos[kustomizeOriginAnnotation], "path: a.yaml",
-					"raw wrapper build output matched annotationSelector and carries swapped origin")
-			} else if wl.GetName() == "b" {
-				assert.Contains(t, annos[kustomizeOriginAnnotation], "path: b.yaml",
-					"raw wrapper build output matched annotationSelector and carries swapped origin")
-			}
+			labels, _ := meta["labels"].(map[string]any)
+			appLabel, _ := labels["app"].(string)
+			byAppLabel[appLabel] = wl
 		}
+		require.Contains(t, byAppLabel, "a")
+		require.Contains(t, byAppLabel, "b")
+
+		wlA := byAppLabel["a"]
+		assert.Equal(t, "b", wlA.GetName())
+		metaA, _ := wlA.GetObject()["metadata"].(map[string]any)
+		annosA, _ := metaA["annotations"].(map[string]any)
+		assert.Contains(t, annosA[kustomizeOriginAnnotation], "path: b.yaml",
+			"raw wrapper build output matched annotationSelector and carries swapped origin")
+
+		wlB := byAppLabel["b"]
+		assert.Equal(t, "a", wlB.GetName())
+		metaB, _ := wlB.GetObject()["metadata"].(map[string]any)
+		annosB, _ := metaB["annotations"].(map[string]any)
+		assert.Contains(t, annosB[kustomizeOriginAnnotation], "path: a.yaml",
+			"raw wrapper build output matched annotationSelector and carries swapped origin")
 
 		// 2. Verify Kubescape detects the ambiguous patch, sets originUnavailable, and falls back to directory
 		require.Equal(t, originUnavailable, originModeFor(swapDir).mode)
@@ -1370,9 +1393,70 @@ metadata:
 			[]byte("resources:\n- deploy.yaml\n"), 0o600))
 		assert.Equal(t, originUnavailable, originModeFor(dir).mode)
 	})
+
+	t.Run("JSON patch with case-colliding keys yields originUnavailable", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+patches:
+- patch: '[{"op":"replace","path":"/metadata/name","Path":"/spec/replicas","value":"x"}]'
+  target:
+    kind: Deployment
+`), 0o600))
+		assert.Equal(t, originUnavailable, originModeFor(dir).mode)
+	})
+
+	t.Run("inline patchesJson6902 replacing /spec/replicas yields originWrapper", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+patchesJson6902:
+- target:
+    kind: Deployment
+    name: demo
+  patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 3
+`), 0o600))
+		assert.Equal(t, originWrapper, originModeFor(dir).mode)
+	})
+
+	t.Run("patchesStrategicMerge entry replicas.json containing a spec-only strategic-merge patch yields originWrapper", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "replicas.json"),
+			[]byte(`{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"demo"},"spec":{"replicas":3}}`), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+patchesStrategicMerge:
+- replicas.json
+`), 0o600))
+		assert.Equal(t, originWrapper, originModeFor(dir).mode)
+	})
+
+	t.Run("kustomization.yaml symlinked to config/settings.yaml with deploy.yaml next to symlink yields originWrapper", func(t *testing.T) {
+		root := t.TempDir()
+		configDir := filepath.Join(root, "config")
+		require.NoError(t, os.MkdirAll(configDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(configDir, "settings.yaml"), []byte(`resources:
+- deploy.yaml
+`), 0o600))
+		if err := os.Symlink(filepath.Join(configDir, "settings.yaml"), filepath.Join(root, "kustomization.yaml")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		assert.Equal(t, originWrapper, originModeFor(root).mode)
+	})
 }
 
-func TestAmbiguousBuildsStillScanSuccessfullyAndFallbackToDirectory(t *testing.T) {
+func TestKustomizeAmbiguousBuildsStillScanSuccessfullyAndFallbackToDirectory(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(root, "deploy.yaml"),
 		[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
@@ -1402,4 +1486,22 @@ patches:
 		}
 	}
 	assert.Contains(t, byKindAndName, "Deployment/demo")
+}
+
+func TestIsRemoteReference(t *testing.T) {
+	tests := []struct {
+		ref  string
+		want bool
+	}{
+		{"github.com:org/repo//base", true},
+		{"gh:org/repo", true},
+		{"git@github.com:org/repo.git", true},
+		{"https://x/y", true},
+		{"../base", false},
+		{"./overlays/prod", false},
+		{"base", false},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, isRemoteReference(tt.ref), "ref: %s", tt.ref)
+	}
 }
