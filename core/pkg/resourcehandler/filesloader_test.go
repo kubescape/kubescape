@@ -1630,3 +1630,53 @@ func TestGetResources_ChartAndFileRoute_EnforcesWorkspaceContainment(t *testing.
 		require.NoError(t, err)
 	})
 }
+
+func TestGetResources_IgnoreFileError(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		validFirst   bool
+		includeValid bool
+	}{
+		{name: "single invalid input"},
+		{name: "invalid then valid", includeValid: true},
+		{name: "valid then invalid", includeValid: true, validFirst: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			badRoot := t.TempDir()
+			// A directory is rejected portably, even when tests run as root.
+			require.NoError(t, os.Mkdir(filepath.Join(badRoot, cautils.IgnoreFileName), 0o700))
+			require.NoError(t, os.WriteFile(filepath.Join(badRoot, "bad.yaml"), []byte(singlePodManifest), 0o600))
+			inputs := []string{badRoot}
+			if tc.includeValid {
+				validPath := filepath.Join(t.TempDir(), "pod.yaml")
+				require.NoError(t, os.WriteFile(validPath, []byte(singlePodManifest), 0o600))
+				if tc.validFirst {
+					inputs = append([]string{validPath}, inputs...)
+				} else {
+					inputs = append(inputs, validPath)
+				}
+			}
+			match := reporthandling.RuleMatchObjects{
+				APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"pods"},
+			}
+			framework := *mockFramework("test-framework", []reporthandling.Control{
+				mockControl("test-control", []reporthandling.PolicyRule{
+					mockRule("test-rule", []reporthandling.RuleMatchObjects{match}, ""),
+				}),
+			})
+			scanInfo := &cautils.ScanInfo{InputPatterns: inputs}
+			session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo, nil)
+			_, resources, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+			if !tc.includeValid {
+				require.ErrorIs(t, err, cautils.ErrIgnoreFileNotRegular)
+				assert.Empty(t, resources)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, resources, 1, "the valid input must still be scanned")
+			require.Len(t, session.SkippedManifests, 1)
+			assert.Equal(t, badRoot, session.SkippedManifests[0].Path)
+			assert.Contains(t, session.SkippedManifests[0].Reason, cautils.ErrIgnoreFileNotRegular.Error())
+		})
+	}
+}
