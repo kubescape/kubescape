@@ -3,6 +3,7 @@ package anonymizer
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -108,6 +109,68 @@ func TestApplyEncryptedEncryptsSkippedManifestPaths(t *testing.T) {
 	}
 	// The reason embeds the same ciphertext as the path it names.
 	assert.Contains(t, session.ScanCoverage.SkippedManifests[1].Reason, session.ScanCoverage.SkippedManifests[1].Path)
+}
+
+// A multi-input scan skips an input whose ignore file can't be used, with the
+// loader's error as the reason. That error names the ignore file, which for a
+// file or a glob input is in the input's directory, not under the input path.
+func TestApplyHidesTheIgnoreFileOfASkippedInput(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "acme-payroll-repo")
+	require.NoError(t, os.MkdirAll(root, 0o700))
+	file := filepath.Join(root, "deploy.yaml")
+	require.NoError(t, os.WriteFile(file, []byte("kind: Pod\n"), 0o600))
+	ignoreFile := filepath.Join(root, cautils.IgnoreFileName)
+
+	invalidPattern := func(t *testing.T) {
+		require.NoError(t, os.RemoveAll(ignoreFile))
+		require.NoError(t, os.WriteFile(ignoreFile, []byte("[\n"), 0o600))
+	}
+	// A directory is rejected portably, even when tests run as root.
+	notAFile := func(t *testing.T) {
+		require.NoError(t, os.RemoveAll(ignoreFile))
+		require.NoError(t, os.Mkdir(ignoreFile, 0o700))
+	}
+	for _, tc := range []struct {
+		name   string
+		input  string
+		setup  func(*testing.T)
+		reason error
+	}{
+		{"file input, invalid pattern", file, invalidPattern, cautils.ErrInvalidIgnorePattern},
+		{"file input, ignore file is a directory", file, notAFile, cautils.ErrIgnoreFileNotRegular},
+		{"glob input, invalid pattern", filepath.Join(root, "*.yaml"), invalidPattern, cautils.ErrInvalidIgnorePattern},
+		{"directory input, ignore file is a directory", root, notAFile, cautils.ErrIgnoreFileNotRegular},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.setup(t)
+			_, err := cautils.NewScanPathFilter(tc.input, nil, true)
+			require.ErrorIs(t, err, tc.reason)
+			// What GetResources records for the input.
+			skipped := func() []cautils.SkippedManifest {
+				return []cautils.SkippedManifest{{Path: tc.input, Reason: fmt.Sprintf("failed to load input: %v", err)}}
+			}
+
+			hidden := skippedManifestsSession()
+			hidden.SkippedManifests, hidden.ScanCoverage.SkippedManifests = skipped(), skipped()
+			require.NoError(t, Apply(&resultshandling.ResultsHandler{ScanData: hidden}))
+
+			encrypted := skippedManifestsSession()
+			encrypted.SkippedManifests, encrypted.ScanCoverage.SkippedManifests = skipped(), skipped()
+			dek := make([]byte, 32)
+			require.NoError(t, ApplyEncrypted(&resultshandling.ResultsHandler{ScanData: encrypted}, dek, []byte("01234567890123456789012345678901")))
+
+			for name, session := range map[string]*cautils.OPASessionObj{"--hide": hidden, "--encrypt": encrypted} {
+				for _, entry := range [][]cautils.SkippedManifest{session.SkippedManifests, session.ScanCoverage.SkippedManifests} {
+					encoded, err := json.Marshal(entry)
+					require.NoError(t, err)
+					assert.NotContains(t, string(encoded), "acme-payroll-repo", name)
+					// The diagnostic survives: which file, and what is wrong with it.
+					assert.Contains(t, entry[0].Reason, cautils.IgnoreFileName, name)
+					assert.Contains(t, entry[0].Reason, tc.reason.Error(), name)
+				}
+			}
+		})
+	}
 }
 
 // Without --hide the paths are the user's own debugging information and must

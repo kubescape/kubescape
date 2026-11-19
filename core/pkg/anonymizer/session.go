@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -691,11 +692,43 @@ func transformSkippedManifests(skipped []cautils.SkippedManifest, transformer Tr
 		if err != nil {
 			return err
 		}
+		reason, err := transformIgnoreFilePath(skipped[i].Reason, original, transformed, transformer)
+		if err != nil {
+			return err
+		}
 		skipped[i].Path = transformed
-		reason := strings.ReplaceAll(skipped[i].Reason, strconv.Quote(original), strconv.Quote(transformed))
+		reason = strings.ReplaceAll(reason, strconv.Quote(original), strconv.Quote(transformed))
 		skipped[i].Reason = strings.ReplaceAll(reason, original, transformed)
 	}
 	return nil
+}
+
+// transformIgnoreFilePath replaces, in reason, the path of the ignore file the
+// scan reads for input. A multi-input scan skips an input whose ignore file
+// can't be used, and the error names that file. For a file or a glob input it
+// is in the input's directory, not under the input path, so the directory
+// gets its own pseudonym and the file keeps its name.
+func transformIgnoreFilePath(reason, input, transformedInput string, transformer Transformer) (string, error) {
+	root := cautils.IgnoreRoot(input)
+	if root == "." {
+		return reason, nil
+	}
+	ignoreFile := filepath.Join(root, cautils.IgnoreFileName)
+	quoted := strconv.Quote(ignoreFile)
+	if !strings.Contains(reason, ignoreFile) && !strings.Contains(reason, quoted) {
+		return reason, nil
+	}
+	transformedRoot := transformedInput
+	if root != input {
+		var err error
+		if transformedRoot, err = transformValue(transformer, "src", root); err != nil {
+			return "", err
+		}
+	}
+	// Not filepath.Join: an encrypted root is base64 and may contain "//".
+	replacement := transformedRoot + string(filepath.Separator) + cautils.IgnoreFileName
+	reason = strings.ReplaceAll(reason, quoted, strconv.Quote(replacement))
+	return strings.ReplaceAll(reason, ignoreFile, replacement), nil
 }
 
 func remapControlResourceIDs(controls reportsummary.ControlSummaries, transformer Transformer, idMapping map[string]string) error {
