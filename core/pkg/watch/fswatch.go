@@ -472,6 +472,9 @@ func (w *FileWatcher) reconcile() error {
 			return err
 		}
 	} else {
+		// The lost events may include the ignore file's, so what it excludes now
+		// is dropped first, as on its own event, rather than watched again below.
+		w.dropExcluded()
 		live := make(map[string]struct{})
 		for _, path := range w.fs.WatchList() {
 			live[path] = struct{}{}

@@ -1122,6 +1122,33 @@ func TestFileWatcherSettlingSkipsWhatIsNoLongerADirectory(t *testing.T) {
 
 // After an overflow every registration is made again, not only the ones the
 // backend no longer lists: one it lists can have stopped reporting.
+// An overflow loses events, and the ignore file's can be among them, so the
+// directories it excludes now are dropped when the watch is reconciled, as they
+// are on its own event, instead of being watched again.
+func TestFileWatcherReconcileDropsWhatTheIgnoreFileNowExcludes(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	extra := filepath.Join(root, "extra")
+	nested := filepath.Join(extra, "nested")
+	write(t, filepath.Join(nested, "api.yaml"), "kind: Pod")
+	var excluded atomic.Bool
+	w, err := newFileWatcher(root, FileWatcherOptions{Exclude: func(path string, isDir bool) bool {
+		return excluded.Load() && isDir && path == extra
+	}})
+	require.NoError(t, err)
+	defer w.fs.Close()
+	require.Contains(t, w.dirs, extra)
+
+	excluded.Store(true)
+	require.NoError(t, w.handleError(fsnotify.ErrEventOverflow))
+
+	assert.NotContains(t, w.dirs, extra, "a directory the ignore file now excludes is watched again")
+	assert.NotContains(t, w.dirs, nested)
+	assert.NotContains(t, w.fs.WatchList(), extra)
+	assert.Contains(t, w.dirs, root)
+	assert.Len(t, w.changes, 1, "the overflow is still signalled")
+}
+
 func TestFileWatcherOverflowRefreshesEveryRegistration(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
