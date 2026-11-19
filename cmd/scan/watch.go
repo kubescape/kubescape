@@ -103,6 +103,22 @@ func watchRoots(inputs []string) []string {
 	return roots
 }
 
+// inKustomizationBelow reports whether path is in a kustomization's directory,
+// its own or one between it and root. A directory scan renders every
+// kustomization it finds below root, not only one at root, and a kustomization
+// reads the files at or below its own directory.
+func inKustomizationBelow(root, path string) bool {
+	root = filepath.Clean(root)
+	for dir := filepath.Dir(filepath.Clean(path)); ; dir = filepath.Dir(dir) {
+		if cautils.IsKustomizeDirectory(dir) {
+			return true
+		}
+		if dir == root || filepath.Dir(dir) == dir {
+			return false
+		}
+	}
+}
+
 func isRenderedDirectory(root string, inputs []string) bool {
 	cleaned := filepath.Clean(root)
 	for _, input := range inputs {
@@ -138,8 +154,8 @@ func watchSecurityScan(cmd *cobra.Command, ks interface{ Context() context.Conte
 	timeout := scanInfo.ScanTimeout
 	return runWatch(ks.Context(), watchConfig{
 		Roots: roots,
-		AcceptDependencies: func(root string) bool {
-			return isRenderedDirectory(root, scanInfo.InputPatterns)
+		AcceptDependencies: func(root, path string) bool {
+			return isRenderedDirectory(root, scanInfo.InputPatterns) || inKustomizationBelow(root, path)
 		},
 		Exclude: func(root string) (func(string, bool) bool, error) {
 			filter, err := newReloadingFilter(root, scanInfo.ExcludePaths, !scanInfo.NoIgnoreFile)
@@ -247,12 +263,12 @@ type watchScan struct {
 type watchConfig struct {
 	// Roots are the files and directories scanned, and watched.
 	Roots []string
-	// AcceptDependencies reports whether root is a rendered-input directory
-	// that should accept dependency files regardless of extension. It is
-	// consulted as files change, so a directory that becomes one when a
-	// kustomization appears, or stops being one when it is removed, is
-	// classified as it is at that moment.
-	AcceptDependencies func(root string) bool
+	// AcceptDependencies reports whether a file at path, in the watch of root,
+	// should be accepted as a dependency regardless of its extension, because
+	// a render reads its directory. It is consulted as files change, so a
+	// directory that becomes one when a kustomization appears, or stops being
+	// one when it is removed, is classified as it is at that moment.
+	AcceptDependencies func(root, path string) bool
 	// Exclude gives the filter of what a root leaves out of the watch, the one
 	// its scan applies. Nil leaves nothing out.
 	Exclude func(root string) (func(path string, isDir bool) bool, error)
@@ -294,9 +310,9 @@ func runWatch(ctx context.Context, cfg watchConfig) error {
 				return fmt.Errorf("--watch: %w", err)
 			}
 		}
-		var acceptDependencies func() bool
+		var acceptDependencies func(string) bool
 		if cfg.AcceptDependencies != nil {
-			acceptDependencies = func() bool { return cfg.AcceptDependencies(root) }
+			acceptDependencies = func(path string) bool { return cfg.AcceptDependencies(root, path) }
 		}
 		watcher, err := watch.NewFileWatcher(ctx, root, watch.FileWatcherOptions{
 			AcceptDependencies: acceptDependencies,

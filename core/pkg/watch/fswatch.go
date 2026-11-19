@@ -34,13 +34,13 @@ const vcsDir = ".git"
 
 // FileWatcherOptions configures a FileWatcher.
 type FileWatcherOptions struct {
-	// AcceptDependencies, when set, reports whether dependency files are
-	// accepted regardless of extension (e.g. Kustomize patch files and
-	// generator inputs) for rendered-input directory watches, keeping
-	// editor-file and path exclusions. It is called as files change rather than
-	// once, so a directory that becomes, or stops being, a rendered-input
-	// directory is classified as it is when the change is seen.
-	AcceptDependencies func() bool
+	// AcceptDependencies, when set, reports whether a file at path is accepted
+	// as a dependency regardless of its extension (e.g. Kustomize patch files
+	// and generator inputs), because a render reads the directory it is in,
+	// keeping editor-file and path exclusions. It is called as files change
+	// rather than once, so a directory that becomes, or stops being, one a
+	// render reads is classified as it is when the change is seen.
+	AcceptDependencies func(path string) bool
 
 	// Exclude, when set, reports whether a path is kept out of the watch. It is
 	// called with absolute paths. Excluded directories are not watched, and an
@@ -715,7 +715,7 @@ func (w *FileWatcher) relevantFile(path string) bool {
 		return false
 	}
 	if !cautils.IsYaml(path) && !cautils.IsJson(path) && !cautils.IsKustomizeFile(path) && !isTerraformOrHelmFile(path) && !isPatchFile(path) {
-		if w.opts.AcceptDependencies == nil || !w.opts.AcceptDependencies() {
+		if w.opts.AcceptDependencies == nil || !w.opts.AcceptDependencies(path) {
 			return false
 		}
 	}

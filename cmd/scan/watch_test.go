@@ -766,6 +766,39 @@ func TestWatchSecurityScanWatchesWhatAKustomizationPatchRenders(t *testing.T) {
 	require.NoError(t, stop())
 }
 
+// A directory scan renders the kustomizations below it as well, so the files
+// such a kustomization reads, an extensionless patch among them, are watched
+// as dependencies, not only those of a kustomization at the root.
+func TestWatchSecurityScanWatchesANestedKustomizationsDependencies(t *testing.T) {
+	dir := t.TempDir()
+	app := filepath.Join(dir, "app")
+	patch := filepath.Join(app, "security")
+	writeFile(t, filepath.Join(app, "pod.yaml"), podManifest("web", false))
+	writeFile(t, patch, "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\nspec:\n  containers:\n  - name: c\n    image: nginx\n    securityContext:\n      readOnlyRootFilesystem: true\n")
+	writeFile(t, filepath.Join(app, "kustomization.yaml"), "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- pod.yaml\npatches:\n- path: security\n  target:\n    kind: Pod\n    name: web\n")
+	out, stop := startSecurityWatch(t, localWatchScanInfo(t, dir))
+
+	out.waitFor(t, "Initial scan complete: 0 failing control(s) on 0 resource(s)")
+	writeFile(t, patch, "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\nspec:\n  containers:\n  - name: c\n    image: nginx\n")
+	out.waitFor(t, "Change detected, scanning again...")
+	out.waitFor(t, "1 new, 0 resolved")
+
+	require.NoError(t, stop())
+}
+
+func TestInKustomizationBelow(t *testing.T) {
+	root := t.TempDir()
+	app := filepath.Join(root, "app")
+	writeFile(t, filepath.Join(app, "kustomization.yaml"), "resources: []\n")
+	require.NoError(t, os.MkdirAll(filepath.Join(app, "patches"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "other"), 0o700))
+
+	assert.True(t, inKustomizationBelow(root, filepath.Join(app, "security")), "in a kustomization's directory")
+	assert.True(t, inKustomizationBelow(root, filepath.Join(app, "patches", "security")), "below one")
+	assert.False(t, inKustomizationBelow(root, filepath.Join(root, "other", "security")), "beside one")
+	assert.False(t, inKustomizationBelow(root, filepath.Join(root, "security")), "above one")
+}
+
 func TestWatchRoots(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "pod.yaml")
