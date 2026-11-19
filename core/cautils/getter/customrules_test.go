@@ -622,6 +622,30 @@ spec:
 	assert.Equal(t, float32(defaultCustomRuleBaseScore), scores["custom-second-policy"])
 }
 
+// The same file with the leading `---` yamllint's document-start rule asks for.
+func TestLoadCustomRules_LeadingSeparatorBeforeAnnotation(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "policies.yaml")
+	content := `---
+# @baseScore 9
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: first-policy
+spec:
+  validations:
+    - expression: "true"
+`
+	require.NoError(t, os.WriteFile(f, []byte(content), 0o600))
+
+	fw, err := LoadCustomRules(f)
+	require.NoError(t, err)
+	require.NotNil(t, fw)
+	require.Len(t, fw.Controls, 1)
+	assert.Equal(t, "custom-first-policy", fw.Controls[0].ControlID)
+	assert.Equal(t, float32(9), fw.Controls[0].BaseScore)
+}
+
 func TestLoadCustomRules_MultiDocumentYAMLDuplicateNameRejected(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "duplicates.yaml")
 	content := `apiVersion: admissionregistration.k8s.io/v1

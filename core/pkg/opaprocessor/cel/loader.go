@@ -324,8 +324,8 @@ func splitYAMLDocuments(data []byte) ([][]byte, error) {
 		if len(bytes.TrimSpace(doc)) == 0 {
 			continue
 		}
-		if isCommentOnlyYAML(doc) {
-			pending = append(pending, doc...)
+		if preamble := stripLeadingSeparator(doc); isCommentOnlyYAML(preamble) {
+			pending = append(pending, preamble...)
 			if len(pending) > 0 && pending[len(pending)-1] != '\n' {
 				pending = append(pending, '\n')
 			}
@@ -338,6 +338,30 @@ func splitYAMLDocuments(data []byte) ([][]byte, error) {
 		documents = append(documents, doc)
 	}
 	return documents, nil
+}
+
+// stripLeadingSeparator drops the `---` that starts doc, keeping a comment that
+// follows it on the same line. The reader returns a stream's leading separator,
+// or the second of two in a row, as the first line of the next chunk, so a
+// stream that starts with `---` and then a comment-only preamble or an empty
+// document would otherwise look like a document of its own.
+func stripLeadingSeparator(doc []byte) []byte {
+	rest, ok := bytes.CutPrefix(doc, []byte("---"))
+	if !ok {
+		return doc
+	}
+	line, remainder, _ := bytes.Cut(rest, []byte("\n"))
+	comment := bytes.TrimSpace(line)
+	if len(comment) == 0 {
+		return remainder
+	}
+	if comment[0] != '#' {
+		return doc
+	}
+	out := make([]byte, 0, len(comment)+1+len(remainder))
+	out = append(out, comment...)
+	out = append(out, '\n')
+	return append(out, remainder...)
 }
 
 // isCommentOnlyYAML reports whether doc contains only comments and blank
