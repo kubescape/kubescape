@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -201,5 +202,48 @@ func TestCategoryPrintersAndHelpers_NilSafety(t *testing.T) {
 	})
 	assert.NotPanics(t, func() {
 		assert.Equal(t, "", getRunCommandForControl(nil))
+	})
+
+	// ControlSummary with nil Status and nil NumberOfResources
+	ctrlWithNilStatusAndResources := &reportsummary.ControlSummary{}
+	assert.NotPanics(t, func() {
+		assert.Nil(t, generateCategoryStatusRow(ctrlWithNilStatusAndResources))
+	})
+	assert.NotPanics(t, func() {
+		row := NewClusterPrinter().generateCountingCategoryRow(nil)
+		assert.Equal(t, table.Row{}, row)
+	})
+	assert.NotPanics(t, func() {
+		row := NewClusterPrinter().generateCountingCategoryRow(ctrlWithNilStatusAndResources)
+		assert.Equal(t, "0", row[1])
+	})
+	ctrlWithNilResources := &mockNilResourcesControlSummary{}
+	assert.NotPanics(t, func() {
+		row := NewClusterPrinter().generateCountingCategoryRow(ctrlWithNilResources)
+		assert.Equal(t, "0", row[1])
+	})
+	assert.NotPanics(t, func() {
+		row := NewRepoPrinter(nil).generateCountingCategoryRow(nil, nil)
+		assert.Equal(t, table.Row{}, row)
+	})
+	assert.NotPanics(t, func() {
+		row := NewRepoPrinter(nil).generateCountingCategoryRow(ctrlWithNilStatusAndResources, nil)
+		assert.Equal(t, "0", row[1])
+	})
+	assert.NotPanics(t, func() {
+		row := NewRepoPrinter(nil).generateCountingCategoryRow(ctrlWithNilResources, nil)
+		assert.Equal(t, "0", row[1])
+	})
+
+	// Slice with nil elements and uninitialized controls
+	mixedControls := []reportsummary.IControlSummary{nil, ctrlWithNilStatusAndResources}
+	assert.NotPanics(t, func() {
+		sortControlSummaries(mixedControls)
+	})
+	assert.NotPanics(t, func() {
+		bucketControlsByCategory(mixedControls)
+	})
+	assert.NotPanics(t, func() {
+		mapCategoryToSummary(mixedControls, map[string]string{"C-1": "cat"})
 	})
 }

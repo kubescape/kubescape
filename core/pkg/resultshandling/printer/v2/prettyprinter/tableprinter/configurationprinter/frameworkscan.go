@@ -31,7 +31,7 @@ func (fp *FrameworkPrinter) getVerboseMode() bool {
 }
 
 func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
-	if summaryDetails == nil || summaryDetails.NumberOfControls().All() == 0 {
+	if summaryDetails == nil || summaryDetails.NumberOfControls() == nil || summaryDetails.NumberOfControls().All() == 0 {
 		fmt.Fprintf(writer, "\nKubescape did not scan any resources. Make sure you are scanning valid manifests (Deployments, Pods, etc.)\n")
 		return
 	}
@@ -73,7 +73,7 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 	summaryTable.Style().Box = table.StyleBoxRounded
 
 	printAll := fp.getVerboseMode()
-	if summaryDetails.NumberOfResources().Failed() == 0 {
+	if numRes := summaryDetails.NumberOfResources(); numRes != nil && numRes.Failed() == 0 {
 		// if there are no failed controls, print the resource table and detailed information
 		printAll = true
 	}

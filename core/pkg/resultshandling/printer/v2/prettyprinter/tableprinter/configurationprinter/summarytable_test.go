@@ -21,6 +21,14 @@ func (m mockCounters) Passed() int   { return m.passed }
 func (m mockCounters) Excluded() int { return m.excluded }
 func (m mockCounters) All() int      { return m.failed + m.skipped + m.passed }
 
+type mockNilResourcesControlSummary struct {
+	reportsummary.ControlSummary
+}
+
+func (m *mockNilResourcesControlSummary) NumberOfResources() reportsummary.ICounters {
+	return nil
+}
+
 func TestControlCountersForSummary(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -311,6 +319,15 @@ func TestGenerateFooter_ShortVsFullDiffer(t *testing.T) {
 	assert.NotEqual(t, len(short), len(full), "short and full footers should have different column counts")
 }
 
+func TestControlCountersForSummary_Nil(t *testing.T) {
+	rows := ControlCountersForSummary(nil)
+	require.Len(t, rows, 4)
+	assert.Equal(t, table.Row{"Controls", "0"}, rows[0])
+	assert.Equal(t, table.Row{"Passed", "0"}, rows[1])
+	assert.Equal(t, table.Row{"Failed", "0"}, rows[2])
+	assert.Equal(t, table.Row{"Action Required", "0"}, rows[3])
+}
+
 func TestSummaryTableHelpers_NilSafety(t *testing.T) {
 	assert.NotPanics(t, func() {
 		row := GenerateRow(nil, nil, false)
@@ -340,5 +357,43 @@ func TestSummaryTableHelpers_NilSafety(t *testing.T) {
 	assert.NotPanics(t, func() {
 		info := GetInfoColumn(nil, nil)
 		assert.Equal(t, "", info)
+	})
+
+	// Uninitialized ControlSummary with nil status
+	ctrlWithNilStatusAndResources := &reportsummary.ControlSummary{}
+	assert.NotPanics(t, func() {
+		row := GenerateRow(ctrlWithNilStatusAndResources, nil, false)
+		assert.Equal(t, "0", row[summaryColumnCounterFailed])
+		assert.Equal(t, "0", row[summaryColumnCounterAll])
+	})
+
+	// ControlSummary with nil NumberOfResources
+	ctrlWithNilResources := &mockNilResourcesControlSummary{}
+	assert.NotPanics(t, func() {
+		row := GenerateRow(ctrlWithNilResources, nil, false)
+		assert.Equal(t, "", row[summaryColumnCounterFailed])
+		assert.Equal(t, "", row[summaryColumnCounterAll])
+	})
+
+	assert.NotPanics(t, func() {
+		score := GetComplianceScoreColumn(ctrlWithNilStatusAndResources, nil)
+		assert.Equal(t, "N/A", score)
+	})
+
+	assert.NotPanics(t, func() {
+		info := GetInfoColumn(ctrlWithNilStatusAndResources, nil)
+		assert.Equal(t, "", info)
+	})
+
+	// SummaryDetails with nil NumberOfResources
+	sdWithNilResources := &reportsummary.SummaryDetails{}
+	assert.NotPanics(t, func() {
+		footer := GenerateFooter(sdWithNilResources, false)
+		assert.Equal(t, "0", footer[summaryColumnCounterFailed])
+		assert.Equal(t, "0", footer[summaryColumnCounterAll])
+	})
+	assert.NotPanics(t, func() {
+		footerShort := GenerateFooter(sdWithNilResources, true)
+		assert.NotEmpty(t, footerShort)
 	})
 }
