@@ -45,26 +45,17 @@ func ControlStatus(summary *reportsummary.SummaryDetails, control *resourcesresu
 		return &apis.StatusInfo{InnerStatus: apis.StatusUnknown, SubStatus: apis.SubStatusUnknown}
 	}
 	if !hasException(control) || control.Status.SubStatus == apis.SubStatusNotEvaluated {
-		if st := control.GetStatus(nil); st != nil {
-			return st
-		}
-		return &apis.StatusInfo{InnerStatus: apis.StatusUnknown, SubStatus: apis.SubStatusUnknown}
+		return control.GetStatus(nil)
 	}
 	// Collection and coverage limits cannot be reconstructed from rule results.
 	if control.Status.InnerStatus != apis.StatusPassed && control.Status.InnerStatus != apis.StatusFailed && (control.Status.InnerStatus != "" || control.Status.InnerInfo != "") {
 		switch control.Status.SubStatus {
 		case apis.SubStatusManualReview, apis.SubStatusRequiresReview, apis.SubStatusConfiguration:
 		default:
-			if st := control.GetStatus(nil); st != nil {
-				return st
-			}
-			return &apis.StatusInfo{InnerStatus: apis.StatusUnknown, SubStatus: apis.SubStatusUnknown}
+			return control.GetStatus(nil)
 		}
 	}
-	if st := control.GetStatus(ControlFilters(summary, control.GetID())); st != nil {
-		return st
-	}
-	return &apis.StatusInfo{InnerStatus: apis.StatusUnknown, SubStatus: apis.SubStatusUnknown}
+	return control.GetStatus(ControlFilters(summary, control.GetID()))
 }
 
 // RuleStatus is the status of one rule of the control controlID, in the
@@ -74,18 +65,12 @@ func RuleStatus(summary *reportsummary.SummaryDetails, controlID string, rule *r
 		return &apis.StatusInfo{InnerStatus: apis.StatusUnknown, SubStatus: apis.SubStatusUnknown}
 	}
 	if len(rule.Exception) == 0 {
-		if st := rule.GetStatus(nil); st != nil {
-			return st
-		}
-		return &apis.StatusInfo{InnerStatus: apis.StatusUnknown, SubStatus: apis.SubStatusUnknown}
+		return rule.GetStatus(nil)
 	}
 	filters := ControlFilters(summary, controlID)
 	view := *rule
 	view.Exception = exceptions.FilterExceptionsByFrameworks(rule.Exception, filters.FrameworkNames, controlID, rule.GetName())
-	if st := view.GetStatus(filters); st != nil {
-		return st
-	}
-	return &apis.StatusInfo{InnerStatus: apis.StatusUnknown, SubStatus: apis.SubStatusUnknown}
+	return view.GetStatus(filters)
 }
 
 // FrameworkRuleStatus is the status of one rule evaluated in a single framework,
@@ -100,17 +85,11 @@ func FrameworkRuleStatus(summary *reportsummary.SummaryDetails, frameworkName, c
 		return RuleStatus(summary, controlID, rule)
 	}
 	if len(rule.Exception) == 0 {
-		if st := rule.GetStatus(nil); st != nil {
-			return st
-		}
-		return &apis.StatusInfo{InnerStatus: apis.StatusUnknown, SubStatus: apis.SubStatusUnknown}
+		return rule.GetStatus(nil)
 	}
 	view := *rule
 	view.Exception = exceptions.FilterExceptionsByFrameworks(rule.Exception, []string{frameworkName}, controlID, rule.GetName())
-	if st := view.GetStatus(&helpersv1.Filters{FrameworkNames: []string{frameworkName}}); st != nil {
-		return st
-	}
-	return &apis.StatusInfo{InnerStatus: apis.StatusUnknown, SubStatus: apis.SubStatusUnknown}
+	return view.GetStatus(&helpersv1.Filters{FrameworkNames: []string{frameworkName}})
 }
 
 // ResourceStatus folds the framework-aware status of each control of the
@@ -122,9 +101,6 @@ func ResourceStatus(summary *reportsummary.SummaryDetails, result *resourcesresu
 	}
 	for i := range result.AssociatedControls {
 		controlStatus := ControlStatus(summary, &result.AssociatedControls[i])
-		if controlStatus == nil {
-			continue
-		}
 		status, subStatus = apis.CompareStatusAndSubStatus(status, controlStatus.Status(), subStatus, controlStatus.GetSubStatus())
 	}
 	return &apis.StatusInfo{InnerStatus: status, SubStatus: subStatus, InnerInfo: apis.SubStatusInfo(subStatus)}
@@ -136,8 +112,7 @@ func ResourceStatus(summary *reportsummary.SummaryDetails, result *resourcesresu
 func FailedRules(summary *reportsummary.SummaryDetails, control resourcesresults.ResourceAssociatedControl) resourcesresults.ResourceAssociatedControl {
 	rules := make([]resourcesresults.ResourceAssociatedRule, 0, len(control.ResourceAssociatedRules))
 	for i := range control.ResourceAssociatedRules {
-		ruleStatus := RuleStatus(summary, control.GetID(), &control.ResourceAssociatedRules[i])
-		if ruleStatus != nil && ruleStatus.IsFailed() {
+		if RuleStatus(summary, control.GetID(), &control.ResourceAssociatedRules[i]).IsFailed() {
 			rules = append(rules, control.ResourceAssociatedRules[i])
 		}
 	}
@@ -167,12 +142,7 @@ func ControlIDsByStatus(summary *reportsummary.SummaryDetails, result *resources
 	controls.Initialize(len(result.AssociatedControls))
 	for i := range result.AssociatedControls {
 		control := &result.AssociatedControls[i]
-		cs := ControlStatus(summary, control)
-		if cs != nil {
-			controls.Append(cs.Status(), control.GetID())
-		} else {
-			controls.Append(apis.StatusUnknown, control.GetID())
-		}
+		controls.Append(ControlStatus(summary, control).Status(), control.GetID())
 	}
 	return controls
 }
@@ -186,9 +156,6 @@ func SettleControlStatus(summary *reportsummary.SummaryDetails, control *resourc
 		return
 	}
 	status := ControlStatus(summary, control)
-	if status == nil {
-		return
-	}
 	control.Status = apis.StatusInfo{InnerStatus: status.Status(), SubStatus: status.GetSubStatus(), InnerInfo: status.Info()}
 }
 
