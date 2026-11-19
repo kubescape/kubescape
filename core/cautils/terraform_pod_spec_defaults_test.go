@@ -442,6 +442,35 @@ resource "kubernetes_pod_v1" "caught_diagnostic_try" {
     }
   }
 }
+resource "kubernetes_pod_v1" "coalesce_unused_fallback" {
+  spec {
+    automount_service_account_token = coalesce(var.declared_null, true, var.missing_bool)
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "coalesce_explicit_false" {
+  spec {
+    automount_service_account_token = coalesce(var.declared_null, false, var.missing_bool)
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "coalesce_unresolvable_try" {
+  spec {
+    automount_service_account_token = try(coalesce(var.declared_null, var.missing_bool), null)
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
 `
 	evalCtx := &hcl.EvalContext{
 		Variables: map[string]cty.Value{
@@ -455,7 +484,7 @@ resource "kubernetes_pod_v1" "caught_diagnostic_try" {
 	}
 	manifests, errs := extractTypedResources(parseTypedHCL(t, src), evalCtx)
 	require.Empty(t, errs, "try(...) suppresses diagnostics so no eval errors are returned")
-	require.Len(t, manifests, 10)
+	require.Len(t, manifests, 13)
 
 	byName := map[string]map[string]interface{}{}
 	for _, m := range manifests {
@@ -491,6 +520,14 @@ resource "kubernetes_pod_v1" "caught_diagnostic_try" {
 
 	assert.Equal(t, true, podSpecAt(t, byName["caught_diagnostic_try"], "spec")["automountServiceAccountToken"],
 		"caught evaluation diagnostic in try(...) falling back to null must take provider default automountServiceAccountToken")
+	assert.Equal(t, true, podSpecAt(t, byName["coalesce_unused_fallback"], "spec")["automountServiceAccountToken"],
+		"coalesce with unused fallback referencing unresolvable variable must preserve resolved boolean true")
+
+	assert.Equal(t, false, podSpecAt(t, byName["coalesce_explicit_false"], "spec")["automountServiceAccountToken"],
+		"coalesce with unused fallback referencing unresolvable variable must preserve resolved boolean false")
+
+	assert.NotContains(t, podSpecAt(t, byName["coalesce_unresolvable_try"], "spec"), "automountServiceAccountToken",
+		"coalesce falling back to unresolvable variable inside try(...) must not take provider default automountServiceAccountToken")
 }
 
 func TestExtractTypedResources_InvalidConditionTypeDoesNotPanicPodSpec(t *testing.T) {
@@ -540,6 +577,9 @@ locals {
   string_cond_true              = "true" ? (try(var.declared_null, var.missing_ref)) : false
   string_cond_false             = "false" ? false : (try(var.declared_null, var.missing_ref))
   caught_diagnostic             = try([][0], null)
+  coalesce_unused_fallback      = coalesce(var.declared_null, true, var.missing_ref)
+  coalesce_explicit_false       = coalesce(var.declared_null, false, var.missing_ref)
+  coalesce_unresolvable         = try(coalesce(var.declared_null, var.missing_ref), null)
 }
 `), 0o600))
 
@@ -660,6 +700,44 @@ resource "kubernetes_pod_v1" "caught_diagnostic" {
     }
   }
 }
+resource "kubernetes_pod_v1" "coalesce_unused_fallback" {
+  metadata {
+    name = "pod-coalesce-unused-fallback"
+  }
+  spec {
+    automount_service_account_token = local.coalesce_unused_fallback
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "coalesce_explicit_false" {
+  metadata {
+    name = "pod-coalesce-explicit-false"
+  }
+  spec {
+    automount_service_account_token = local.coalesce_explicit_false
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "coalesce_unresolvable" {
+  metadata {
+    name = "pod-coalesce-unresolvable"
+  }
+  spec {
+    automount_service_account_token = local.coalesce_unresolvable
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
 `), 0o600))
 
 	workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
@@ -692,6 +770,12 @@ resource "kubernetes_pod_v1" "caught_diagnostic" {
 		"local with string condition 'false' must take provider default automountServiceAccountToken")
 	assert.Equal(t, true, podSpecAt(t, byName["pod-caught-diagnostic"], "spec")["automountServiceAccountToken"],
 		"local with caught evaluation diagnostic in try(...) falling back to null must take provider default automountServiceAccountToken")
+	assert.Equal(t, true, podSpecAt(t, byName["pod-coalesce-unused-fallback"], "spec")["automountServiceAccountToken"],
+		"local with coalesce unused fallback must preserve resolved boolean true")
+	assert.Equal(t, false, podSpecAt(t, byName["pod-coalesce-explicit-false"], "spec")["automountServiceAccountToken"],
+		"local with coalesce unused fallback must preserve resolved boolean false")
+	assert.NotContains(t, podSpecAt(t, byName["pod-coalesce-unresolvable"], "spec"), "automountServiceAccountToken",
+		"local with unresolvable coalesce inside try(...) must not take provider default automountServiceAccountToken")
 }
 
 // An attribute missing from a known value is an error that try() catches, as in

@@ -17,39 +17,39 @@ import (
 // this table is left unscanned rather than guessed at, same policy as
 // kubernetes_manifest.
 var typedResourceGVK = map[string]struct{ apiVersion, kind string }{
-	"kubernetes_deployment":           {"apps/v1", "Deployment"},
-	"kubernetes_deployment_v1":        {"apps/v1", "Deployment"},
-	"kubernetes_stateful_set":         {"apps/v1", "StatefulSet"},
-	"kubernetes_stateful_set_v1":      {"apps/v1", "StatefulSet"},
-	"kubernetes_daemonset":            {"apps/v1", "DaemonSet"},
-	"kubernetes_daemon_set":           {"apps/v1", "DaemonSet"},
-	"kubernetes_daemon_set_v1":        {"apps/v1", "DaemonSet"},
-	"kubernetes_pod":                  {"v1", "Pod"},
-	"kubernetes_pod_v1":               {"v1", "Pod"},
-	"kubernetes_service":              {"v1", "Service"},
-	"kubernetes_service_v1":           {"v1", "Service"},
-	"kubernetes_config_map":           {"v1", "ConfigMap"},
-	"kubernetes_config_map_v1":        {"v1", "ConfigMap"},
-	"kubernetes_secret":               {"v1", "Secret"},
-	"kubernetes_secret_v1":            {"v1", "Secret"},
-	"kubernetes_namespace":            {"v1", "Namespace"},
-	"kubernetes_namespace_v1":         {"v1", "Namespace"},
+	"kubernetes_deployment":                 {"apps/v1", "Deployment"},
+	"kubernetes_deployment_v1":              {"apps/v1", "Deployment"},
+	"kubernetes_stateful_set":               {"apps/v1", "StatefulSet"},
+	"kubernetes_stateful_set_v1":            {"apps/v1", "StatefulSet"},
+	"kubernetes_daemonset":                  {"apps/v1", "DaemonSet"},
+	"kubernetes_daemon_set":                 {"apps/v1", "DaemonSet"},
+	"kubernetes_daemon_set_v1":              {"apps/v1", "DaemonSet"},
+	"kubernetes_pod":                        {"v1", "Pod"},
+	"kubernetes_pod_v1":                     {"v1", "Pod"},
+	"kubernetes_service":                    {"v1", "Service"},
+	"kubernetes_service_v1":                 {"v1", "Service"},
+	"kubernetes_config_map":                 {"v1", "ConfigMap"},
+	"kubernetes_config_map_v1":              {"v1", "ConfigMap"},
+	"kubernetes_secret":                     {"v1", "Secret"},
+	"kubernetes_secret_v1":                  {"v1", "Secret"},
+	"kubernetes_namespace":                  {"v1", "Namespace"},
+	"kubernetes_namespace_v1":               {"v1", "Namespace"},
 	"kubernetes_service_account":            {"v1", "ServiceAccount"},
 	"kubernetes_service_account_v1":         {"v1", "ServiceAccount"},
 	"kubernetes_default_service_account":    {"v1", "ServiceAccount"},
 	"kubernetes_default_service_account_v1": {"v1", "ServiceAccount"},
-	"kubernetes_job":                  {"batch/v1", "Job"},
-	"kubernetes_job_v1":               {"batch/v1", "Job"},
-	"kubernetes_cron_job":             {"batch/v1", "CronJob"},
-	"kubernetes_cron_job_v1":          {"batch/v1", "CronJob"},
-	"kubernetes_ingress":              {"networking.k8s.io/v1beta1", "Ingress"},
-	"kubernetes_ingress_v1":           {"networking.k8s.io/v1", "Ingress"},
-	"kubernetes_network_policy":       {"networking.k8s.io/v1", "NetworkPolicy"},
-	"kubernetes_network_policy_v1":    {"networking.k8s.io/v1", "NetworkPolicy"},
-	"kubernetes_role":                 {"rbac.authorization.k8s.io/v1", "Role"},
-	"kubernetes_role_binding":         {"rbac.authorization.k8s.io/v1", "RoleBinding"},
-	"kubernetes_cluster_role":         {"rbac.authorization.k8s.io/v1", "ClusterRole"},
-	"kubernetes_cluster_role_binding": {"rbac.authorization.k8s.io/v1", "ClusterRoleBinding"},
+	"kubernetes_job":                        {"batch/v1", "Job"},
+	"kubernetes_job_v1":                     {"batch/v1", "Job"},
+	"kubernetes_cron_job":                   {"batch/v1", "CronJob"},
+	"kubernetes_cron_job_v1":                {"batch/v1", "CronJob"},
+	"kubernetes_ingress":                    {"networking.k8s.io/v1beta1", "Ingress"},
+	"kubernetes_ingress_v1":                 {"networking.k8s.io/v1", "Ingress"},
+	"kubernetes_network_policy":             {"networking.k8s.io/v1", "NetworkPolicy"},
+	"kubernetes_network_policy_v1":          {"networking.k8s.io/v1", "NetworkPolicy"},
+	"kubernetes_role":                       {"rbac.authorization.k8s.io/v1", "Role"},
+	"kubernetes_role_binding":               {"rbac.authorization.k8s.io/v1", "RoleBinding"},
+	"kubernetes_cluster_role":               {"rbac.authorization.k8s.io/v1", "ClusterRole"},
+	"kubernetes_cluster_role_binding":       {"rbac.authorization.k8s.io/v1", "ClusterRoleBinding"},
 
 	"kubernetes_role_v1":                 {"rbac.authorization.k8s.io/v1", "Role"},
 	"kubernetes_role_binding_v1":         {"rbac.authorization.k8s.io/v1", "RoleBinding"},
@@ -577,14 +577,24 @@ var providerPodSpecDefaults = map[string]interface{}{
 	"automount_service_account_token": true,
 }
 
-// unwrapParentheses strips any enclosing grouping parentheses from expr.
+// unwrapParentheses strips any enclosing grouping parentheses and
+// interpolation-only template wraps from expr.
 func unwrapParentheses(expr hcl.Expression) hcl.Expression {
 	for {
-		p, ok := expr.(*hclsyntax.ParenthesesExpr)
-		if !ok || p == nil {
+		switch e := expr.(type) {
+		case *hclsyntax.ParenthesesExpr:
+			if e == nil {
+				return expr
+			}
+			expr = e.Expression
+		case *hclsyntax.TemplateWrapExpr:
+			if e == nil {
+				return expr
+			}
+			expr = e.Wrapped
+		default:
 			return expr
 		}
-		expr = p.Expression
 	}
 }
 
@@ -630,6 +640,26 @@ func hasUnresolvableVariables(expr hcl.Expression, evalCtx *hcl.EvalContext) boo
 		return true
 	}
 
+	if call, ok := expr.(*hclsyntax.FunctionCallExpr); ok && call.Name == "coalesce" {
+		for _, rawArg := range call.Args {
+			arg := unwrapParentheses(rawArg)
+			if hasUnresolvableVariables(arg, evalCtx) {
+				return true
+			}
+			val, diags := arg.Value(evalCtx)
+			if diags.HasErrors() {
+				return false
+			}
+			if !val.IsKnown() {
+				return true
+			}
+			if val.IsNull() || (val.Type() == cty.String && val.AsString() == "") {
+				continue
+			}
+			return false
+		}
+		return false
+	}
 	if cond, ok := expr.(*hclsyntax.ConditionalExpr); ok {
 		condExpr := unwrapParentheses(cond.Condition)
 		if hasUnresolvableVariables(condExpr, evalCtx) {
