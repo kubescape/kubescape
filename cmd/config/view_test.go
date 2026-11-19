@@ -175,3 +175,17 @@ func TestGetViewCmd_RejectsUnsupportedFormat(t *testing.T) {
 		})
 	}
 }
+
+func TestGetViewCmd_HonorsCobraOutputWriter(t *testing.T) {
+	ks := &capturingView{}
+	cmd := getViewCmd(ks)
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--format", "json"})
+
+	err := cmd.Execute()
+	assert.NoError(t, err)
+	if assert.NotNil(t, ks.got) {
+		assert.Equal(t, &buf, ks.got.Writer)
+	}
+}

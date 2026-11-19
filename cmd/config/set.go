@@ -60,6 +60,14 @@ var supportConfigSet = map[string]func(*metav1.SetConfig, string) error{
 		s.CloudReportURL = cloudReportURL
 		return nil
 	},
+	"clusterName": func(s *metav1.SetConfig, clusterName string) error {
+		clusterName = strings.TrimSpace(clusterName)
+		if clusterName == "" {
+			return fmt.Errorf("invalid clusterName: cannot be empty")
+		}
+		s.ClusterName = clusterName
+		return nil
+	},
 }
 
 func validateURL(u string) error {

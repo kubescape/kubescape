@@ -85,7 +85,7 @@ func TestParseSetArgs_Single(t *testing.T) {
 func TestParseSetArgs_InvalidKey(t *testing.T) {
 	args := []string{"invalidKey=value1"}
 	_, err := parseSetArgs(args)
-	assert.EqualError(t, err, `key "invalidKey" unknown; supported: accessKey/accountID/cloudAPIURL/cloudReportURL`)
+	assert.EqualError(t, err, `key "invalidKey" unknown; supported: accessKey/accountID/cloudAPIURL/cloudReportURL/clusterName`)
 }
 
 func TestParseSetArgs_CaseInsensitiveAndKebabCase(t *testing.T) {
@@ -114,6 +114,12 @@ func TestParseSetArgs_CaseInsensitiveAndKebabCase(t *testing.T) {
 		{name: "cloudReportUrl mixedCase", args: []string{"cloudReportUrl=https://report.example.com"}, wantField: "cloudReportURL", wantVal: "https://report.example.com"},
 		{name: "cloud-report-url kebab-case", args: []string{"cloud-report-url=https://report.example.com"}, wantField: "cloudReportURL", wantVal: "https://report.example.com"},
 		{name: "cloud_report_url snake-case", args: []string{"cloud_report_url", "https://report.example.com"}, wantField: "cloudReportURL", wantVal: "https://report.example.com"},
+
+		{name: "clusterName camelCase", args: []string{"clusterName=my-cluster"}, wantField: "clusterName", wantVal: "my-cluster"},
+		{name: "clustername lowercase", args: []string{"clustername=my-cluster"}, wantField: "clusterName", wantVal: "my-cluster"},
+		{name: "cluster-name kebab-case", args: []string{"cluster-name=my-cluster"}, wantField: "clusterName", wantVal: "my-cluster"},
+		{name: "cluster_name snake-case", args: []string{"cluster_name", "my-cluster"}, wantField: "clusterName", wantVal: "my-cluster"},
+		{name: "CLUSTER_NAME uppercase", args: []string{"CLUSTER_NAME=my-cluster"}, wantField: "clusterName", wantVal: "my-cluster"},
 	}
 
 	for _, tt := range tests {
@@ -131,6 +137,8 @@ func TestParseSetArgs_CaseInsensitiveAndKebabCase(t *testing.T) {
 				assert.Equal(t, tt.wantVal, setConfig.CloudAPIURL)
 			case "cloudReportURL":
 				assert.Equal(t, tt.wantVal, setConfig.CloudReportURL)
+			case "clusterName":
+				assert.Equal(t, tt.wantVal, setConfig.ClusterName)
 			}
 		})
 	}
@@ -207,6 +215,7 @@ func TestParseSetArgs_EmptyValue(t *testing.T) {
 		{"empty second argument", []string{"accessKey", ""}, "accessKey"},
 		{"whitespace only", []string{"accessKey", "   "}, "accessKey"},
 		{"whitespace url", []string{"cloud-api-url=  "}, "cloud-api-url"},
+		{"whitespace cluster-name", []string{"cluster-name=  "}, "cluster-name"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -222,6 +231,10 @@ func TestParseSetArgs_TrimsValue(t *testing.T) {
 	setConfig, err := parseSetArgs([]string{"accessKey", " value1\n"})
 	assert.NoError(t, err)
 	assert.Equal(t, "value1", setConfig.AccessKey)
+
+	setConfig, err = parseSetArgs([]string{"clusterName", " test-cluster \n"})
+	assert.NoError(t, err)
+	assert.Equal(t, "test-cluster", setConfig.ClusterName)
 }
 
 func TestGetSetCmd_ArgsValidation(t *testing.T) {
