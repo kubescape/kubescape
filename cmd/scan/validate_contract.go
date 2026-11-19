@@ -2,6 +2,7 @@ package scan
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -54,12 +55,18 @@ func getValidateContractCmd(scanInfo *cautils.ScanInfo) *cobra.Command {
 				return err
 			}
 
-			selected, validationErr := contractv1alpha1.LoadFile(args[0], contractv1alpha1.LoadOptions{
-				ContractName:        contractName,
-				RunningVersion:      versioncheck.BuildNumber,
-				SupportedFormats:    shared.ScanFormats,
-				SupportedSeverities: reporthandlingapis.GetSupportedSeverities(),
-			})
+			var validationErr error
+			var selected *contractv1alpha1.SelectedContract
+			if commandFlagChanged(cmd, "contract") && strings.TrimSpace(contractName) == "" {
+				validationErr = errors.New("--contract needs a contract name")
+			} else {
+				selected, validationErr = contractv1alpha1.LoadFile(args[0], contractv1alpha1.LoadOptions{
+					ContractName:        contractName,
+					RunningVersion:      versioncheck.BuildNumber,
+					SupportedFormats:    shared.ScanFormats,
+					SupportedSeverities: reporthandlingapis.GetSupportedSeverities(),
+				})
+			}
 			if validationErr != nil && normalizedFormat != validateContractFormatSARIF {
 				return validationErr
 			}

@@ -41,6 +41,10 @@ func loadAndApplyScanContract(cmd *cobra.Command, scanInfo *cautils.ScanInfo, pa
 		return nil, nil
 	}
 
+	if commandFlagChanged(cmd, "contract") && strings.TrimSpace(name) == "" {
+		return nil, errors.New("--contract needs a contract name")
+	}
+
 	allowedMap, err := parseContractAllowlist(allowSections)
 	if err != nil {
 		return nil, err

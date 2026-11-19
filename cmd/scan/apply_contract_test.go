@@ -418,13 +418,17 @@ func TestContractControlsVersionRejectsBypassModes(t *testing.T) {
 }
 
 func TestContractNameRequiresContractFile(t *testing.T) {
-	cmd := GetScanCommand(&contractCaptureKubescape{})
-	root := &cobra.Command{Use: "kubescape", SilenceErrors: true, SilenceUsage: true}
-	root.AddCommand(cmd)
-	root.SetArgs([]string{"scan", ".", "--contract", "ci"})
+	for _, val := range []string{"ci", "", "   ", "\t\n"} {
+		t.Run(fmt.Sprintf("contract=%q", val), func(t *testing.T) {
+			cmd := GetScanCommand(&contractCaptureKubescape{})
+			root := &cobra.Command{Use: "kubescape", SilenceErrors: true, SilenceUsage: true}
+			root.AddCommand(cmd)
+			root.SetArgs([]string{"scan", ".", "--contract", val})
 
-	err := root.Execute()
-	require.EqualError(t, err, "--contract requires --scan-contract")
+			err := root.Execute()
+			require.EqualError(t, err, "--contract requires --scan-contract")
+		})
+	}
 }
 
 func TestScanContractRejectsEmptyOrWhitespace(t *testing.T) {
@@ -437,6 +441,23 @@ func TestScanContractRejectsEmptyOrWhitespace(t *testing.T) {
 
 			err := root.Execute()
 			require.EqualError(t, err, "--scan-contract needs a file path")
+		})
+	}
+}
+
+func TestContractNameRejectsEmptyOrWhitespace(t *testing.T) {
+	path := writeScanContract(t, `
+        policy:
+          frameworks: [nsa]`)
+	for _, val := range []string{"", "   ", "\t\n"} {
+		t.Run(fmt.Sprintf("contract=%q", val), func(t *testing.T) {
+			cmd := GetScanCommand(&contractCaptureKubescape{})
+			root := &cobra.Command{Use: "kubescape", SilenceErrors: true, SilenceUsage: true}
+			root.AddCommand(cmd)
+			root.SetArgs([]string{"scan", ".", "--scan-contract", path, "--contract", val})
+
+			err := root.Execute()
+			require.EqualError(t, err, "--contract needs a contract name")
 		})
 	}
 }

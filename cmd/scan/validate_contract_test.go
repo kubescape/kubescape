@@ -458,7 +458,12 @@ func TestValidateContractCommandRejectsPaddedAndWhitespaceContractNames(t *testi
 		{
 			name:         "whitespace-only contract name is rejected and does not fall back to default",
 			contractName: "   ",
-			wantErr:      `contract "   " does not exist`,
+			wantErr:      "--contract needs a contract name",
+		},
+		{
+			name:         "empty contract name is rejected and does not fall back to default",
+			contractName: "",
+			wantErr:      "--contract needs a contract name",
 		},
 	}
 
@@ -480,6 +485,31 @@ func TestValidateContractCommandRejectsPaddedAndWhitespaceContractNames(t *testi
 			require.Error(t, scanErr)
 			assert.Contains(t, scanErr.Error(), tt.wantErr)
 		})
+	}
+}
+
+func TestValidateContractCommandRejectsBlankContractSARIF(t *testing.T) {
+	contractPath := filepath.Join(t.TempDir(), "kubescape.yaml")
+	require.NoError(t, os.WriteFile(contractPath, []byte(commandContract), 0o600))
+
+	for _, contractName := range []string{"", "   ", "\t"} {
+		cmd := GetScanCommand(core.NewKubescape(context.Background()))
+		output := &bytes.Buffer{}
+		cmd.SetOut(output)
+		cmd.SetErr(io.Discard)
+		cmd.SetArgs([]string{"validate-contract", contractPath, "--contract", contractName, "--format", "sarif"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.EqualError(t, err, "--contract needs a contract name")
+
+		report := decodeValidateContractSARIF(t, output.Bytes())
+		run := report["runs"].([]any)[0].(map[string]any)
+		results := run["results"].([]any)
+		require.Len(t, results, 1)
+		result := results[0].(map[string]any)
+		assert.Equal(t, "kubescape.scan-contract.valid", result["ruleId"])
+		assert.Equal(t, "error", result["level"])
+		assert.Equal(t, "--contract needs a contract name", result["message"].(map[string]any)["text"])
 	}
 }
 
