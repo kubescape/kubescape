@@ -1664,3 +1664,323 @@ func TestTestsCases_SourcePathFallback(t *testing.T) {
 	assert.Contains(t, contents, "name: workload-none", "should include resource without source path")
 	assert.NotContains(t, contents, "name: workload-none; sourcePath:", "should not include sourcePath when both are empty")
 }
+
+// TestXmlSanitize tests that illegal XML 1.0 characters are stripped while valid
+// whitespace (\t, \n, \r), DEL (0x7F), replacement characters (U+FFFD), and Unicode are preserved.
+func TestXmlSanitize(t *testing.T) {
+	assert.Equal(t, "", xmlSanitize(""))
+	assert.Equal(t, "clean string", xmlSanitize("clean string"))
+	// Strips non-whitespace C0 controls (0x00-0x1F)
+	assert.Equal(t, "hello world", xmlSanitize("hello\x00\x01\x08\x0b\x0c\x0e\x1f world"))
+	// Strips XML 1.0 noncharacters U+FFFE and U+FFFF
+	assert.Equal(t, "usethisversion", xmlSanitize("use\ufffethis\uffffversion"))
+	// Preserves valid XML 1.0 characters: \t, \n, \r, 0x7F (DEL), U+FFFD, and Unicode
+	assert.Equal(t, "tab\tnewline\ncarriage\rreturn", xmlSanitize("tab\tnewline\ncarriage\rreturn"))
+	assert.Equal(t, "del:\x7f-char", xmlSanitize("del:\x7f-char"))
+	assert.Equal(t, "replacement:\ufffd-char", xmlSanitize("replacement:\ufffd-char"))
+	assert.Equal(t, "unicode: 🚀 ✓ 测试", xmlSanitize("unicode: 🚀 ✓ 测试"))
+}
+
+// TestXmlSanitizeID verifies that custom control IDs with illegal XML characters
+// are escaped rather than stripped, preserving identifier uniqueness across classnames.
+func TestXmlSanitizeID(t *testing.T) {
+	assert.Equal(t, "", xmlSanitizeID(""))
+	assert.Equal(t, "C-0001", xmlSanitizeID("C-0001"))
+	assert.Equal(t, "rule%01name", xmlSanitizeID("rule\x01name"))
+	assert.Equal(t, "rule%25name", xmlSanitizeID("rule%name"))
+	assert.NotEqual(t, xmlSanitizeID("rule"), xmlSanitizeID("rule\x01"))
+	assert.NotEqual(t, xmlSanitizeID("rule%01"), xmlSanitizeID("rule\x01"))
+}
+
+// TestTestsCases_ResourceDeduplication_PreservesDistinctWithControls verifies that
+// resource entries differing only by control characters do not collapse during map deduplication.
+func TestTestsCases_ResourceDeduplication_PreservesDistinctWithControls(t *testing.T) {
+	session := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{Controls: reportsummary.ControlSummaries{}},
+		},
+		AllResources:   map[string]workloadinterface.IMetadata{},
+		ResourceSource: map[string]reporthandling.Source{},
+	}
+
+	resourceIDs := helpersv1.AllLists{}
+	resourceIDs.Append(apis.StatusFailed, "pod-a")
+	resourceIDs.Append(apis.StatusFailed, "pod-\x01a")
+
+	control := reportsummary.ControlSummary{
+		ControlID:   "C-0001",
+		Name:        "Test Deduplication",
+		Status:      apis.StatusFailed,
+		StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		ResourceIDs: resourceIDs,
+	}
+
+	controls := reportsummary.ControlSummaries{"C-0001": control}
+	cases := testsCases(session, &controls, "TestSuite")
+	require.Len(t, cases, 1)
+	require.NotNil(t, cases[0].Failure)
+	assert.Contains(t, cases[0].Failure.Message, "failed on 2 resource(s)")
+}
+
+// TestJunitActionPrint_SanitizesControlCharacters verifies that findings and image scans
+// containing non-printable ASCII control characters produce valid XML 1.0 that unmarshals cleanly
+// and preserves sanitized findings.
+func TestJunitActionPrint_SanitizesControlCharacters(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "junit-sanitize-*.xml")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+	require.NoError(t, tmpFile.Close())
+
+	jp := NewJunitPrinter(false)
+	ctx := context.Background()
+	require.NoError(t, jp.SetWriter(ctx, tmpFile.Name()))
+
+	imageMatch := func(id, severity, packageName string) match.Match {
+		return match.Match{
+			Vulnerability: vulnerability.Vulnerability{
+				Reference: vulnerability.Reference{ID: id, Namespace: "nvd"},
+				Metadata:  &vulnerability.Metadata{ID: id, Severity: severity},
+				Fix: vulnerability.Fix{
+					Versions: []string{"2.0\x1f.0"},
+					State:    vulnerability.FixStateFixed,
+				},
+			},
+			Package: grypepkg.Package{
+				ID:      grypepkg.ID(packageName),
+				Name:    packageName,
+				Version: "1.0.0",
+			},
+		}
+	}
+
+	imageScan := []cautils.ImageScanData{
+		{
+			Image:    "malicious\x00image\x1b:v1.0",
+			Platform: "linux/\x01amd64",
+			Matches:  match.NewMatches(imageMatch("CVE-2026-\x020001", "High", "bad\x08pkg")),
+		},
+	}
+
+	session := cautils.NewOPASessionObjMock()
+	if session.Report.SummaryDetails.Controls == nil {
+		session.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{}
+	}
+	if session.AllResources == nil {
+		session.AllResources = map[string]workloadinterface.IMetadata{}
+	}
+	if session.ResourceSource == nil {
+		session.ResourceSource = map[string]reporthandling.Source{}
+	}
+
+	workload := exceptionsWorkload(t, "Pod", "default", "pod-control\x01")
+	session.AllResources["r-failed-1"] = workload
+	session.ResourceSource["r-failed-1"] = reporthandling.Source{
+		RelativePath: "manifests/pod\x01.yaml",
+	}
+
+	resourceIDs := helpersv1.AllLists{}
+	resourceIDs.Append(apis.StatusFailed, "r-failed-1")
+
+	session.Report.SummaryDetails.Controls["C-0001"] = reportsummary.ControlSummary{
+		ControlID:   "C-0001",
+		Name:        "Control with \x05control chars",
+		Description: "Desc",
+		Remediation: "Remediation with \x06special chars",
+		Status:      apis.StatusFailed,
+		StatusInfo: apis.StatusInfo{
+			InnerStatus: apis.StatusFailed,
+		},
+		ResourceIDs: resourceIDs,
+	}
+
+	err = jp.ActionPrint(ctx, session, imageScan)
+	require.NoError(t, err)
+	require.NoError(t, jp.CloseWriter())
+
+	data, err := os.ReadFile(tmpFile.Name())
+	require.NoError(t, err)
+
+	// Output must parse cleanly as XML 1.0 without syntax or token errors.
+	var parsed JUnitTestSuites
+	err = xml.Unmarshal(data, &parsed)
+	require.NoError(t, err, "JUnit output with control characters must parse cleanly as XML 1.0")
+
+	// Assert decoded image suite name and vulnerability testcase name
+	var foundImageSuite bool
+	var foundVulnCase bool
+	for _, suite := range parsed.Suites {
+		if suite.Name == "maliciousimage:v1.0 [linux/amd64]" {
+			foundImageSuite = true
+			for _, tc := range suite.TestCases {
+				if tc.Name == "CVE-2026-0001 (badpkg)" {
+					foundVulnCase = true
+				}
+			}
+		}
+	}
+	assert.True(t, foundImageSuite, "should find sanitized image suite name")
+	assert.True(t, foundVulnCase, "should find sanitized vulnerability testcase name")
+
+	// Assert control finding failure contents includes sanitized sourcePath and remediation
+	var foundControlCase bool
+	for _, suite := range parsed.Suites {
+		for _, tc := range suite.TestCases {
+			if tc.Name == "Control with control chars" && tc.Failure != nil {
+				foundControlCase = true
+				assert.Contains(t, tc.Failure.Contents, "sourcePath: manifests/pod.yaml")
+				assert.Contains(t, tc.Failure.Contents, "Remediation: Remediation with special chars")
+			}
+		}
+	}
+	assert.True(t, foundControlCase, "should find control testcase with sanitized failure contents")
+
+	// Ensure no forbidden control characters exist in the serialized XML.
+	for _, b := range data {
+		if b < 0x20 && b != '\t' && b != '\n' && b != '\r' {
+			t.Fatalf("Found illegal XML 1.0 byte 0x%02x in output: %s", b, string(data))
+		}
+	}
+}
+
+// TestXmlUnsanitizeID verifies that percent-encoded identifiers produced by xmlSanitizeID
+// are accurately decoded back to their original raw identifiers.
+func TestXmlUnsanitizeID(t *testing.T) {
+	assert.Equal(t, "", xmlUnsanitizeID(""))
+	assert.Equal(t, "C-0001", xmlUnsanitizeID("C-0001"))
+	assert.Equal(t, "rule%blue", xmlUnsanitizeID(xmlSanitizeID("rule%blue")))
+	assert.Equal(t, "rule\x01name", xmlUnsanitizeID(xmlSanitizeID("rule\x01name")))
+	assert.Equal(t, "rule\uffffname", xmlUnsanitizeID(xmlSanitizeID("rule\uffffname")))
+}
+
+// TestAppendSkippedControls_DeduplicatesByRawControlID verifies that raw control IDs
+// are used for deduplication, avoiding duplicate skipped cases and preventing distinct
+// controls with percent-encoded names from colliding.
+func TestAppendSkippedControls_DeduplicatesByRawControlID(t *testing.T) {
+	// Case 1: Existing control with ID "rule%blue" produces Classname ending in "rule%25blue".
+	// A skipped control with raw ID "rule%blue" must be recognized as already emitted and not duplicated.
+	existingCases := []JUnitTestCase{
+		{
+			Classname: "Framework/rule%25blue",
+			Name:      "Rule Percent Blue",
+			controlID: "rule%blue",
+		},
+	}
+	skipped := []skippedControlInfo{
+		{
+			controlID: "rule%blue",
+			name:      "Rule Percent Blue",
+			reason:    "not evaluated",
+		},
+	}
+	result := appendSkippedControls(nil, existingCases, skipped, "Framework", nil)
+	require.Len(t, result, 1, "rule%blue should not be duplicated when already present in the suite")
+
+	// Case 2: Existing control with ID "rule\x01" produces Classname ending in "rule%01".
+	// A distinct skipped control with literal raw ID "rule%01" must NOT be suppressed.
+	existingCases2 := []JUnitTestCase{
+		{
+			Classname: "Framework/rule%01",
+			Name:      "Rule with Control Byte",
+			controlID: "rule\x01",
+		},
+	}
+	skipped2 := []skippedControlInfo{
+		{
+			controlID: "rule%01",
+			name:      "Literal Rule Percent Zero One",
+			reason:    "not evaluated",
+		},
+	}
+	result2 := appendSkippedControls(nil, existingCases2, skipped2, "Framework", nil)
+	require.Len(t, result2, 2, "distinct skipped control with raw ID rule%01 must not be suppressed by rule\\x01")
+}
+
+// TestListTestsSuite_TracksFrameworkAssignmentByRawControlID verifies that controls assigned
+// to a framework are tracked by their raw control ID, preventing unassigned fallbacks from
+// duplicating them into the first framework when policy metadata is missing.
+func TestListTestsSuite_TracksFrameworkAssignmentByRawControlID(t *testing.T) {
+	session := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Frameworks: []reportsummary.FrameworkSummary{
+					{
+						Name:     "Framework1",
+						Controls: reportsummary.ControlSummaries{},
+					},
+					{
+						Name: "Framework2",
+						Controls: reportsummary.ControlSummaries{
+							"rule%blue": reportsummary.ControlSummary{
+								ControlID:  "rule%blue",
+								Name:       "Rule Percent Blue",
+								Status:     apis.StatusSkipped,
+								StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusSkipped},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	suites := listTestsSuite(session)
+	require.Len(t, suites, 2)
+
+	// Framework 1 should not have rule%blue
+	for _, tc := range suites[0].TestCases {
+		assert.NotEqual(t, "Framework1/rule%25blue", tc.Classname, "Framework 1 should not receive rule%blue via unassigned fallback")
+	}
+
+	// Framework 2 should have rule%blue
+	var foundInF2 bool
+	for _, tc := range suites[1].TestCases {
+		if tc.Classname == "Framework2/rule%25blue" {
+			foundInF2 = true
+		}
+	}
+	assert.True(t, foundInF2, "Framework 2 should contain rule%blue")
+}
+
+// TestListTestsSuite_KeepsDistinctFrameworkNamesDistinct verifies that frameworks
+// with names differing only by control characters produce distinct testcase classnames.
+func TestListTestsSuite_KeepsDistinctFrameworkNamesDistinct(t *testing.T) {
+	session := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Frameworks: []reportsummary.FrameworkSummary{
+					{
+						Name: "TeamA",
+						Controls: reportsummary.ControlSummaries{
+							"C-0001": reportsummary.ControlSummary{
+								ControlID:  "C-0001",
+								Name:       "Same Name",
+								Status:     apis.StatusPassed,
+								StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusPassed},
+							},
+						},
+					},
+					{
+						Name: "Team\x01A",
+						Controls: reportsummary.ControlSummaries{
+							"C-0001": reportsummary.ControlSummary{
+								ControlID:  "C-0001",
+								Name:       "Same Name",
+								Status:     apis.StatusPassed,
+								StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusPassed},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	suites := listTestsSuite(session)
+	require.Len(t, suites, 2)
+	require.Len(t, suites[0].TestCases, 1)
+	require.Len(t, suites[1].TestCases, 1)
+
+	assert.Equal(t, "TeamA/C-0001", suites[0].TestCases[0].Classname)
+	assert.Equal(t, "Team%01A/C-0001", suites[1].TestCases[0].Classname)
+	assert.NotEqual(t, suites[0].TestCases[0].Classname, suites[1].TestCases[0].Classname, "frameworks differing by control characters must have distinct classnames")
+}
