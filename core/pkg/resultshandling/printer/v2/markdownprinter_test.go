@@ -524,11 +524,37 @@ func TestMdEscapeCell(t *testing.T) {
 		{"with\x07bell", "withbell"},
 		{"with\x7fdel", "withdel"},
 		{"with\ttab", "with\ttab"},
+		{"with\u0080pad", "withpad"},
+		{"with\u0085nel", "withnel"},
+		{"with\u009bcsi", "withcsi"},
+		{"with\u009fapc", "withapc"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.input, func(t *testing.T) {
 			assert.Equal(t, tc.want, mdEscapeCell(tc.input))
+		})
+	}
+}
+
+func TestMdSanitizeText(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty", "", ""},
+		{"normal text", "hello world", "hello world"},
+		{"collapses newlines and carriage returns", "line1\r\nline2\nline3\rline4", "line1 line2 line3 line4"},
+		{"trims surrounding whitespace", "   spaced text   \n", "spaced text"},
+		{"strips C0 control characters but preserves tab", "col1\t\x00val\x07\x1b", "col1\tval"},
+		{"strips C1 control characters (0x80-0x9f)", "foo\u0080bar\u0085baz\u009bqux\u009f", "foobarbazqux"},
+		{"preserves printable non-ASCII characters", "latin: \u00a0 café — \u4e16\u754c", "latin: \u00a0 café — \u4e16\u754c"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, mdSanitizeText(tc.input))
 		})
 	}
 }
@@ -543,6 +569,7 @@ func TestMdEscapeCodeCell(t *testing.T) {
 		{"image`with`backticks", "image'with'backticks"},
 		{"image|with|pipe`and`ticks\r\n", "image\\|with\\|pipe'and'ticks"},
 		{"\x1b[31mimage`tag`\x00", "[31mimage'tag'"},
+		{"image\u0085with\u009bC1`and`pipe|", "imagewithC1'and'pipe\\|"},
 	}
 
 	for _, tc := range cases {
@@ -561,6 +588,7 @@ func TestMdEscapeInline(t *testing.T) {
 		{"image`tag", "image'tag"},
 		{"img`with`backtick\nand\r\nnewlines", "img'with'backtick and newlines"},
 		{"\x00bad`inline\x1b", "bad'inline"},
+		{"\u0080bad`inline\u009b", "bad'inline"},
 	}
 
 	for _, tc := range cases {
