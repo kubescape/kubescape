@@ -1,0 +1,74 @@
+[
+    {
+        "alertMessage": "Subject: ServiceAccount-app can escalate roles/clusterroles beyond their own permissions",
+        "failedPaths": [
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "reviewPaths": [
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 9,
+        "alertObject": {
+            "externalObjects": {
+                "kind": "ServiceAccount",
+                "name": "app",
+                "relatedObjects": [
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "RoleBinding",
+                        "metadata": {
+                            "name": "app-role-binding",
+                            "namespace": "apps"
+                        },
+                        "roleRef": {
+                            "apiGroup": "rbac.authorization.k8s.io",
+                            "kind": "Role",
+                            "name": "app-role"
+                        },
+                        "subjects": [
+                            {
+                                "kind": "ServiceAccount",
+                                "name": "app"
+                            }
+                        ]
+                    },
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "Role",
+                        "metadata": {
+                            "annotations": {
+                                "meta.helm.sh/release-namespace": "apps"
+                            },
+                            "name": "app-role"
+                        },
+                        "rules": [
+                            {
+                                "apiGroups": [
+                                    "rbac.authorization.k8s.io"
+                                ],
+                                "resources": [
+                                    "roles"
+                                ],
+                                "verbs": [
+                                    "escalate"
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+]

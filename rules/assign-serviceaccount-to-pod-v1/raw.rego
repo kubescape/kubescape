@@ -194,6 +194,19 @@ is_same_namespace(role, rolebinding) if {
 is_same_namespace(role, rolebinding) if {
 	role.kind == "Role"
 	not has_namespace(role)
+	not release_namespace(role)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	not has_namespace(rolebinding)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	rolebinding.metadata.namespace == release_namespace(role)
 }
 
 is_same_namespace(role, rolebinding) if {
@@ -204,6 +217,12 @@ is_same_namespace(role, rolebinding) if {
 has_namespace(obj) if {
 	is_string(obj.metadata.namespace)
 	obj.metadata.namespace != ""
+}
+
+release_namespace(obj) := ns if {
+	is_string(obj.metadata.annotations["meta.helm.sh/release-namespace"])
+	obj.metadata.annotations["meta.helm.sh/release-namespace"] != ""
+	ns := obj.metadata.annotations["meta.helm.sh/release-namespace"]
 }
 
 is_same_subjects(subjectVector, subject) if {
