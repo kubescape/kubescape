@@ -221,7 +221,7 @@ func (c *coordinator) apply(ctx context.Context, generation uint64, findings sca
 			continue
 		}
 		canonical := canonicalKey(d.path)
-		if _, skip := unreliable[canonical]; skip {
+		if _, skip := unreliable[canonical]; skip || insideAny(findings.unreliable, d.path) {
 			continue
 		}
 		// Re-checked for each document, under the publishing lock: a save, or the
@@ -271,9 +271,29 @@ func (c *coordinator) inScope(path string) bool {
 	return slices.ContainsFunc(c.roots, func(root string) bool { return within(root, path) })
 }
 
+// insideAny reports whether path is inside one of paths. A scan can skip a
+// whole input, such as a workspace folder whose Kustomize build fails, and then
+// nothing is known of any file in it. paths are keys (pathKey), lowercased on
+// a case-insensitive file system, so both sides are compared as keys: made
+// canonical first, so that symlinks resolve on the real spelling, then keyed.
+func insideAny(paths map[string]struct{}, path string) bool {
+	key := pathKey(canonical(path))
+	for p := range paths {
+		if below(pathKey(canonical(p)), key) {
+			return true
+		}
+	}
+	return false
+}
+
 // within reports whether path is root or below it.
 func within(root, path string) bool {
-	rel, err := filepath.Rel(canonical(root), canonical(path))
+	return below(canonical(root), canonical(path))
+}
+
+// below reports whether path is root or below it, as they are spelled.
+func below(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return false
 	}

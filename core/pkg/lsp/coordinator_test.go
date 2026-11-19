@@ -557,6 +557,53 @@ func TestAnUnreadableManifestKeepsItsPreviousDiagnostics(t *testing.T) {
 	assert.Empty(t, h.barrier())
 }
 
+// A scan can skip a whole input, as #5089 does for a workspace folder whose
+// Kustomize or Helm build fails. Nothing is then known of the files in it, so
+// their diagnostics are left as they are, not cleared, while the files outside
+// it get theirs.
+func TestASkippedFolderKeepsTheDiagnosticsOfItsFiles(t *testing.T) {
+	var pod, other string
+	scan := newFakeScan(func(n int, _ []string) (scanFindings, error) {
+		if n == 1 {
+			return findingsFor(true, map[string][]protocol.Diagnostic{pod: {diag("pod")}, other: {diag("other")}}), nil
+		}
+		f := findingsFor(true, map[string][]protocol.Diagnostic{other: {diag("other, rescanned")}})
+		f.unreliable[pathKey(filepath.Dir(pod))] = struct{}{} // the folder's input was skipped
+		return f, nil
+	})
+	h := newHarness(t, scan, true)
+	// Capitals in the path: the skipped folder is kept as a key, lowercased where
+	// the file system ignores case.
+	require.NoError(t, os.Mkdir(filepath.Join(h.dir, "App"), 0o700))
+	pod, other = h.file(filepath.Join("App", "Pod.yaml")), h.file("other.yaml")
+	h.save(other)
+	h.nextPublish()
+	h.nextPublish()
+
+	h.save(other)
+	for p := h.nextPublish(); string(p.URI) != uriFromPath(other); p = h.nextPublish() {
+		assert.NotEqual(t, uriFromPath(pod), string(p.URI), "the pod's diagnostics are left as they are")
+	}
+	// apply publishes under pubMu, so taking it waits for the rest of the scan.
+	h.c.pubMu.Lock()
+	_, kept := h.c.published[pathKey(pod)]
+	h.c.pubMu.Unlock()
+	assert.True(t, kept, "the pod's diagnostics are left as they are")
+}
+
+// The unreliable paths are keys, lowercased where the file system ignores case
+// (pathKey), so a file is found inside one whatever the case of its own path.
+func TestInsideAnyComparesKeys(t *testing.T) {
+	app := filepath.Join(t.TempDir(), "App")
+	require.NoError(t, os.Mkdir(app, 0o700))
+	pod := filepath.Join(app, "Pod.yaml")
+	require.NoError(t, os.WriteFile(pod, []byte("kind: Pod\n"), 0o600))
+
+	assert.True(t, insideAny(map[string]struct{}{pathKey(app): {}}, pod), "a file inside a skipped folder")
+	assert.True(t, insideAny(map[string]struct{}{pathKey(pod): {}}, pod), "a skipped file is inside itself")
+	assert.False(t, insideAny(map[string]struct{}{pathKey(app): {}}, filepath.Join(filepath.Dir(app), "Other.yaml")))
+}
+
 func TestADocumentOutsideTheWorkspaceIsNotTouched(t *testing.T) {
 	scan := newFakeScan(func(int, []string) (scanFindings, error) { return findingsFor(true, nil), nil })
 	h := newHarness(t, scan, true)
