@@ -82,12 +82,23 @@ func prepareClusterScan(t *testing.T, serverURL string) string {
 	require.NoError(t, os.WriteFile(kubeconfig, []byte(content), 0o600))
 	t.Setenv("KUBECONFIG", kubeconfig)
 	t.Setenv("HOME", t.TempDir())
-	previousConfig, previousContext, previousConnected := k8sinterface.K8SConfig, k8sinterface.GetContextName(), k8sinterface.IsConnectedToCluster()
+	// Read the config before IsConnectedToCluster, which loads this kubeconfig
+	// into it when it is unset.
+	previousConfig := k8sinterface.K8SConfig
+	previousConnected := k8sinterface.IsConnectedToCluster()
 	t.Cleanup(func() {
+		// Naming the context resets the loaded config and the connection state, so
+		// they are put back after it. Restore no explicit context, not the name
+		// the kubeconfig resolved to, which later tests' kubeconfigs may not have.
+		k8sinterface.SetClusterContextName("")
 		k8sinterface.K8SConfig = previousConfig
-		k8sinterface.SetClusterContextName(previousContext)
 		k8sinterface.SetConnectedToCluster(previousConnected)
 	})
+	// Another test may have left a context name that this kubeconfig does not
+	// have, a loaded config, or a failed connection. Start from none of them.
+	k8sinterface.SetClusterContextName("")
+	k8sinterface.K8SConfig = nil
+	k8sinterface.SetConnectedToCluster(true)
 	return dir
 }
 
