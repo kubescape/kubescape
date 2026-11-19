@@ -74,6 +74,18 @@ func globScanFixture(t *testing.T, root string) (manifests string, scan func(inp
 	}
 }
 
+// canonicalTempDir returns t.TempDir() with symlinks resolved. go-git reports a
+// worktree root through filepath.EvalSymlinks, which on Windows also expands 8.3
+// short names: CI's TEMP is C:\Users\RUNNER~1\..., so the raw temp path and the
+// repository root would name one directory two ways. Building the fixture, the
+// scan inputs and the expected root from the canonical path keeps them in step.
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	return dir
+}
+
 // reportedRoot is the base path a report records, which kubescape fix and the
 // SARIF printer resolve relative paths against.
 func reportedRoot(data *cautils.OPASessionObj) (reporthandlingv2.ScanningTarget, string) {
@@ -165,7 +177,7 @@ func TestScanGlobInputIsReportedLikeItsDirectory(t *testing.T) {
 	t.Run("inside a repository without commits", func(t *testing.T) {
 		// Without a HEAD the scan is a directory scan anchored at the repository
 		// root, which ScanRootPath finds by walking up from the input.
-		root := t.TempDir()
+		root := canonicalTempDir(t)
 		manifests, scan := globScanFixture(t, root)
 		_, err := git.PlainInit(root, false)
 		require.NoError(t, err)
@@ -179,7 +191,7 @@ func TestScanGlobInputIsReportedLikeItsDirectory(t *testing.T) {
 	t.Run("inside a committed repository", func(t *testing.T) {
 		// Windows cannot open a path containing '*', so go-git only finds the
 		// repository when the glob is resolved to its directory first.
-		root := t.TempDir()
+		root := canonicalTempDir(t)
 		manifests, scan := globScanFixture(t, root)
 		repo, err := git.PlainInitWithOptions(root, &git.PlainInitOptions{InitOptions: git.InitOptions{DefaultBranch: plumbing.Master}})
 		require.NoError(t, err)
