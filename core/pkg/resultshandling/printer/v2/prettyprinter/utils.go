@@ -242,9 +242,9 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 		days := int(age.Hours() / 24)
 		info := summary.VulnDBBuilt.UTC().Format("2006-01-02")
 		if days < 1 {
-			cautils.InfoDisplay(writer, fmt.Sprintf("Vulnerability DB built: %s\n", info))
+			cautils.InfoDisplay(writer, "Vulnerability DB built: %s\n", info)
 		} else {
-			cautils.InfoDisplay(writer, fmt.Sprintf("Vulnerability DB built: %s (%d days ago)\n", info, days))
+			cautils.InfoDisplay(writer, "Vulnerability DB built: %s (%d days ago)\n", info, days)
 		}
 	}
 
@@ -262,7 +262,7 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 	if len(summary.CVEs) == 0 {
 		txt := "No vulnerabilities were found!"
 
-		cautils.InfoDisplay(writer, txt+"\n")
+		cautils.InfoDisplay(writer, "%s\n", txt)
 		return
 	}
 
@@ -292,7 +292,7 @@ func printImagesCommands(writer *os.File, summary imageprinter.ImageScanSummary)
 		cautils.SimpleDisplay(writer, "Receive a full report by running: kubescape scan image <image>\n")
 	} else {
 		for _, img := range summary.Images {
-			cautils.SimpleDisplay(writer, fmt.Sprintf("Receive a full report by running: %s\n", getCallToActionString(fmt.Sprintf("'$ kubescape scan image %s'", img))))
+			cautils.SimpleDisplay(writer, "Receive a full report by running: %s\n", getCallToActionString(fmt.Sprintf("'$ kubescape scan image %s'", img)))
 		}
 	}
 
@@ -304,7 +304,7 @@ func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
 	cautils.SectionHeadingDisplay(writer, txt)
 
 	for _, ns := range nextSteps {
-		cautils.StarDisplay(writer, ns+"\n")
+		cautils.StarDisplay(writer, "%s\n", ns)
 	}
 	if addLine {
 		cautils.SimpleDisplay(writer, "\n")

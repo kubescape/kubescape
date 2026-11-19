@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"strings"
@@ -562,4 +563,14 @@ func TestFrameworksScoresToString(t *testing.T) {
 			assert.Equal(t, tt.expected, FrameworksScoresToString(tt.frameworks))
 		})
 	}
+}
+
+func TestPrintInfo_PercentVerbsPreserved(t *testing.T) {
+	var buf bytes.Buffer
+	info := "memory usage exceeds 80% of limit (%s %d)"
+	PrintInfo(&buf, []InfoStars{{Stars: "*", Info: info}})
+
+	got := buf.String()
+	assert.Contains(t, got, info, "info text must be printed literally, not evaluated as format string")
+	assert.NotContains(t, got, "%!o(MISSING)", "percent signs must not cause format string errors")
 }
