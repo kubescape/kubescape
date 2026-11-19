@@ -420,10 +420,14 @@ func resolveLocals(files []*hcl.File, vars map[string]cty.Value) map[string]cty.
 					helpers.Int("skipped", len(pending)))
 				return resolved
 			}
-			val, diags := pending[name].Value(evalCtx)
+			expr := pending[name]
+			val, diags := expr.Value(evalCtx)
 			delete(pending, name)
 			if diags.HasErrors() {
 				continue
+			}
+			if val.IsNull() && hasUnresolvableVariables(expr, evalCtx) {
+				val = cty.UnknownVal(cty.DynamicPseudoType)
 			}
 			limit := min(maxTerraformLocalSize, budget)
 			size := terraformValueSize(val, limit)

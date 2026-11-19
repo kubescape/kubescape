@@ -372,18 +372,90 @@ resource "kubernetes_pod_v1" "resolvable_null" {
     }
   }
 }
+
+resource "kubernetes_pod_v1" "unused_fallback_var" {
+  spec {
+    automount_service_account_token = try(var.declared_null, var.missing_bool)
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "unused_fallback_null" {
+  spec {
+    automount_service_account_token = try(null, var.missing_bool)
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "parenthesized_unused_fallback" {
+  spec {
+    automount_service_account_token = (try(var.declared_null, var.missing_bool))
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "parenthesized_unresolvable_try" {
+  spec {
+    automount_service_account_token = (try(var.missing_bool, null))
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "string_condition_true" {
+  spec {
+    automount_service_account_token = var.flag_str_true ? (try(var.declared_null, var.missing_bool)) : false
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "string_condition_false" {
+  spec {
+    automount_service_account_token = var.flag_str_false ? false : (try(var.declared_null, var.missing_bool))
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "caught_diagnostic_try" {
+  spec {
+    automount_service_account_token = try([][0], null)
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
 `
 	evalCtx := &hcl.EvalContext{
 		Variables: map[string]cty.Value{
 			"var": cty.ObjectVal(map[string]cty.Value{
-				"declared_null": cty.NullVal(cty.Bool),
+				"declared_null":  cty.NullVal(cty.Bool),
+				"flag_str_true":  cty.StringVal("true"),
+				"flag_str_false": cty.StringVal("false"),
 			}),
 		},
 		Functions: terraformFunctions,
 	}
 	manifests, errs := extractTypedResources(parseTypedHCL(t, src), evalCtx)
 	require.Empty(t, errs, "try(...) suppresses diagnostics so no eval errors are returned")
-	require.Len(t, manifests, 3)
+	require.Len(t, manifests, 10)
 
 	byName := map[string]map[string]interface{}{}
 	for _, m := range manifests {
@@ -398,4 +470,226 @@ resource "kubernetes_pod_v1" "resolvable_null" {
 
 	assert.Equal(t, true, podSpecAt(t, byName["resolvable_null"], "spec")["automountServiceAccountToken"],
 		"explicitly resolvable null in try(...) must take provider default")
+
+	assert.Equal(t, true, podSpecAt(t, byName["unused_fallback_var"], "spec")["automountServiceAccountToken"],
+		"unused fallback referencing unresolvable variable must not prevent provider default automountServiceAccountToken")
+
+	assert.Equal(t, true, podSpecAt(t, byName["unused_fallback_null"], "spec")["automountServiceAccountToken"],
+		"unused fallback after literal null must take provider default automountServiceAccountToken")
+
+	assert.Equal(t, true, podSpecAt(t, byName["parenthesized_unused_fallback"], "spec")["automountServiceAccountToken"],
+		"parenthesized try(...) with unused fallback must take provider default automountServiceAccountToken")
+
+	assert.NotContains(t, podSpecAt(t, byName["parenthesized_unresolvable_try"], "spec"), "automountServiceAccountToken",
+		"parenthesized try(...) hiding unresolvable reference must not take provider default automountServiceAccountToken")
+
+	assert.Equal(t, true, podSpecAt(t, byName["string_condition_true"], "spec")["automountServiceAccountToken"],
+		"conditional with convertible string 'true' must select true branch and take provider default")
+
+	assert.Equal(t, true, podSpecAt(t, byName["string_condition_false"], "spec")["automountServiceAccountToken"],
+		"conditional with convertible string 'false' must select false branch and take provider default")
+
+	assert.Equal(t, true, podSpecAt(t, byName["caught_diagnostic_try"], "spec")["automountServiceAccountToken"],
+		"caught evaluation diagnostic in try(...) falling back to null must take provider default automountServiceAccountToken")
+}
+
+func TestExtractTypedResources_InvalidConditionTypeDoesNotPanicPodSpec(t *testing.T) {
+	src := `
+resource "kubernetes_pod_v1" "invalid_cond" {
+  spec {
+    automount_service_account_token = var.flag_invalid ? true : false
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+`
+	evalCtx := &hcl.EvalContext{
+		Variables: map[string]cty.Value{
+			"var": cty.ObjectVal(map[string]cty.Value{
+				"flag_invalid": cty.StringVal("not-a-bool"),
+			}),
+		},
+		Functions: terraformFunctions,
+	}
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), evalCtx)
+	require.NotEmpty(t, errs, "invalid condition type yields HCL evaluation diagnostic")
+	require.Len(t, manifests, 1)
+	assert.NotContains(t, podSpecAt(t, manifests[0], "spec"), "automountServiceAccountToken",
+		"invalid condition must be treated as unresolvable and leave default unset without panicking")
+}
+
+func TestTerraformDirectory_LocalsCarryingNullThroughPodSpec(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "variables.tf"), []byte(`
+variable "declared_null" {
+  type    = bool
+  default = null
+}
+`), 0o600))
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "locals.tf"), []byte(`
+locals {
+  explicit_null                 = null
+  from_var_null                 = var.declared_null
+  unused_fallback               = try(var.declared_null, var.missing_ref)
+  unresolvable_try              = try(kubernetes_service_account_v1.ci.automount_service_account_token, null)
+  parenthesized_unused_fallback = (try(var.declared_null, var.missing_ref))
+  parenthesized_unresolvable    = (try(kubernetes_service_account_v1.ci.automount_service_account_token, null))
+  string_cond_true              = "true" ? (try(var.declared_null, var.missing_ref)) : false
+  string_cond_false             = "false" ? false : (try(var.declared_null, var.missing_ref))
+  caught_diagnostic             = try([][0], null)
+}
+`), 0o600))
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.tf"), []byte(`
+resource "kubernetes_pod_v1" "explicit_null" {
+  metadata {
+    name = "pod-explicit-null"
+  }
+  spec {
+    automount_service_account_token = local.explicit_null
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "from_var_null" {
+  metadata {
+    name = "pod-from-var-null"
+  }
+  spec {
+    automount_service_account_token = local.from_var_null
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "unused_fallback" {
+  metadata {
+    name = "pod-unused-fallback"
+  }
+  spec {
+    automount_service_account_token = local.unused_fallback
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "unresolvable_try" {
+  metadata {
+    name = "pod-unresolvable-try"
+  }
+  spec {
+    automount_service_account_token = local.unresolvable_try
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "parenthesized_unused_fallback" {
+  metadata {
+    name = "pod-parenthesized-unused-fallback"
+  }
+  spec {
+    automount_service_account_token = local.parenthesized_unused_fallback
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "parenthesized_unresolvable" {
+  metadata {
+    name = "pod-parenthesized-unresolvable"
+  }
+  spec {
+    automount_service_account_token = local.parenthesized_unresolvable
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "string_cond_true" {
+  metadata {
+    name = "pod-string-cond-true"
+  }
+  spec {
+    automount_service_account_token = local.string_cond_true
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "string_cond_false" {
+  metadata {
+    name = "pod-string-cond-false"
+  }
+  spec {
+    automount_service_account_token = local.string_cond_false
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "caught_diagnostic" {
+  metadata {
+    name = "pod-caught-diagnostic"
+  }
+  spec {
+    automount_service_account_token = local.caught_diagnostic
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+`), 0o600))
+
+	workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
+	require.Empty(t, errs)
+
+	byName := map[string]map[string]interface{}{}
+	for _, list := range workloads {
+		for _, w := range list {
+			obj := w.GetObject()
+			meta := obj["metadata"].(map[string]interface{})
+			byName[meta["name"].(string)] = obj
+		}
+	}
+
+	assert.Equal(t, true, podSpecAt(t, byName["pod-explicit-null"], "spec")["automountServiceAccountToken"],
+		"explicit null local must take provider default automountServiceAccountToken")
+	assert.Equal(t, true, podSpecAt(t, byName["pod-from-var-null"], "spec")["automountServiceAccountToken"],
+		"local carrying null from declared variable must take provider default automountServiceAccountToken")
+	assert.Equal(t, true, podSpecAt(t, byName["pod-unused-fallback"], "spec")["automountServiceAccountToken"],
+		"local with unused fallback referencing missing variable must take provider default automountServiceAccountToken")
+	assert.NotContains(t, podSpecAt(t, byName["pod-unresolvable-try"], "spec"), "automountServiceAccountToken",
+		"local hiding an unresolvable reference in try(...) must not take provider default automountServiceAccountToken")
+	assert.Equal(t, true, podSpecAt(t, byName["pod-parenthesized-unused-fallback"], "spec")["automountServiceAccountToken"],
+		"local with parenthesized unused fallback must take provider default automountServiceAccountToken")
+	assert.NotContains(t, podSpecAt(t, byName["pod-parenthesized-unresolvable"], "spec"), "automountServiceAccountToken",
+		"local with parenthesized unresolvable try(...) must not take provider default automountServiceAccountToken")
+	assert.Equal(t, true, podSpecAt(t, byName["pod-string-cond-true"], "spec")["automountServiceAccountToken"],
+		"local with string condition 'true' must take provider default automountServiceAccountToken")
+	assert.Equal(t, true, podSpecAt(t, byName["pod-string-cond-false"], "spec")["automountServiceAccountToken"],
+		"local with string condition 'false' must take provider default automountServiceAccountToken")
+	assert.Equal(t, true, podSpecAt(t, byName["pod-caught-diagnostic"], "spec")["automountServiceAccountToken"],
+		"local with caught evaluation diagnostic in try(...) falling back to null must take provider default automountServiceAccountToken")
 }

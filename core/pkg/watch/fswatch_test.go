@@ -1273,7 +1273,7 @@ func TestFileWatcherDependenciesAreFiles(t *testing.T) {
 	write(t, filepath.Join(git, "HEAD"), "ref: refs/heads/main")
 	w, err := newFileWatcher(root, FileWatcherOptions{
 		Exclude:            func(path string, isDir bool) bool { return isDir && path == extra }, // extra/
-		AcceptDependencies: func() bool { return true },
+		AcceptDependencies: func(string) bool { return true },
 	})
 	require.NoError(t, err)
 	defer w.fs.Close()
