@@ -889,3 +889,54 @@ func TestValidateCommonScanFlags_PathFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateCommonScanFlags_ExceptionsWithScanImages(t *testing.T) {
+	tests := []struct {
+		name        string
+		format      string
+		scanType    cautils.ScanTypes
+		scanImages  bool
+		expectedErr string
+	}{
+		{
+			name:        "exceptions on posture scan with --scan-images is rejected",
+			format:      printer.ExceptionsFormat,
+			scanType:    cautils.ScanTypeCluster,
+			scanImages:  true,
+			expectedErr: "exceptions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images",
+		},
+		{
+			name:        "exceptions on posture scan without --scan-images is accepted",
+			format:      printer.ExceptionsFormat,
+			scanType:    cautils.ScanTypeCluster,
+			scanImages:  false,
+			expectedErr: "",
+		},
+		{
+			name:        "comma-separated formats containing exceptions with --scan-images is rejected",
+			format:      "json,exceptions",
+			scanType:    cautils.ScanTypeCluster,
+			scanImages:  true,
+			expectedErr: "exceptions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := &cobra.Command{}
+			cmd.Flags().String("format", "", "")
+			scanInfo := &cautils.ScanInfo{
+				Format:     tt.format,
+				ScanImages: tt.scanImages,
+				ScanType:   tt.scanType,
+			}
+			err := ValidateCommonScanFlags(cmd, scanInfo, ScanFormats)
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Equal(t, tt.expectedErr, err.Error())
+			}
+		})
+	}
+}

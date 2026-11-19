@@ -535,3 +535,25 @@ func TestActionPrint_NilReportDoesNotPanic(t *testing.T) {
 	})
 	require.NoError(t, err)
 }
+
+func TestExceptionsPrinter_RejectsImageScanData(t *testing.T) {
+	ep := NewExceptionsPrinter()
+	images := []cautils.ImageScanData{{Image: "nginx:1.23"}}
+	session := exceptionsSession(t)
+
+	tmp, err := os.CreateTemp("", "exceptions-combined-*.json")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	})
+	ep.writer = tmp
+
+	err = ep.ActionPrint(context.Background(), session, images)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceptions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+	assert.Empty(t, raw, "a partial report must not appear when combined scan is rejected")
+}

@@ -74,3 +74,28 @@ func TestWorkloadCommandGitHubActionsRejectsBeforeScanning(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkloadCommandExceptionsRejectsBeforeScanning(t *testing.T) {
+	for _, input := range []string{"./manifests", "-"} {
+		t.Run(input, func(t *testing.T) {
+			ks := &workloadScanCaptureKubescape{}
+			info := &cautils.ScanInfo{}
+			output := filepath.Join(t.TempDir(), "report.json")
+			require.NoError(t, os.WriteFile(output, []byte("existing report"), 0600))
+			stdin := strings.NewReader("kind: Deployment\n")
+			parent := &cobra.Command{Use: "scan"}
+			parent.SetIn(stdin)
+			parent.PersistentFlags().StringVar(&info.Format, "format", "", "")
+			parent.PersistentFlags().StringVar(&info.Output, "output", "", "")
+			parent.AddCommand(getWorkloadCmd(ks, info))
+			parent.SetArgs([]string{"workload", "Deployment/nginx", input, "--format", "exceptions", "--output", output})
+
+			require.ErrorContains(t, parent.Execute(), "exceptions cannot carry image vulnerabilities")
+			require.Nil(t, ks.scanInfo, "invalid mixed output must not invoke the scanner")
+			require.Equal(t, len("kind: Deployment\n"), stdin.Len(), "validation must precede stdin preparation")
+			raw, err := os.ReadFile(output)
+			require.NoError(t, err)
+			require.Equal(t, "existing report", string(raw), "validation must not truncate output")
+		})
+	}
+}
