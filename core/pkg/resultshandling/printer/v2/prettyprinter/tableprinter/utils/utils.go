@@ -22,8 +22,12 @@ type InfoStars struct {
 }
 
 func MapInfoToPrintInfoFromIface(ctrls []reportsummary.IControlSummary) []InfoStars {
-	ordered := make([]reportsummary.IControlSummary, len(ctrls))
-	copy(ordered, ctrls)
+	ordered := make([]reportsummary.IControlSummary, 0, len(ctrls))
+	for _, ctrl := range ctrls {
+		if ctrl != nil {
+			ordered = append(ordered, ctrl)
+		}
+	}
 	return collectInfoStars(ordered)
 }
 
@@ -41,19 +45,25 @@ func MapInfoToPrintInfo(controls reportsummary.ControlSummaries) []InfoStars {
 // controls are put in a fixed order first: without it the same scan hands a
 // different star to each message on every run.
 func collectInfoStars(ctrls []reportsummary.IControlSummary) []InfoStars {
-	sort.Slice(ctrls, func(i, j int) bool {
-		if ctrls[i].GetName() != ctrls[j].GetName() {
-			return ctrls[i].GetName() < ctrls[j].GetName()
+	filtered := make([]reportsummary.IControlSummary, 0, len(ctrls))
+	for _, ctrl := range ctrls {
+		if ctrl != nil {
+			filtered = append(filtered, ctrl)
 		}
-		return ctrls[i].GetID() < ctrls[j].GetID()
+	}
+	sort.Slice(filtered, func(i, j int) bool {
+		if filtered[i].GetName() != filtered[j].GetName() {
+			return filtered[i].GetName() < filtered[j].GetName()
+		}
+		return filtered[i].GetID() < filtered[j].GetID()
 	})
 
 	infoToPrintInfo := []InfoStars{}
 	infoToPrintInfoMap := map[string]any{}
 	starCount := "*"
-	for _, ctrl := range ctrls {
+	for _, ctrl := range filtered {
 		status := ctrl.GetStatus()
-		if !status.IsSkipped() || status.Info() == "" {
+		if status == nil || !status.IsSkipped() || status.Info() == "" {
 			continue
 		}
 		if _, ok := infoToPrintInfoMap[status.Info()]; ok {
@@ -102,20 +112,26 @@ func ImageSeverityToInt(severity string) int {
 }
 
 func FrameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) string {
-	if len(frameworks) == 1 {
-		if frameworks[0].GetName() != "" {
-			return fmt.Sprintf("Framework scanned: %s\n", frameworks[0].GetName())
+	valid := make([]reportsummary.IFrameworkSummary, 0, len(frameworks))
+	for _, fw := range frameworks {
+		if fw != nil {
+			valid = append(valid, fw)
 		}
-	} else if len(frameworks) > 1 {
+	}
+	if len(valid) == 1 {
+		if valid[0].GetName() != "" {
+			return fmt.Sprintf("Framework scanned: %s\n", valid[0].GetName())
+		}
+	} else if len(valid) > 1 {
 		var p strings.Builder
 		p.WriteString("Frameworks scanned: ")
-		for i, fw := range frameworks {
+		for i, fw := range valid {
 			scoreStr := "N/A"
 			if fw.GetComplianceScore() >= 0 {
 				scoreStr = cautils.ComplianceScoreToString(fw.GetComplianceScore(), 2)
 			}
 			separator := ", "
-			if i == len(frameworks)-1 {
+			if i == len(valid)-1 {
 				separator = "\n"
 			}
 			fmt.Fprintf(&p, "%s (compliance score: %s)%s", fw.GetName(), scoreStr, separator)
@@ -171,9 +187,13 @@ func CheckShortTerminalWidth(rows []table.Row, headers table.Row) bool {
 			cellLen := min(len(cellStr),
 				// Take only 50 characters of each sentence for counting size
 				50)
-			headerStr, ok := headers[idx].(string)
-			if !ok {
-				// If header is not a string, use cell length
+			var headerStr string
+			var hasHeaderStr bool
+			if idx < len(headers) {
+				headerStr, hasHeaderStr = headers[idx].(string)
+			}
+			if !hasHeaderStr {
+				// If header is not available or not a string, use cell length
 				rowWidth += cellLen
 			} else if cellLen > len(headerStr) {
 				rowWidth += cellLen

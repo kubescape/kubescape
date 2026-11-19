@@ -420,6 +420,30 @@ func TestCheckShortTerminalWidth(t *testing.T) {
 			headers:        table.Row{"Header1", "Header2"},
 			shouldNotPanic: true,
 		},
+		{
+			name: "Rows with more columns than headers",
+			rows: []table.Row{
+				{"cell1", "cell2", "cell3", "extra cell 4", "extra cell 5"},
+			},
+			headers:        table.Row{"Header1", "Header2"},
+			shouldNotPanic: true,
+		},
+		{
+			name: "Non-empty rows with empty headers",
+			rows: []table.Row{
+				{"cell1", "cell2"},
+			},
+			headers:        table.Row{},
+			shouldNotPanic: true,
+		},
+		{
+			name: "Non-empty rows with nil headers",
+			rows: []table.Row{
+				{"cell1", "cell2"},
+			},
+			headers:        nil,
+			shouldNotPanic: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -484,6 +508,20 @@ func TestMapInfoToPrintInfoFromIface_StableAcrossRuns(t *testing.T) {
 	assert.Equal(t, "C-0002", forward[0].GetID(), "the caller's slice must not be reordered")
 }
 
+func TestMapInfoToPrintInfoFromIface_HandlesNilElements(t *testing.T) {
+	first := skippedControlWithInfo("C-0002", "alpha", "control type is manual-review")
+	second := skippedControlWithInfo("C-0001", "delta", "configurations are empty")
+
+	sliceWithNils := []reportsummary.IControlSummary{nil, &first, nil, &second, nil}
+
+	want := []InfoStars{
+		{Stars: "*", Info: "control type is manual-review"},
+		{Stars: "**", Info: "configurations are empty"},
+	}
+
+	assert.Equal(t, want, MapInfoToPrintInfoFromIface(sliceWithNils))
+}
+
 func TestMapInfoToPrintInfo_IgnoresNonSkippedAndEmptyInfo(t *testing.T) {
 	passed := skippedControlWithInfo("C-0001", "alpha", "ignored: not skipped")
 	passed.Status = apis.StatusPassed
@@ -508,6 +546,38 @@ func TestFrameworksScoresToString(t *testing.T) {
 			name:       "empty frameworks",
 			frameworks: nil,
 			expected:   "",
+		},
+		{
+			name:       "single nil framework",
+			frameworks: []reportsummary.IFrameworkSummary{nil},
+			expected:   "",
+		},
+		{
+			name: "single valid framework with nil entry",
+			frameworks: []reportsummary.IFrameworkSummary{
+				nil,
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: 85.0},
+			},
+			expected: "Framework scanned: nsa\n",
+		},
+		{
+			name: "multiple frameworks with nil entries",
+			frameworks: []reportsummary.IFrameworkSummary{
+				nil,
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: 85.0},
+				nil,
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: 100.0},
+				nil,
+			},
+			expected: "Frameworks scanned: nsa (compliance score: 85.00), mitre (compliance score: 100.00)\n",
+		},
+		{
+			name: "multiple frameworks all nil",
+			frameworks: []reportsummary.IFrameworkSummary{
+				nil,
+				nil,
+			},
+			expected: "",
 		},
 		{
 			name: "single framework",
