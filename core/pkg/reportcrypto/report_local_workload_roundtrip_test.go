@@ -639,17 +639,20 @@ func TestEncryptedFileScanRBACSubjectWithAnAPIGroupRoundTrip(t *testing.T) {
 
 // A non-RBAC-subject object matching IsTypeRegoResponseVector (kind, name, relatedObjects)
 // whose ID starts with "path=" must have a valid sourcePath, and is rejected
-// when sourcePath is missing.
+// when sourcePath is missing (even if name is empty).
 func TestDecryptReportRejectsNonRBACSubjectWithoutSourcePath(t *testing.T) {
 	tests := []struct {
-		name     string
-		kind     string
-		apiGroup string
+		name      string
+		kind      string
+		apiGroup  string
+		emptyName bool
 	}{
 		{name: "Widget", kind: "Widget"},
 		{name: "CustomResource", kind: "CustomResource"},
 		{name: "User with non-RBAC apiGroup", kind: "User", apiGroup: "acme.example.com"},
 		{name: "Group with non-RBAC apiGroup", kind: "Group", apiGroup: "acme.example.com"},
+		{name: "User with version-qualified apiGroup", kind: "User", apiGroup: "rbac.authorization.k8s.io/v1"},
+		{name: "Widget with empty name", kind: "Widget", emptyName: true},
 	}
 
 	for _, tt := range tests {
@@ -657,9 +660,13 @@ func TestDecryptReportRejectsNonRBACSubjectWithoutSourcePath(t *testing.T) {
 			var report map[string]any
 			require.NoError(t, json.Unmarshal(encryptedFileScanReport(t), &report))
 			res := report["resources"].([]any)[0].(map[string]any)
+			name := "example"
+			if tt.emptyName {
+				name = ""
+			}
 			object := map[string]any{
 				"kind":           tt.kind,
-				"name":           "example",
+				"name":           name,
 				"relatedObjects": []any{},
 			}
 			if tt.apiGroup != "" {
@@ -675,4 +682,52 @@ func TestDecryptReportRejectsNonRBACSubjectWithoutSourcePath(t *testing.T) {
 			assert.Nil(t, decrypted)
 		})
 	}
+}
+
+// A non-RBAC RegoResponseVectorObject with an empty name but a valid sourcePath
+// passes sourcePath validation and falls back to preserving the entry.
+func TestDecryptReportNonRBACVectorEmptyNameWithValidSourcePath(t *testing.T) {
+	var report map[string]any
+	require.NoError(t, json.Unmarshal(encryptedFileScanReport(t), &report))
+	res := report["resources"].([]any)[0].(map[string]any)
+	object := map[string]any{
+		"kind":                "Widget",
+		"name":                "",
+		localworkload.PathKey: "/path/to/widget.yaml",
+		"relatedObjects":      []any{},
+	}
+	res["object"] = object
+
+	encrypted, err := json.Marshal(report)
+	require.NoError(t, err)
+
+	decrypted, err := reportcrypto.DecryptReport(encrypted, []byte(exceptionTestMasterKey))
+	require.NoError(t, err)
+	require.NotNil(t, decrypted)
+}
+
+// A non-RBAC RegoResponseVectorObject with a valid own sourcePath retains its
+// composite ID (including relatedObjects) after decryption.
+func TestEncryptedFileScanNonRBACVectorWithSourcePathPreservesCompositeID(t *testing.T) {
+	subject := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
+		"apiGroup":            "security.corp.io",
+		"kind":                "CustomVector",
+		"name":                "vector-1",
+		localworkload.PathKey: "/home/alice/project/manifest.yaml",
+		"relatedObjects": []any{
+			map[string]any{
+				"apiVersion": "v1",
+				"kind":       "ConfigMap",
+				"sourcePath": "/home/alice/project/config.yaml:0",
+				"metadata":   map[string]any{"name": "app-config", "namespace": "default"},
+			},
+		},
+	})
+	originalID := subject.GetID()
+	require.True(t, strings.HasPrefix(originalID, "path="), originalID)
+
+	decryptedJSON, err := reportcrypto.DecryptReport(encryptedReport(t, subject), []byte(exceptionTestMasterKey))
+	require.NoError(t, err)
+	decryptedID, _, _ := soleResource(t, decryptedJSON)
+	assert.Equal(t, originalID, decryptedID)
 }

@@ -313,6 +313,17 @@ func (d *reportDecryptor) decryptResource(resource rawObject, context string) (s
 		return "", "", fmt.Errorf("failed to marshal %s.object: %w", context, err)
 	}
 	resource["object"] = updatedObject
+
+	// An RBAC User or Group subject has no sourcePath of its own: its ID is made
+	// from its related objects', which can start it with "path=".
+	// All other local resources whose ID starts with "path=" must have a valid sourcePath.
+	if strings.HasPrefix(oldID, "path=") && !isRBACSubject(workload) {
+		// File-scan IDs include the restored sourcePath, including its document index.
+		if path, ok := workload.GetObject()[localworkload.PathKey].(string); !ok || path == "" {
+			return "", "", fmt.Errorf("cannot restore %s.resourceID: local resource has no valid sourcePath", context)
+		}
+	}
+
 	if !hasUsableWorkloadID(workload) {
 		if err := d.decryptSource(resource, context); err != nil {
 			return "", "", err
@@ -321,15 +332,13 @@ func (d *reportDecryptor) decryptResource(resource rawObject, context string) (s
 	}
 
 	newID := workload.GetID()
-	// An RBAC User or Group subject has no sourcePath of its own: its ID is made
-	// from its related objects', which can start it with "path=", and GetID has
-	// already made it again from their restored sourcePaths.
-	if strings.HasPrefix(oldID, "path=") && !isRBACSubject(workload) {
-		// File-scan IDs include the restored sourcePath, including its document index.
-		if path, ok := workload.GetObject()[localworkload.PathKey].(string); !ok || path == "" {
-			return "", "", fmt.Errorf("cannot restore %s.resourceID: local resource has no valid sourcePath", context)
+	// Ordinary file-manifest IDs must be rebuilt as local workload IDs to include
+	// the restored sourcePath and document index. Rego response vectors already
+	// produce their composite IDs via workload.GetID().
+	if strings.HasPrefix(oldID, "path=") {
+		if _, isRego := workload.(*objectsenvelopes.RegoResponseVectorObject); !isRego {
+			newID = localworkload.NewLocalWorkload(workload.GetObject()).GetID()
 		}
-		newID = localworkload.NewLocalWorkload(workload.GetObject()).GetID()
 	}
 
 	if oldID != "" || newID != "" {
@@ -1001,11 +1010,10 @@ func isRBACSubject(workload workloadinterface.IMetadata) bool {
 	if kind != "User" && kind != "Group" {
 		return false
 	}
-	apiGroup, _ := rego.GetObject()["apiGroup"].(string)
-	if apiGroup == "" {
-		apiGroup = rego.GetApiVersion()
+	if apiGroup, ok := rego.GetObject()["apiGroup"].(string); ok && apiGroup != "" {
+		return apiGroup == "rbac.authorization.k8s.io"
 	}
-	group, _, _ := strings.Cut(apiGroup, "/")
+	group, _, _ := strings.Cut(rego.GetApiVersion(), "/")
 	return group == "rbac.authorization.k8s.io"
 }
 

@@ -1066,6 +1066,14 @@ func TestIsRBACSubject(t *testing.T) {
 	})
 	assert.False(t, isRBACSubject(userNonRBAC))
 
+	userVersionQualifiedAPIGroup := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
+		"apiGroup":       "rbac.authorization.k8s.io/v1",
+		"kind":           "User",
+		"name":           "alice",
+		"relatedObjects": []any{},
+	})
+	assert.False(t, isRBACSubject(userVersionQualifiedAPIGroup))
+
 	serviceAccount := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
 		"kind":           "ServiceAccount",
 		"name":           "default",
