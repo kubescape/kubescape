@@ -538,8 +538,10 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 		path = clonedRepo
 	}
 
-	// Get repo root
-	repoRoot, gitRepo := extractGitRepo(path)
+	// Get repo root. A glob input is not a path on disk: anchor it at the
+	// directory file discovery walks, as the ignore file and --watch already do.
+	rootInput, _ := cautils.GlobInputRoot(path)
+	repoRoot, gitRepo := extractGitRepo(rootInput)
 
 	// when scanning a single file, we consider the repository root to be
 	// the directory of the scanned file. This applies to every file type: a

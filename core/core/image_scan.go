@@ -184,6 +184,10 @@ func readImageExceptionsFile(path string) ([]byte, error) {
 }
 
 // Loads exception policies from exceptions json object.
+//
+// Unknown JSON fields are rejected so that typos in key names (e.g.
+// "image_name" instead of "imageName") surface as errors instead of
+// silently widening an exception to match every image.
 func GetImageExceptionsFromFile(filePath string) ([]VulnerabilitiesIgnorePolicy, error) {
 	// Read the JSON file
 	jsonFile, err := readImageExceptionsFile(filePath)
@@ -191,11 +195,17 @@ func GetImageExceptionsFromFile(filePath string) ([]VulnerabilitiesIgnorePolicy,
 		return nil, fmt.Errorf("error reading exceptions file: %w", err)
 	}
 
-	// Unmarshal the JSON data into an array of VulnerabilitiesIgnorePolicy
+	// Decode with DisallowUnknownFields so misspelled keys are caught
+	// instead of silently falling through to zero-value (empty) patterns,
+	// which the regex matcher treats as "match everything".
 	var policies []VulnerabilitiesIgnorePolicy
-	err = json.Unmarshal(jsonFile, &policies)
-	if err != nil {
+	dec := json.NewDecoder(bytes.NewReader(jsonFile))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&policies); err != nil {
 		return nil, fmt.Errorf("error unmarshaling exceptions file: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("error unmarshaling exceptions file: unexpected data after JSON array")
 	}
 	if err := validateImageExceptionTargetRegexes(policies); err != nil {
 		return nil, fmt.Errorf("error validating exceptions file: %w", err)

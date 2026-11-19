@@ -159,6 +159,117 @@ func TestGetImageExceptionsFromFileRejectsInvalidTargetRegex(t *testing.T) {
 	}
 }
 
+func TestGetImageExceptionsFromFileRejectsUnknownFields(t *testing.T) {
+	tests := []struct {
+		name          string
+		jsonContent   string
+		expectedError string
+	}{
+		{
+			name: "misspelled image_name in attributes",
+			jsonContent: `[
+				{
+					"metadata": {"name": "test-policy"},
+					"kind": "VulnerabilitiesIgnorePolicy",
+					"targets": [
+						{
+							"designatorType": "Attributes",
+							"attributes": {
+								"registry": "docker.io",
+								"image_name": "nginx"
+							}
+						}
+					],
+					"vulnerabilities": ["CVE-2024-0001"],
+					"severities": ["CRITICAL"]
+				}
+			]`,
+			expectedError: `unknown field "image_name"`,
+		},
+		{
+			name: "misspelled attribute instead of attributes",
+			jsonContent: `[
+				{
+					"metadata": {"name": "test-policy"},
+					"kind": "VulnerabilitiesIgnorePolicy",
+					"targets": [
+						{
+							"designatorType": "Attributes",
+							"attribute": {
+								"registry": "docker.io"
+							}
+						}
+					],
+					"vulnerabilities": ["CVE-2024-0001"]
+				}
+			]`,
+			expectedError: `unknown field "attribute"`,
+		},
+		{
+			name: "misspelled vulnerability instead of vulnerabilities",
+			jsonContent: `[
+				{
+					"metadata": {"name": "test-policy"},
+					"kind": "VulnerabilitiesIgnorePolicy",
+					"targets": [
+						{
+							"designatorType": "Attributes",
+							"attributes": {
+								"imageName": "nginx"
+							}
+						}
+					],
+					"vulnerability": ["CVE-2024-0001"]
+				}
+			]`,
+			expectedError: `unknown field "vulnerability"`,
+		},
+		{
+			name: "misspelled severity instead of severities",
+			jsonContent: `[
+				{
+					"metadata": {"name": "test-policy"},
+					"kind": "VulnerabilitiesIgnorePolicy",
+					"targets": [
+						{
+							"designatorType": "Attributes",
+							"attributes": {
+								"imageName": "nginx"
+							}
+						}
+					],
+					"severity": ["CRITICAL"]
+				}
+			]`,
+			expectedError: `unknown field "severity"`,
+		},
+		{
+			name: "unexpected trailing data",
+			jsonContent: `[
+				{
+					"metadata": {"name": "test-policy"},
+					"kind": "VulnerabilitiesIgnorePolicy",
+					"targets": [],
+					"vulnerabilities": []
+				}
+			] trailing data`,
+			expectedError: "unexpected data after JSON array",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "exceptions.json")
+			require.NoError(t, os.WriteFile(path, []byte(tt.jsonContent), 0o600))
+
+			policies, err := GetImageExceptionsFromFile(path)
+			require.Error(t, err)
+			assert.Nil(t, policies)
+			assert.ErrorContains(t, err, tt.expectedError)
+		})
+	}
+}
+
 func TestGetAttributesFromImage(t *testing.T) {
 	tests := []struct {
 		imageName          string

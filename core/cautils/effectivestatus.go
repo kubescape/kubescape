@@ -41,6 +41,9 @@ func ControlFilters(summary *reportsummary.SummaryDetails, controlID string) *he
 // Only a control with a matched exception is re-evaluated; any other keeps its
 // recorded status, so results without exceptions are unchanged.
 func ControlStatus(summary *reportsummary.SummaryDetails, control *resourcesresults.ResourceAssociatedControl) apis.IStatus {
+	if control == nil {
+		return &apis.StatusInfo{InnerStatus: apis.StatusUnknown, SubStatus: apis.SubStatusUnknown}
+	}
 	if !hasException(control) || control.Status.SubStatus == apis.SubStatusNotEvaluated {
 		return control.GetStatus(nil)
 	}
@@ -58,6 +61,9 @@ func ControlStatus(summary *reportsummary.SummaryDetails, control *resourcesresu
 // RuleStatus is the status of one rule of the control controlID, in the
 // frameworks that contain that control.
 func RuleStatus(summary *reportsummary.SummaryDetails, controlID string, rule *resourcesresults.ResourceAssociatedRule) apis.IStatus {
+	if rule == nil {
+		return &apis.StatusInfo{InnerStatus: apis.StatusUnknown, SubStatus: apis.SubStatusUnknown}
+	}
 	if len(rule.Exception) == 0 {
 		return rule.GetStatus(nil)
 	}
@@ -72,6 +78,9 @@ func RuleStatus(summary *reportsummary.SummaryDetails, controlID string, rule *r
 // report). An exception scoped to another framework does not apply to it. With
 // no framework name it falls back to RuleStatus.
 func FrameworkRuleStatus(summary *reportsummary.SummaryDetails, frameworkName, controlID string, rule *resourcesresults.ResourceAssociatedRule) apis.IStatus {
+	if rule == nil {
+		return &apis.StatusInfo{InnerStatus: apis.StatusUnknown, SubStatus: apis.SubStatusUnknown}
+	}
 	if frameworkName == "" {
 		return RuleStatus(summary, controlID, rule)
 	}
@@ -87,6 +96,9 @@ func FrameworkRuleStatus(summary *reportsummary.SummaryDetails, frameworkName, c
 // resource, the way Result.GetStatus folds the recorded ones.
 func ResourceStatus(summary *reportsummary.SummaryDetails, result *resourcesresults.Result) apis.IStatus {
 	status, subStatus := apis.StatusUnknown, apis.SubStatusUnknown
+	if result == nil {
+		return &apis.StatusInfo{InnerStatus: status, SubStatus: subStatus, InnerInfo: apis.SubStatusInfo(subStatus)}
+	}
 	for i := range result.AssociatedControls {
 		controlStatus := ControlStatus(summary, &result.AssociatedControls[i])
 		status, subStatus = apis.CompareStatusAndSubStatus(status, controlStatus.Status(), subStatus, controlStatus.GetSubStatus())
@@ -123,6 +135,10 @@ func EvidenceControl(summary *reportsummary.SummaryDetails, control resourcesres
 // status, the way Result.ListControlsIDs lists them by recorded status.
 func ControlIDsByStatus(summary *reportsummary.SummaryDetails, result *resourcesresults.Result) *helpersv1.AllLists {
 	controls := &helpersv1.AllLists{}
+	if result == nil {
+		controls.Initialize(0)
+		return controls
+	}
 	controls.Initialize(len(result.AssociatedControls))
 	for i := range result.AssociatedControls {
 		control := &result.AssociatedControls[i]
@@ -136,7 +152,7 @@ func ControlIDsByStatus(summary *reportsummary.SummaryDetails, result *resources
 // It is meant for a copy made for serialization: the evaluation held by the scan
 // keeps its raw status, and the rules keep theirs and their exceptions either way.
 func SettleControlStatus(summary *reportsummary.SummaryDetails, control *resourcesresults.ResourceAssociatedControl) {
-	if !hasException(control) {
+	if control == nil || !hasException(control) {
 		return
 	}
 	status := ControlStatus(summary, control)
@@ -144,6 +160,9 @@ func SettleControlStatus(summary *reportsummary.SummaryDetails, control *resourc
 }
 
 func hasException(control *resourcesresults.ResourceAssociatedControl) bool {
+	if control == nil {
+		return false
+	}
 	for i := range control.ResourceAssociatedRules {
 		if len(control.ResourceAssociatedRules[i].Exception) > 0 {
 			return true
