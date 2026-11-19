@@ -158,6 +158,10 @@ Get detailed information about a specific CVE in a manifest, including affected 
 
 Correlate known image vulnerabilities (from already-scanned `VulnerabilityManifest` objects) with how reachable each workload is: its NetworkPolicy ingress exposure and its external exposure through a Service, Ingress, or Gateway API route. With `include_identity` it also reports the ServiceAccount each vulnerable workload runs as and what the existing RBAC escalation analysis finds for it.
 
+StatefulSets with at least one CVE meeting `min_severity` use the labels of live Pods matched by controller UID. Pods in the `Failed` or `Succeeded` phase are excluded; nonterminal Pods with a deletion timestamp remain included during scale-down. If the Pod list contains a different controller UID for the same StatefulSet name and namespace, the response warns that the controller may have changed during analysis and qualifies the finding's exposure reason as unconfirmed for the current controller. Pods with a different controller UID remain excluded. This requires permission to **list Pods** in the requested namespace, or cluster-wide when no namespace is supplied; a failed Pod list returns a tool error. StatefulSets whose CVEs are all below the threshold do not require that read.
+
+If no owned nonterminal Pods are present, analysis uses the pod template and generated identity labels. When NetworkPolicy exposure depends on Pod index generation, it reports the widest result with an uncertainty warning. Fallback external exposure keeps the union of paths with and without index generation and warns if those path sets differ. Observed Pod labels determine Service matches directly, without an index-generation warning.
+
 **Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
