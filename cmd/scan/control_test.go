@@ -112,6 +112,17 @@ func TestGetControlCmd_RunERejectsAmbiguousFilePathAndPositionalInputs(t *testin
 	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
 }
 
+func TestGetControlCmd_RejectsWhitespaceFilePath(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getControlCmd(mockKubescape, &scanInfo)
+	cmd.SetArgs([]string{"C-0058", "--file-path", "   "})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.EqualError(t, err, "--file-path needs a file path")
+}
+
 // TestControlCmdHasCoverageFlag ensures scan control registers --fail-coverage-below
 // so the flag is not silently ignored when passed to this subcommand.
 func TestControlCmdHasCoverageFlag(t *testing.T) {

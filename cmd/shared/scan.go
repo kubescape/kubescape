@@ -264,7 +264,12 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 		{"exceptions", &scanInfo.UseExceptions, "--exceptions needs a file path"},
 		{"use-artifacts-from", &scanInfo.UseArtifactsFrom, "--use-artifacts-from needs a directory path"},
 		{"custom-rules", &scanInfo.CustomRules, "--custom-rules needs a path"},
+		{"file-path", &scanInfo.FilePath, "--file-path needs a file path"},
+		{"chart-path", &scanInfo.ChartPath, "--chart-path needs a path"},
 	} {
+		if scanInfo.ScanType == cautils.ScanTypeImage && (flag.name == "file-path" || flag.name == "chart-path") {
+			continue
+		}
 		if commandFlagChanged(cmd, flag.name) {
 			trimmed := strings.TrimSpace(*flag.val)
 			if trimmed == "" {

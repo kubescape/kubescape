@@ -853,6 +853,8 @@ func TestValidateCommonScanFlags_PathFlags(t *testing.T) {
 		{"exceptions", func(s *cautils.ScanInfo, v string) { s.UseExceptions = v }, func(s *cautils.ScanInfo) string { return s.UseExceptions }, "--exceptions needs a file path"},
 		{"use-artifacts-from", func(s *cautils.ScanInfo, v string) { s.UseArtifactsFrom = v }, func(s *cautils.ScanInfo) string { return s.UseArtifactsFrom }, "--use-artifacts-from needs a directory path"},
 		{"custom-rules", func(s *cautils.ScanInfo, v string) { s.CustomRules = v }, func(s *cautils.ScanInfo) string { return s.CustomRules }, "--custom-rules needs a path"},
+		{"file-path", func(s *cautils.ScanInfo, v string) { s.FilePath = v }, func(s *cautils.ScanInfo) string { return s.FilePath }, "--file-path needs a file path"},
+		{"chart-path", func(s *cautils.ScanInfo, v string) { s.ChartPath = v }, func(s *cautils.ScanInfo) string { return s.ChartPath }, "--chart-path needs a path"},
 	}
 
 	for _, f := range flags {
