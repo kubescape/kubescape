@@ -950,6 +950,12 @@ func evidencePathsWithCurrentValues(control *resourcesresults.ResourceAssociated
 // path that does not resolve as unresolved. Review paths carry their value in
 // every view.
 func assistedRemediationPaths(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets, deleteValues bool) []string {
+	if control == nil {
+		return nil
+	}
+	if resource == nil {
+		return AssistedRemediationPathsToString(control)
+	}
 	kind := resource.GetKind()
 	// showSecrets extracts values for all paths including sensitive ones - the
 	// caller explicitly opted in.

@@ -44,11 +44,19 @@ const (
 // still belong in this table. They carry an empty absPath and simply resolve no
 // lines.
 func failedResourcesInPrintOrder(opaSessionObj *cautils.OPASessionObj) []scannedResource {
+	if opaSessionObj == nil {
+		return nil
+	}
 	basePath := getBasePathFromMetadata(opaSessionObj)
+
+	var summary *reportsummary.SummaryDetails
+	if opaSessionObj.Report != nil {
+		summary = &opaSessionObj.Report.SummaryDetails
+	}
 
 	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID, result := range opaSessionObj.ResourcesResult {
-		if !cautils.ResourceStatus(&opaSessionObj.Report.SummaryDetails, &result).IsFailed() {
+		if !cautils.ResourceStatus(summary, &result).IsFailed() {
 			continue
 		}
 		if res, ok := opaSessionObj.GetResource(resourceID); !ok || res == nil {
@@ -74,6 +82,13 @@ func failedResourcesInPrintOrder(opaSessionObj *cautils.OPASessionObj) []scanned
 }
 
 func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASessionObj) {
+	if opaSessionObj == nil {
+		return
+	}
+	var summary *reportsummary.SummaryDetails
+	if opaSessionObj.Report != nil {
+		summary = &opaSessionObj.Report.SummaryDetails
+	}
 
 	var caches manifestCache
 	for _, scanned := range failedResourcesInPrintOrder(opaSessionObj) {
@@ -97,7 +112,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		if resource.GetNamespace() != "" {
 			fmt.Fprintf(prettyPrinter.writer, "Namespace: %s\n", resource.GetNamespace())
 		}
-		fmt.Fprintf(prettyPrinter.writer, "\n%s\n\n", prettyprinter.ControlCountersForResource(cautils.ControlIDsByStatus(&opaSessionObj.Report.SummaryDetails, &result)))
+		fmt.Fprintf(prettyPrinter.writer, "\n%s\n\n", prettyprinter.ControlCountersForResource(cautils.ControlIDsByStatus(summary, &result)))
 
 		summaryTable := table.NewWriter()
 		summaryTable.SetOutputMirror(prettyPrinter.writer)
@@ -113,7 +128,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 			sourcePath = BestSourcePath(src)
 		}
 		lineFor := prettyPrinter.pathLineResolver(opaSessionObj, &caches, scanned)
-		resourceRows := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails, resource, prettyPrinter.showEvidence, prettyPrinter.showSecrets, sourcePath, lineFor)
+		resourceRows := generateResourceRows(result.ListControls(), summary, resource, prettyPrinter.showEvidence, prettyPrinter.showSecrets, sourcePath, lineFor)
 
 		short := utils.CheckShortTerminalWidth(resourceRows, generateResourceHeader(false))
 		if short {
@@ -131,7 +146,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		// on the cluster to point at.
 		if prettyPrinter.showEvidence && !prettyPrinter.anonymized && isClusterScan(opaSessionObj) {
 			cluster := kubectlCluster{kubeconfig: prettyPrinter.kubeconfig, context: scanContextName(opaSessionObj)}
-			if commands := kubectlPointers(result.ListControls(), &opaSessionObj.Report.SummaryDetails, resource, cluster, prettyPrinter.showSecrets); len(commands) > 0 {
+			if commands := kubectlPointers(result.ListControls(), summary, resource, cluster, prettyPrinter.showSecrets); len(commands) > 0 {
 				fmt.Fprintf(prettyPrinter.writer, "\nTo see the current values on the cluster:\n")
 				for _, command := range commands {
 					fmt.Fprintf(prettyPrinter.writer, "  %s\n", command)
@@ -161,7 +176,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 //
 // A nil return is the caller's signal to print paths exactly as before.
 func (prettyPrinter *PrettyPrinter) pathLineResolver(opaSessionObj *cautils.OPASessionObj, caches *manifestCache, scanned scannedResource) func(string) (int, bool) {
-	if !prettyPrinter.showEvidence || scanned.absPath == "" || opaSessionObj.SourcePathsAnonymized {
+	if opaSessionObj == nil || !prettyPrinter.showEvidence || scanned.absPath == "" || opaSessionObj.SourcePathsAnonymized {
 		return nil
 	}
 
@@ -213,8 +228,10 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 		}
 		row[resourceColumnName] = controls[i].GetName()
 
-		if c := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, controls[i].GetID()); c != nil {
-			row[resourceColumnSeverity] = getSeverityColumn(c)
+		if summaryDetails != nil && summaryDetails.Controls != nil {
+			if c := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, controls[i].GetID()); c != nil {
+				row[resourceColumnSeverity] = getSeverityColumn(c)
+			}
 		}
 
 		rows = append(rows, row)
@@ -244,7 +261,7 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 // it matches what SARIF already reports as a review path's related location,
 // so the two outputs point at the same place for the same finding.
 func annotatePathLines(paths *[]string, control *resourcesresults.ResourceAssociatedControl, lineFor func(string) (int, bool)) {
-	if lineFor == nil || len(*paths) == 0 {
+	if paths == nil || control == nil || lineFor == nil || len(*paths) == 0 {
 		return
 	}
 
@@ -316,7 +333,7 @@ func renderedAsBarePath(entry, path string) bool {
 }
 
 func addContainerNameToAssistedRemediation(resource workloadinterface.IMetadata, paths *[]string) {
-	if resource == nil {
+	if resource == nil || paths == nil {
 		return
 	}
 	wl := workloadinterface.NewWorkloadObj(resource.GetObject())
@@ -365,7 +382,15 @@ func generateResourceHeader(short bool) table.Row {
 func shortFormatResource(resourceRows []table.Row) []table.Row {
 	rows := make([]table.Row, len(resourceRows))
 	for i, resourceRow := range resourceRows {
-		rows[i] = table.Row{fmt.Sprintf("Severity"+strings.Repeat(" ", 13)+": %+v\nControl Name"+strings.Repeat(" ", 9)+": %+v\nDocs"+strings.Repeat(" ", 17)+": %+v\nAssisted Remediation"+strings.Repeat(" ", 1)+": %+v", resourceRow[resourceColumnSeverity], resourceRow[resourceColumnName], resourceRow[resourceColumnURL], strings.ReplaceAll(resourceRow[resourceColumnPath].(string), "\n", "\n"+strings.Repeat(" ", 23)))}
+		pathStr := ""
+		if len(resourceRow) > resourceColumnPath && resourceRow[resourceColumnPath] != nil {
+			if s, ok := resourceRow[resourceColumnPath].(string); ok {
+				pathStr = s
+			} else {
+				pathStr = fmt.Sprintf("%v", resourceRow[resourceColumnPath])
+			}
+		}
+		rows[i] = table.Row{fmt.Sprintf("Severity"+strings.Repeat(" ", 13)+": %+v\nControl Name"+strings.Repeat(" ", 9)+": %+v\nDocs"+strings.Repeat(" ", 17)+": %+v\nAssisted Remediation"+strings.Repeat(" ", 1)+": %+v", resourceRow[resourceColumnSeverity], resourceRow[resourceColumnName], resourceRow[resourceColumnURL], strings.ReplaceAll(pathStr, "\n", "\n"+strings.Repeat(" ", 23)))}
 	}
 	return rows
 }
@@ -387,6 +412,9 @@ func (a Matrix) Less(i, j int) bool {
 }
 
 func fixPathsToString(control *resourcesresults.ResourceAssociatedControl, onlyPath bool) []string {
+	if control == nil {
+		return nil
+	}
 	var paths []string
 
 	for j := range control.ResourceAssociatedRules {
@@ -405,6 +433,9 @@ func fixPathsToString(control *resourcesresults.ResourceAssociatedControl, onlyP
 }
 
 func deletePathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+	if control == nil {
+		return nil
+	}
 	var paths []string
 
 	for j := range control.ResourceAssociatedRules {
@@ -418,6 +449,9 @@ func deletePathsToString(control *resourcesresults.ResourceAssociatedControl) []
 }
 
 func reviewPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+	if control == nil {
+		return nil
+	}
 	var paths []string
 
 	for j := range control.ResourceAssociatedRules {
@@ -431,6 +465,9 @@ func reviewPathsToString(control *resourcesresults.ResourceAssociatedControl) []
 }
 
 func AssistedRemediationPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+	if control == nil {
+		return nil
+	}
 	paths := append(fixPathsToString(control, false), append(deletePathsToString(control), reviewPathsToString(control)...)...)
 	return deduplicatePaths(paths)
 }
