@@ -799,6 +799,39 @@ func TestInKustomizationBelow(t *testing.T) {
 	assert.False(t, inKustomizationBelow(root, filepath.Join(root, "security")), "above one")
 }
 
+func TestInKustomizationBelowWithRelativeRoot(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "manifests")
+	app := filepath.Join(root, "app")
+
+	require.NoError(t, os.MkdirAll(app, 0o700))
+
+	// This Kustomization is above the watched root and must not
+	// cause unrelated files inside the watched root to be accepted.
+	writeFile(t, filepath.Join(base, "kustomization.yaml"), "resources: []\n")
+
+	// A Kustomization inside the watched root must still be accepted.
+	writeFile(t, filepath.Join(app, "kustomization.yaml"), "resources: []\n")
+
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	relativeRoot, err := filepath.Rel(cwd, root)
+	require.NoError(t, err)
+
+	assert.False(
+		t,
+		inKustomizationBelow(relativeRoot, filepath.Join(root, "notes.txt")),
+		"a kustomization above the relative watch root must not be accepted",
+	)
+
+	assert.True(
+		t,
+		inKustomizationBelow(relativeRoot, filepath.Join(app, "security")),
+		"a kustomization inside the relative watch root must still be accepted",
+	)
+}
+
 func TestWatchRoots(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "pod.yaml")
