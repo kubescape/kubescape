@@ -1,7 +1,6 @@
 package scan
 
 import (
-	"bufio"
 	"context"
 	"encoding/csv"
 	"encoding/json"
@@ -168,7 +167,14 @@ func runFleetChild(ctx context.Context, kubeContext string, scanInfo *cautils.Sc
 	}
 	cluster, readErr := readChildCluster(resultPath, kubeContext)
 	if readErr != nil {
-		return failedOutcome(kubeContext, fmt.Errorf("the scan wrote no result (%v): %s", runErr, lastLines(logPath, 3)), time.Since(started))
+		err := fmt.Errorf("the scan wrote no result: %w", readErr)
+		if runErr != nil {
+			err = fmt.Errorf("%w (child process: %v)", err, runErr)
+		}
+		if tail := lastLines(logPath, 3); tail != "" {
+			err = fmt.Errorf("%w: %s", err, tail)
+		}
+		return failedOutcome(kubeContext, err, time.Since(started))
 	}
 	outcome := fleetOutcome{cluster: cluster, scanned: cluster.Scanned(), attempts: cluster.Attempts}
 	// Only a fleet report or a child result reads the cluster's report, so without one it is not kept until every child is done.
@@ -293,15 +299,17 @@ func readChildCluster(path, kubeContext string) (fleet.ClusterResult, error) {
 
 // childFailure finds the child's own "<context>: <error>" line, which its fleet summary prints on failure.
 func childFailure(logPath, kubeContext string) string {
-	file, err := openFleetChildFile(logPath)
+	tail, startsMidLine, err := readFleetChildLogTail(logPath)
 	if err != nil {
 		return "the scan failed"
 	}
-	defer file.Close()
-	scanner := bufio.NewScanner(io.LimitReader(file, getMaxFleetChildFileSize()))
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		if message, ok := strings.CutPrefix(scanner.Text(), kubeContext+": "); ok {
+	summaryLines := tail
+	if startsMidLine {
+		_, summaryLines, _ = strings.Cut(tail, "\n")
+	}
+	for line := range strings.Lines(summaryLines) {
+		line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+		if message, ok := strings.CutPrefix(line, kubeContext+": "); ok {
 			// The parent adds the attempt count itself, so the child's copy is dropped.
 			if i := strings.LastIndex(message, " (after "); i >= 0 && strings.HasSuffix(message, " attempts)") {
 				message = message[:i]
@@ -309,7 +317,7 @@ func childFailure(logPath, kubeContext string) string {
 			return message
 		}
 	}
-	return "the scan failed: " + lastLines(logPath, 3)
+	return "the scan failed: " + formatLastLines(tail, 3)
 }
 
 // csvField quotes a value so that pflag, which reads comma-separated flags as CSV, gets it back whole.
@@ -324,14 +332,55 @@ func csvField(value string) string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
+// readFleetChildLogTail reads a bounded window ending at the log's recorded size.
+func readFleetChildLogTail(path string) (tail string, startsMidLine bool, err error) {
+	file, err := openFleetChildFile(path)
+	if err != nil {
+		return "", false, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return "", false, err
+	}
+	limit := getMaxFleetChildFileSize()
+	length := min(info.Size(), limit)
+	start := info.Size() - length
+	if start > 0 {
+		// A clipped line is useful in the log excerpt but cannot be a child summary.
+		var previous [1]byte
+		if _, err := file.ReadAt(previous[:], start-1); err != nil {
+			return "", false, err
+		}
+		startsMidLine = previous[0] != '\n'
+	}
+	data, err := io.ReadAll(io.NewSectionReader(file, start, length))
+	return string(data), startsMidLine, err
+}
+
 // lastLines returns the end of a child's log, for errors that left no report behind.
 func lastLines(path string, n int) string {
-	contents, err := readFleetChildFile(path)
+	tail, _, err := readFleetChildLogTail(path)
 	if err != nil {
 		return ""
 	}
-	lines := strings.Split(strings.TrimSpace(string(contents)), "\n")
-	return strings.Join(lines[max(0, len(lines)-n):], " | ")
+	return formatLastLines(tail, n)
+}
+
+func formatLastLines(tail string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	tail = strings.TrimSpace(tail)
+	start := len(tail)
+	for range n {
+		start = strings.LastIndexByte(tail[:start], '\n')
+		if start < 0 {
+			break
+		}
+	}
+	return strings.ReplaceAll(tail[max(0, start+1):], "\n", " | ")
 }
 
 // writeFleetChildResult saves a child's result for the parent; under --hide or --encrypt the scan already protected it.
