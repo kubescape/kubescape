@@ -1272,8 +1272,10 @@ func TestFileWatcherDependenciesAreFiles(t *testing.T) {
 	write(t, filepath.Join(extra, "api.yaml"), "kind: Pod")
 	write(t, filepath.Join(git, "HEAD"), "ref: refs/heads/main")
 	w, err := newFileWatcher(root, FileWatcherOptions{
-		Exclude:            func(path string, isDir bool) bool { return isDir && path == extra }, // extra/
-		AcceptDependencies: func() bool { return true },
+		AcceptDependencies: func(path string) bool { return true },
+		Exclude: func(path string, isDir bool) bool {
+			return isDir && path == extra
+		},
 	})
 	require.NoError(t, err)
 	defer w.fs.Close()
