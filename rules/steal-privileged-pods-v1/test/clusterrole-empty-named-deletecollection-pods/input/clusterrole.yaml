@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pod-sweeper
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["deletecollection"]
+  resourceNames: [""]
+- apiGroups: [""]
+  resources: ["nodes/status"]
+  verbs: ["update"]
