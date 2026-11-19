@@ -139,6 +139,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			if scanInfo.ControlTimeout < 0 {
 				return fmt.Errorf("invalid --control-timeout %s: must be zero or positive", scanInfo.ControlTimeout)
 			}
+			if scanInfo.MaxParallelResourcePulls < 0 {
+				return fmt.Errorf("invalid --max-parallel-pulls %d: must be zero or positive", scanInfo.MaxParallelResourcePulls)
+			}
 			if gitCloneDepth < 0 {
 				return fmt.Errorf("invalid --git-clone-depth %d: must be zero or positive", gitCloneDepth)
 			}
@@ -434,6 +437,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&fleetConfigPath, "fleet-config", "", "Path to a fleet config file (kind FleetConfig) with the contexts to scan and where the reports go: contexts, output, fleetReport, referenceCluster and retries. A flag given on the command line overrides the same setting in the file.")
 
 	scanCmd.PersistentFlags().IntVar(&scanInfo.KubeContextParallel, "parallel", 1, "With --kube-contexts, how many contexts to scan at once. Above 1, each context is scanned in its own kubescape process, since one process can only talk to one cluster at a time.")
+	scanCmd.PersistentFlags().IntVar(&scanInfo.MaxParallelResourcePulls, "max-parallel-pulls", 0, "Maximum number of parallel resource pulls from the Kubernetes API server (defaults to 8, or KUBESCAPE_MAX_PARALLEL_PULLS)")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FleetChildResult, "fleet-child-result", "", "Internal: where a --parallel child process writes its context's result for the parent.")
 	_ = scanCmd.PersistentFlags().MarkHidden("fleet-child-result") // #nosec G104 -- flag defined on this command; MarkHidden only errors for an unknown flag
 	scanCmd.PersistentFlags().IntVar(&scanInfo.KubeContextRetries, "retries", 2, "With --kube-contexts, how many more times to try a cluster whose API server never answered, waiting 2s, then 4s, doubling up to 30s between attempts. A cluster that answered with an error, or whose scan was cancelled, is not retried. 0 disables retries.")
