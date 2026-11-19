@@ -369,3 +369,49 @@ resource "kubernetes_role_binding_v1" "reader" {
 	assert.Equal(t, "default", s2["namespace"],
 		"explicitly resolvable null in try(...) must take provider default")
 }
+
+// A key or attribute missing from a known value is an error that try() catches,
+// as in Terraform: the expression is null, so the provider default applies.
+func TestExtractTypedResourcesAppliesDefaultWhenTryCatchesAMissingKey(t *testing.T) {
+	src := `
+resource "kubernetes_service_account_v1" "map_key" {
+  metadata {
+    name      = "map_key"
+    namespace = try(var.config["namespace"], null)
+  }
+}
+
+resource "kubernetes_service_account_v1" "object_attribute" {
+  metadata {
+    name      = "object_attribute"
+    namespace = try(var.app.namespace, null)
+  }
+}
+
+resource "kubernetes_service_account_v1" "local_attribute" {
+  metadata {
+    name      = "local_attribute"
+    namespace = try(local.settings.namespace, null)
+  }
+}
+`
+	evalCtx := &hcl.EvalContext{
+		Variables: map[string]cty.Value{
+			"var": cty.ObjectVal(map[string]cty.Value{
+				"config": cty.MapValEmpty(cty.String),
+				"app":    cty.ObjectVal(map[string]cty.Value{"name": cty.StringVal("web")}),
+			}),
+			"local": cty.ObjectVal(map[string]cty.Value{
+				"settings": cty.EmptyObjectVal,
+			}),
+		},
+		Functions: terraformFunctions,
+	}
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), evalCtx)
+	require.Empty(t, errs)
+	require.Len(t, manifests, 3)
+	for _, manifest := range manifests {
+		metadata := manifest["metadata"].(map[string]interface{})
+		assert.Equal(t, "default", metadata["namespace"], metadata["name"])
+	}
+}
