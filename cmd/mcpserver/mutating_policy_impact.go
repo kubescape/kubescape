@@ -41,7 +41,7 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 		mcp.WithString("api_group", mcp.Description("API group of the resource (omit or empty for the core group, e.g. Pod/ConfigMap)")),
 		mcp.WithString("api_version", mcp.Required(), mcp.Description("API version of the resource, e.g. v1")),
 		mcp.WithString("resource", mcp.Required(), mcp.Description("Plural resource name, e.g. pods, deployments")),
-		mcp.WithString("subresource", mcp.Description("Subresource the request targets, e.g. status or scale (omit for the resource itself). A policy scoped to the resource does not cover its subresources, and the reverse, so this changes which policies match")),
+		mcp.WithString("subresource", mcp.Description("Subresource the request targets, e.g. status or scale (omit for the resource itself). A policy scoped to the resource does not cover its subresources, and the reverse, so this changes which policies match. Scale analysis requires permission to get the scale subresource")),
 		mcp.WithString("operation", mcp.Description("Admission operation to check: CREATE, UPDATE, or CONNECT (default CREATE)")),
 		mcp.WithBoolean("cluster_scoped", mcp.Description("Set true for a cluster-scoped resource (namespace is ignored, and any namespaceSelector is treated as non-restricting, matching the Kubernetes API's own documented behavior)")),
 	)
@@ -154,12 +154,17 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 			dynClient := k8sClient.DynamicClient
 
 			resourceInterface := dynClient.Resource(gvr)
+			var getSubresources []string
+			if subresource == "scale" {
+				// Scale has its own metadata; parent labels do not establish a selector match.
+				getSubresources = []string{subresource}
+			}
 			var obj *unstructured.Unstructured
 			var getErr error
 			if effectiveClusterScoped {
-				obj, getErr = resourceInterface.Get(ctx, name, metav1.GetOptions{})
+				obj, getErr = resourceInterface.Get(ctx, name, metav1.GetOptions{}, getSubresources...)
 			} else {
-				obj, getErr = resourceInterface.Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+				obj, getErr = resourceInterface.Namespace(namespace).Get(ctx, name, metav1.GetOptions{}, getSubresources...)
 			}
 			if getErr != nil {
 				if apierrors.IsNotFound(getErr) {
