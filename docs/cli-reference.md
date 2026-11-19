@@ -1043,7 +1043,7 @@ Two details worth knowing:
 #### What is skipped, and why
 
 A cluster fix is only offered where the emitted manifest would be both correct
-and applyable. Everything else is listed as unfixed with its reason, so nothing
+and applicable. Everything else is listed as unfixed with its reason, so nothing
 disappears silently:
 
 - **Resources whose scan record is redacted.** A scan report is built for
