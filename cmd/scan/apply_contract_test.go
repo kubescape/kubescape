@@ -427,17 +427,62 @@ func TestContractNameRequiresContractFile(t *testing.T) {
 	require.EqualError(t, err, "--contract requires --scan-contract")
 }
 
+func TestScanContractRejectsEmptyOrWhitespace(t *testing.T) {
+	for _, val := range []string{"", "   ", "\t\n"} {
+		t.Run(fmt.Sprintf("scan-contract=%q", val), func(t *testing.T) {
+			cmd := GetScanCommand(&contractCaptureKubescape{})
+			root := &cobra.Command{Use: "kubescape", SilenceErrors: true, SilenceUsage: true}
+			root.AddCommand(cmd)
+			root.SetArgs([]string{"scan", ".", "--scan-contract", val})
+
+			err := root.Execute()
+			require.EqualError(t, err, "--scan-contract needs a file path")
+		})
+	}
+}
+
 func TestScanContractIsRejectedForImageCommand(t *testing.T) {
 	path := writeScanContract(t, `
       policy:
         frameworks: [nsa]`)
-	cmd := GetScanCommand(&contractCaptureKubescape{})
-	root := &cobra.Command{Use: "kubescape", SilenceErrors: true, SilenceUsage: true}
-	root.AddCommand(cmd)
-	root.SetArgs([]string{"scan", "image", "nginx:latest", "--scan-contract", path})
+	testCases := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "with path",
+			args:    []string{"scan", "image", "nginx:latest", "--scan-contract", path},
+			wantErr: "--scan-contract is supported for posture scans, not image scans",
+		},
+		{
+			name:    "empty path",
+			args:    []string{"scan", "image", "nginx:latest", "--scan-contract", ""},
+			wantErr: "--scan-contract is supported for posture scans, not image scans",
+		},
+		{
+			name:    "contract name flag",
+			args:    []string{"scan", "image", "nginx:latest", "--contract", "ci"},
+			wantErr: "--contract is supported for posture scans, not image scans",
+		},
+		{
+			name:    "contract-allow flag",
+			args:    []string{"scan", "image", "nginx:latest", "--contract-allow", "policy"},
+			wantErr: "--contract-allow is supported for posture scans, not image scans",
+		},
+	}
 
-	err := root.Execute()
-	require.EqualError(t, err, "--scan-contract is supported for posture scans, not image scans")
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := GetScanCommand(&contractCaptureKubescape{})
+			root := &cobra.Command{Use: "kubescape", SilenceErrors: true, SilenceUsage: true}
+			root.AddCommand(cmd)
+			root.SetArgs(tc.args)
+
+			err := root.Execute()
+			require.EqualError(t, err, tc.wantErr)
+		})
+	}
 }
 
 func TestContractDrivenAndFlagOnlySettingsAreEquivalent(t *testing.T) {
