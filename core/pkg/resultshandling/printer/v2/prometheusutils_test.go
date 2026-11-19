@@ -5,7 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/assert"
@@ -756,4 +759,172 @@ func TestPrometheusMetrics_CarriageReturnNeutralization(t *testing.T) {
 	assert.Contains(t, output, `name="my-pod\nfake-line"`)
 	assert.Contains(t, output, `path="manifests/pod\n.yaml"`)
 	assert.Contains(t, output, `image="my-image:latest\nmalicious"`)
+}
+
+type mockCounters struct {
+	passed  int
+	skipped int
+	failed  int
+}
+
+func (m *mockCounters) Passed() int   { return m.passed }
+func (m *mockCounters) Skipped() int  { return m.skipped }
+func (m *mockCounters) Failed() int   { return m.failed }
+func (m *mockCounters) Excluded() int { return 0 }
+func (m *mockCounters) All() int      { return m.passed + m.skipped + m.failed }
+
+func TestMetricsSet_NilCountersSafety(t *testing.T) {
+	t.Run("mComplianceScore nil counters", func(t *testing.T) {
+		mrs := mComplianceScore{}
+		require.NotPanics(t, func() {
+			mrs.set(nil, nil)
+		})
+		assert.Equal(t, 0, mrs.resourcesCountFailed)
+		assert.Equal(t, 0, mrs.resourcesCountPassed)
+		assert.Equal(t, 0, mrs.resourcesCountSkipped)
+		assert.Equal(t, 0, mrs.controlsCountFailed)
+		assert.Equal(t, 0, mrs.controlsCountPassed)
+		assert.Equal(t, 0, mrs.controlsCountSkipped)
+
+		resCounters := &mockCounters{passed: 10, skipped: 5, failed: 2}
+		require.NotPanics(t, func() {
+			mrs.set(resCounters, nil)
+		})
+		assert.Equal(t, 10, mrs.resourcesCountPassed)
+		assert.Equal(t, 5, mrs.resourcesCountSkipped)
+		assert.Equal(t, 2, mrs.resourcesCountFailed)
+		assert.Equal(t, 0, mrs.controlsCountFailed)
+
+		ctrlCounters := &mockCounters{passed: 8, skipped: 1, failed: 3}
+		require.NotPanics(t, func() {
+			mrs.set(nil, ctrlCounters)
+		})
+		assert.Equal(t, 10, mrs.resourcesCountPassed)
+		assert.Equal(t, 8, mrs.controlsCountPassed)
+		assert.Equal(t, 1, mrs.controlsCountSkipped)
+		assert.Equal(t, 3, mrs.controlsCountFailed)
+	})
+
+	t.Run("mFrameworkComplianceScore nil counters", func(t *testing.T) {
+		mfrs := mFrameworkComplianceScore{}
+		require.NotPanics(t, func() {
+			mfrs.set(nil, nil)
+		})
+		assert.Equal(t, 0, mfrs.resourcesCountFailed)
+		assert.Equal(t, 0, mfrs.controlsCountFailed)
+
+		resCounters := &mockCounters{passed: 4, skipped: 2, failed: 1}
+		require.NotPanics(t, func() {
+			mfrs.set(resCounters, nil)
+		})
+		assert.Equal(t, 4, mfrs.resourcesCountPassed)
+		assert.Equal(t, 2, mfrs.resourcesCountSkipped)
+		assert.Equal(t, 1, mfrs.resourcesCountFailed)
+
+		ctrlCounters := &mockCounters{passed: 6, skipped: 0, failed: 2}
+		require.NotPanics(t, func() {
+			mfrs.set(nil, ctrlCounters)
+		})
+		assert.Equal(t, 4, mfrs.resourcesCountPassed)
+		assert.Equal(t, 6, mfrs.controlsCountPassed)
+		assert.Equal(t, 0, mfrs.controlsCountSkipped)
+		assert.Equal(t, 2, mfrs.controlsCountFailed)
+	})
+
+	t.Run("mControlComplianceScore nil counters", func(t *testing.T) {
+		mcrs := mControlComplianceScore{}
+		require.NotPanics(t, func() {
+			mcrs.set(nil)
+		})
+		assert.Equal(t, 0, mcrs.resourcesCountPassed)
+		assert.Equal(t, 0, mcrs.resourcesCountFailed)
+		assert.Equal(t, 0, mcrs.resourcesCountSkipped)
+
+		resCounters := &mockCounters{passed: 7, skipped: 3, failed: 1}
+		require.NotPanics(t, func() {
+			mcrs.set(resCounters)
+		})
+		assert.Equal(t, 7, mcrs.resourcesCountPassed)
+		assert.Equal(t, 3, mcrs.resourcesCountSkipped)
+		assert.Equal(t, 1, mcrs.resourcesCountFailed)
+	})
+}
+
+func TestSetComplianceScores_WithNilCounters(t *testing.T) {
+	score := float32(80)
+	summaryDetails := &reportsummary.SummaryDetails{
+		Score:           80,
+		ComplianceScore: 80,
+		Frameworks: []reportsummary.FrameworkSummary{
+			{
+				Name:            "FrameworkWithNilCounters",
+				ComplianceScore: 80,
+			},
+		},
+		Controls: reportsummary.ControlSummaries{
+			"C-0001": {
+				ControlID:       "C-0001",
+				Name:            "ControlWithNilCounters",
+				ComplianceScore: &score,
+			},
+		},
+	}
+
+	m := &Metrics{}
+	require.NotPanics(t, func() {
+		m.setComplianceScores(summaryDetails)
+	})
+	assert.Len(t, m.listFrameworks, 1)
+	assert.Len(t, m.listControls, 1)
+	assert.Equal(t, 0, m.listFrameworks[0].resourcesCountPassed)
+	assert.Equal(t, 0, m.listFrameworks[0].controlsCountPassed)
+	assert.Equal(t, 0, m.listControls[0].resourcesCountPassed)
+}
+
+func TestSetResourcesCountersFromCatalog_NilSummaryDetailsSafety(t *testing.T) {
+	resources := map[string]workloadinterface.IMetadata{}
+	wl := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "test-pod", "namespace": "default"},
+	})
+	id := wl.GetID()
+	resources[id] = wl
+
+	results := map[string]resourcesresults.Result{
+		id: {
+			ResourceID: id,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0001",
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+						{
+							Name: "rule-1",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	catalog := cautils.NewMapResourceCatalog(resources)
+	m := &Metrics{}
+	require.NotPanics(t, func() {
+		m.setResourcesCountersFromCatalog(catalog, results, nil, nil)
+	})
+	require.Len(t, m.listResources, 1)
+	assert.Equal(t, "test-pod", m.listResources[0].name)
+}
+
+func TestSetImageVulnerabilities_NilSummarySafety(t *testing.T) {
+	m := &Metrics{isImageScan: true}
+	require.NotPanics(t, func() {
+		m.setImageVulnerabilities([]cautils.ImageScanData{
+			{
+				Image:    "test-image:latest",
+				Platform: "linux/amd64",
+			},
+		})
+	})
+	assert.Empty(t, m.listImages)
 }
