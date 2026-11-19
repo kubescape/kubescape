@@ -1376,3 +1376,30 @@ func TestFileWatcherSignalsRemovedDependencyFiles(t *testing.T) {
 		})
 	}
 }
+
+// A dependency file that cannot be looked at, for a reason other than being
+// gone, is still signalled, and stays remembered until it is known to be gone.
+func TestFileWatcherKeepsADependencyThatCannotBeInspected(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	dep := filepath.Join(sub, "settings")
+	write(t, dep, "key=value")
+	w := &FileWatcher{root: root}
+	require.True(t, w.mayBeDependency(dep))
+	require.Contains(t, w.depFiles, dep)
+
+	// sub becomes a file, so dep can't be inspected: not "does not exist" but
+	// "not a directory" (except where the platform reports that as missing).
+	require.NoError(t, os.RemoveAll(sub))
+	write(t, sub, "now a file")
+	if _, err := os.Lstat(dep); err == nil || errors.Is(err, fs.ErrNotExist) {
+		t.Skipf("this platform reports %q as missing, not as uninspectable: %v", dep, err)
+	}
+	assert.True(t, w.mayBeDependency(dep), "a dependency that can't be inspected still counts")
+	assert.Contains(t, w.depFiles, dep, "and stays remembered")
+
+	require.NoError(t, os.Remove(sub))
+	assert.True(t, w.mayBeDependency(dep), "its removal counts")
+	assert.NotContains(t, w.depFiles, dep, "and once it is known to be gone it is forgotten")
+}

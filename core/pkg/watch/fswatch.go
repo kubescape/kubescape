@@ -757,7 +757,12 @@ func (w *FileWatcher) mayBeDependency(path string) bool {
 		return true
 	}
 	if _, was := w.depFiles[path]; was {
-		delete(w.depFiles, path)
+		// Forgotten only once it is known to be gone or a directory: if it could
+		// not be looked at (permissions, I/O), the record is kept, so its removal
+		// is still recognised later.
+		if err == nil || errors.Is(err, fs.ErrNotExist) {
+			delete(w.depFiles, path)
+		}
 		return true
 	}
 	if err != nil {
