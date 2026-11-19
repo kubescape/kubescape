@@ -340,3 +340,62 @@ resource "kubernetes_deployment_v1" "app" {
 	require.Len(t, rs, 1, "the provider sends automountServiceAccountToken: true, so the pod mounts a token whatever the ServiceAccount says")
 	assert.Equal(t, true, rs[0].Expressions[0].Value)
 }
+
+func TestExtractTypedResourcesDoesNotApplyAutomountDefaultWhenTryHidesUnresolvableReference(t *testing.T) {
+	src := `
+resource "kubernetes_pod_v1" "unresolvable_try" {
+  spec {
+    automount_service_account_token = try(kubernetes_service_account_v1.ci.automount_service_account_token, null)
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "resolvable_fallback" {
+  spec {
+    automount_service_account_token = try(var.missing_bool, false)
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_pod_v1" "resolvable_null" {
+  spec {
+    automount_service_account_token = try(var.declared_null, null)
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+`
+	evalCtx := &hcl.EvalContext{
+		Variables: map[string]cty.Value{
+			"var": cty.ObjectVal(map[string]cty.Value{
+				"declared_null": cty.NullVal(cty.Bool),
+			}),
+		},
+		Functions: terraformFunctions,
+	}
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), evalCtx)
+	require.Empty(t, errs, "try(...) suppresses diagnostics so no eval errors are returned")
+	require.Len(t, manifests, 3)
+
+	byName := map[string]map[string]interface{}{}
+	for _, m := range manifests {
+		byName[m["metadata"].(map[string]interface{})["name"].(string)] = m
+	}
+
+	assert.NotContains(t, podSpecAt(t, byName["unresolvable_try"], "spec"), "automountServiceAccountToken",
+		"try(...) hiding an unresolvable reference must not apply provider default automountServiceAccountToken")
+
+	assert.Equal(t, false, podSpecAt(t, byName["resolvable_fallback"], "spec")["automountServiceAccountToken"],
+		"fallback value in try(...) must be preserved")
+
+	assert.Equal(t, true, podSpecAt(t, byName["resolvable_null"], "spec")["automountServiceAccountToken"],
+		"explicitly resolvable null in try(...) must take provider default")
+}

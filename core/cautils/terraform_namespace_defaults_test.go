@@ -299,3 +299,73 @@ resource "kubernetes_cluster_role_binding_v1" "ci" {
 	require.Len(t, rs, 1)
 	assert.Equal(t, []interface{}{"ci"}, rs[0].Expressions[0].Value, "default/ci holds the cluster-admin binding")
 }
+
+func TestExtractTypedResourcesDoesNotApplyDefaultWhenTryHidesUnresolvableReference(t *testing.T) {
+	src := `
+resource "kubernetes_service_account_v1" "ci" {
+  metadata {
+    name      = "ci"
+    namespace = try(kubernetes_namespace_v1.team.metadata[0].name, null)
+  }
+}
+
+resource "kubernetes_role_binding_v1" "reader" {
+  metadata {
+    name      = "reader"
+    namespace = "apps"
+  }
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "Role"
+    name      = "reader"
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = "ci"
+    namespace = try(var.missing_ns, null)
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = "deployer"
+    namespace = try(var.missing_ns, "fallback-ns")
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = "admin"
+    namespace = try(var.declared_null, null)
+  }
+}
+`
+	evalCtx := &hcl.EvalContext{
+		Variables: map[string]cty.Value{
+			"var": cty.ObjectVal(map[string]cty.Value{
+				"declared_null": cty.NullVal(cty.String),
+			}),
+		},
+		Functions: terraformFunctions,
+	}
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), evalCtx)
+	require.Empty(t, errs, "try(...) suppresses diagnostics so no eval errors are returned")
+	require.Len(t, manifests, 2)
+
+	assert.NotContains(t, manifests[0]["metadata"].(map[string]interface{}), "namespace",
+		"try(...) hiding an unresolvable reference must not take the provider default namespace")
+
+	subjects := manifests[1]["subjects"].([]interface{})
+	require.Len(t, subjects, 3)
+
+	s0 := subjects[0].(map[string]interface{})
+	assert.Equal(t, "ci", s0["name"])
+	assert.NotContains(t, s0, "namespace",
+		"subject namespace with unresolvable reference in try(...) must remain unset")
+
+	s1 := subjects[1].(map[string]interface{})
+	assert.Equal(t, "deployer", s1["name"])
+	assert.Equal(t, "fallback-ns", s1["namespace"],
+		"fallback value in try(...) must be preserved")
+
+	s2 := subjects[2].(map[string]interface{})
+	assert.Equal(t, "admin", s2["name"])
+	assert.Equal(t, "default", s2["namespace"],
+		"explicitly resolvable null in try(...) must take provider default")
+}
