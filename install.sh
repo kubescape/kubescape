@@ -37,8 +37,9 @@ get_latest_version() {
     local latest_release
     latest_release=$(curl -s "https://api.github.com/repos/kubescape/kubescape/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
     if [ -z "$latest_release" ]; then
-        echo -e "\033[31mError: Failed to fetch latest release version"
-        exit 1
+        echo -e "\033[31mError: Failed to fetch latest release version" >&2
+        echo -e "\033[33mTo install a specific version, use: curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash -s -- -v <version>" >&2
+	exit 1
     fi
     echo "$latest_release"
 }
