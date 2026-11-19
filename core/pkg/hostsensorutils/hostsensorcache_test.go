@@ -403,3 +403,26 @@ func TestGetCacheFilePath_PathTraversalPrevention(t *testing.T) {
 	require.Len(t, got, 1)
 	assert.Equal(t, "traversal-node", got[0].GetName())
 }
+
+func TestOpenHostSensorCacheFile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Empty path
+	_, err := openHostSensorCacheFile("")
+	assert.ErrorIs(t, err, os.ErrNotExist)
+
+	// Directory path
+	_, err = openHostSensorCacheFile(dir)
+	assert.ErrorContains(t, err, "is not a regular file")
+
+	// Non-existent path
+	_, err = openHostSensorCacheFile(filepath.Join(dir, "missing.cache"))
+	assert.Error(t, err)
+
+	// Valid regular file
+	validPath := filepath.Join(dir, "valid.cache")
+	require.NoError(t, os.WriteFile(validPath, []byte("valid"), 0600))
+	f, err := openHostSensorCacheFile(validPath)
+	require.NoError(t, err)
+	assert.NoError(t, f.Close())
+}

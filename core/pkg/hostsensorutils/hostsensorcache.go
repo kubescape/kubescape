@@ -9,8 +9,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -136,6 +136,42 @@ func removeLegacyCacheEntry(clusterName, resourceName string) {
 	}
 }
 
+// openHostSensorCacheFile opens path for reading, verifies it is a regular file,
+// and rejects non-regular files (FIFOs, sockets, device nodes, directories).
+// O_NONBLOCK ensures that opening a FIFO without a writer returns immediately
+// instead of hanging indefinitely (CWE-400), and descriptor-based validation
+// guards against TOCTOU races.
+func openHostSensorCacheFile(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	cleaned := filepath.Clean(path)
+	statInfo, err := os.Stat(cleaned)
+	if err != nil {
+		return nil, err
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%q is not a regular file", path)
+	}
+
+	file, err := os.OpenFile(cleaned, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%q is not a regular file", path)
+	}
+
+	return file, nil
+}
+
 func loadFromCache(clusterName, resourceName string) ([]hostsensor.HostSensorDataEnvelope, error) {
 	ttl := getHostSensorCacheTtl()
 	if ttl <= 0 {
@@ -166,21 +202,25 @@ func loadFromCache(clusterName, resourceName string) ([]hostsensor.HostSensorDat
 		return nil, fmt.Errorf("cache expired")
 	}
 
-	f, err := os.Open(filepath.Clean(path))
+	f, err := openHostSensorCacheFile(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	gr, err := gzip.NewReader(f)
+	limit := cautils.GetMaxFileSize()
+	gr, err := gzip.NewReader(io.LimitReader(f, limit+1))
 	if err != nil {
 		return nil, err
 	}
 	defer gr.Close()
 
-	data, err := io.ReadAll(io.LimitReader(gr, maxHostSensorCachePayloadBytes))
+	data, err := io.ReadAll(io.LimitReader(gr, maxHostSensorCachePayloadBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(data)) > maxHostSensorCachePayloadBytes {
+		return nil, fmt.Errorf("host sensor cache payload exceeds %d bytes limit", maxHostSensorCachePayloadBytes)
 	}
 
 	var envelopes []hostsensor.HostSensorDataEnvelope
