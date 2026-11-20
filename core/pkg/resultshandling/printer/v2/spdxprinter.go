@@ -49,6 +49,9 @@ func (sp *SPDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 		logger.L().Ctx(ctx).Error("spdx-json output requires scanned images")
 		return fmt.Errorf("spdx-json output requires scanned images")
 	}
+	if sp.writer == nil {
+		return fmt.Errorf("failed to write spdx-json output: output writer is nil")
+	}
 
 	encoder, err := spdxjson.NewFormatEncoderWithConfig(spdxjson.DefaultEncoderConfig())
 	if err != nil {

@@ -168,3 +168,14 @@ func TestActionPrint_SPDX_PostureScanWithImages(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &documents))
 	assert.Len(t, documents, 2, "a posture scan with --scan-images must emit one document per scanned image")
 }
+
+func TestActionPrint_SPDX_NilWriterReturnsError(t *testing.T) {
+	sp := NewSPDXPrinter()
+	imageScanData := []cautils.ImageScanData{buildSeverityExceptionImageScanData()}
+
+	require.NotPanics(t, func() {
+		err := sp.ActionPrint(context.Background(), nil, imageScanData)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
