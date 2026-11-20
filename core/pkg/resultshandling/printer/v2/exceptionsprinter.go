@@ -234,14 +234,13 @@ func collectFailures(ctx context.Context, opaSessionObj *cautils.OPASessionObj) 
 			if cautils.ControlStatus(summary, control).Status() != apis.StatusFailed {
 				continue
 			}
-			controlID := strings.TrimSpace(control.ControlID)
-			if controlID == "" {
+			if strings.TrimSpace(control.ControlID) == "" {
 				continue
 			}
-			if _, ok := failures[controlID]; !ok {
-				failures[controlID] = map[resourceKey]struct{}{}
+			if _, ok := failures[control.ControlID]; !ok {
+				failures[control.ControlID] = map[resourceKey]struct{}{}
 			}
-			failures[controlID][key] = struct{}{}
+			failures[control.ControlID][key] = struct{}{}
 		}
 	}
 
