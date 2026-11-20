@@ -72,6 +72,7 @@ func TestFieldNameFor(t *testing.T) {
 		{"plural override for metric", "metric", "metrics"},
 		{"plural override for policy", "policy", "policies"},
 		{"plural override for match_expression", "match_expression", "matchExpressions"},
+		{"plural override for node_selector_term", "node_selector_term", "nodeSelectorTerms"},
 		{"non-overridden label falls back to camelCase", "metadata", "metadata"},
 		{"multi-word fallback", "image_pull_policy", "imagePullPolicy"},
 	}
@@ -86,6 +87,7 @@ func TestAttributeNameFor(t *testing.T) {
 	assert.Equal(t, "port", attributeNameFor("port"))
 	assert.Equal(t, "containerPort", attributeNameFor("container_port"))
 	assert.Equal(t, "protocol", attributeNameFor("protocol"))
+	assert.Equal(t, "diskURI", attributeNameFor("data_disk_uri"))
 }
 
 func TestAttributeValueFor(t *testing.T) {
@@ -1224,12 +1226,32 @@ resource "kubernetes_persistent_volume" "pv" {
         server = "nfs.internal"
       }
     }
+    node_affinity {
+      required {
+        node_selector_term {
+          match_expressions {
+            key      = "topology.kubernetes.io/zone"
+            operator = "In"
+            values   = ["us-east-1a"]
+          }
+        }
+      }
+    }
   }
 }
 
 resource "kubernetes_persistent_volume_v1" "pv_v1" {
   metadata {
     name = "log-pv"
+  }
+  spec {
+    persistent_volume_source {
+      azure_disk {
+        caching_mode  = "None"
+        data_disk_uri = "https://example.blob.core.windows.net/vhds/disk.vhd"
+        disk_name     = "disk.vhd"
+      }
+    }
   }
 }
 
@@ -1346,6 +1368,18 @@ resource "kubernetes_horizontal_pod_autoscaler_v2" "hpa_v2" {
         }
       }
     }
+    metric {
+      type = "External"
+      external {
+        metric {
+          name = "queue_messages"
+        }
+        target {
+          type  = "Value"
+          value = "30"
+        }
+      }
+    }
     behavior {
       scale_up {
         policy {
@@ -1410,11 +1444,28 @@ resource "kubernetes_priority_class_v1" "pc_v1" {
 	assert.Equal(t, map[string]interface{}{"path": "/export", "server": "nfs.internal"}, pvSpec["nfs"])
 	assert.NotContains(t, pvSpec, "persistentVolumeSource")
 
-	// PV v1: cluster-scoped
+	// PV node_affinity node_selector_term encodes as nodeSelectorTerms array
+	nodeAffinity := pvSpec["nodeAffinity"].(map[string]interface{})
+	requiredAffinity := nodeAffinity["required"].(map[string]interface{})
+	nodeSelectorTerms := requiredAffinity["nodeSelectorTerms"].([]interface{})
+	require.Len(t, nodeSelectorTerms, 1)
+	term0 := nodeSelectorTerms[0].(map[string]interface{})
+	matchExprs := term0["matchExpressions"].([]interface{})
+	require.Len(t, matchExprs, 1)
+	expr0 := matchExprs[0].(map[string]interface{})
+	assert.Equal(t, "topology.kubernetes.io/zone", expr0["key"])
+	assert.Equal(t, "In", expr0["operator"])
+	assert.Equal(t, []interface{}{"us-east-1a"}, expr0["values"])
+
+	// PV v1: cluster-scoped, azure_disk with diskURI
 	pvV1 := manifests[3]
 	assert.Equal(t, "v1", pvV1["apiVersion"])
 	assert.Equal(t, "PersistentVolume", pvV1["kind"])
 	assert.Equal(t, map[string]interface{}{"name": "log-pv"}, pvV1["metadata"])
+	pvV1Spec := pvV1["spec"].(map[string]interface{})
+	azureDisk := pvV1Spec["azureDisk"].(map[string]interface{})
+	assert.Equal(t, "https://example.blob.core.windows.net/vhds/disk.vhd", azureDisk["diskURI"])
+	assert.Equal(t, "disk.vhd", azureDisk["diskName"])
 
 	// PDB: namespaced, numeric minAvailable string converts to json.Number
 	pdb := manifests[4]
@@ -1440,8 +1491,8 @@ resource "kubernetes_priority_class_v1" "pc_v1" {
 	quotaSpec := quota["spec"].(map[string]interface{})
 	assert.Equal(t, map[string]interface{}{"pods": "20"}, quotaSpec["hard"])
 	scopeSel := quotaSpec["scopeSelector"].(map[string]interface{})
-	matchExprs := scopeSel["matchExpressions"].([]interface{})
-	require.Len(t, matchExprs, 1)
+	quotaMatchExprs := scopeSel["matchExpressions"].([]interface{})
+	require.Len(t, quotaMatchExprs, 1)
 
 	// ResourceQuota v1
 	quotaV1 := manifests[7]
@@ -1489,7 +1540,13 @@ resource "kubernetes_priority_class_v1" "pc_v1" {
 	hpaV2Spec := hpaV2["spec"].(map[string]interface{})
 	assert.Equal(t, json.Number("2"), hpaV2Spec["minReplicas"])
 	metricsArr := hpaV2Spec["metrics"].([]interface{})
-	require.Len(t, metricsArr, 1)
+	require.Len(t, metricsArr, 2)
+	extMetric := metricsArr[1].(map[string]interface{})
+	assert.Equal(t, "External", extMetric["type"])
+	extBlock := extMetric["external"].(map[string]interface{})
+	metricIdent := extBlock["metric"].(map[string]interface{})
+	assert.Equal(t, "queue_messages", metricIdent["name"])
+	assert.NotContains(t, extBlock, "metrics")
 	behavior := hpaV2Spec["behavior"].(map[string]interface{})
 	scaleUp := behavior["scaleUp"].(map[string]interface{})
 	policies := scaleUp["policies"].([]interface{})

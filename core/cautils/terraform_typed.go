@@ -101,6 +101,8 @@ var pluralOverrides = map[string]string{
 	"limit":                 "limits",
 	"metric":                "metrics",
 	"policy":                "policies",
+	"node_selector_term":    "nodeSelectorTerms",
+	"node_selector_terms":   "nodeSelectorTerms",
 }
 
 // repeatableBlocks lists HCL block labels that always encode as a JSON array,
@@ -115,6 +117,7 @@ var repeatableBlocks = map[string]bool{
 	"sysctl": true, "ingress": true, "egress": true, "from": true, "to": true,
 	"path": true, "tls": true,
 	"limit": true, "metric": true, "policy": true,
+	"node_selector_term": true, "node_selector_terms": true,
 }
 
 // resourceMetaAttributes are Terraform meta-argument attributes valid on any
@@ -175,6 +178,9 @@ func fieldNameFor(blockType string) string {
 }
 
 func attributeNameFor(name string) string {
+	if name == "data_disk_uri" {
+		return "diskURI"
+	}
 	return snakeToCamel(name)
 }
 
@@ -274,6 +280,13 @@ func isServiceAccountSecretBlock(path, blockType string) bool {
 	return (strings.HasPrefix(path, "kubernetes_service_account") ||
 		strings.HasPrefix(path, "kubernetes_default_service_account")) &&
 		strings.Count(path, ".") == 1
+}
+
+func isNestedHPAMetricBlock(path, blockType string) bool {
+	if blockType != "metric" {
+		return false
+	}
+	return strings.HasSuffix(path, ".external") || strings.HasSuffix(path, ".pods") || strings.HasSuffix(path, ".object")
 }
 
 // isServiceTargetPortField reports whether name is a Service port's
@@ -410,6 +423,10 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 			field = "secrets"
 			isRepeatable = true
 		}
+		if isNestedHPAMetricBlock(path, blockType) {
+			field = "metric"
+			isRepeatable = false
+		}
 
 		if isRepeatable {
 			var arr []interface{}
@@ -478,6 +495,10 @@ func hclResourceBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *
 		if isServiceAccountSecretBlock(path, blockType) {
 			field = "secrets"
 			isRepeatable = true
+		}
+		if isNestedHPAMetricBlock(path, blockType) {
+			field = "metric"
+			isRepeatable = false
 		}
 
 		if isRepeatable {
