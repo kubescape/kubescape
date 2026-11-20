@@ -116,11 +116,18 @@ func ResolveOutputFile(format, outputFile, defaultBaseName string) (string, bool
 	}
 
 	// A trailing separator names a directory: write the default report name
-	// inside it rather than a hidden file such as "reports/.json". Append
-	// instead of filepath.Join, which would clean "link/../" lexically and
-	// pick a different directory than the filesystem does through a symlink.
-	if defaultBaseName != "" && os.IsPathSeparator(outputFile[len(outputFile)-1]) {
-		outputFile += defaultBaseName
+	// inside it rather than a hidden file such as "reports/.json". A path
+	// whose last element is "." or ".." (--output . or --output reports/..)
+	// names a directory too, so it gets the same treatment instead of the
+	// hidden file "..json". Append instead of filepath.Join, which would
+	// clean "link/../" lexically and pick a different directory than the
+	// filesystem does through a symlink.
+	if defaultBaseName != "" {
+		if os.IsPathSeparator(outputFile[len(outputFile)-1]) {
+			outputFile += defaultBaseName
+		} else if base := filepath.Base(outputFile); base == "." || base == ".." {
+			outputFile += string(filepath.Separator) + defaultBaseName
+		}
 	}
 
 	ext, ok := FormatOutputExt[format]
