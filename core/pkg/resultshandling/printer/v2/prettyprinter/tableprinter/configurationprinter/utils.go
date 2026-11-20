@@ -21,6 +21,9 @@ func bucketControlsByCategory(controlSummaries []reportsummary.IControlSummary) 
 	mapCategoryIDToName := make(map[string]string)
 
 	for i := range controlSummaries {
+		if controlSummaries[i] == nil {
+			continue
+		}
 		cat := controlSummaries[i].GetCategory()
 		if cat == nil {
 			continue
@@ -71,6 +74,9 @@ func mapCategoryToSummary(controlSummaries []reportsummary.IControlSummary, mapD
 	mapCategoryIDToName := make(map[string]string)
 
 	for i := range controlSummaries {
+		if controlSummaries[i] == nil {
+			continue
+		}
 		// check if we need to print this control
 		category, ok := mapDisplayCtrlIDToCategory[controlSummaries[i].GetID()]
 		if !ok {
@@ -117,7 +123,7 @@ func buildCategoryToControlsMap(mapCategoriesToCtrlSummary map[string][]reportsu
 	for categoryID, ctrls := range mapCategoriesToCtrlSummary {
 		status := apis.StatusPassed
 		for _, ctrl := range ctrls {
-			if ctrl.GetStatus().Status() == apis.StatusFailed {
+			if ctrl != nil && ctrl.GetStatus() != nil && ctrl.GetStatus().Status() == apis.StatusFailed {
 				status = apis.StatusFailed
 				break
 			}
@@ -151,6 +157,12 @@ func getRunCommandForControl(controlSummary reportsummary.IControlSummary) strin
 
 func sortControlSummaries(controlSummaries []reportsummary.IControlSummary) {
 	sort.Slice(controlSummaries, func(i, j int) bool {
+		if controlSummaries[i] == nil {
+			return false
+		}
+		if controlSummaries[j] == nil {
+			return true
+		}
 		return controlSummaries[i].GetName() < controlSummaries[j].GetName()
 	})
 }

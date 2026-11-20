@@ -62,13 +62,13 @@ func generateCategoryStatusRow(controlSummary reportsummary.IControlSummary) tab
 
 	// show only passed, failed and action required controls
 	status := controlSummary.GetStatus()
-	if !status.IsFailed() && !status.IsSkipped() && !status.IsPassed() {
+	if status == nil || (!status.IsFailed() && !status.IsSkipped() && !status.IsPassed()) {
 		return nil
 	}
 
 	rows := make(table.Row, 3)
 
-	rows[0] = utils.GetStatusIcon(controlSummary.GetStatus().Status())
+	rows[0] = utils.GetStatusIcon(status.Status())
 
 	rows[1] = utils.TruncateName(controlSummary.GetName(), utils.MaxControlNameLen)
 

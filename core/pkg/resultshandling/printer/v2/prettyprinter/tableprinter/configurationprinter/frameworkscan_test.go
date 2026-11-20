@@ -233,3 +233,15 @@ func TestRenderSeverityCountersSummary_Nil(t *testing.T) {
 	expected := []table.Row{{"Critical", "0"}, {"High", "0"}, {"Medium", "0"}, {"Low", "0"}}
 	assert.Equal(t, expected, renderSeverityCountersSummary(nil))
 }
+
+func TestPrintSummaryTable_NilCounters(t *testing.T) {
+	fp := NewFrameworkPrinter(true)
+	f, err := os.CreateTemp("", "print")
+	assert.NoError(t, err)
+	defer f.Close()
+
+	// summaryDetails with empty (nil) NumberOfControls
+	assert.NotPanics(t, func() {
+		fp.PrintSummaryTable(f, &reportsummary.SummaryDetails{}, nil)
+	})
+}

@@ -68,7 +68,10 @@ func (rp *RepoPrinter) renderSingleCategoryTable(categoryName string, categoryTy
 
 	var rows []table.Row
 	for _, ctrls := range controlSummaries {
-		if ctrls.NumberOfResources().Failed() == 0 {
+		if ctrls == nil {
+			continue
+		}
+		if numRes := ctrls.NumberOfResources(); numRes != nil && numRes.Failed() == 0 {
 			continue
 		}
 
@@ -92,11 +95,17 @@ func (rp *RepoPrinter) renderSingleCategoryTable(categoryName string, categoryTy
 }
 
 func (rp *RepoPrinter) generateCountingCategoryRow(controlSummary reportsummary.IControlSummary, inputPatterns []string) table.Row {
+	if controlSummary == nil {
+		return table.Row{}
+	}
 	rows := make(table.Row, 3)
 
 	rows[0] = controlSummary.GetName()
 
-	failedResources := controlSummary.NumberOfResources().Failed()
+	failedResources := 0
+	if numRes := controlSummary.NumberOfResources(); numRes != nil {
+		failedResources = numRes.Failed()
+	}
 	if failedResources > 0 {
 		rows[1] = gchalk.WithYellow().Bold(fmt.Sprintf("%d", failedResources))
 	} else {
@@ -109,5 +118,8 @@ func (rp *RepoPrinter) generateCountingCategoryRow(controlSummary reportsummary.
 }
 
 func (rp *RepoPrinter) generateTableNextSteps(controlSummary reportsummary.IControlSummary, inputPatterns []string) string {
+	if controlSummary == nil {
+		return ""
+	}
 	return fmt.Sprintf("$ kubescape scan control %s %s -v", controlSummary.GetID(), strings.Join(inputPatterns, ","))
 }
