@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
@@ -123,12 +124,20 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		summaryTable.Style().Format.Header = text.FormatDefault
 		summaryTable.Style().Box = table.StyleBoxRounded
 
+		var source reporthandling.Source
 		var sourcePath string
 		if src, ok := opaSessionObj.ResourceSource[resourceID]; ok {
+			source = src
 			sourcePath = BestSourcePath(src)
 		}
 		lineFor := prettyPrinter.pathLineResolver(opaSessionObj, &caches, scanned)
-		resourceRows := generateResourceRows(result.ListControls(), summary, resource, prettyPrinter.showEvidence, prettyPrinter.showSecrets, sourcePath, lineFor)
+		var patchFor func([]string) string
+		if source.FileType == reporthandling.SourceTypeKustomizeDirectory && source.KustomizeDirectoryName != "" {
+			patchFor = func(paths []string) string {
+				return cautils.TraceKustomizePatch(resource, paths, source)
+			}
+		}
+		resourceRows := generateResourceRows(result.ListControls(), summary, resource, prettyPrinter.showEvidence, prettyPrinter.showSecrets, sourcePath, lineFor, patchFor)
 
 		short := utils.CheckShortTerminalWidth(resourceRows, generateResourceHeader(false))
 		if short {
@@ -205,7 +214,7 @@ func (prettyPrinter *PrettyPrinter) pathLineResolver(opaSessionObj *cautils.OPAS
 	}
 }
 
-func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata, showEvidence bool, showSecrets bool, sourcePath string, lineFor func(string) (int, bool)) []table.Row {
+func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata, showEvidence bool, showSecrets bool, sourcePath string, lineFor func(string) (int, bool), patchFor ...func([]string) string) []table.Row {
 	var rows []table.Row
 
 	for i := range controls {
@@ -221,8 +230,18 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 			paths := evidencePathsWithCurrentValues(&displayed, resource, showSecrets)
 			addContainerNameToAssistedRemediation(resource, &paths)
 			annotatePathLines(&paths, &displayed, lineFor)
-			if sourcePath != "" {
-				paths = append([]string{"@ " + sourcePath}, paths...)
+			srcDisplay := sourcePath
+			if len(patchFor) > 0 && patchFor[0] != nil {
+				if patchFile := patchFor[0](paths); patchFile != "" && patchFile != sourcePath {
+					if srcDisplay != "" {
+						srcDisplay = fmt.Sprintf("%s (patch: %s)", srcDisplay, patchFile)
+					} else {
+						srcDisplay = patchFile
+					}
+				}
+			}
+			if srcDisplay != "" {
+				paths = append([]string{"@ " + srcDisplay}, paths...)
 			}
 			row[resourceColumnPath] = strings.Join(paths, "\n")
 		}
