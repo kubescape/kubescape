@@ -151,6 +151,9 @@ func sortHTMLResourceTableView(resourceTableView ResourceTableView) ResourceTabl
 // sortHTMLControlsBySeverityName sorts control summaries primarily by severity descending,
 // then alphabetically by name ascending, breaking ties by control ID ascending.
 func sortHTMLControlsBySeverityName(controlSummaries map[string]reportsummary.ControlSummary) []reportsummary.ControlSummary {
+	if controlSummaries == nil {
+		return nil
+	}
 	sortedSlice := make([]reportsummary.ControlSummary, 0, len(controlSummaries))
 	for _, val := range controlSummaries {
 		sortedSlice = append(sortedSlice, val)
@@ -175,6 +178,9 @@ func sortHTMLControlsBySeverityName(controlSummaries map[string]reportsummary.Co
 }
 
 func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if hp.writer == nil {
+		return fmt.Errorf("failed to write HTML results: output writer is nil")
+	}
 	if err := printer.PrepareOutput(hp.writer); err != nil {
 		return err
 	}
