@@ -180,7 +180,7 @@ func (opap *OPAProcessor) newCacheCandidate(controlID string, cacheWrite *cacheW
 func (opap *OPAProcessor) attributedFailedResources(response reporthandling.RuleResponse, enumeratedIDs map[string]struct{}) []workloadinterface.IMetadata {
 	var attributed []workloadinterface.IMetadata
 	for _, failedResource := range objectsenvelopes.ListMapToMeta(response.GetFailedResources()) {
-		if opap.skipNamespace(failedResource.GetNamespace()) {
+		if opap.skipObject(failedResource) {
 			continue
 		}
 		if !inEnumeratedScope(enumeratedIDs, failedResource, failedResource.GetID()) {
@@ -199,7 +199,7 @@ func (opap *OPAProcessor) attributedFailedResources(response reporthandling.Rule
 func (opap *OPAProcessor) reportedObjects(response reporthandling.RuleResponse) []workloadinterface.IMetadata {
 	var reported []workloadinterface.IMetadata
 	for _, object := range objectsenvelopes.ListMapToMeta(response.GetFailedResources()) {
-		if opap.skipNamespace(object.GetNamespace()) {
+		if opap.skipObject(object) {
 			continue
 		}
 		reported = append(reported, object)

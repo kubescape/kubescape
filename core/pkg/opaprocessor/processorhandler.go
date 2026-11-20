@@ -1834,7 +1834,7 @@ func (opap *OPAProcessor) evaluateRuleOnScope(ctx context.Context, rule *reporth
 		var toEvaluate []workloadinterface.IMetadata
 		cacheHitIDs = make(map[string]struct{})
 		for _, r := range resourceToScan {
-			if opap.skipNamespace(r.GetNamespace()) {
+			if opap.skipObject(r) {
 				continue
 			}
 			hash := scancache.ResourceHash(r.GetObject())
@@ -1947,7 +1947,7 @@ func (opap *OPAProcessor) evaluateRuleOnScope(ctx context.Context, rule *reporth
 
 	var addedResources []workloadinterface.IMetadata
 	for _, inputResource := range inputResources {
-		if opap.skipNamespace(inputResource.GetNamespace()) {
+		if opap.skipObject(inputResource) {
 			continue
 		}
 		addedResources = append(addedResources, inputResource)
@@ -1999,7 +1999,7 @@ func (opap *OPAProcessor) evaluateRuleOnScope(ctx context.Context, rule *reporth
 		}
 	}
 	for _, inputResource := range inputResources {
-		if opap.skipNamespace(inputResource.GetNamespace()) {
+		if opap.skipObject(inputResource) {
 			continue
 		}
 		id := inputResource.GetID()
@@ -2121,7 +2121,7 @@ func (opap *OPAProcessor) markResourcesSkipped(out map[string]*resourcesresults.
 		SubStatus:   apis.SubStatusUnknown,
 	}
 	for _, inputResource := range inputResources {
-		if opap.skipNamespace(inputResource.GetNamespace()) {
+		if opap.skipObject(inputResource) {
 			continue
 		}
 		id := inputResource.GetID()
@@ -2572,7 +2572,7 @@ func (opap *OPAProcessor) seedCELSkips(out map[string]*resourcesresults.Resource
 		if meta == nil {
 			continue
 		}
-		if opap.skipNamespace(meta.GetNamespace()) {
+		if opap.skipObject(meta) {
 			continue
 		}
 		id := meta.GetID()
@@ -2934,6 +2934,21 @@ func (opap *OPAProcessor) makeRegoDeps(configInputs []reporthandling.ControlConf
 		DataControlInputs:    dataControlInputs,
 		PostureControlInputs: clonedPostureInputs,
 	}
+}
+
+// skipObject reports whether the namespace selectors leave obj out of the scan.
+// A namespaced object is judged by its namespace. A Namespace object has none in
+// its metadata, so it is judged by its own name, as the cluster collector does
+// with a metadata.name field selector. Any other cluster-scoped object is never
+// filtered.
+func (opap *OPAProcessor) skipObject(obj workloadinterface.IMetadata) bool {
+	if ns := obj.GetNamespace(); ns != "" {
+		return opap.skipNamespace(ns)
+	}
+	if obj.GetKind() == "Namespace" && obj.GetApiVersion() == "v1" {
+		return opap.skipNamespace(obj.GetName())
+	}
+	return false
 }
 
 func (opap *OPAProcessor) skipNamespace(ns string) bool {
