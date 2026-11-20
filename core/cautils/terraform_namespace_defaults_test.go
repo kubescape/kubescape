@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/open-policy-agent/opa/v1/rego"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -351,6 +352,21 @@ resource "kubernetes_role_binding_v1" "reader" {
     name      = "unused_fallback_null"
     namespace = try(null, var.missing_ns)
   }
+  subject {
+    kind      = "ServiceAccount"
+    name      = "coalesce_unused_fallback"
+    namespace = coalesce(var.declared_null, "default", var.missing_ns)
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = "coalesce_unresolvable"
+    namespace = try(coalesce(var.declared_null, var.missing_ns), null)
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = "coalesce_mixed_type"
+    namespace = coalesce(123, "fallback")
+  }
 }
 
 resource "kubernetes_service_account_v1" "parenthesized_unused_fallback" {
@@ -387,6 +403,48 @@ resource "kubernetes_service_account_v1" "caught_diagnostic_try" {
     namespace = try([][0], null)
   }
 }
+
+resource "kubernetes_service_account_v1" "coalesce_unused_fallback" {
+  metadata {
+    name      = "coalesce_unused_fallback"
+    namespace = coalesce(var.declared_null, "default", var.missing_ns)
+  }
+}
+
+resource "kubernetes_service_account_v1" "coalesce_unresolvable_try" {
+  metadata {
+    name      = "coalesce_unresolvable_try"
+    namespace = try(coalesce(var.declared_null, var.missing_ns), null)
+  }
+}
+
+resource "kubernetes_service_account_v1" "coalesce_mixed_type" {
+  metadata {
+    name      = "coalesce_mixed_type"
+    namespace = coalesce(123, "fallback")
+  }
+}
+
+resource "kubernetes_service_account_v1" "coalesce_caught_diagnostic_try" {
+  metadata {
+    name      = "coalesce_caught_diagnostic_try"
+    namespace = try(coalesce([][0], "fallback"), null)
+  }
+}
+
+resource "kubernetes_service_account_v1" "template_wrap_try_null" {
+  metadata {
+    name      = "template_wrap_try_null"
+    namespace = "${try(null, var.missing_ns)}"
+  }
+}
+
+resource "kubernetes_service_account_v1" "template_wrap_try_unresolvable" {
+  metadata {
+    name      = "template_wrap_try_unresolvable"
+    namespace = "${try(var.missing_ns, null)}"
+  }
+}
 `
 	evalCtx := &hcl.EvalContext{
 		Variables: map[string]cty.Value{
@@ -400,7 +458,7 @@ resource "kubernetes_service_account_v1" "caught_diagnostic_try" {
 	}
 	manifests, errs := extractTypedResources(parseTypedHCL(t, src), evalCtx)
 	require.Empty(t, errs, "try(...) suppresses diagnostics so no eval errors are returned")
-	require.Len(t, manifests, 8)
+	require.Len(t, manifests, 14)
 
 	byName := map[string]map[string]interface{}{}
 	for _, m := range manifests {
@@ -428,8 +486,26 @@ resource "kubernetes_service_account_v1" "caught_diagnostic_try" {
 	assert.Equal(t, "default", byName["ServiceAccount/caught_diagnostic_try"]["metadata"].(map[string]interface{})["namespace"],
 		"caught evaluation diagnostic in try(...) falling back to null must take provider default")
 
+	assert.Equal(t, "default", byName["ServiceAccount/coalesce_unused_fallback"]["metadata"].(map[string]interface{})["namespace"],
+		"coalesce with unused fallback referencing unresolvable variable must preserve resolved value")
+
+	assert.NotContains(t, byName["ServiceAccount/coalesce_unresolvable_try"]["metadata"].(map[string]interface{}), "namespace",
+		"coalesce falling back to unresolvable variable inside try(...) must not take provider default namespace")
+
+	assert.Equal(t, "123", byName["ServiceAccount/coalesce_mixed_type"]["metadata"].(map[string]interface{})["namespace"],
+		"coalesce with mixed number and string arguments must unify to string namespace")
+
+	assert.Equal(t, "default", byName["ServiceAccount/coalesce_caught_diagnostic_try"]["metadata"].(map[string]interface{})["namespace"],
+		"caught evaluation diagnostic inside coalesce within try(...) falling back to null must take provider default")
+
+	assert.Equal(t, "default", byName["ServiceAccount/template_wrap_try_null"]["metadata"].(map[string]interface{})["namespace"],
+		"interpolation-only template wrap with try(...) falling back cleanly to null must take provider default namespace")
+
+	assert.NotContains(t, byName["ServiceAccount/template_wrap_try_unresolvable"]["metadata"].(map[string]interface{}), "namespace",
+		"interpolation-only template wrap with try(...) hiding unresolvable reference must not take provider default namespace")
+
 	subjects := byName["RoleBinding/reader"]["subjects"].([]interface{})
-	require.Len(t, subjects, 5)
+	require.Len(t, subjects, 8)
 
 	s0 := subjects[0].(map[string]interface{})
 	assert.Equal(t, "ci", s0["name"])
@@ -455,6 +531,20 @@ resource "kubernetes_service_account_v1" "caught_diagnostic_try" {
 	assert.Equal(t, "unused_fallback_null", s4["name"])
 	assert.Equal(t, "default", s4["namespace"],
 		"subject namespace with unused fallback after literal null must take provider default")
+	s5 := subjects[5].(map[string]interface{})
+	assert.Equal(t, "coalesce_unused_fallback", s5["name"])
+	assert.Equal(t, "default", s5["namespace"],
+		"subject namespace with coalesce unused fallback must take resolved value")
+
+	s6 := subjects[6].(map[string]interface{})
+	assert.Equal(t, "coalesce_unresolvable", s6["name"])
+	assert.NotContains(t, s6, "namespace",
+		"subject namespace with unresolvable coalesce inside try(...) must remain unset")
+
+	s7 := subjects[7].(map[string]interface{})
+	assert.Equal(t, "coalesce_mixed_type", s7["name"])
+	assert.Equal(t, "123", s7["namespace"],
+		"subject namespace with mixed type coalesce must unify to string namespace")
 }
 
 func TestExtractTypedResources_InvalidConditionTypeDoesNotPanic(t *testing.T) {
@@ -501,6 +591,11 @@ locals {
   string_cond_true              = "true" ? (try(var.declared_null, var.missing_ref)) : "other"
   string_cond_false             = "false" ? "other" : (try(var.declared_null, var.missing_ref))
   caught_diagnostic             = try([][0], null)
+  coalesce_unused_fallback      = coalesce(var.declared_null, "default", var.missing_ref)
+  coalesce_unresolvable         = try(coalesce(var.declared_null, var.missing_ref), null)
+  coalesce_mixed_type           = coalesce(123, "fallback")
+  template_wrap_try_null        = "${try(null, var.missing_ref)}"
+  template_wrap_unresolvable    = "${try(var.missing_ref, null)}"
 }
 `), 0o600))
 
@@ -567,6 +662,40 @@ resource "kubernetes_service_account_v1" "caught_diagnostic" {
     namespace = local.caught_diagnostic
   }
 }
+resource "kubernetes_service_account_v1" "coalesce_unused_fallback" {
+  metadata {
+    name      = "coalesce-unused-fallback"
+    namespace = local.coalesce_unused_fallback
+  }
+}
+
+resource "kubernetes_service_account_v1" "coalesce_unresolvable" {
+  metadata {
+    name      = "coalesce-unresolvable"
+    namespace = local.coalesce_unresolvable
+  }
+}
+
+resource "kubernetes_service_account_v1" "coalesce_mixed_type" {
+  metadata {
+    name      = "coalesce-mixed-type"
+    namespace = local.coalesce_mixed_type
+  }
+}
+
+resource "kubernetes_service_account_v1" "template_wrap_try_null" {
+  metadata {
+    name      = "template-wrap-try-null"
+    namespace = local.template_wrap_try_null
+  }
+}
+
+resource "kubernetes_service_account_v1" "template_wrap_unresolvable" {
+  metadata {
+    name      = "template-wrap-unresolvable"
+    namespace = local.template_wrap_unresolvable
+  }
+}
 `), 0o600))
 
 	workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
@@ -599,6 +728,16 @@ resource "kubernetes_service_account_v1" "caught_diagnostic" {
 		"local with string-valued condition 'false' must take provider default namespace")
 	assert.Equal(t, "default", byName["caught-diagnostic"]["namespace"],
 		"local with caught evaluation diagnostic in try(...) falling back to null must take provider default namespace")
+	assert.Equal(t, "default", byName["coalesce-unused-fallback"]["namespace"],
+		"local with coalesce unused fallback must preserve resolved value")
+	assert.NotContains(t, byName["coalesce-unresolvable"], "namespace",
+		"local with unresolvable coalesce inside try(...) must not take provider default namespace")
+	assert.Equal(t, "123", byName["coalesce-mixed-type"]["namespace"],
+		"local with mixed-type coalesce must resolve to string")
+	assert.Equal(t, "default", byName["template-wrap-try-null"]["namespace"],
+		"local with interpolation-wrapped try(...) falling back cleanly to null must take provider default namespace")
+	assert.NotContains(t, byName["template-wrap-unresolvable"], "namespace",
+		"local with interpolation-wrapped try(...) hiding unresolvable reference must not take provider default namespace")
 }
 
 // A key or attribute missing from a known value is an error that try() catches,
@@ -644,5 +783,161 @@ resource "kubernetes_service_account_v1" "local_attribute" {
 	for _, manifest := range manifests {
 		metadata := manifest["metadata"].(map[string]interface{})
 		assert.Equal(t, "default", metadata["namespace"], metadata["name"])
+	}
+}
+
+func TestHasUnresolvableVariables_Coalesce(t *testing.T) {
+	evalCtx := &hcl.EvalContext{
+		Variables: map[string]cty.Value{
+			"var": cty.ObjectVal(map[string]cty.Value{
+				"declared_null":  cty.NullVal(cty.String),
+				"valid_str":      cty.StringVal("prod"),
+				"empty_str":      cty.StringVal(""),
+				"declared_true":  cty.True,
+				"declared_false": cty.False,
+			}),
+		},
+		Functions: terraformFunctions,
+	}
+
+	tests := []struct {
+		name string
+		expr string
+		want bool
+	}{
+		{
+			name: "first arg is valid non-null string, stops before missing fallback",
+			expr: `coalesce(var.valid_str, var.missing)`,
+			want: false,
+		},
+		{
+			name: "first arg is literal non-null string, stops before missing fallback",
+			expr: `coalesce("prod", var.missing)`,
+			want: false,
+		},
+		{
+			name: "first arg is declared null, falls back to unresolvable variable",
+			expr: `coalesce(var.declared_null, var.missing)`,
+			want: true,
+		},
+		{
+			name: "first arg is empty string, falls back to unresolvable variable",
+			expr: `coalesce(var.empty_str, var.missing)`,
+			want: true,
+		},
+		{
+			name: "first arg is null, second is valid non-null string, stops before missing fallback",
+			expr: `coalesce(var.declared_null, var.valid_str, var.missing)`,
+			want: false,
+		},
+		{
+			name: "parenthesized coalesce stops at first valid non-null",
+			expr: `(coalesce(var.valid_str, var.missing))`,
+			want: false,
+		},
+		{
+			name: "boolean true stops before missing fallback",
+			expr: `coalesce(var.declared_true, var.missing)`,
+			want: false,
+		},
+		{
+			name: "boolean false is non-null and stops before missing fallback",
+			expr: `coalesce(var.declared_false, var.missing)`,
+			want: false,
+		},
+		{
+			name: "all args null has no unresolvable variables",
+			expr: `coalesce(var.declared_null, null)`,
+			want: false,
+		},
+		{
+			name: "mixed type number and string stops before missing fallback",
+			expr: `coalesce(123, "fallback", var.missing)`,
+			want: false,
+		},
+		{
+			name: "mixed type declared null then number stops before missing fallback",
+			expr: `coalesce(var.declared_null, 123, var.missing)`,
+			want: false,
+		},
+		{
+			name: "mixed type declared null then missing fallback retains protection",
+			expr: `coalesce(var.declared_null, var.missing, 123)`,
+			want: true,
+		},
+		{
+			name: "coalesce with runtime evaluation diagnostic is not treated as unresolvable",
+			expr: `coalesce([][0], "x")`,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file, diags := hclsyntax.ParseConfig([]byte("x = "+tt.expr), "test.tf", hcl.Pos{Line: 1, Column: 1})
+			require.False(t, diags.HasErrors())
+			attr := file.Body.(*hclsyntax.Body).Attributes["x"]
+			got := hasUnresolvableVariables(attr.Expr, evalCtx)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestHasUnresolvableVariables_TemplateWrapExpr(t *testing.T) {
+	evalCtx := &hcl.EvalContext{
+		Variables: map[string]cty.Value{
+			"var": cty.ObjectVal(map[string]cty.Value{
+				"declared_null": cty.NullVal(cty.String),
+				"valid_str":     cty.StringVal("prod"),
+			}),
+		},
+		Functions: terraformFunctions,
+	}
+
+	tests := []struct {
+		name string
+		expr string
+		want bool
+	}{
+		{
+			name: "interpolation wrapping try with primary null preserves default",
+			expr: `"${try(null, var.missing)}"`,
+			want: false,
+		},
+		{
+			name: "interpolation wrapping try with primary declared null preserves default",
+			expr: `"${try(var.declared_null, var.missing)}"`,
+			want: false,
+		},
+		{
+			name: "interpolation wrapping try with unresolvable reference retains protection",
+			expr: `"${try(var.missing, null)}"`,
+			want: true,
+		},
+		{
+			name: "interpolation wrapping coalesce with valid primary stops before missing",
+			expr: `"${coalesce(var.valid_str, var.missing)}"`,
+			want: false,
+		},
+		{
+			name: "interpolation wrapping coalesce falling back to missing retains protection",
+			expr: `"${coalesce(var.declared_null, var.missing)}"`,
+			want: true,
+		},
+		{
+			name: "nested parentheses and template wrap",
+			expr: `"${(try(null, var.missing))}"`,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file, diags := hclsyntax.ParseConfig([]byte("x = "+tt.expr), "test.tf", hcl.Pos{Line: 1, Column: 1})
+			require.False(t, diags.HasErrors())
+			attr := file.Body.(*hclsyntax.Body).Attributes["x"]
+			got := hasUnresolvableVariables(attr.Expr, evalCtx)
+			assert.Equal(t, tt.want, got)
+		})
 	}
 }

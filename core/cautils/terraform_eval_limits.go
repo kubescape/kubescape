@@ -59,7 +59,7 @@ func boundTerraformFunctions(funcs map[string]function.Function, limit int) map[
 	bounded := make(map[string]function.Function, len(funcs))
 	for name, fn := range funcs {
 		switch name {
-		case "can", "try":
+		case "can", "try", "coalesce":
 			// These take unevaluated expressions; every function those
 			// expressions call is bounded on its own.
 			bounded[name] = fn
