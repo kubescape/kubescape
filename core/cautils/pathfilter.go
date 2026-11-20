@@ -353,7 +353,12 @@ func parseIgnoreRule(line string) (ignoreRule, bool, error) {
 		rule.dirOnly = true
 		pattern = strings.TrimRight(pattern, "/")
 	}
-	pattern = strings.TrimPrefix(pattern, "./")
+	// A leading "./" names the scan root the way a leading "/" does, so it anchors the
+	// pattern even when no other "/" is left in it.
+	if rest, ok := strings.CutPrefix(pattern, "./"); ok {
+		pattern = rest
+		rule.anchored = true
+	}
 	if strings.HasPrefix(pattern, "/") {
 		rule.anchored = true
 		pattern = strings.TrimLeft(pattern, "/")
