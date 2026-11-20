@@ -49,6 +49,9 @@ func (cp *CycloneDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *caut
 		logger.L().Ctx(ctx).Error("cyclonedx-json output requires scanned images")
 		return fmt.Errorf("cyclonedx-json output requires scanned images")
 	}
+	if cp.writer == nil {
+		return fmt.Errorf("failed to write cyclonedx-json output: output writer is nil")
+	}
 
 	encoder, err := cyclonedxjson.NewFormatEncoderWithConfig(cyclonedxjson.DefaultEncoderConfig())
 	if err != nil {

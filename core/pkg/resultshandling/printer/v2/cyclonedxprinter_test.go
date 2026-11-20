@@ -159,3 +159,14 @@ func TestActionPrint_CycloneDX_PostureScanWithImages(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &documents))
 	assert.Len(t, documents, 2, "a posture scan with --scan-images must emit one document per scanned image")
 }
+
+func TestActionPrint_CycloneDX_NilWriterReturnsError(t *testing.T) {
+	cp := NewCycloneDXPrinter()
+	imageScanData := []cautils.ImageScanData{buildSeverityExceptionImageScanData()}
+
+	require.NotPanics(t, func() {
+		err := cp.ActionPrint(context.Background(), nil, imageScanData)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
