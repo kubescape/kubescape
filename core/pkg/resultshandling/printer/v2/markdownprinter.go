@@ -56,6 +56,9 @@ func (mp *MarkdownPrinter) Score(score float32) {
 }
 
 func (mp *MarkdownPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if mp.writer == nil {
+		return fmt.Errorf("failed to write markdown results: output writer is nil")
+	}
 	if err := printer.PrepareOutput(mp.writer); err != nil {
 		return err
 	}
@@ -171,14 +174,18 @@ func mdWriteSummaryTable(w io.Writer, controls []reportsummary.ControlSummary) e
 
 	for i := range controls {
 		ctrl := &controls[i]
-		lists := ctrl.ListResourcesIDs(nil)
+		var failed, passed int
+		if lists := ctrl.ListResourcesIDs(nil); lists != nil {
+			failed = lists.Failed()
+			passed = lists.Passed()
+		}
 		ew.printf("| %s | %s | %s | %s | %d | %d |\n",
 			apis.ControlSeverityToString(ctrl.GetScoreFactor()),
 			mdEscapeCell(ctrl.GetName()),
 			mdEscapeCell(ctrl.GetID()),
 			mdStatusLabel(ctrl.GetStatus()),
-			lists.Failed(),
-			lists.Passed(),
+			failed,
+			passed,
 		)
 	}
 	ew.printf("\n")
@@ -188,7 +195,7 @@ func mdWriteSummaryTable(w io.Writer, controls []reportsummary.ControlSummary) e
 func mdWriteFailedSection(ctx context.Context, w io.Writer, controls []reportsummary.ControlSummary, session *cautils.OPASessionObj) error {
 	hasFailed := false
 	for i := range controls {
-		if controls[i].GetStatus().IsFailed() {
+		if status := controls[i].GetStatus(); status != nil && status.IsFailed() {
 			hasFailed = true
 			break
 		}
@@ -202,7 +209,7 @@ func mdWriteFailedSection(ctx context.Context, w io.Writer, controls []reportsum
 
 	for i := range controls {
 		ctrl := &controls[i]
-		if !ctrl.GetStatus().IsFailed() {
+		if status := ctrl.GetStatus(); status == nil || !status.IsFailed() {
 			continue
 		}
 
@@ -219,7 +226,10 @@ func mdWriteFailedSection(ctx context.Context, w io.Writer, controls []reportsum
 			return ew.err
 		}
 
-		failedIDs := ctrl.ListResourcesIDs(nil).GetItems(apis.StatusFailed)
+		var failedIDs []string
+		if lists := ctrl.ListResourcesIDs(nil); lists != nil {
+			failedIDs = lists.GetItems(apis.StatusFailed)
+		}
 		sort.Strings(failedIDs)
 
 		if len(failedIDs) == 0 {
@@ -230,6 +240,11 @@ func mdWriteFailedSection(ctx context.Context, w io.Writer, controls []reportsum
 		ew.printf("|---|---|---|\n")
 
 		for _, id := range failedIDs {
+			if session == nil {
+				logger.L().Ctx(ctx).Debug("resource missing from AllResources", helpers.String("resourceID", id))
+				ew.printf("| %s | — | — |\n", mdEscapeCell(id))
+				continue
+			}
 			res, ok := session.GetResource(id)
 			if !ok || res == nil {
 				logger.L().Ctx(ctx).Debug("resource missing from AllResources", helpers.String("resourceID", id))
