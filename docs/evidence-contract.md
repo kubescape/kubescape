@@ -198,8 +198,8 @@ The SARIF, HTML, CSV, GitLab SAST and GitHub Actions outputs read the same path 
 | Source of the resource | What is shown |
 |------------------------|---------------|
 | A YAML file | The file and the line |
-| A Helm chart | The template file. The line is shown only if the template contains no template actions (`{{`), because otherwise the rendered output no longer matches the file, and Kubescape prefers no line to a wrong one |
-| A Kustomize directory | The file Kustomize read the resource from, such as `base/deployment.yaml`, and no line. Where a field of a rendered resource can be traced to an overlay patch, the patching file is named next to the base file (e.g. `base/deployment.yaml (patch: overlay/patch.yaml)`). A resource that a generator made is attributed to the kustomization file that configures the generator. The output is composed from a base and overlays, so no single line in any file is the line of a field, and Kubescape prefers no line to a wrong one. A resource from a remote base, or from a file outside the scan root, is attributed to the directory |
+| A Helm chart | The template file. For templates without actions, or templates with actions where fields map unambiguously to the raw template, uncomposed fields resolve to their line in the template file. Templated or modified fields keep the file-only form without a line, because Kubescape prefers no line to a wrong one |
+| A Kustomize directory | The file Kustomize read the resource from, such as `base/deployment.yaml`. For fields that come straight from that originating file without being composed or modified, the line in that file is resolved. Where a field of a rendered resource can be traced to an overlay patch, the patching file is named next to the base file (e.g. `base/deployment.yaml (patch: overlay/patch.yaml)`). Composed, patched, or overlay-added fields keep the file-only form without a line, because Kubescape prefers no line to a wrong one. A resource that a generator made is attributed to the kustomization file that configures the generator. A resource from a remote base, or from a file outside the scan root, is attributed to the directory |
 | A live cluster | No file or line. With `--show-evidence` the terminal output prints, under each resource's table, a `kubectl get ... -o jsonpath=...` command per path, including `--context` for the cluster that was scanned. It prints nothing for a credential-shaped path unless `--show-secrets` is set, and for a fix path the command prints nothing when the field is absent |
 | Any source, with `--hide` or `--encrypt` | The path and value, but no line. Source paths are replaced by pseudonyms and cannot be read, and Kubescape warns about it |
 
@@ -256,7 +256,7 @@ None of these produce an error. The control fails as usual, and the evidence is 
 | The path is malformed | No line, marked `<unresolved>` | `spec.containers[*].image` |
 | An index is left unsubstituted | No line, marked `<unresolved>` | `spec.containers[container_ndx].image` |
 | The value was scrubbed | `[redacted]` is shown, or the entry is left out | A path into a ConfigMap's `data` |
-| The resource comes from a templated Helm file | The path, but no line | A template containing `{{ .Values.x }}` |
+| The field comes from a templated Helm action or composed Kustomize overlay | The path, but no line | A field generated or modified by a template action like `{{ .Values.x }}` or patched by an overlay |
 
 ---
 
