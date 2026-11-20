@@ -84,12 +84,13 @@ func NewScanPathFilter(input string, patterns []string, useIgnoreFile bool, dept
 
 	var combined []string
 	if useIgnoreFile {
+		ignoreFile := filepath.Join(root, IgnoreFileName)
 		filePatterns, err := LoadIgnoreFilePatterns(root)
 		if err != nil {
-			return nil, err
+			return nil, &IgnoreFileError{Path: ignoreFile, Err: err}
 		}
 		if err := ValidateIgnorePatterns(filePatterns); err != nil {
-			return nil, fmt.Errorf("%s: %w", filepath.Join(root, IgnoreFileName), err)
+			return nil, &IgnoreFileError{Path: ignoreFile, Err: fmt.Errorf("%s: %w", ignoreFile, err)}
 		}
 		combined = append(combined, filePatterns...)
 	}
@@ -126,6 +127,18 @@ func ValidateCommandLinePatterns(patterns []string) error {
 	}
 	return nil
 }
+
+// IgnoreFileError is the error NewScanPathFilter returns when the ignore file
+// at the scan root can't be read or holds an invalid pattern. Path is the file
+// it read, which the message names; the message is the wrapped error's.
+type IgnoreFileError struct {
+	Path string
+	Err  error
+}
+
+func (e *IgnoreFileError) Error() string { return e.Err.Error() }
+
+func (e *IgnoreFileError) Unwrap() error { return e.Err }
 
 var (
 	// ErrIgnoreFileNotRegular is returned when an ignore file is not a regular file.
@@ -391,10 +404,9 @@ func descendantPrefix(rule ignoreRule) string {
 }
 
 // IgnoreRoot is the directory NewScanPathFilter reads the ignore file from for
-// input. A repository input is cloned with the scan's clone depth, which must
-// be passed to find its clone.
-func IgnoreRoot(input string, depthOpt ...int) string {
-	return ignoreRoot(input, depthOpt...)
+// input.
+func IgnoreRoot(input string) string {
+	return ignoreRoot(input)
 }
 
 // ignoreRoot resolves the directory a scan input is anchored at. A file or a glob is

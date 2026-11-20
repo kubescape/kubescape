@@ -61,10 +61,13 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 			pathFilter, filterErr := pathFilterFromScanInfo(ctx, scanInfo.InputPatterns[path], scanInfo)
 			if filterErr != nil {
 				err = filterErr
-				// The error names the ignore file it read. Record where that
-				// is now: the anonymizer can't find it again for a repository
-				// cloned with another depth, or a directory gone by then.
-				ignoreFile = filepath.Join(cautils.IgnoreRoot(scanInfo.InputPatterns[path], cloneDepth), cautils.IgnoreFileName)
+				// Record the ignore file the error names. The anonymizer
+				// can't find it again from the input for a repository cloned
+				// with another depth, or a directory gone by then.
+				var ignoreErr *cautils.IgnoreFileError
+				if errors.As(filterErr, &ignoreErr) {
+					ignoreFile = ignoreErr.Path
+				}
 			} else {
 				input.root, input.sources, input.workloads, skipped, err = getResourcesFromInput(ctx, scanInfo.InputPatterns[path], helmValueOpts, pathFilter, cloneDepth, scanInfo.WorkspaceDir)
 				input.remote = remoteName(scanInfo.InputPatterns[path], cloneDepth)
