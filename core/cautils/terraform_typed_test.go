@@ -1399,7 +1399,7 @@ resource "kubernetes_priority_class_v1" "pc_v1" {
 	assert.Equal(t, "PersistentVolumeClaim", pvcV1["kind"])
 	assert.Equal(t, map[string]interface{}{"name": "log-pvc", "namespace": "monitoring"}, pvcV1["metadata"])
 
-	// PV: cluster-scoped, NO namespace in metadata
+	// PV: cluster-scoped, NO namespace in metadata; persistent_volume_source is flattened
 	pv := manifests[2]
 	assert.Equal(t, "v1", pv["apiVersion"])
 	assert.Equal(t, "PersistentVolume", pv["kind"])
@@ -1407,6 +1407,8 @@ resource "kubernetes_priority_class_v1" "pc_v1" {
 	pvSpec := pv["spec"].(map[string]interface{})
 	assert.Equal(t, "Retain", pvSpec["persistentVolumeReclaimPolicy"])
 	assert.Equal(t, []interface{}{"ReadWriteMany"}, pvSpec["accessModes"])
+	assert.Equal(t, map[string]interface{}{"path": "/export", "server": "nfs.internal"}, pvSpec["nfs"])
+	assert.NotContains(t, pvSpec, "persistentVolumeSource")
 
 	// PV v1: cluster-scoped
 	pvV1 := manifests[3]

@@ -252,6 +252,17 @@ func isBackendServicePortBlock(path, blockType string) bool {
 	return true
 }
 
+func isPersistentVolumeSourceBlock(path, blockType string) bool {
+	if blockType != "persistent_volume_source" {
+		return false
+	}
+	if !strings.HasSuffix(path, ".spec") {
+		return false
+	}
+	return strings.HasPrefix(path, "kubernetes_persistent_volume.") ||
+		strings.HasPrefix(path, "kubernetes_persistent_volume_v1.")
+}
+
 func isConvertiblePortField(path, name string) bool {
 	return isNetworkPolicyPortField(path, name) || isLegacyIngressBackendPortField(path, name) || isIngressBackendServicePortNumberField(path, name)
 }
@@ -384,6 +395,13 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 		blocks := grouped[blockType]
 		if isBackendServicePortBlock(path, blockType) {
 			out["port"] = hclBodyToMap(blocks[0].Body, evalCtx, errs, path+"."+blockType)
+			continue
+		}
+		if isPersistentVolumeSourceBlock(path, blockType) {
+			pvSource := hclBodyToMap(blocks[0].Body, evalCtx, errs, path+"."+blockType)
+			for k, v := range pvSource {
+				out[k] = v
+			}
 			continue
 		}
 		field := fieldNameFor(blockType)
