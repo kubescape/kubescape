@@ -85,6 +85,36 @@ func TestOperatorAdapter_OperatorScan(t *testing.T) {
 		assert.Len(t, list.Items, 1)
 	})
 
+	t.Run("partial creation reports already created commands", func(t *testing.T) {
+		dyn := newFakeOperatorCommandClient(t)
+		createErr := errors.New("quota exceeded")
+		attempts := 0
+		dyn.PrependReactor("create", "operatorcommands", func(clienttesting.Action) (bool, runtime.Object, error) {
+			attempts++
+			if attempts == 3 {
+				return true, nil, createErr
+			}
+			return false, nil, nil
+		})
+		payload := &apis.Commands{Commands: []apis.Command{
+			{CommandName: "scan-first"}, {CommandName: "scan-second"},
+			{CommandName: "scan-third"}, {CommandName: "scan-fourth"},
+		}}
+		adapter := NewOperatorAdapterWithClient(&fakeOperatorScanInfo{payload: payload}, "test-operator", dyn)
+
+		got, err := adapter.OperatorScan()
+
+		require.ErrorIs(t, err, createErr)
+		assert.Empty(t, got)
+		assert.ErrorContains(t, err, `already created OperatorCommands in namespace "test-operator": kubescape-cli-1, kubescape-cli-2`)
+		assert.ErrorContains(t, err, "check their status before retrying")
+		actions := dyn.Actions()
+		require.Len(t, actions, 3)
+		for _, action := range actions {
+			assert.True(t, action.Matches("create", "operatorcommands"))
+		}
+	})
+
 	t.Run("failed command is reported", func(t *testing.T) {
 		dyn := newFakeOperatorCommandClient(t)
 		dyn.PrependReactor("create", "operatorcommands", func(action clienttesting.Action) (bool, runtime.Object, error) {
