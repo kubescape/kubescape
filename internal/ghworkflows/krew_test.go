@@ -112,6 +112,7 @@ type krewPlatform struct {
 var krewPlatforms = []krewPlatform{
 	{os: "linux", arch: "amd64", binary: "kubescape"},
 	{os: "linux", arch: "arm64", binary: "kubescape"},
+	{os: "linux", arch: "s390x", binary: "kubescape"},
 	{os: "darwin", arch: "amd64", binary: "kubescape"},
 	{os: "darwin", arch: "arm64", binary: "kubescape"},
 	{os: "windows", arch: "amd64", binary: "kubescape.exe"},
