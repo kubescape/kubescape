@@ -331,3 +331,19 @@ func TestBoundedTerraformFunctions_CoalesceIncompatibleTypes(t *testing.T) {
 	require.False(t, diags.HasErrors(), diags.Error())
 	assert.True(t, got.RawEquals(cty.StringVal("fallback")), "try should catch type error and return fallback")
 }
+
+func TestBoundedTerraformFunctions_CoalesceOversizedConvertedResult(t *testing.T) {
+	// A collection of booleans measures ~262 KB before conversion, but ~1.3 MB
+	// when converted to list(string), exceeding maxTerraformFunctionSize.
+	numBools := 262144
+	boolElems := make([]cty.Value, numBools)
+	for i := range boolElems {
+		boolElems[i] = cty.True
+	}
+	locals := map[string]cty.Value{
+		"bools": cty.ListVal(boolElems),
+	}
+	_, diags := evalBoundedTerraformExpr(t, `coalesce(local.bools, tolist(["x"]))`, locals)
+	require.True(t, diags.HasErrors(), "coalesce with converted result exceeding size limit should produce error")
+	assert.Contains(t, diags.Error(), "argument exceeds the size limit")
+}
