@@ -40,11 +40,11 @@ func TestRunPrerequisites_NilClientReturnsError(t *testing.T) {
 	origBuild := buildKubeClient
 	t.Cleanup(func() { buildKubeClient = origBuild })
 
-	buildKubeClient = func(string) (*kubernetes.Clientset, bool) {
+	buildKubeClient = func(string, string) (*kubernetes.Clientset, bool) {
 		return nil, false
 	}
 
-	err := runPrerequisites(context.Background(), "")
+	err := runPrerequisites(context.Background(), "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "could not create kube client")
 }
@@ -57,7 +57,7 @@ func TestRunPrerequisites_CollectClusterDataErrorAborts(t *testing.T) {
 		collectClusterData = origCollect
 	})
 
-	buildKubeClient = func(string) (*kubernetes.Clientset, bool) {
+	buildKubeClient = func(string, string) (*kubernetes.Clientset, bool) {
 		// Non-nil sentinel is enough: collectClusterData is stubbed and never uses it.
 		return &kubernetes.Clientset{}, false
 	}
@@ -68,7 +68,7 @@ func TestRunPrerequisites_CollectClusterDataErrorAborts(t *testing.T) {
 		return &common.ClusterData{}, errors.New("pods is forbidden")
 	}
 
-	err := runPrerequisites(context.Background(), "/tmp/restricted.kubeconfig")
+	err := runPrerequisites(context.Background(), "/tmp/restricted.kubeconfig", "")
 	require.Error(t, err)
 	assert.True(t, collectCalled)
 	assert.ErrorContains(t, err, "failed to collect cluster data")
@@ -127,7 +127,7 @@ func TestGetPreReqCmd_Execute_DefaultKubeconfig(t *testing.T) {
 	})
 
 	var capturedPath string
-	buildKubeClient = func(path string) (*kubernetes.Clientset, bool) {
+	buildKubeClient = func(path, _ string) (*kubernetes.Clientset, bool) {
 		capturedPath = path
 		return &kubernetes.Clientset{}, false
 	}
@@ -160,7 +160,7 @@ func TestGetPreReqCmd_Execute_KubeconfigPassed(t *testing.T) {
 	})
 
 	var capturedPath string
-	buildKubeClient = func(path string) (*kubernetes.Clientset, bool) {
+	buildKubeClient = func(path, _ string) (*kubernetes.Clientset, bool) {
 		capturedPath = path
 		return &kubernetes.Clientset{}, false
 	}
@@ -188,7 +188,7 @@ func TestGetPreReqCmd_NilKubescape(t *testing.T) {
 	origBuild := buildKubeClient
 	t.Cleanup(func() { buildKubeClient = origBuild })
 
-	buildKubeClient = func(string) (*kubernetes.Clientset, bool) {
+	buildKubeClient = func(string, string) (*kubernetes.Clientset, bool) {
 		return nil, false
 	}
 
@@ -210,7 +210,7 @@ func TestGetPreReqCmd_NilKubescape_UsesCommandContext(t *testing.T) {
 		collectClusterData = origCollect
 	})
 
-	buildKubeClient = func(string) (*kubernetes.Clientset, bool) {
+	buildKubeClient = func(string, string) (*kubernetes.Clientset, bool) {
 		return &kubernetes.Clientset{}, false
 	}
 
@@ -268,7 +268,7 @@ func TestGetPreReqCmd_TrimsWhitespaceAroundKubeconfig(t *testing.T) {
 	})
 
 	var capturedPath string
-	buildKubeClient = func(path string) (*kubernetes.Clientset, bool) {
+	buildKubeClient = func(path, _ string) (*kubernetes.Clientset, bool) {
 		capturedPath = path
 		return &kubernetes.Clientset{}, false
 	}
