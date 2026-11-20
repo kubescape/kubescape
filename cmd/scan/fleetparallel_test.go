@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -23,6 +25,13 @@ const fleetChildEnv = "KUBESCAPE_TEST_FLEET_CHILD"
 
 // TestMain lets the test binary stand in for kubescape when a parallel fleet scan starts a child.
 func TestMain(m *testing.M) {
+	if os.Getenv(fleetChildEnv) == "diagnostics" {
+		fmt.Print(os.Args[1])
+		if os.Args[2] == "fail" {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	if os.Getenv(fleetChildEnv) == "1" {
 		cmd := GetScanCommand(core.NewKubescape(context.Background()))
 		cmd.SetArgs(os.Args[1:])
@@ -279,16 +288,101 @@ func TestReadChildCluster_DirectoryRejected(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrFleetFileNotRegular), "expected ErrFleetFileNotRegular, got %v", err)
 }
 
+func TestRunFleetChild_ReportAndLogDiagnostics(t *testing.T) {
+	const limit = 128
+	t.Setenv(cautils.MaxFileSizeEnvVar, "128")
+	t.Setenv(fleetChildEnv, "diagnostics")
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	previous := fleetChildCommand
+	t.Cleanup(func() { fleetChildCommand = previous })
+
+	const logTail = "retry started\nretry failed\ncheck credentials"
+	for _, tc := range []struct {
+		name       string
+		report     string
+		directory  bool
+		fail       bool
+		logTail    string
+		wantErr    error
+		wantDetail string
+	}{
+		{
+			name: "successful child with an oversized report", report: strings.Repeat(" ", limit+1),
+			logTail: logTail, wantErr: ErrFleetFileTooLarge,
+			wantDetail: "retry started | retry failed | check credentials",
+		},
+		{
+			name: "successful child with a non-regular report", directory: true,
+			logTail: logTail, wantErr: ErrFleetFileNotRegular,
+			wantDetail: "retry started | retry failed | check credentials",
+		},
+		{
+			name: "failed child with no report", fail: true,
+			logTail: logTail, wantErr: os.ErrNotExist, wantDetail: "exit status 1",
+		},
+		{
+			name: "failed child with a summary in the log tail", fail: true,
+			report:  `{"clusters":[{"context":"alpha"}]}`,
+			logTail: "alpha: check credentials (after 2 attempts)", wantDetail: "check credentials",
+		},
+		{
+			name: "failed child without a summary in the log tail", fail: true,
+			report:  `{"clusters":[{"context":"alpha"}]}`,
+			logTail: logTail, wantDetail: "the scan failed: retry started | retry failed | check credentials",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := filepath.Join(t.TempDir(), "child")
+			if tc.directory {
+				require.NoError(t, os.Mkdir(base+".json", 0o700))
+			} else if tc.report != "" {
+				require.NoError(t, os.WriteFile(base+".json", []byte(tc.report), 0o600))
+			}
+
+			exit := "success"
+			if tc.fail {
+				exit = "fail"
+			}
+			childLog := "alpha: stale error\n" + strings.Repeat("x", 2*limit) + "\n" + tc.logTail
+			fleetChildCommand = func(ctx context.Context, _ []string) (*exec.Cmd, error) {
+				return exec.CommandContext(ctx, executable, childLog, exit), nil
+			}
+
+			outcome := runFleetChild(t.Context(), "alpha", &cautils.ScanInfo{}, nil, base)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, outcome.err, tc.wantErr)
+				assert.ErrorContains(t, outcome.err, tc.wantDetail)
+				assert.Equal(t, outcome.err.Error(), outcome.cluster.Error)
+				assert.NotContains(t, outcome.cluster.Error, "<nil>")
+			} else {
+				assert.EqualError(t, outcome.err, tc.wantDetail)
+			}
+		})
+	}
+}
+
 func TestLastLines_OversizedFile(t *testing.T) {
-	t.Setenv(cautils.MaxFileSizeEnvVar, "10")
-	dir := t.TempDir()
-	path := filepath.Join(dir, "child.log")
+	t.Setenv(cautils.MaxFileSizeEnvVar, "12")
+	path := filepath.Join(t.TempDir(), "child.log")
 	require.NoError(t, os.WriteFile(path, []byte("line1\nline2\nline3\nline4\nline5\n"), 0o600))
 
-	assert.Empty(t, lastLines(path, 3))
+	assert.Equal(t, "line4 | line5", lastLines(path, 3))
 }
 
 func TestChildFailure_DirectoryRejected(t *testing.T) {
 	dir := t.TempDir()
 	assert.Equal(t, "the scan failed", childFailure(dir, "alpha"))
+}
+
+func TestChildFailure_LogTailLineBoundary(t *testing.T) {
+	const tail = "alpha: a message\nsubsequent detail"
+	t.Setenv(cautils.MaxFileSizeEnvVar, fmt.Sprint(len(tail)))
+	path := filepath.Join(t.TempDir(), "child.log")
+
+	require.NoError(t, os.WriteFile(path, []byte("earlier line\n"+tail), 0o600))
+	assert.Equal(t, "a message", childFailure(path, "alpha"))
+
+	require.NoError(t, os.WriteFile(path, []byte("prefix on the same line: "+tail), 0o600))
+	assert.Equal(t, "the scan failed: alpha: a message | subsequent detail", childFailure(path, "alpha"))
 }
