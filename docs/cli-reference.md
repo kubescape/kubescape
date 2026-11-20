@@ -825,6 +825,8 @@ kubescape scan control C-0013 /path/to/deployment.yaml
 cat ./manifests/deployment.yaml | kubescape scan control C-0013 -
 ```
 
+A manifest read from stdin (`-`) is named `stdin.yaml` in the report.
+
 ---
 
 ## kubescape scan workload
