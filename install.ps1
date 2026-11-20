@@ -178,10 +178,22 @@ if (-not $expected) {
     exit 1
 }
 
-# Get-FileHash returns uppercase, the manifest is lowercase; normalise both
-# rather than leaning on -ne being case-insensitive.
-Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
-$actual = (Get-FileHash -Path $downloadPath -Algorithm SHA256).Hash.ToLowerInvariant()
+# Convert the SHA256 digest to lowercase to match the checksum manifest.
+
+$sha256 = [System.Security.Cryptography.SHA256]::Create()
+$fileStream = $null
+
+try {
+    $fileStream = [System.IO.File]::OpenRead($downloadPath)
+    $hashBytes = $sha256.ComputeHash($fileStream)
+    $actual = ([System.BitConverter]::ToString($hashBytes)).Replace("-", "").ToLowerInvariant()
+} finally {
+    if ($null -ne $fileStream) {
+        $fileStream.Dispose()
+    }
+    $sha256.Dispose()
+}
+
 if ($actual -ne $expected) {
     Write-Host "Error: checksum mismatch for $asset" -ForegroundColor Red
     Write-Host "  expected: $expected" -ForegroundColor Red
