@@ -73,7 +73,8 @@ func (cp *ClusterPrinter) printTopWorkloads(topWorkloadsByScore []reporthandling
 		ns := wl.GetNamespace()
 		name := wl.GetName()
 		kind := wl.GetKind()
-		cautils.SimpleDisplay(cp.writer, "%d. namespace: %s, name: %s, kind: %s\n", i+1, ns, name, kind)
+		cmdPrefix := getWorkloadPrefixForCmd(ns, kind, name)
+		cautils.SimpleDisplay(cp.writer, "%d. %s\n", i+1, cmdPrefix)
 		cautils.SimpleDisplay(cp.writer, "   '%s'\n", getCallToActionString(cp.getWorkloadScanCommand(ns, kind, name)))
 	}
 
@@ -81,5 +82,8 @@ func (cp *ClusterPrinter) printTopWorkloads(topWorkloadsByScore []reporthandling
 }
 
 func (cp *ClusterPrinter) getWorkloadScanCommand(namespace, kind, name string) string {
+	if namespace == "" {
+		return fmt.Sprintf("$ kubescape scan workload %s/%s", kind, name)
+	}
 	return fmt.Sprintf("$ kubescape scan workload %s/%s --namespace %s", kind, name, namespace)
 }
