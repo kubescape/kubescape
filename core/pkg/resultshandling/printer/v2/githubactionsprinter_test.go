@@ -458,7 +458,7 @@ func TestGitHubActionsPrinter_StepSummary(t *testing.T) {
 		FailedGVRPulls: []cautils.FailedGVRPull{
 			{
 				GVR:   "apps/v1/deployments",
-				Error: "the server could not find the requested resource",
+				Error: "failed to read https://example.com/pod_test.yaml and https://example.com<b title=x>warning",
 			},
 		},
 	}
@@ -478,8 +478,7 @@ func TestGitHubActionsPrinter_StepSummary(t *testing.T) {
 	assert.Contains(t, summary, "| C-0099 |")
 	assert.Contains(t, summary, "missing: apps/v1/deployments")
 	assert.Contains(t, summary, "#### Failed Resource Queries")
-	assert.Contains(t, summary, "| apps/v1/deployments |")
-	assert.Contains(t, summary, "the server could not find the requested resource")
+	assert.Contains(t, summary, "| apps/v1/deployments | failed to read https&#58;//example.com/pod\\_test.yaml and https&#58;//example.com&lt;b title=x&gt;warning |")
 }
 
 func TestGitHubActionsPrinter_StepSummaryUnset(t *testing.T) {
@@ -887,7 +886,7 @@ func TestSanitizeMarkdownTableCell_StripsControlsAndBackticks(t *testing.T) {
 		{
 			name:     "escapes markdown formatting characters (*, _, <, >, [, ], ~)",
 			input:    "error in *.yaml* and _value_ and <nil> and [selector] and ~~strikethrough~~ and path\\to\\file",
-			expected: "error in \\*.yaml\\* and \\_value\\_ and \\<nil\\> and \\[selector\\] and \\~\\~strikethrough\\~\\~ and path\\\\to\\\\file",
+			expected: "error in \\*.yaml\\* and \\_value\\_ and &lt;nil&gt; and \\[selector\\] and \\~\\~strikethrough\\~\\~ and path\\\\to\\\\file",
 		},
 		{
 			name:     "escapes standalone asterisk and underscore",
@@ -897,7 +896,27 @@ func TestSanitizeMarkdownTableCell_StripsControlsAndBackticks(t *testing.T) {
 		{
 			name:     "escapes angle-bracket tags to prevent html swallowing",
 			input:    "resource <default/pod> failed <nil>",
-			expected: "resource \\<default/pod\\> failed \\<nil\\>",
+			expected: "resource &lt;default/pod&gt; failed &lt;nil&gt;",
+		},
+		{
+			name:     "prevents URL autolinking without changing displayed text",
+			input:    "https://example.com/pod_test.yaml?ref=a&name=b",
+			expected: "https&#58;//example.com/pod\\_test.yaml?ref=a&amp;name=b",
+		},
+		{
+			name:     "escapes angle brackets adjacent to a URL",
+			input:    "https://example.com<b title=x>warning",
+			expected: "https&#58;//example.com&lt;b title=x&gt;warning",
+		},
+		{
+			name:     "prevents autolinks formed by stripping controls",
+			input:    "https:\x00//example.com and ww\x1bw.example.com/pod_test.yaml",
+			expected: "https&#58;//example.com and www&#46;example.com/pod\\_test.yaml",
+		},
+		{
+			name:     "preserves literal character references",
+			input:    "received &lt; and &#95;",
+			expected: "received &amp;lt; and &amp;#95;",
 		},
 		{
 			name:     "preserves tab and unicode",
@@ -988,9 +1007,9 @@ func TestGenerateStepSummary_EscapesMarkdownCharactersInTables(t *testing.T) {
 	}
 
 	summary := generateStepSummaryWithBudget(session, 1024*1024)
-	assert.Contains(t, summary, "failed with \\*.yaml\\* and \\<nil\\> and \\[selector\\]")
+	assert.Contains(t, summary, "failed with \\*.yaml\\* and &lt;nil&gt; and \\[selector\\]")
 	assert.Contains(t, summary, "manifests/pod\\_test.yaml")
-	assert.Contains(t, summary, "skipped because of \\~\\~deprecated\\~\\~ and \\<custom-tag\\>")
+	assert.Contains(t, summary, "skipped because of \\~\\~deprecated\\~\\~ and &lt;custom-tag&gt;")
 }
 
 func TestGitHubActionsPrinter_FilePathWithControls_EmitsWithoutLocation(t *testing.T) {
