@@ -7,6 +7,8 @@ import (
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
+	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/convert"
 )
 
 // typedResourceGVK maps the typed kubernetes_* Terraform provider resources we
@@ -575,20 +577,81 @@ var providerPodSpecDefaults = map[string]interface{}{
 	"automount_service_account_token": true,
 }
 
-// hasUnresolvableVariables reports whether any variable traversal referenced in
-// expr cannot be resolved in evalCtx. This prevents expressions that wrap
-// unresolvable references in try(...) from having provider defaults applied
-// when try() suppresses diagnostics and evaluates to null.
+// unwrapParentheses strips any enclosing grouping parentheses from expr.
+func unwrapParentheses(expr hcl.Expression) hcl.Expression {
+	for {
+		p, ok := expr.(*hclsyntax.ParenthesesExpr)
+		if !ok || p == nil {
+			return expr
+		}
+		expr = p.Expression
+	}
+}
+
+// hasUnresolvableVariables reports whether expr cannot be resolved in evalCtx,
+// or whether expr evaluated to null because an unresolvable reference in a
+// try(...) or conditional expression failed and fell back to null.
+//
+// Unused fallbacks in try(...) that reference unresolvable variables do not
+// prevent provider defaults when the primary operand evaluates cleanly without
+// error.
 func hasUnresolvableVariables(expr hcl.Expression, evalCtx *hcl.EvalContext) bool {
+	expr = unwrapParentheses(expr)
 	if expr == nil {
 		return false
 	}
+	if evalCtx == nil {
+		return len(expr.Variables()) > 0
+	}
+
+	if val, diags := expr.Value(evalCtx); !diags.HasErrors() && !val.IsKnown() {
+		return true
+	}
+
+	if call, ok := expr.(*hclsyntax.FunctionCallExpr); ok && call.Name == "try" {
+		hadUnresolvableArg := false
+		for _, rawArg := range call.Args {
+			arg := unwrapParentheses(rawArg)
+			val, diags := arg.Value(evalCtx)
+			if diags.HasErrors() || !val.IsKnown() {
+				if hasUnresolvableVariables(arg, evalCtx) {
+					hadUnresolvableArg = true
+				}
+				continue
+			}
+			if hadUnresolvableArg {
+				// An earlier argument failed due to an unresolvable reference;
+				// try() suppressed that unresolvable reference to use this fallback.
+				return true
+			}
+			// This candidate succeeded without being preceded by an unresolvable reference.
+			return hasUnresolvableVariables(arg, evalCtx)
+		}
+		return true
+	}
+
+	if cond, ok := expr.(*hclsyntax.ConditionalExpr); ok {
+		condExpr := unwrapParentheses(cond.Condition)
+		if hasUnresolvableVariables(condExpr, evalCtx) {
+			return true
+		}
+		val, diags := condExpr.Value(evalCtx)
+		if diags.HasErrors() || !val.IsKnown() || val.IsNull() {
+			return true
+		}
+		boolVal, err := convert.Convert(val, cty.Bool)
+		if err != nil || !boolVal.IsKnown() || boolVal.IsNull() {
+			return true
+		}
+		if boolVal.True() {
+			return hasUnresolvableVariables(cond.TrueResult, evalCtx)
+		}
+		return hasUnresolvableVariables(cond.FalseResult, evalCtx)
+	}
+
 	vars := expr.Variables()
 	if len(vars) == 0 {
 		return false
-	}
-	if evalCtx == nil {
-		return true
 	}
 	for _, traversal := range vars {
 		if traversal.IsRelative() {
