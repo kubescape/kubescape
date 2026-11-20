@@ -108,6 +108,25 @@ func TestRunCELOnK8sParamRef(t *testing.T) {
 		assert.Empty(t, responses, "the binding's params allow every capability, so the pod passes")
 	})
 
+	t.Run("a named paramRef resolves from the collected param objects", func(t *testing.T) {
+		// Cluster scans collect the referenced ControlConfiguration separately
+		// from the scanned resources, so the finder must index VAPParamObjects
+		// too, not just the catalog.
+		config := metav1unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "kubescape.io/v1",
+			"kind":       "ControlConfiguration",
+			"metadata":   map[string]any{"name": "permissive-config"},
+			"settings":   map[string]any{"insecureCapabilities": []any{}},
+		}}
+
+		opap := paramRefProcessor(paramRefBindingFor(t, "C-0046", map[string]any{"name": "permissive-config"}))
+		opap.VAPParamObjects = []metav1unstructured.Unstructured{config}
+
+		responses, _, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{privilegedPod}, nil, "C-0046")
+		require.NoError(t, err)
+		assert.Empty(t, responses, "the collected params allow every capability, so the pod passes")
+	})
+
 	t.Run("a paramless control ignores the selector, as the apiserver does", func(t *testing.T) {
 		selector := map[string]any{"selector": map[string]any{
 			"matchLabels": map[string]any{"tier": "strict"},

@@ -22,6 +22,10 @@ const (
 	vapResource        = "validatingadmissionpolicies"
 	vapBindingResource = "validatingadmissionpolicybindings"
 
+	paramGroup    = "kubescape.io"
+	paramVersion  = "v1"
+	paramResource = "controlconfigurations"
+
 	// controlIDLabel is the label cel-admission-library stamps a control's
 	// policy with. Policies without it are not addressable by control.
 	controlIDLabel = "controlId"
@@ -51,16 +55,29 @@ func Collect(ctx context.Context, k8s *k8sinterface.KubernetesApi) ([]unstructur
 		return nil, nil, err
 	}
 
-	policies, err := list(ctx, k8s.DynamicClient, version, vapResource)
+	policies, err := list(ctx, k8s.DynamicClient, schema.GroupVersionResource{Group: vapGroup, Version: version, Resource: vapResource})
 	if err != nil {
 		return nil, nil, err
 	}
-	bindings, err := list(ctx, k8s.DynamicClient, version, vapBindingResource)
+	bindings, err := list(ctx, k8s.DynamicClient, schema.GroupVersionResource{Group: vapGroup, Version: version, Resource: vapBindingResource})
 	if err != nil {
 		return nil, nil, err
 	}
 
 	return policies, bindings, nil
+}
+
+// CollectControlConfigurations lists the cluster-scoped
+// controlconfigurations.kubescape.io objects that live bindings reference by
+// spec.paramRef.name. A cluster without the API returns ErrUnsupported, and
+// credentials that may not list it ErrForbidden.
+func CollectControlConfigurations(ctx context.Context, k8s *k8sinterface.KubernetesApi) ([]unstructured.Unstructured, error) {
+	if k8s == nil || k8s.DynamicClient == nil {
+		return nil, ErrUnsupported
+	}
+
+	gvr := schema.GroupVersionResource{Group: paramGroup, Version: paramVersion, Resource: paramResource}
+	return list(ctx, k8s.DynamicClient, gvr)
 }
 
 // resolveVersion returns the first VAP version the cluster both advertises and
@@ -115,13 +132,11 @@ func serves(resources *metav1.APIResourceList, names ...string) bool {
 	return true
 }
 
-// list pulls every object of one cluster-scoped VAP resource. A resource that
+// list pulls every object of one cluster-scoped resource. A resource that
 // discovery advertised but the API server does not route is reported as
 // unsupported, and one the credentials may not read as forbidden; neither is a
 // scan failure.
-func list(ctx context.Context, client dynamic.Interface, version, resource string) ([]unstructured.Unstructured, error) {
-	gvr := schema.GroupVersionResource{Group: vapGroup, Version: version, Resource: resource}
-
+func list(ctx context.Context, client dynamic.Interface, gvr schema.GroupVersionResource) ([]unstructured.Unstructured, error) {
 	var items []unstructured.Unstructured
 	listFunc := func(opts metav1.ListOptions) (string, error) {
 		listed, err := client.Resource(gvr).List(ctx, opts)
