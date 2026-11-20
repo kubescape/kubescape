@@ -169,11 +169,11 @@ func (drp *DownloadReleasedPolicy) SetRegoObjectsWithFallbackContext(ctx context
 	return false, nil
 }
 
-// GetControl returns a control by its control ID or, when it carries one, its
-// framework section number; see controlMatcher. The released store only
-// indexes control IDs, so a section number is resolved from the full control
-// list, and only after the control ID lookup reported the control as not
-// found. A failure to read the catalog is returned as is, never as an
+// GetControl returns a control by its control ID, its name or, when it carries
+// one, its framework section number; see controlMatcher. The released store
+// only indexes control IDs, so a name or a section number is resolved from the
+// full control list, and only after the control ID lookup reported the control
+// as not found. A failure to read the catalog is returned as is, never as an
 // unknown control.
 func (drp *DownloadReleasedPolicy) GetControl(ID string) (*reporthandling.Control, error) {
 	id := strings.TrimSpace(ID)

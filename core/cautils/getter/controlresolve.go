@@ -21,24 +21,24 @@ type controlNotFoundError struct{ cause error }
 func (e *controlNotFoundError) Error() string   { return e.cause.Error() }
 func (e *controlNotFoundError) Unwrap() []error { return []error{ErrControlNotFound, e.cause} }
 
-// AmbiguousControlError reports a section number carried by more than one
-// control. It matches ErrControlAmbiguous with errors.Is.
+// AmbiguousControlError reports a section number or a name carried by more
+// than one control. It matches ErrControlAmbiguous with errors.Is.
 type AmbiguousControlError struct {
-	// Identifier is the normalized section number that was requested.
+	// Identifier is the normalized section number or name that was requested.
 	Identifier string
 	// Matches holds the control IDs that carry it.
 	Matches []string
 }
 
 func (e *AmbiguousControlError) Error() string {
-	return fmt.Sprintf("%v: %q is the section number of %s", ErrControlAmbiguous, e.Identifier, strings.Join(e.Matches, ", "))
+	return fmt.Sprintf("%v: %q is the section number or name of %s", ErrControlAmbiguous, e.Identifier, strings.Join(e.Matches, ", "))
 }
 
 func (e *AmbiguousControlError) Unwrap() error { return ErrControlAmbiguous }
 
-// ResolveControl resolves one user-supplied control identifier, a control ID
-// or a framework section number, with the policy getter's own GetControl, so
-// every caller sees the same matching rules. It returns:
+// ResolveControl resolves one user-supplied control identifier, a control ID,
+// a framework section number or a control name, with the policy getter's own
+// GetControl, so every caller sees the same matching rules. It returns:
 //
 //   - ErrIDRequired for an empty or whitespace-only identifier, as the getters
 //     report it;

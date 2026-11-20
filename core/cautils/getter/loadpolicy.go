@@ -182,8 +182,8 @@ func (lp *LoadPolicy) ShouldPersistPolicyArtifacts() bool {
 }
 
 // GetControl returns a control from the policy file. The control is named by
-// its control ID or, when it carries one, its framework section number; see
-// controlMatcher.
+// its control ID, its name or, when it carries one, its framework section
+// number; see controlMatcher.
 //
 // A file that cannot be read or decoded is skipped, so a partly damaged cache
 // still answers for the controls in its other files. If no file is usable the

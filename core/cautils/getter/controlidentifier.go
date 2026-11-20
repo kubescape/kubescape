@@ -7,19 +7,20 @@ import (
 )
 
 // controlMatcher resolves a user-supplied control identifier against candidate
-// controls. It accepts the same two identifiers as cautils.ControlIdentifiers
-// (which getter cannot import): the Kubescape control ID (ControlID, e.g.
-// "C-0286") and, where the control carries one, its framework section number
-// (Control_ID, e.g. "CIS-3.1.1"). Matching is case-insensitive and ignores
-// surrounding whitespace.
+// controls. It accepts the two identifiers of cautils.ControlIdentifiers (which
+// getter cannot import): the Kubescape control ID (ControlID, e.g. "C-0286")
+// and, where the control carries one, its framework section number (Control_ID,
+// e.g. "CIS-3.1.1"). It also accepts the control name (e.g. "Privileged
+// container"), which the scan control help advertises. Matching is
+// case-insensitive and ignores surrounding whitespace.
 //
-// A control ID is unique, so it always wins. A section number is only
+// A control ID is unique, so it always wins. A section number or a name is only
 // accepted when every control that carries it is the same control; two
-// different controls sharing a section number is reported as
-// ErrControlAmbiguous rather than resolved to whichever was seen first.
+// different controls sharing one is reported as ErrControlAmbiguous rather than
+// resolved to whichever was seen first.
 type controlMatcher struct {
 	id       string
-	sections []reporthandling.Control // distinct by ControlID
+	sections []reporthandling.Control // distinct by ControlID; matched by section number or name
 }
 
 func newControlMatcher(id string) *controlMatcher {
@@ -36,7 +37,7 @@ func (m *controlMatcher) offer(control *reporthandling.Control) bool {
 	if normalizeControlIdentifier(control.ControlID) == m.id {
 		return true
 	}
-	if normalizeControlIdentifier(control.Control_ID) != m.id {
+	if normalizeControlIdentifier(control.Control_ID) != m.id && normalizeControlIdentifier(control.Name) != m.id {
 		return false
 	}
 	for i := range m.sections {
@@ -48,8 +49,8 @@ func (m *controlMatcher) offer(control *reporthandling.Control) bool {
 	return false
 }
 
-// bySection returns the control the identifier names by section number. It
-// returns (nil, nil) when no candidate carried it.
+// bySection returns the control the identifier names by section number or
+// name. It returns (nil, nil) when no candidate carried it.
 func (m *controlMatcher) bySection() (*reporthandling.Control, error) {
 	switch len(m.sections) {
 	case 0:
