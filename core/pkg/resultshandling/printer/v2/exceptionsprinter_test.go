@@ -557,3 +557,69 @@ func TestExceptionsPrinter_RejectsImageScanData(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, raw, "a partial report must not appear when combined scan is rejected")
 }
+
+func TestActionPrint_NilWriterReturnsError(t *testing.T) {
+	ep := NewExceptionsPrinter()
+	session := exceptionsSession(t)
+
+	require.NotPanics(t, func() {
+		err := ep.ActionPrint(context.Background(), session, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestBuildExceptionPolicies_SkipsEmptyAndWhitespaceControlIDs(t *testing.T) {
+	session := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			ReportGenerationTime: time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC),
+		},
+		AllResources: map[string]workloadinterface.IMetadata{
+			"api": exceptionsWorkload(t, "Deployment", "prod", "api"),
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			"api": {
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					failedControl(""),
+					failedControl("   "),
+					failedControl("\t\n"),
+					failedControl("C-0001"),
+				},
+			},
+		},
+	}
+
+	policies := buildExceptionPolicies(context.Background(), session)
+	require.Len(t, policies, 1)
+	assert.Equal(t, "exclude-C-0001", policies[0].Name)
+	require.Len(t, policies[0].PosturePolicies, 1)
+	assert.Equal(t, "C-0001", policies[0].PosturePolicies[0].ControlID)
+
+	for _, policy := range policies {
+		for _, pp := range policy.PosturePolicies {
+			assert.NotEmpty(t, pp.ControlID, "controlID must not be empty or wildcard")
+		}
+	}
+}
+
+func TestHasFailedControl_IgnoresEmptyControlIDs(t *testing.T) {
+	result := resourcesresults.Result{
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			failedControl(""),
+			failedControl("   "),
+		},
+	}
+	assert.False(t, hasFailedControl(nil, result))
+
+	resultWithValidControl := resourcesresults.Result{
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			failedControl(""),
+			failedControl("C-0001"),
+		},
+	}
+	assert.True(t, hasFailedControl(nil, resultWithValidControl))
+}
+
+func TestSourcePath_NilResourceDoesNotPanic(t *testing.T) {
+	assert.Empty(t, sourcePath(nil))
+}
