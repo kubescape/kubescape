@@ -1990,11 +1990,13 @@ func TestSARIFMultipleImageRunsHaveDistinctCategories(t *testing.T) {
 	cases := []struct {
 		name    string
 		session *cautils.OPASessionObj
+		images  []cautils.ImageScanData
 		// imageRuns is the part of the report the images occupy.
 		firstImageRun int
 	}{
-		{name: "image scan"},
-		{name: "combined scan", session: configurationOutputFixture(t, 1), firstImageRun: 1},
+		{name: "image scan", images: []cautils.ImageScanData{imageA, imageB}},
+		{name: "combined scan", session: configurationOutputFixture(t, 1), images: []cautils.ImageScanData{imageA, imageB}, firstImageRun: 1},
+		{name: "combined scan with single image", session: configurationOutputFixture(t, 1), images: []cautils.ImageScanData{imageA}, firstImageRun: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2002,7 +2004,7 @@ func TestSARIFMultipleImageRunsHaveDistinctCategories(t *testing.T) {
 			require.NoError(t, err)
 			sp := NewSARIFPrinter(false)
 			sp.writer = tmp
-			require.NoError(t, sp.ActionPrint(context.Background(), tc.session, []cautils.ImageScanData{imageA, imageB}))
+			require.NoError(t, sp.ActionPrint(context.Background(), tc.session, tc.images))
 			require.NoError(t, tmp.Close())
 
 			raw, err := os.ReadFile(tmp.Name())
@@ -2011,7 +2013,7 @@ func TestSARIFMultipleImageRunsHaveDistinctCategories(t *testing.T) {
 
 			var report sarif.Report
 			require.NoError(t, json.Unmarshal(raw, &report))
-			require.Len(t, report.Runs, tc.firstImageRun+2)
+			require.Len(t, report.Runs, tc.firstImageRun+len(tc.images))
 
 			seen := map[string]bool{}
 			for _, run := range report.Runs[tc.firstImageRun:] {
@@ -2021,6 +2023,15 @@ func TestSARIFMultipleImageRunsHaveDistinctCategories(t *testing.T) {
 				assert.True(t, strings.HasSuffix(id, "/"), "id %q would be split into a category and a run ID", id)
 				assert.False(t, seen[id], "two runs share category %q", id)
 				seen[id] = true
+			}
+			if tc.firstImageRun > 0 {
+				configCategory := ""
+				if report.Runs[0].AutomationDetails != nil && report.Runs[0].AutomationDetails.ID != nil {
+					configCategory = *report.Runs[0].AutomationDetails.ID
+				}
+				for _, run := range report.Runs[tc.firstImageRun:] {
+					assert.NotEqual(t, configCategory, *run.AutomationDetails.ID, "image run category collides with configuration run")
+				}
 			}
 		})
 	}
