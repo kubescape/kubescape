@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"syscall"
 
 	"gopkg.in/yaml.v3"
@@ -25,8 +24,9 @@ var (
 // openContractFile opens path for reading and rejects non-regular files (such as FIFOs,
 // device nodes, or directories). O_NONBLOCK ensures that opening a FIFO without a writer
 // fails or returns immediately rather than blocking the process indefinitely.
+// Preserve the path so a symlink followed by .. is resolved by the filesystem.
 func openContractFile(path string) (*os.File, os.FileInfo, error) {
-	file, err := os.OpenFile(filepath.Clean(path), os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, nil, err
 	}

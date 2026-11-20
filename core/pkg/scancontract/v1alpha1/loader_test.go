@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -298,6 +299,30 @@ func TestLoadFile_Valid(t *testing.T) {
 	require.NotNil(t, selected)
 	assert.Equal(t, "payments-service", selected.Metadata.Name)
 	assert.Equal(t, "developer", selected.ContractName)
+}
+
+func TestLoadFile_PreservesSymlinkParentTraversal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink parent traversal uses different path semantics on Windows")
+	}
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target", "child")
+	require.NoError(t, os.MkdirAll(target, 0o700))
+	link := filepath.Join(dir, "link")
+	require.NoError(t, os.Symlink(target, link))
+
+	// Both paths are valid, but only the symlink's parent selects the CI gates.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "contract.yaml"), []byte(validContract), 0o600))
+	ciContract := strings.Replace(validContract, "defaultContract: developer", "defaultContract: ci", 1)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "target", "contract.yaml"), []byte(ciContract), 0o600))
+
+	selected, err := LoadFile(link+"/../contract.yaml", testOptions())
+	require.NoError(t, err)
+	assert.Equal(t, "ci", selected.ContractName)
+	require.NotNil(t, selected.Contract.Failure)
+	require.NotNil(t, selected.Contract.Failure.ComplianceBelow)
+	assert.Equal(t, float64(80), *selected.Contract.Failure.ComplianceBelow)
 }
 
 func TestLoadFile_EmptyFile(t *testing.T) {
