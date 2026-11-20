@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -681,6 +682,10 @@ func transformSessionInPlace(session *cautils.OPASessionObj, transformer Transfo
 // across the report. The loader's reasons embed the same path, raw (an
 // os.PathError) or %q-quoted, so the path is replaced inside the reason too
 // and the rest of the diagnostic is kept.
+//
+// All replacements in a reason are made in one pass, so a pseudonym that was
+// just written is never matched again: the pseudonym "src-<hash>" of an input
+// named "src" contains "src".
 func transformSkippedManifests(skipped []cautils.SkippedManifest, transformer Transformer) error {
 	for i := range skipped {
 		original := skipped[i].Path
@@ -691,11 +696,48 @@ func transformSkippedManifests(skipped []cautils.SkippedManifest, transformer Tr
 		if err != nil {
 			return err
 		}
+		replacements, err := ignoreFileReplacements(skipped[i].Reason, original, transformed, transformer)
+		if err != nil {
+			return err
+		}
+		// At a position where several match, strings.Replacer uses the
+		// first pair, so the ignore file's longer paths go first.
+		replacements = append(replacements,
+			strconv.Quote(original), strconv.Quote(transformed),
+			original, transformed,
+		)
 		skipped[i].Path = transformed
-		reason := strings.ReplaceAll(skipped[i].Reason, strconv.Quote(original), strconv.Quote(transformed))
-		skipped[i].Reason = strings.ReplaceAll(reason, original, transformed)
+		skipped[i].Reason = strings.NewReplacer(replacements...).Replace(skipped[i].Reason)
 	}
 	return nil
+}
+
+// ignoreFileReplacements returns the old, new pairs that replace, in reason,
+// the path of the ignore file the scan reads for input. A multi-input scan
+// skips an input whose ignore file can't be used, and the error names that
+// file. For a file or a glob input it is in the input's directory, not under
+// the input path, so the directory gets its own pseudonym and the file keeps
+// its name.
+func ignoreFileReplacements(reason, input, transformedInput string, transformer Transformer) ([]string, error) {
+	root := cautils.IgnoreRoot(input)
+	if root == "." {
+		return nil, nil
+	}
+	ignoreFile := filepath.Join(root, cautils.IgnoreFileName)
+	quoted := strconv.Quote(ignoreFile)
+	if !strings.Contains(reason, ignoreFile) && !strings.Contains(reason, quoted) {
+		return nil, nil
+	}
+	transformedRoot := transformedInput
+	if root != input {
+		var err error
+		if transformedRoot, err = transformValue(transformer, "src", root); err != nil {
+			return nil, err
+		}
+	}
+	// Not filepath.Join: an encrypted root is base64 and may contain "//".
+	replacement := transformedRoot + string(filepath.Separator) + cautils.IgnoreFileName
+	return []string{quoted, strconv.Quote(replacement), ignoreFile, replacement}, nil
 }
 
 func remapControlResourceIDs(controls reportsummary.ControlSummaries, transformer Transformer, idMapping map[string]string) error {
