@@ -568,3 +568,33 @@ func TestGetDownloadCmd_NilKubescape(t *testing.T) {
 	err := cmd.Execute()
 	require.EqualError(t, err, "uninitialized kubescape interface")
 }
+
+func TestGetDownloadCmd_TargetCompletion(t *testing.T) {
+	cmd := GetDownloadCmd(nil)
+
+	require.NotNil(t, cmd.ValidArgsFunction)
+
+	suggestions, directive := cmd.ValidArgsFunction(cmd, nil, "")
+	assert.Equal(t, core.DownloadSupportCommands(), suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "frame")
+	assert.Equal(t, []string{core.TargetFramework}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+}
+
+func TestGetDownloadCmd_IdentifierCompletion(t *testing.T) {
+	cmd := GetDownloadCmd(nil)
+
+	suggestions, directive := cmd.ValidArgsFunction(
+		cmd, []string{core.TargetFramework}, "",
+	)
+	assert.Empty(t, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(
+		cmd, []string{core.TargetControlsInputs}, "",
+	)
+	assert.Empty(t, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveDefault, directive)
+}

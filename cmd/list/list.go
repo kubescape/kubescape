@@ -62,6 +62,19 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 		Short:   "List the supported frameworks, controls and control configuration",
 		Long:    ``,
 		Example: listExample,
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) > 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+
+			var suggestions []string
+			for _, target := range core.ListSupportActions() {
+				if strings.HasPrefix(strings.ToLower(target), strings.ToLower(toComplete)) {
+					suggestions = append(suggestions, target)
+				}
+			}
+			return suggestions, cobra.ShellCompDirectiveNoFileComp
+		},
 		Args: func(cmd *cobra.Command, args []string) error {
 			supported := strings.Join(core.ListSupportActions(), ",")
 
@@ -107,6 +120,18 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 	listCmd.PersistentFlags().StringVarP(&listPolicies.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
 	listCmd.PersistentFlags().StringVarP(&listPolicies.AccessKey, "access-key", "", "", "Kubescape SaaS access key. Default will load access key from cache")
 	listCmd.PersistentFlags().StringVarP(&listPolicies.Format, "format", "f", "pretty-print", "output format. supported: 'pretty-print'/'json'/'yaml'/'csv'")
+
+	_ = listCmd.RegisterFlagCompletionFunc("format",
+		func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			var suggestions []string
+			for _, format := range core.ListSupportFormats() {
+				if strings.HasPrefix(strings.ToLower(format), strings.ToLower(toComplete)) {
+					suggestions = append(suggestions, format)
+				}
+			}
+			return suggestions, cobra.ShellCompDirectiveNoFileComp
+		},
+	)
 	listCmd.PersistentFlags().StringVar(&listPolicies.ControlsInputs, "controls-config", "", "Path to a controls-config file, to show the inputs a scan would use with it. Only applies to 'controls-config'")
 	listCmd.PersistentFlags().StringVar(&listPolicies.ControlFilters.Framework, "framework", "", "Only applies to 'controls'. Return controls that belong to this framework")
 	listCmd.PersistentFlags().StringVar(&listPolicies.ControlFilters.Search, "search", "", "Only applies to 'controls'. Case-insensitive match against control ID, name, or framework")
