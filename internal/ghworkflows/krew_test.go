@@ -108,16 +108,28 @@ type krewPlatform struct {
 }
 
 // krewPlatforms is the set of platforms .goreleaser.yaml builds the `cli`
-// artifact for: goos linux/darwin/windows crossed with goarch amd64/arm64,
-// plus linux/s390x, which is the only s390x pair the toolchain builds.
+// artifact for: goos linux/darwin/windows crossed with goarch amd64/arm64.
+// linux/s390x is deliberately absent: the `cli` build produces it, but
+// krew-index CI runs validate-krew-manifest v0.4.5, whose allPlatforms() list
+// has no s390x, so a selector for that pair is rejected.
 var krewPlatforms = []krewPlatform{
 	{os: "linux", arch: "amd64", binary: "kubescape"},
 	{os: "linux", arch: "arm64", binary: "kubescape"},
-	{os: "linux", arch: "s390x", binary: "kubescape"},
 	{os: "darwin", arch: "amd64", binary: "kubescape"},
 	{os: "darwin", arch: "arm64", binary: "kubescape"},
 	{os: "windows", arch: "amd64", binary: "kubescape.exe"},
 	{os: "windows", arch: "arm64", binary: "kubescape.exe"},
+}
+
+// krewExcludedPlatforms are pairs the `cli` build produces but the plugin
+// manifest deliberately does not offer. krew-index CI runs
+// validate-krew-manifest at v0.4.5, whose allPlatforms() list enumerates the
+// os/arch pairs krew supports and does not include s390x. A selector matching
+// none of those pairs is rejected with "does not match any supported
+// platforms", so listing s390x in the manifest would break krew publishing.
+// The archive is still published for direct download and for install.sh.
+var krewExcludedPlatforms = [][2]string{
+	{"linux", "s390x"},
 }
 
 // krewReleaseRequest mirrors the fields of krew-release-bot's ReleaseRequest,
@@ -467,6 +479,21 @@ func TestKrewPlatformsMatchGoreleaserBuildMatrix(t *testing.T) {
 		}
 	}
 	require.NotEmptyf(t, built, "the %q build declares no goos/goarch product", krewBuildID)
+
+	// Drop the pairs the manifest intentionally does not offer, so the
+	// comparison is against what krew can actually install rather than the
+	// whole build.
+	excluded := make(map[[2]string]bool, len(krewExcludedPlatforms))
+	for _, pair := range krewExcludedPlatforms {
+		excluded[pair] = true
+	}
+	offered := built[:0]
+	for _, pair := range built {
+		if !excluded[pair] {
+			offered = append(offered, pair)
+		}
+	}
+	built = offered
 
 	listed := make([][2]string, 0, len(krewPlatforms))
 	for _, platform := range krewPlatforms {
