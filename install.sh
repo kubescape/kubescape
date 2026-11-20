@@ -25,6 +25,7 @@ determine_os_and_arch() {
     case $arch in
         x86_64|amd64) arch="amd64" ;;
         aarch64|arm64) arch="arm64" ;;
+        s390x) arch="s390x" ;;
         *)
             echo -e "\033[31mError: Unsupported architecture: $arch"
             exit 1
