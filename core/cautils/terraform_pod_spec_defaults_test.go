@@ -693,3 +693,31 @@ resource "kubernetes_pod_v1" "caught_diagnostic" {
 	assert.Equal(t, true, podSpecAt(t, byName["pod-caught-diagnostic"], "spec")["automountServiceAccountToken"],
 		"local with caught evaluation diagnostic in try(...) falling back to null must take provider default automountServiceAccountToken")
 }
+
+// An attribute missing from a known value is an error that try() catches, as in
+// Terraform: the expression is null, so the provider default applies.
+func TestExtractTypedResourcesAppliesAutomountDefaultWhenTryCatchesAMissingAttribute(t *testing.T) {
+	src := `
+resource "kubernetes_pod_v1" "missing_attribute" {
+  spec {
+    automount_service_account_token = try(var.pod_settings.automount, null)
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+`
+	evalCtx := &hcl.EvalContext{
+		Variables: map[string]cty.Value{
+			"var": cty.ObjectVal(map[string]cty.Value{
+				"pod_settings": cty.ObjectVal(map[string]cty.Value{"replicas": cty.NumberIntVal(2)}),
+			}),
+		},
+		Functions: terraformFunctions,
+	}
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), evalCtx)
+	require.Empty(t, errs)
+	require.Len(t, manifests, 1)
+	assert.Equal(t, true, podSpecAt(t, manifests[0], "spec")["automountServiceAccountToken"])
+}

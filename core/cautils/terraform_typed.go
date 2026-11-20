@@ -657,6 +657,12 @@ func hasUnresolvableVariables(expr hcl.Expression, evalCtx *hcl.EvalContext) boo
 		if traversal.IsRelative() {
 			continue
 		}
+		// Only the referenced variable, local or object must resolve. A key or
+		// attribute missing from a known value is an evaluation error, which
+		// try() catches as Terraform does, not an unresolvable reference.
+		if len(traversal) > 2 {
+			traversal = traversal[:2]
+		}
 		if _, diags := traversal.TraverseAbs(evalCtx); diags.HasErrors() {
 			return true
 		}
