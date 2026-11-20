@@ -2796,6 +2796,19 @@ func (opap *OPAProcessor) celParamObjectFinder() func(apiVersion, kind, namespac
 		return true
 	})
 
+	// Param objects collected from the cluster for binding paramRefs are not
+	// scanned resources, so they live outside the catalog. Index them the same
+	// way so ResolveParamObject finds a cluster-scoped object via the empty
+	// namespace candidate.
+	for i := range opap.VAPParamObjects {
+		obj := &opap.VAPParamObjects[i]
+		if obj.Object == nil {
+			continue
+		}
+		key := obj.GetAPIVersion() + "/" + obj.GetKind() + "/" + obj.GetNamespace() + "/" + obj.GetName()
+		idx[key] = obj.Object
+	}
+
 	return func(apiVersion, kind, namespace, name string) (map[string]any, bool) {
 		obj, ok := idx[apiVersion+"/"+kind+"/"+namespace+"/"+name]
 		return obj, ok

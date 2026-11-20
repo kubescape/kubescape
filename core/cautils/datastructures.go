@@ -133,6 +133,7 @@ type OPASessionObj struct {
 	IncludeControls       string                      // Comma-separated control IDs to include (all others skipped)
 	VAPPolicies           []unstructured.Unstructured // ValidatingAdmissionPolicy resources collected from the cluster
 	VAPBindings           []unstructured.Unstructured // ValidatingAdmissionPolicyBinding resources collected from the cluster
+	VAPParamObjects       []unstructured.Unstructured // ControlConfiguration resources collected from the cluster for binding paramRefs
 
 	// VAPCoverage refines VAPPolicies/VAPBindings' coarse "is any binding
 	// present" signal (see reportsummary.ControlSummary.VAPEnforcement) with

@@ -327,7 +327,35 @@ func (k8sHandler *K8sResourceHandler) collectVAPResources(ctx context.Context, s
 	default:
 		sessionObj.VAPPolicies = policies
 		sessionObj.VAPBindings = bindings
+		if bindingsUseParamRef(bindings) {
+			params, err := vapreconcile.CollectControlConfigurations(ctx, k8sHandler.k8s)
+			switch {
+			case errors.Is(err, vapreconcile.ErrUnsupported):
+				logger.L().Debug("skipping ControlConfiguration collection, cluster does not serve the API")
+			case errors.Is(err, vapreconcile.ErrForbidden):
+				logger.L().Ctx(ctx).Warning("credentials may not list controlconfigurations.kubescape.io, so a binding that references one cannot be resolved and its control may fail every resource", helpers.Error(err))
+			case err != nil:
+				logger.L().Ctx(ctx).Warning("failed to collect ControlConfiguration resources", helpers.Error(err))
+			default:
+				sessionObj.VAPParamObjects = params
+			}
+		}
 	}
+}
+
+// bindingsUseParamRef reports whether any binding names a parameter object via
+// spec.paramRef.name, the only form that needs the referenced object collected.
+func bindingsUseParamRef(bindings []unstructured.Unstructured) bool {
+	for i := range bindings {
+		if bindings[i].Object == nil {
+			continue
+		}
+		name, _, _ := unstructured.NestedString(bindings[i].Object, "spec", "paramRef", "name")
+		if name != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (k8sHandler *K8sResourceHandler) GetCloudProvider() string {
