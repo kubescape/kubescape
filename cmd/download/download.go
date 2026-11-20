@@ -56,6 +56,24 @@ func normalizeDownloadTarget(target string) string {
 	}
 }
 
+// completeWithCasePrefix filters candidates matching toComplete case-insensitively,
+// preserving the typed prefix in returned suggestions so that shells with
+// case-sensitive completion (such as Bash) retain the matches.
+func completeWithCasePrefix(candidates []string, toComplete string) []string {
+	var suggestions []string
+	lowerToComplete := strings.ToLower(toComplete)
+	for _, candidate := range candidates {
+		if strings.HasPrefix(strings.ToLower(candidate), lowerToComplete) {
+			if len(toComplete) <= len(candidate) {
+				suggestions = append(suggestions, toComplete+candidate[len(toComplete):])
+			} else {
+				suggestions = append(suggestions, candidate)
+			}
+		}
+	}
+	return suggestions
+}
+
 // GetDownloadCmd returns the Cobra command for downloading Kubescape policies, frameworks, controls, and artifacts.
 func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 	var downloadInfo = v1.DownloadInfo{}
@@ -74,13 +92,7 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 				return nil, cobra.ShellCompDirectiveNoFileComp
 			}
 
-			var suggestions []string
-			for _, target := range core.DownloadSupportCommands() {
-				if strings.HasPrefix(strings.ToLower(target), strings.ToLower(toComplete)) {
-					suggestions = append(suggestions, target)
-				}
-			}
-			return suggestions, cobra.ShellCompDirectiveNoFileComp
+			return completeWithCasePrefix(core.DownloadSupportCommands(), toComplete), cobra.ShellCompDirectiveNoFileComp
 		},
 		Args: func(cmd *cobra.Command, args []string) error {
 			supported := strings.Join(core.DownloadSupportCommands(), ",")

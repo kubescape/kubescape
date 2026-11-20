@@ -581,6 +581,22 @@ func TestGetDownloadCmd_TargetCompletion(t *testing.T) {
 	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "frame")
 	assert.Equal(t, []string{core.TargetFramework}, suggestions)
 	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "Fr")
+	assert.Equal(t, []string{"Framework"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "FRAME")
+	assert.Equal(t, []string{"FRAMEwork"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "Controls-")
+	assert.Equal(t, []string{"Controls-inputs"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "xyz")
+	assert.Empty(t, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
 }
 
 func TestGetDownloadCmd_IdentifierCompletion(t *testing.T) {
