@@ -55,6 +55,23 @@ var typedResourceGVK = map[string]struct{ apiVersion, kind string }{
 	"kubernetes_role_binding_v1":         {"rbac.authorization.k8s.io/v1", "RoleBinding"},
 	"kubernetes_cluster_role_v1":         {"rbac.authorization.k8s.io/v1", "ClusterRole"},
 	"kubernetes_cluster_role_binding_v1": {"rbac.authorization.k8s.io/v1", "ClusterRoleBinding"},
+
+	"kubernetes_persistent_volume_claim":           {"v1", "PersistentVolumeClaim"},
+	"kubernetes_persistent_volume_claim_v1":        {"v1", "PersistentVolumeClaim"},
+	"kubernetes_persistent_volume":                 {"v1", "PersistentVolume"},
+	"kubernetes_persistent_volume_v1":              {"v1", "PersistentVolume"},
+	"kubernetes_pod_disruption_budget":             {"policy/v1", "PodDisruptionBudget"},
+	"kubernetes_pod_disruption_budget_v1":          {"policy/v1", "PodDisruptionBudget"},
+	"kubernetes_resource_quota":                    {"v1", "ResourceQuota"},
+	"kubernetes_resource_quota_v1":                 {"v1", "ResourceQuota"},
+	"kubernetes_limit_range":                       {"v1", "LimitRange"},
+	"kubernetes_limit_range_v1":                    {"v1", "LimitRange"},
+	"kubernetes_horizontal_pod_autoscaler":         {"autoscaling/v1", "HorizontalPodAutoscaler"},
+	"kubernetes_horizontal_pod_autoscaler_v1":      {"autoscaling/v1", "HorizontalPodAutoscaler"},
+	"kubernetes_horizontal_pod_autoscaler_v2":      {"autoscaling/v2", "HorizontalPodAutoscaler"},
+	"kubernetes_horizontal_pod_autoscaler_v2beta2": {"autoscaling/v2beta2", "HorizontalPodAutoscaler"},
+	"kubernetes_priority_class":                    {"scheduling.k8s.io/v1", "PriorityClass"},
+	"kubernetes_priority_class_v1":                 {"scheduling.k8s.io/v1", "PriorityClass"},
 }
 
 // pluralOverrides maps an HCL block label to the K8s array field name it must
@@ -77,9 +94,15 @@ var pluralOverrides = map[string]string{
 	"image_pull_secret":     "imagePullSecrets",
 	"image_pull_secrets":    "imagePullSecrets",
 	"match_expressions":     "matchExpressions",
+	"match_expression":      "matchExpressions",
 	"volume_claim_template": "volumeClaimTemplates",
 	"http_header":           "httpHeaders",
 	"sysctl":                "sysctls",
+	"limit":                 "limits",
+	"metric":                "metrics",
+	"policy":                "policies",
+	"node_selector_term":    "nodeSelectorTerms",
+	"node_selector_terms":   "nodeSelectorTerms",
 }
 
 // repeatableBlocks lists HCL block labels that always encode as a JSON array,
@@ -90,9 +113,11 @@ var repeatableBlocks = map[string]bool{
 	"env": true, "env_from": true, "port": true, "ports": true, "toleration": true,
 	"host_alias": true, "host_aliases": true, "rule": true, "subject": true,
 	"image_pull_secret": true, "image_pull_secrets": true,
-	"match_expressions": true, "volume_claim_template": true, "http_header": true,
+	"match_expressions": true, "match_expression": true, "volume_claim_template": true, "http_header": true,
 	"sysctl": true, "ingress": true, "egress": true, "from": true, "to": true,
 	"path": true, "tls": true,
+	"limit": true, "metric": true, "policy": true,
+	"node_selector_term": true, "node_selector_terms": true,
 }
 
 // resourceMetaAttributes are Terraform meta-argument attributes valid on any
@@ -119,6 +144,7 @@ var resourceMetaBlocks = map[string]bool{
 
 var fieldInitialisms = map[string]string{
 	"api":  "API",
+	"cpu":  "CPU",
 	"id":   "ID",
 	"ip":   "IP",
 	"ipc":  "IPC",
@@ -152,6 +178,9 @@ func fieldNameFor(blockType string) string {
 }
 
 func attributeNameFor(name string) string {
+	if name == "data_disk_uri" {
+		return "diskURI"
+	}
 	return snakeToCamel(name)
 }
 
@@ -229,6 +258,17 @@ func isBackendServicePortBlock(path, blockType string) bool {
 	return true
 }
 
+func isPersistentVolumeSourceBlock(path, blockType string) bool {
+	if blockType != "persistent_volume_source" {
+		return false
+	}
+	if !strings.HasSuffix(path, ".spec") {
+		return false
+	}
+	return strings.HasPrefix(path, "kubernetes_persistent_volume.") ||
+		strings.HasPrefix(path, "kubernetes_persistent_volume_v1.")
+}
+
 func isConvertiblePortField(path, name string) bool {
 	return isNetworkPolicyPortField(path, name) || isLegacyIngressBackendPortField(path, name) || isIngressBackendServicePortNumberField(path, name)
 }
@@ -240,6 +280,13 @@ func isServiceAccountSecretBlock(path, blockType string) bool {
 	return (strings.HasPrefix(path, "kubernetes_service_account") ||
 		strings.HasPrefix(path, "kubernetes_default_service_account")) &&
 		strings.Count(path, ".") == 1
+}
+
+func isNestedHPAMetricBlock(path, blockType string) bool {
+	if blockType != "metric" {
+		return false
+	}
+	return strings.HasSuffix(path, ".external") || strings.HasSuffix(path, ".pods") || strings.HasSuffix(path, ".object")
 }
 
 // isServiceTargetPortField reports whether name is a Service port's
@@ -290,6 +337,20 @@ func isStringTypedNumberField(path, name string) bool {
 	return isServiceTargetPortField(path, name) || isHandlerPortField(path, name) || isSecurityContextIDField(path, name)
 }
 
+// isPDBIntOrStringField reports whether name is min_available or
+// max_unavailable in a PodDisruptionBudget spec. The provider declares them as
+// strings (or int-or-string) and intstr.Parse converts digit strings to
+// integers while preserving percentage strings.
+func isPDBIntOrStringField(path, name string) bool {
+	if name != "min_available" && name != "max_unavailable" {
+		return false
+	}
+	if !strings.HasSuffix(path, ".spec") && path != "spec" {
+		return false
+	}
+	return strings.Contains(path, "kubernetes_pod_disruption_budget")
+}
+
 func attributeValueFor(path, name string, val interface{}) interface{} {
 	// The provider keeps the security context IDs in strings so that "" can
 	// leave them unset: it sets runAsUser, runAsGroup and fsGroup only from a
@@ -297,7 +358,7 @@ func attributeValueFor(path, name string, val interface{}) interface{} {
 	if s, ok := val.(string); ok && s == "" && isSecurityContextIDField(path, name) {
 		return nil
 	}
-	if s, ok := val.(string); ok && (isConvertiblePortField(path, name) || isStringTypedNumberField(path, name)) && isDigitOnly(s) {
+	if s, ok := val.(string); ok && (isConvertiblePortField(path, name) || isStringTypedNumberField(path, name) || isPDBIntOrStringField(path, name)) && isDigitOnly(s) {
 		return json.Number(canonicalizeNumericString(s))
 	}
 	return val
@@ -349,11 +410,22 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 			out["port"] = hclBodyToMap(blocks[0].Body, evalCtx, errs, path+"."+blockType)
 			continue
 		}
+		if isPersistentVolumeSourceBlock(path, blockType) {
+			pvSource := hclBodyToMap(blocks[0].Body, evalCtx, errs, path+"."+blockType)
+			for k, v := range pvSource {
+				out[k] = v
+			}
+			continue
+		}
 		field := fieldNameFor(blockType)
 		isRepeatable := len(blocks) > 1 || repeatableBlocks[blockType]
 		if isServiceAccountSecretBlock(path, blockType) {
 			field = "secrets"
 			isRepeatable = true
+		}
+		if isNestedHPAMetricBlock(path, blockType) {
+			field = "metric"
+			isRepeatable = false
 		}
 
 		if isRepeatable {
@@ -423,6 +495,10 @@ func hclResourceBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *
 		if isServiceAccountSecretBlock(path, blockType) {
 			field = "secrets"
 			isRepeatable = true
+		}
+		if isNestedHPAMetricBlock(path, blockType) {
+			field = "metric"
+			isRepeatable = false
 		}
 
 		if isRepeatable {
@@ -533,6 +609,8 @@ var clusterScopedTypedKinds = map[string]bool{
 	"Namespace":          true,
 	"ClusterRole":        true,
 	"ClusterRoleBinding": true,
+	"PersistentVolume":   true,
+	"PriorityClass":      true,
 }
 
 // providerNamespaceDefault is the namespace the provider writes into a block
