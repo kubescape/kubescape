@@ -180,6 +180,7 @@ if (-not $expected) {
 
 # Get-FileHash returns uppercase, the manifest is lowercase; normalise both
 # rather than leaning on -ne being case-insensitive.
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
 $actual = (Get-FileHash -Path $downloadPath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) {
     Write-Host "Error: checksum mismatch for $asset" -ForegroundColor Red
@@ -190,7 +191,10 @@ if ($actual -ne $expected) {
 }
 
 
+
 Write-Host "Checksum verified." -ForegroundColor Green
+
+$backupPath = $null
 
 try {
     if (Test-Path -LiteralPath $outputPath) {
@@ -203,8 +207,24 @@ try {
         [System.IO.File]::Move($downloadPath, $outputPath)
     }
 } catch {
+    $installError = $_
+
     Write-Host "Error: Failed to install kubescape" -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host $installError.Exception.Message -ForegroundColor Red
+
+    if ($backupPath -and
+        (Test-Path -LiteralPath $backupPath) -and
+        -not (Test-Path -LiteralPath $outputPath)) {
+
+        try {
+            [System.IO.File]::Move($backupPath, $outputPath)
+            Write-Host "Restored the previous kubescape executable." -ForegroundColor Yellow
+        } catch {
+            Write-Host "Could not restore the previous executable. Backup remains at: $backupPath" -ForegroundColor Red
+            Write-Host $_.Exception.Message -ForegroundColor Red
+        }
+    }
+
     Remove-Item $downloadPath -ErrorAction SilentlyContinue
     exit 1
 }

@@ -77,6 +77,14 @@ func TestInstallScriptWindowsUpgradeSafety(t *testing.T) {
 			wantContent: "new-download",
 		},
 		{
+			name:        "replacement failure restores existing executable",
+			mode:        "replace-failure",
+			existing:    true,
+			wantExit:    1,
+			wantExists:  true,
+			wantContent: "old-binary",
+		},
+		{
 			name:        "first installation succeeds",
 			mode:        "success",
 			existing:    false,
@@ -126,7 +134,7 @@ return [PSCustomObject]@{ Content = $content }`,
 					validHash,
 				)
 
-			case "success":
+			case "success", "replace-failure":
 				manifestBlock = fmt.Sprintf(
 					`$content = "%s  " + $script:asset + [Environment]::NewLine
 return [PSCustomObject]@{ Content = $content }`,
@@ -156,9 +164,28 @@ function Invoke-WebRequest {
 }
 `, manifestBlock)
 
-			testScript := filepath.Join(tempDir, "install-test.ps1")
-			script := mockFunctions + "\n" + installerSource + "\nexit 0\n"
+			testInstallerSource := installerSource
 
+			if tt.mode == "replace-failure" {
+				original := "[System.IO.File]::Replace($downloadPath, $outputPath, $backupPath)"
+
+				simulatedFailure := `[System.IO.File]::Move($outputPath, $backupPath)
+throw "Simulated replacement failure after moving existing executable"`
+
+				if !strings.Contains(testInstallerSource, original) {
+					t.Fatal("could not find executable replacement operation")
+				}
+
+				testInstallerSource = strings.Replace(
+					testInstallerSource,
+					original,
+					simulatedFailure,
+					1,
+				)
+			}
+
+			testScript := filepath.Join(tempDir, "install-test.ps1")
+			script := mockFunctions + "\n" + testInstallerSource + "\nexit 0\n"
 			if err := os.WriteFile(testScript, []byte(script), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -180,6 +207,10 @@ function Invoke-WebRequest {
 			)
 
 			output, runErr := cmd.CombinedOutput()
+			if tt.mode == "replace-failure" &&
+				!strings.Contains(string(output), "Restored the previous kubescape executable.") {
+				t.Errorf("expected previous executable to be restored, got:\n%s", output)
+			}
 
 			if tt.wantExit == 0 {
 				if runErr != nil {
