@@ -162,7 +162,7 @@ Findings reappear as new after upgrading
 A finding's identity is derived in part from the file path it was reported at. Releases that correct those paths therefore change the identity of the affected findings, and GitLab reports them as new once. Previously dismissed findings from affected scans have to be dismissed again on that first pipeline run; identities are stable across subsequent scans.
 
 Some resources are missing from the report
-The GitLab SAST format can only anchor a finding to a file inside the repository, so resources with no file path, or with a path outside the repository root, are excluded. Kubescape logs a warning with the count when this happens. Cluster scans have no file paths at all, so Kubescape rejects this format and SARIF for them; use `--format json` instead.
+The GitLab SAST format can only anchor a finding to a file inside the repository, so resources with no file path, or with a path outside the repository root, are excluded. Kubescape logs a warning with the count when this happens. Cluster scans have no file paths at all, so Kubescape rejects this format for them. `--format sarif` and `--format json` both work for a cluster scan, but SARIF locations there are virtual resource identifiers, not repository files; scan the manifests to get findings on real file locations.
 
 Further Reading
 - Kubescape CLI Reference

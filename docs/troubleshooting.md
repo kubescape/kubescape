@@ -463,20 +463,22 @@ Ensure you're redirecting to a file, not mixing with console output:
 kubescape scan --format json --output results.json
 ```
 
-### SARIF format fails
+### SARIF results point at files that don't exist
 
-**Symptom:** SARIF output not working.
+**Symptom:** A SARIF report from a cluster scan has locations such as `cluster/default/deployment/web.yaml` that don't match any file in your repository.
 
-**Note:** SARIF format is only supported for file/repository scans, not live cluster scans.
+**Cause:** A resource read from a live cluster has no source file, so Kubescape gives it a virtual resource identifier, `cluster/<namespace>/<kind>/<name>.yaml`. Every result points at line 1 and carries no fixes.
 
-**Solution:**
+**Solution:** Scan the manifests to get findings on real file locations, with suggested fixes:
 ```bash
-# This works
+# Real file locations and fixes
 kubescape scan /path/to/manifests --format sarif --output results.sarif
 
-# This does NOT work
+# Virtual resource identifiers
 kubescape scan --format sarif --output results.sarif  # cluster scan
 ```
+
+GitLab SAST, GitLab Code Quality and GitHub Actions output are still only supported for file and repository scans.
 
 ### HTML/PDF report generation fails
 
