@@ -621,6 +621,54 @@ func TestNewScanPathFilterAnchorsARepositoryInputAtItsClone(t *testing.T) {
 	assert.False(t, filter.Excluded(filepath.Join(clone, "pod.yaml"), false))
 }
 
+// An unusable ignore file fails the filter with an IgnoreFileError that carries
+// the path it read, with the message and wrapped errors it had before.
+func TestNewScanPathFilterReportsTheIgnoreFileItRead(t *testing.T) {
+	invalid := t.TempDir()
+	writeIgnoreFile(t, invalid, "[\n")
+
+	notAFile := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(notAFile, IgnoreFileName), 0o700))
+
+	// A repository is found through its clone, which the scan's clone depth keys.
+	const repoURL = "https://github.com/kubescape/example-ignore-file-error"
+	const depth = 5
+	clone := t.TempDir()
+	writeIgnoreFile(t, clone, "[\n")
+	gitURL, err := giturl.NewGitAPI(repoURL)
+	require.NoError(t, err)
+	key := repoWorkspaceKey(gitURL, depth)
+	tmpDirPathsMu.Lock()
+	tmpDirPaths[key] = clone
+	tmpDirPathsMu.Unlock()
+	t.Cleanup(func() {
+		tmpDirPathsMu.Lock()
+		delete(tmpDirPaths, key)
+		tmpDirPathsMu.Unlock()
+	})
+
+	for name, tc := range map[string]struct {
+		input   string
+		depth   []int
+		root    string
+		wrapped error
+	}{
+		"invalid pattern":            {input: invalid, root: invalid, wrapped: ErrInvalidIgnorePattern},
+		"ignore file is a directory": {input: notAFile, root: notAFile, wrapped: ErrIgnoreFileNotRegular},
+		"repository clone":           {input: repoURL, depth: []int{depth}, root: clone, wrapped: ErrInvalidIgnorePattern},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewScanPathFilter(tc.input, nil, true, tc.depth...)
+			var ignoreErr *IgnoreFileError
+			require.ErrorAs(t, err, &ignoreErr)
+			ignoreFile := filepath.Join(tc.root, IgnoreFileName)
+			assert.Equal(t, ignoreFile, ignoreErr.Path)
+			assert.ErrorIs(t, err, tc.wrapped)
+			assert.Contains(t, err.Error(), ignoreFile)
+		})
+	}
+}
+
 func TestLoadIgnoreFilePatterns_OversizedFileRejected(t *testing.T) {
 	t.Setenv(MaxFileSizeEnvVar, "")
 	dir := t.TempDir()

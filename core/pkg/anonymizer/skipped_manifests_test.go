@@ -173,6 +173,42 @@ func TestApplyHidesTheIgnoreFileOfASkippedInput(t *testing.T) {
 	}
 }
 
+// The loader records the ignore file it read for a skipped input. The input
+// can't always lead back to it: a repository cloned with a non-default depth,
+// or a directory gone by now. The recorded path is hidden either way, and the
+// report keeps no copy of it.
+func TestApplyHidesTheRecordedIgnoreFileOfASkippedInput(t *testing.T) {
+	clone := filepath.Join(t.TempDir(), "kubescape-clone-alice")
+	ignoreFile := filepath.Join(clone, cautils.IgnoreFileName)
+	skipped := func() []cautils.SkippedManifest {
+		return []cautils.SkippedManifest{{
+			Path:       "https://github.com/acme/payroll",
+			Reason:     "failed to load input: " + ignoreFile + `: invalid exclusion pattern: "["`,
+			IgnoreFile: ignoreFile,
+		}}
+	}
+	dek := make([]byte, 32)
+	for name, apply := range map[string]func(*resultshandling.ResultsHandler) error{
+		"--hide": Apply,
+		"--encrypt": func(handler *resultshandling.ResultsHandler) error {
+			return ApplyEncrypted(handler, dek, []byte("01234567890123456789012345678901"))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			session := skippedManifestsSession()
+			session.SkippedManifests, session.ScanCoverage.SkippedManifests = skipped(), skipped()
+			require.NoError(t, apply(&resultshandling.ResultsHandler{ScanData: session}))
+
+			for _, entry := range [][]cautils.SkippedManifest{session.SkippedManifests, session.ScanCoverage.SkippedManifests} {
+				require.Len(t, entry, 1)
+				assert.NotContains(t, entry[0].Reason, "kubescape-clone-alice")
+				assert.Contains(t, entry[0].Reason, cautils.IgnoreFileName)
+				assert.Empty(t, entry[0].IgnoreFile)
+			}
+		})
+	}
+}
+
 // Each path in a reason is replaced once. The pseudonym of an input named "src"
 // contains "src", and must not be replaced again.
 func TestApplyReplacesEachPathInASkippedReasonOnce(t *testing.T) {
