@@ -391,9 +391,10 @@ func descendantPrefix(rule ignoreRule) string {
 }
 
 // IgnoreRoot is the directory NewScanPathFilter reads the ignore file from for
-// input.
-func IgnoreRoot(input string) string {
-	return ignoreRoot(input)
+// input. A repository input is cloned with the scan's clone depth, which must
+// be passed to find its clone.
+func IgnoreRoot(input string, depthOpt ...int) string {
+	return ignoreRoot(input, depthOpt...)
 }
 
 // ignoreRoot resolves the directory a scan input is anchored at. A file or a glob is

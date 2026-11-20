@@ -76,6 +76,10 @@ func ImageScanTarget(image, platform string) string {
 type SkippedManifest struct {
 	Path   string `json:"path"`
 	Reason string `json:"reason"`
+	// IgnoreFile is the ignore file the loader read for an input it skipped
+	// because that file could not be used. Reason names it, and --hide and
+	// --encrypt replace it there. It is not part of the report.
+	IgnoreFile string `json:"-"`
 }
 
 type ScanTypes string

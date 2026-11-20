@@ -585,6 +585,30 @@ func TestNewScanPathFilterAnchorsARepositoryInputAtItsClone(t *testing.T) {
 	assert.False(t, filter.Excluded(filepath.Join(clone, "pod.yaml"), false))
 }
 
+// A repository is cloned with the scan's clone depth, and only that depth finds
+// the clone again.
+func TestIgnoreRootFindsARepositoryClonedWithTheScanDepth(t *testing.T) {
+	const repoURL = "https://github.com/kubescape/example-ignore-root-depth"
+	const depth = 5
+
+	clone := t.TempDir()
+	gitURL, err := giturl.NewGitAPI(repoURL)
+	require.NoError(t, err)
+	key := repoWorkspaceKey(gitURL, depth)
+
+	tmpDirPathsMu.Lock()
+	tmpDirPaths[key] = clone
+	tmpDirPathsMu.Unlock()
+	t.Cleanup(func() {
+		tmpDirPathsMu.Lock()
+		delete(tmpDirPaths, key)
+		tmpDirPathsMu.Unlock()
+	})
+
+	assert.Equal(t, clone, IgnoreRoot(repoURL, depth))
+	assert.NotEqual(t, clone, IgnoreRoot(repoURL), "the default depth doesn't find a clone made with another one")
+}
+
 func TestLoadIgnoreFilePatterns_OversizedFileRejected(t *testing.T) {
 	t.Setenv(MaxFileSizeEnvVar, "")
 	dir := t.TempDir()

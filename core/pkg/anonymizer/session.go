@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -114,18 +115,15 @@ func cloneSessionForTransform(session *cautils.OPASessionObj) (*sessionTransform
 	}
 	working.ExceptionAudit = exceptionAudit
 
-	skippedManifests, err := cloneJSON(session.SkippedManifests)
-	if err != nil {
-		return nil, fmt.Errorf("clone skipped manifests: %w", err)
-	}
-	working.SkippedManifests = skippedManifests
+	// Skipped manifests hold only strings, so a copy of the slice is a deep
+	// copy. A JSON round trip would drop IgnoreFile, which the report leaves
+	// out but the transformation needs.
+	working.SkippedManifests = slices.Clone(session.SkippedManifests)
 
 	// ScanCoverage is a value; only its skipped manifests are transformed, so
 	// a copy with its own slice is enough to keep the caller untouched.
 	working.ScanCoverage = session.ScanCoverage
-	if working.ScanCoverage.SkippedManifests, err = cloneJSON(session.ScanCoverage.SkippedManifests); err != nil {
-		return nil, fmt.Errorf("clone scan coverage skipped manifests: %w", err)
-	}
+	working.ScanCoverage.SkippedManifests = slices.Clone(session.ScanCoverage.SkippedManifests)
 
 	resources, originalByClone, err := cloneCatalog(session.GetCatalog())
 	if err != nil {
@@ -696,10 +694,11 @@ func transformSkippedManifests(skipped []cautils.SkippedManifest, transformer Tr
 		if err != nil {
 			return err
 		}
-		replacements, err := ignoreFileReplacements(skipped[i].Reason, original, transformed, transformer)
+		replacements, err := ignoreFileReplacements(skipped[i], transformed, transformer)
 		if err != nil {
 			return err
 		}
+		skipped[i].IgnoreFile = ""
 		// At a position where several match, strings.Replacer uses the
 		// first pair, so the ignore file's longer paths go first.
 		replacements = append(replacements,
@@ -712,24 +711,30 @@ func transformSkippedManifests(skipped []cautils.SkippedManifest, transformer Tr
 	return nil
 }
 
-// ignoreFileReplacements returns the old, new pairs that replace, in reason,
-// the path of the ignore file the scan reads for input. A multi-input scan
-// skips an input whose ignore file can't be used, and the error names that
-// file. For a file or a glob input it is in the input's directory, not under
-// the input path, so the directory gets its own pseudonym and the file keeps
-// its name.
-func ignoreFileReplacements(reason, input, transformedInput string, transformer Transformer) ([]string, error) {
-	root := cautils.IgnoreRoot(input)
+// ignoreFileReplacements returns the old, new pairs that replace, in the
+// reason of skipped, the path of the ignore file the scan read for its input.
+// A multi-input scan skips an input whose ignore file can't be used, and the
+// error names that file. The loader records which file that was, because it
+// can't always be found again from the input: a repository is cloned with the
+// scan's clone depth, and a directory can be gone by now. Without a recorded
+// path, it is worked out from the input. For a file or a glob input the file
+// is in the input's directory, not under the input path, so the directory gets
+// its own pseudonym and the file keeps its name.
+func ignoreFileReplacements(skipped cautils.SkippedManifest, transformedInput string, transformer Transformer) ([]string, error) {
+	ignoreFile := skipped.IgnoreFile
+	if ignoreFile == "" {
+		ignoreFile = filepath.Join(cautils.IgnoreRoot(skipped.Path), cautils.IgnoreFileName)
+	}
+	root := filepath.Dir(ignoreFile)
 	if root == "." {
 		return nil, nil
 	}
-	ignoreFile := filepath.Join(root, cautils.IgnoreFileName)
 	quoted := strconv.Quote(ignoreFile)
-	if !strings.Contains(reason, ignoreFile) && !strings.Contains(reason, quoted) {
+	if !strings.Contains(skipped.Reason, ignoreFile) && !strings.Contains(skipped.Reason, quoted) {
 		return nil, nil
 	}
 	transformedRoot := transformedInput
-	if root != input {
+	if root != filepath.Clean(skipped.Path) {
 		var err error
 		if transformedRoot, err = transformValue(transformer, "src", root); err != nil {
 			return nil, err

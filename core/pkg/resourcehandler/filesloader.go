@@ -49,6 +49,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 	for path := range scanInfo.InputPatterns {
 		var input loadedInput
 		var skipped []cautils.SkippedManifest
+		var ignoreFile string
 		var err error
 
 		cloneDepth := scanInfo.EffectiveGitCloneDepth()
@@ -60,6 +61,10 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 			pathFilter, filterErr := pathFilterFromScanInfo(ctx, scanInfo.InputPatterns[path], scanInfo)
 			if filterErr != nil {
 				err = filterErr
+				// The error names the ignore file it read. Record where that
+				// is now: the anonymizer can't find it again for a repository
+				// cloned with another depth, or a directory gone by then.
+				ignoreFile = filepath.Join(cautils.IgnoreRoot(scanInfo.InputPatterns[path], cloneDepth), cautils.IgnoreFileName)
 			} else {
 				input.root, input.sources, input.workloads, skipped, err = getResourcesFromInput(ctx, scanInfo.InputPatterns[path], helmValueOpts, pathFilter, cloneDepth, scanInfo.WorkspaceDir)
 				input.remote = remoteName(scanInfo.InputPatterns[path], cloneDepth)
@@ -72,8 +77,9 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 					helpers.String("path", scanInfo.InputPatterns[path]),
 					helpers.Error(err))
 				sessionObj.SkippedManifests = append(sessionObj.SkippedManifests, cautils.SkippedManifest{
-					Path:   scanInfo.InputPatterns[path],
-					Reason: fmt.Sprintf("failed to load input: %v", err),
+					Path:       scanInfo.InputPatterns[path],
+					Reason:     fmt.Sprintf("failed to load input: %v", err),
+					IgnoreFile: ignoreFile,
 				})
 				inputErrors = append(inputErrors, fmt.Errorf("input %q: %w", scanInfo.InputPatterns[path], err))
 				continue

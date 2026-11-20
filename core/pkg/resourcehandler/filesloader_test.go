@@ -1677,6 +1677,8 @@ func TestGetResources_IgnoreFileError(t *testing.T) {
 			require.Len(t, session.SkippedManifests, 1)
 			assert.Equal(t, badRoot, session.SkippedManifests[0].Path)
 			assert.Contains(t, session.SkippedManifests[0].Reason, cautils.ErrIgnoreFileNotRegular.Error())
+			// The anonymizer hides this path in the reason.
+			assert.Equal(t, filepath.Join(badRoot, cautils.IgnoreFileName), session.SkippedManifests[0].IgnoreFile)
 		})
 	}
 }
