@@ -108,7 +108,8 @@ type krewPlatform struct {
 }
 
 // krewPlatforms is the set of platforms .goreleaser.yaml builds the `cli`
-// artifact for: goos linux/darwin/windows crossed with goarch amd64/arm64.
+// artifact for: goos linux/darwin/windows crossed with goarch amd64/arm64,
+// plus linux/s390x, which is the only s390x pair the toolchain builds.
 var krewPlatforms = []krewPlatform{
 	{os: "linux", arch: "amd64", binary: "kubescape"},
 	{os: "linux", arch: "arm64", binary: "kubescape"},
