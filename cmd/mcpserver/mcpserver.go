@@ -874,7 +874,15 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		profile, err := ksClient.ContainerProfiles(namespaceStr).Get(ctx, profileNameStr, metav1.GetOptions{})
 		if err != nil {
-			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to get container profile: %v", err), nil), nil
+			return mcpToolError(
+				classifyScanError(err),
+				fmt.Sprintf("failed to get container profile: %v", err),
+				map[string]any{
+					"resource_type": "ContainerProfile",
+					"namespace":     namespaceStr,
+					"name":          profileNameStr,
+				},
+			), nil
 		}
 
 		var rawManifest []byte
@@ -903,7 +911,15 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 
 		if err != nil {
-			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to get workload manifest: %v", err), nil), nil
+			return mcpToolError(
+				classifyScanError(err),
+				fmt.Sprintf("failed to get workload manifest: %v", err),
+				map[string]any{
+					"resource_type": strings.ToLower(workloadKindStr),
+					"namespace":     namespaceStr,
+					"name":          workloadNameStr,
+				},
+			), nil
 		}
 		rawManifest, err = jsonMarshal(workloadObj)
 		if err != nil {

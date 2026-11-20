@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -294,14 +295,33 @@ func TestGetConfigurationDrift_MarshalErrorIsToolError(t *testing.T) {
 	assert.Contains(t, text, "marshal boom")
 }
 
+func TestGetConfigurationDrift_MissingProfileDetails(t *testing.T) {
+	ksServer := &KubescapeMcpserver{ksClient: storagefake.NewClientset().SpdxV1beta1()}
+	result, err := ksServer.CallTool(context.Background(), "get_configuration_drift", map[string]any{
+		"profile_name":  "missing-profile",
+		"workload_name": "nginx",
+		"workload_kind": "pod",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.IsError)
+	var toolErr ToolError
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
+	assert.Equal(t, ErrCodeResourceNotFound, toolErr.Code)
+	assert.Equal(t, map[string]any{
+		"resource_type": "ContainerProfile",
+		"namespace":     "default",
+		"name":          "missing-profile",
+	}, toolErr.Details)
+}
+
 func TestGetConfigurationDrift_SupportsAllWorkloadKinds(t *testing.T) {
 	profile := &storagev1beta1.ContainerProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-profile", Namespace: "default"},
 	}
 	ksClient := storagefake.NewClientset(profile)
 
-	// The fake k8s client returns "not found" for all workloads, but that's fine:
-	// we only need to verify the tool doesn't reject the kind as "unsupported".
+	// The empty Kubernetes client returns NotFound for each supported kind.
 	ksServer := &KubescapeMcpserver{
 		ksClient: ksClient.SpdxV1beta1(),
 		k8sClient: &k8sinterface.KubernetesApi{
@@ -314,14 +334,19 @@ func TestGetConfigurationDrift_SupportsAllWorkloadKinds(t *testing.T) {
 			result, err := ksServer.CallTool(context.Background(), "get_configuration_drift", map[string]any{
 				"profile_name":  "test-profile",
 				"workload_name": "test-workload",
-				"workload_kind": kind,
+				"workload_kind": strings.ToUpper(kind),
 			})
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			text := toolResultText(t, result)
-			// The error should be "not found" (workload doesn't exist in the fake client),
-			// NOT "unsupported workload kind" which would mean the kind was rejected.
-			assert.NotContains(t, text, "unsupported workload kind")
+			require.True(t, result.IsError)
+			var toolErr ToolError
+			require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &toolErr))
+			assert.Equal(t, ErrCodeResourceNotFound, toolErr.Code)
+			assert.Equal(t, map[string]any{
+				"resource_type": kind,
+				"namespace":     "default",
+				"name":          "test-workload",
+			}, toolErr.Details)
 		})
 	}
 }
