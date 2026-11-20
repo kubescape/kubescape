@@ -4,11 +4,19 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 )
 
-const stdinManifestTempPattern = "tmp-kubescape*.yaml"
+const (
+	// stdinManifestDirPattern names the private directory that holds the staged
+	// stdin manifest.
+	stdinManifestDirPattern = "kubescape-stdin-*"
+	// stdinManifestName is the file name every staged stdin manifest gets, so
+	// reports name the input "stdin.yaml" rather than a random temporary name.
+	stdinManifestName = "stdin.yaml"
+)
 
 type scanLocalInputOptions struct {
 	FirstInputArg    int
@@ -18,7 +26,9 @@ type scanLocalInputOptions struct {
 
 // prepareScanLocalInput normalizes and prepares scan inputs from positional arguments
 // or flags, staging standard input into a temporary file when "-" is specified as the
-// manifest source. It returns a cleanup function to remove any allocated temporary files.
+// manifest source. The staged file is always named "stdin.yaml", inside a temporary
+// directory of its own, so reports show a stable name. It returns a cleanup function
+// to remove any allocated temporary files.
 // When stdin is a regular file (e.g. redirected from a file on disk), its FileInfo is
 // preserved on scanInfo.OriginalStdinInfo to enable output safety collision detection.
 func prepareScanLocalInput(stdin io.Reader, args []string, scanInfo *cautils.ScanInfo, opts scanLocalInputOptions) (func(), error) {
@@ -56,12 +66,20 @@ func prepareScanLocalInput(stdin io.Reader, args []string, scanInfo *cautils.Sca
 		scanInfo.OriginalStdinInfo = stat
 	}
 
-	tempFile, err := os.CreateTemp("", stdinManifestTempPattern)
+	// The manifest goes into a directory of its own, so it can have a fixed
+	// name that reports show instead of a random temporary one.
+	stagingDir, err := os.MkdirTemp("", stdinManifestDirPattern)
 	if err != nil {
 		return cleanup, err
 	}
 	cleanup = func() {
-		_ = os.Remove(tempFile.Name())
+		_ = os.RemoveAll(stagingDir)
+	}
+
+	tempFile, err := os.OpenFile(filepath.Join(stagingDir, stdinManifestName), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		cleanup()
+		return func() {}, err
 	}
 
 	if _, err := io.Copy(tempFile, stdin); err != nil {

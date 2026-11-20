@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -401,7 +400,7 @@ func TestPrepareWorkloadInput(t *testing.T) {
 		cleanup, err := prepareWorkloadInput(stdin, []string{"Pod/nginx", "-"}, &scanInfo)
 		require.NoError(t, err)
 		require.Len(t, scanInfo.InputPatterns, 1)
-		assert.Equal(t, filepath.Clean(os.TempDir()), filepath.Dir(scanInfo.InputPatterns[0]))
+		requireStagedStdinPath(t, scanInfo.InputPatterns[0])
 
 		got, err := os.ReadFile(scanInfo.InputPatterns[0])
 		require.NoError(t, err)
