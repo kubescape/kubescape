@@ -559,3 +559,103 @@ func TestMetadataGitLocalLinkedWorktree(t *testing.T) {
 	assert.Equal(t, "Fixture Committer", metadata.LastCommit.CommitterName)
 	assert.True(t, fixture.when.Equal(metadata.LastCommit.Date))
 }
+
+// createBranchRepositoryFixture checks out branch on top of the detached fixture
+// (origin is https://github.com/kubescape/branch-config-fixture.git) and appends
+// gitConfig, verbatim, to the repository's .git/config. The config text is
+// written by hand rather than through go-git so it carries keys go-git has no
+// field for, such as the vscode-merge-base VS Code adds to a branch.
+func createBranchRepositoryFixture(t *testing.T, branch, gitConfig string) detachedRepositoryFixture {
+	t.Helper()
+
+	fixture := createDetachedRepositoryFixture(t, "origin", "https://github.com/kubescape/branch-config-fixture.git")
+	repository, err := gitv5.PlainOpen(fixture.root)
+	require.NoError(t, err)
+	ref := plumbingv5.NewBranchReferenceName(branch)
+	require.NoError(t, repository.Storer.SetReference(plumbingv5.NewHashReference(ref, fixture.commit)))
+	require.NoError(t, repository.Storer.SetReference(plumbingv5.NewSymbolicReference(plumbingv5.HEAD, ref)))
+
+	file, err := os.OpenFile(filepath.Join(fixture.root, ".git", "config"), os.O_APPEND|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	_, err = file.WriteString(gitConfig)
+	require.NoError(t, err)
+	require.NoError(t, file.Close())
+
+	return fixture
+}
+
+// TestGetRemoteUrlBranchSection covers the shapes of a [branch] section for the
+// checked-out branch. A section that names no usable remote must not stop the
+// default remote from answering, while a branch that names a configured remote,
+// or a URL, keeps getting that one.
+func TestGetRemoteUrlBranchSection(t *testing.T) {
+	const originURL = "https://github.com/kubescape/branch-config-fixture.git"
+
+	tests := []struct {
+		name      string
+		gitConfig string
+		want      string
+	}{
+		{
+			name:      "no branch section",
+			gitConfig: "",
+			want:      originURL,
+		},
+		{
+			name:      "section without a remote key, as VS Code writes it",
+			gitConfig: "[branch \"feature\"]\n\tvscode-merge-base = origin/main\n",
+			want:      originURL,
+		},
+		{
+			name:      "section holding only a description",
+			gitConfig: "[branch \"feature\"]\n\tdescription = work in progress\n",
+			want:      originURL,
+		},
+		{
+			name:      "branch tracking a local branch",
+			gitConfig: "[branch \"feature\"]\n\tremote = .\n\tmerge = refs/heads/main\n",
+			want:      originURL,
+		},
+		{
+			name: "branch tracking a configured remote",
+			gitConfig: "[remote \"upstream\"]\n\turl = https://github.com/kubescape/upstream-fixture.git\n" +
+				"[branch \"feature\"]\n\tremote = upstream\n\tmerge = refs/heads/feature\n",
+			want: "https://github.com/kubescape/upstream-fixture.git",
+		},
+		{
+			name:      "branch naming a remote by its URL",
+			gitConfig: "[branch \"feature\"]\n\tremote = https://github.com/kubescape/url-fixture.git\n\tmerge = refs/heads/feature\n",
+			want:      "https://github.com/kubescape/url-fixture.git",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := createBranchRepositoryFixture(t, "feature", tt.gitConfig)
+			repository, err := NewLocalGitRepository(fixture.root)
+			require.NoError(t, err)
+			require.Equal(t, "feature", repository.GetBranchName())
+
+			got, err := repository.GetRemoteUrl()
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestMetadataGitLocalBranchWithoutRemote pins what a user sees: a branch created
+// in VS Code carries a [branch] section with no remote, and its scan reports must
+// still name the repository, owner, branch and last commit.
+func TestMetadataGitLocalBranchWithoutRemote(t *testing.T) {
+	fixture := createBranchRepositoryFixture(t, "feature", "[branch \"feature\"]\n\tvscode-merge-base = origin/main\n")
+
+	metadata, err := metadataGitLocal(fixture.root)
+	require.NoError(t, err)
+	require.NotNil(t, metadata)
+	assert.Equal(t, "feature", metadata.Branch)
+	assert.Equal(t, "github", metadata.Provider)
+	assert.Equal(t, "kubescape", metadata.Owner)
+	assert.Equal(t, "branch-config-fixture", metadata.Repo)
+	assert.Equal(t, "https://github.com/kubescape/branch-config-fixture", metadata.RemoteURL)
+	assert.Equal(t, fixture.commit.String(), metadata.LastCommit.Hash)
+}
