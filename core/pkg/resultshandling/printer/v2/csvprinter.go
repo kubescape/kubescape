@@ -103,15 +103,18 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 		return err
 	}
 	hasReport := opaSessionObj != nil && opaSessionObj.Report != nil
+	if !hasReport && len(imageScanData) == 0 {
+		return fmt.Errorf("no data provided for CSV output")
+	}
+	if cp.writer == nil {
+		return fmt.Errorf("failed to write CSV results: output writer is nil")
+	}
 	if !hasReport && len(imageScanData) > 0 {
 		if err := writeImageScanCSV(cp.writer, imageScanData); err != nil {
 			return err
 		}
 		printer.LogOutputFile(cp.writer.Name())
 		return nil
-	}
-	if !hasReport {
-		return fmt.Errorf("no data provided for CSV output")
 	}
 
 	finalizedReport := FinalizeResults(opaSessionObj)
@@ -219,8 +222,10 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 					reason:    remediation,
 				}] = struct{}{}
 			} else {
-				if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, ctrlID); ctrl != nil {
-					remediation = ctrl.GetRemediation()
+				if summaryControls != nil {
+					if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, ctrlID); ctrl != nil {
+						remediation = ctrl.GetRemediation()
+					}
 				}
 			}
 
@@ -249,8 +254,10 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 	for _, sc := range skippedControls {
 		name := sc.name
 		if name == "" || name == sc.controlID {
-			if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, sc.controlID); ctrl != nil && ctrl.GetName() != "" {
-				name = ctrl.GetName()
+			if summaryControls != nil {
+				if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, sc.controlID); ctrl != nil && ctrl.GetName() != "" {
+					name = ctrl.GetName()
+				}
 			}
 		}
 		if name == "" {
@@ -258,8 +265,10 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 		}
 		severity := apis.ControlSeverityToString(sc.scoreFactor)
 		if severity == "" || severity == "Unknown" {
-			if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, sc.controlID); ctrl != nil && ctrl.GetScoreFactor() > 0 {
-				severity = apis.ControlSeverityToString(ctrl.GetScoreFactor())
+			if summaryControls != nil {
+				if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, sc.controlID); ctrl != nil && ctrl.GetScoreFactor() > 0 {
+					severity = apis.ControlSeverityToString(ctrl.GetScoreFactor())
+				}
 			}
 		}
 		if severity == "" {
@@ -307,7 +316,10 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 }
 
 func (cp *CsvPrinter) writeImageScanCompanion(ctx context.Context, imageScanData []cautils.ImageScanData) error {
-	if len(imageScanData) == 0 || cp.writer.Name() == os.DevNull {
+	if len(imageScanData) == 0 {
+		return nil
+	}
+	if cp.writer == nil || cp.writer.Name() == os.DevNull {
 		return nil
 	}
 	postureInfo, err := cp.writer.Stat()
