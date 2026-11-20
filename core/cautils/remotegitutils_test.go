@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -90,11 +91,73 @@ func TestCloneRepo(t *testing.T) {
 	})
 	gitURL := authenticatedGitURL(t, "https://github.com/kubescape/kubescape/")
 
-	tempDir, err := cloneRepo(gitURL)
+	tempDir, err := cloneRepo(context.Background(), gitURL)
 
 	require.NoError(t, err)
 	assert.DirExists(t, tempDir)
 	require.NoError(t, ReleaseClonedRepo("https://github.com/kubescape/kubescape/"))
+}
+
+func TestCloneRepoContextCancellation(t *testing.T) {
+	resetRepoWorkspaceState(t)
+	var attemptedPath string
+	useFakeClone(t, func(path string, _ bool, _ *git.CloneOptions) (*git.Repository, error) {
+		attemptedPath = path
+		return nil, context.Canceled
+	})
+	gitURL := authenticatedGitURL(t, "https://github.com/kubescape/kubescape/")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tempDir, err := cloneRepo(ctx, gitURL)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, tempDir)
+	if attemptedPath != "" {
+		assert.NoDirExists(t, attemptedPath)
+	}
+	assert.Empty(t, GetClonedPath("https://github.com/kubescape/kubescape/"))
+}
+
+func TestCloneGitRepoContext(t *testing.T) {
+	resetRepoWorkspaceState(t)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	useFakeClone(t, func(path string, _ bool, options *git.CloneOptions) (*git.Repository, error) {
+		return initializeCloneWorkspace(path, options)
+	})
+	rawURL := "https://github.com/kubescape/kubescape/"
+	path := rawURL
+
+	clonedDir, err := CloneGitRepoContext(context.Background(), &path)
+	require.NoError(t, err)
+	assert.DirExists(t, clonedDir)
+	assert.Equal(t, clonedDir, path)
+	require.NoError(t, ReleaseClonedRepo(rawURL))
+}
+
+func TestCloneGitRepoContextCancellation(t *testing.T) {
+	resetRepoWorkspaceState(t)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	var attemptedPath string
+	useFakeClone(t, func(path string, _ bool, _ *git.CloneOptions) (*git.Repository, error) {
+		attemptedPath = path
+		return nil, context.Canceled
+	})
+	rawURL := "https://github.com/kubescape/kubescape/"
+	path := rawURL
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	clonedDir, err := CloneGitRepoContext(ctx, &path)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, clonedDir)
+	if attemptedPath != "" {
+		assert.NoDirExists(t, attemptedPath)
+	}
+	assert.Empty(t, GetClonedPath(rawURL))
 }
 func TestGetClonedPath(t *testing.T) {
 	testCases := []struct {
@@ -249,7 +312,7 @@ func TestCloneRepoShallowDepthOptions(t *testing.T) {
 			})
 
 			gitURL := authenticatedGitURL(t, tt.url)
-			tempDir, err := cloneRepo(gitURL, tt.depthOpt...)
+			tempDir, err := cloneRepo(context.Background(), gitURL, tt.depthOpt...)
 			require.NoError(t, err)
 			assert.DirExists(t, tempDir)
 
@@ -309,7 +372,7 @@ func TestCloneRepoCommitSHAFallback(t *testing.T) {
 			})
 
 			gitURL := authenticatedGitURL(t, u)
-			tempDir, err := cloneRepo(gitURL, 1) // requested depth 1 should fall back to 0 for commit SHA
+			tempDir, err := cloneRepo(context.Background(), gitURL, 1) // requested depth 1 should fall back to 0 for commit SHA
 			require.NoError(t, err)
 			assert.DirExists(t, tempDir)
 
@@ -365,12 +428,12 @@ func TestCloneRepo_DifferentDepthsDoNotReuseWorkspace(t *testing.T) {
 	gitURL := authenticatedGitURL(t, "https://github.com/kubescape/kubescape/")
 
 	// Clone 1: shallow depth 1
-	path1, err := cloneRepo(gitURL, 1)
+	path1, err := cloneRepo(context.Background(), gitURL, 1)
 	require.NoError(t, err)
 	assert.Equal(t, 1, cloneCalls)
 
 	// Clone 2: full history depth 0 - must execute a second clone, not reuse depth 1
-	path2, err := cloneRepo(gitURL, 0)
+	path2, err := cloneRepo(context.Background(), gitURL, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 2, cloneCalls, "different clone depths must not reuse the same workspace")
 	assert.NotEqual(t, path1, path2, "workspaces for different depths must have distinct directories")

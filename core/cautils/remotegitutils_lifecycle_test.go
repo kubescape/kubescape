@@ -36,13 +36,20 @@ func resetRepoWorkspaceState(t *testing.T) {
 	}
 }
 
+func useFakeCloneContext(t *testing.T, clone func(context.Context, string, bool, *git.CloneOptions) (*git.Repository, error)) {
+	t.Helper()
+	original := plainCloneContext
+	plainCloneContext = clone
+	t.Cleanup(func() {
+		plainCloneContext = original
+		resetRepoWorkspaceState(t)
+	})
+}
+
 func useFakeClone(t *testing.T, clone func(string, bool, *git.CloneOptions) (*git.Repository, error)) {
 	t.Helper()
-	original := plainClone
-	plainClone = clone
-	t.Cleanup(func() {
-		plainClone = original
-		resetRepoWorkspaceState(t)
+	useFakeCloneContext(t, func(_ context.Context, path string, isBare bool, options *git.CloneOptions) (*git.Repository, error) {
+		return clone(path, isBare, options)
 	})
 }
 
@@ -98,7 +105,7 @@ func TestCloneRepoDeduplicatesConcurrentClonesAndReferenceCountsUsers(t *testing
 	for i := 0; i < users; i++ {
 		parsed := authenticatedGitURL(t, "https://github.com/example/project")
 		go func(gitURL giturl.IGitAPI) {
-			path, err := cloneRepo(gitURL)
+			path, err := cloneRepo(context.Background(), gitURL)
 			results <- path
 			errors <- err
 		}(parsed)
@@ -143,7 +150,7 @@ func TestCloneRepoClonesDifferentRepositoriesConcurrently(t *testing.T) {
 		urls[i] = fmt.Sprintf("https://github.com/example/project-%d", i)
 		gitURL := authenticatedGitURL(t, urls[i])
 		go func() {
-			_, err := cloneRepo(gitURL)
+			_, err := cloneRepo(context.Background(), gitURL)
 			errs <- err
 		}()
 	}
@@ -168,7 +175,7 @@ func TestCloneRepoDoesNotPublishOrLeakFailedWorkspace(t *testing.T) {
 		return nil, errors.New("clone interrupted")
 	})
 
-	_, err := cloneRepo(authenticatedGitURL(t, "https://github.com/example/broken"))
+	_, err := cloneRepo(context.Background(), authenticatedGitURL(t, "https://github.com/example/broken"))
 	require.ErrorContains(t, err, "clone interrupted")
 	assert.NotEmpty(t, attemptedPath)
 	assert.NoDirExists(t, attemptedPath)
@@ -185,9 +192,9 @@ func TestCloneRepoKeepsBranchesInSeparateWorkspaces(t *testing.T) {
 
 	mainURL := "https://github.com/example/project/tree/main"
 	featureURL := "https://github.com/example/project/tree/feature"
-	mainPath, err := cloneRepo(authenticatedGitURL(t, mainURL))
+	mainPath, err := cloneRepo(context.Background(), authenticatedGitURL(t, mainURL))
 	require.NoError(t, err)
-	featurePath, err := cloneRepo(authenticatedGitURL(t, featureURL))
+	featurePath, err := cloneRepo(context.Background(), authenticatedGitURL(t, featureURL))
 	require.NoError(t, err)
 
 	assert.NotEqual(t, mainPath, featurePath)
@@ -315,9 +322,7 @@ func TestScanInfoInitPropagatesCloneError(t *testing.T) {
 }
 
 // TestMaterializeRemoteInputsPreCloneCancellation verifies that a cancelled
-// context prevents any clone from starting. This is pre-clone cancellation
-// only; an already-running git.PlainClone is not interrupted because
-// CloneGitRepo does not accept a context today.
+// context prevents any clone from starting.
 func TestMaterializeRemoteInputsPreCloneCancellation(t *testing.T) {
 	resetRepoWorkspaceState(t)
 	var cloneCalls atomic.Int32
@@ -333,6 +338,78 @@ func TestMaterializeRemoteInputsPreCloneCancellation(t *testing.T) {
 	err := scanInfo.MaterializeRemoteInputs(ctx)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, int32(0), cloneCalls.Load())
+}
+
+// TestCloneRepoContextCancellationCleansWorkspace verifies that cancelling the
+// context during an in-flight clone immediately aborts the operation and cleans up
+// the partial workspace from disk without leaking reservations.
+func TestCloneRepoContextCancellationCleansWorkspace(t *testing.T) {
+	resetRepoWorkspaceState(t)
+	cloneStarted := make(chan struct{})
+	var attemptedPath string
+	useFakeCloneContext(t, func(ctx context.Context, path string, _ bool, _ *git.CloneOptions) (*git.Repository, error) {
+		attemptedPath = path
+		close(cloneStarted)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	repoURL := "https://github.com/example/cancellable"
+	gitURL := authenticatedGitURL(t, repoURL)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := cloneRepo(ctx, gitURL)
+		errCh <- err
+	}()
+
+	<-cloneStarted
+	assert.DirExists(t, attemptedPath)
+
+	cancel()
+
+	err := <-errCh
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.NoDirExists(t, attemptedPath)
+	assert.Empty(t, GetClonedPath(repoURL))
+}
+
+// TestMaterializeRemoteInputsMidCloneCancellation verifies that cancelling the
+// context while a clone is actively in progress aborts MaterializeRemoteInputs,
+// returns the context error, and removes the workspace.
+func TestMaterializeRemoteInputsMidCloneCancellation(t *testing.T) {
+	resetRepoWorkspaceState(t)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	cloneStarted := make(chan struct{})
+	var attemptedPath string
+	useFakeCloneContext(t, func(ctx context.Context, path string, _ bool, _ *git.CloneOptions) (*git.Repository, error) {
+		attemptedPath = path
+		close(cloneStarted)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	remoteURL := "https://github.com/example/mid-cancel"
+	scanInfo := &ScanInfo{InputPatterns: []string{remoteURL}}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- scanInfo.MaterializeRemoteInputs(ctx)
+	}()
+
+	<-cloneStarted
+	assert.DirExists(t, attemptedPath)
+
+	cancel()
+
+	err := <-errCh
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.NoDirExists(t, attemptedPath)
+	assert.Empty(t, GetClonedPath(remoteURL))
 }
 
 // TestScanInfoCleanupSequentialIdempotency verifies that cleanup hooks are
