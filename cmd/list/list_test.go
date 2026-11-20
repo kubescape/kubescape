@@ -579,6 +579,30 @@ func TestGetListCmd_TargetCompletion(t *testing.T) {
 	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "fr")
 	assert.Equal(t, []string{"frameworks"}, suggestions)
 	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "Fr")
+	assert.Equal(t, []string{"Frameworks"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "FRAME")
+	assert.Equal(t, []string{"FRAMEworks"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "c")
+	assert.Equal(t, []string{"controls", "controls-config"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "C")
+	assert.Equal(t, []string{"Controls", "Controls-config"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "Controls-")
+	assert.Equal(t, []string{"Controls-config"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "xyz")
+	assert.Empty(t, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
 }
 
 func TestGetListCmd_FormatCompletion(t *testing.T) {
@@ -593,5 +617,25 @@ func TestGetListCmd_FormatCompletion(t *testing.T) {
 
 	suggestions, directive = completion(cmd, nil, "j")
 	assert.Equal(t, []string{"json"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = completion(cmd, nil, "J")
+	assert.Equal(t, []string{"Json"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = completion(cmd, nil, "JSON")
+	assert.Equal(t, []string{"JSON"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = completion(cmd, nil, "Yaml")
+	assert.Equal(t, []string{"Yaml"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = completion(cmd, nil, "Pretty-")
+	assert.Equal(t, []string{"Pretty-print"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = completion(cmd, nil, "xyz")
+	assert.Empty(t, suggestions)
 	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
 }

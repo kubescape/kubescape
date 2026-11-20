@@ -54,6 +54,24 @@ func normalizeListTarget(target string) string {
 	}
 }
 
+// completeWithCasePrefix filters candidates matching toComplete case-insensitively,
+// preserving the typed prefix in returned suggestions so that shells with
+// case-sensitive completion (such as Bash) retain the matches.
+func completeWithCasePrefix(candidates []string, toComplete string) []string {
+	var suggestions []string
+	lowerToComplete := strings.ToLower(toComplete)
+	for _, candidate := range candidates {
+		if strings.HasPrefix(strings.ToLower(candidate), lowerToComplete) {
+			if len(toComplete) <= len(candidate) {
+				suggestions = append(suggestions, toComplete+candidate[len(toComplete):])
+			} else {
+				suggestions = append(suggestions, candidate)
+			}
+		}
+	}
+	return suggestions
+}
+
 func GetListCmd(ks meta.IKubescape) *cobra.Command {
 	var listPolicies = v1.ListPolicies{}
 
@@ -67,13 +85,7 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 				return nil, cobra.ShellCompDirectiveNoFileComp
 			}
 
-			var suggestions []string
-			for _, target := range core.ListSupportActions() {
-				if strings.HasPrefix(strings.ToLower(target), strings.ToLower(toComplete)) {
-					suggestions = append(suggestions, target)
-				}
-			}
-			return suggestions, cobra.ShellCompDirectiveNoFileComp
+			return completeWithCasePrefix(core.ListSupportActions(), toComplete), cobra.ShellCompDirectiveNoFileComp
 		},
 		Args: func(cmd *cobra.Command, args []string) error {
 			supported := strings.Join(core.ListSupportActions(), ",")
@@ -123,13 +135,7 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 
 	_ = listCmd.RegisterFlagCompletionFunc("format",
 		func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-			var suggestions []string
-			for _, format := range core.ListSupportFormats() {
-				if strings.HasPrefix(strings.ToLower(format), strings.ToLower(toComplete)) {
-					suggestions = append(suggestions, format)
-				}
-			}
-			return suggestions, cobra.ShellCompDirectiveNoFileComp
+			return completeWithCasePrefix(core.ListSupportFormats(), toComplete), cobra.ShellCompDirectiveNoFileComp
 		},
 	)
 	listCmd.PersistentFlags().StringVar(&listPolicies.ControlsInputs, "controls-config", "", "Path to a controls-config file, to show the inputs a scan would use with it. Only applies to 'controls-config'")
