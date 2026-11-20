@@ -39,6 +39,11 @@ func TestClusterScan_getWorkloadScanCommand(t *testing.T) {
 	if command != "$ kubescape scan workload kind/name --namespace ns" {
 		t.Errorf("Expected $ kubescape scan workload kind/name --namespace ns, got %s", command)
 	}
+
+	commandNoNs := clusterPrinter.getWorkloadScanCommand("", "ClusterRole", "cluster-admin")
+	if commandNoNs != "$ kubescape scan workload ClusterRole/cluster-admin" {
+		t.Errorf("Expected $ kubescape scan workload ClusterRole/cluster-admin, got %s", commandNoNs)
+	}
 }
 
 func TestNewClusterPrinter(t *testing.T) {
@@ -108,13 +113,13 @@ func TestGetWorkloadScanCommand(t *testing.T) {
 			name:      "Empty",
 			namespace: "",
 			kind:      "",
-			want:      "$ kubescape scan workload /Empty --namespace ",
+			want:      "$ kubescape scan workload /Empty",
 		},
 		{
 			name:      "Empty Namespace",
 			namespace: "",
 			kind:      "Kind",
-			want:      "$ kubescape scan workload Kind/Empty Namespace --namespace ",
+			want:      "$ kubescape scan workload Kind/Empty Namespace",
 		},
 		{
 			name:      "Empty Kind",
@@ -172,4 +177,36 @@ func TestClusterScan_printTopWorkloads_ResourceNameWithPercentVerbs(t *testing.T
 	}
 
 	assert.Contains(t, string(got), name, "resource name must be printed literally, not interpreted as a format string")
+}
+
+func TestClusterScan_printTopWorkloads_ClusterScopedResource(t *testing.T) {
+	f, err := os.CreateTemp("", "print-top-workloads-clusterscoped")
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	cp := &ClusterPrinter{writer: f}
+
+	resource := reporthandling.NewResource(map[string]interface{}{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRole",
+		"metadata": map[string]interface{}{
+			"name": "cluster-admin",
+		},
+	})
+
+	cp.printTopWorkloads([]reporthandling.IResource{resource})
+
+	f.Seek(0, 0)
+	gotBytes, err := io.ReadAll(f)
+	if err != nil {
+		panic(err)
+	}
+	got := string(gotBytes)
+
+	assert.Contains(t, got, "1. name: cluster-admin, kind: ClusterRole")
+	assert.NotContains(t, got, "namespace:")
+	assert.Contains(t, got, "$ kubescape scan workload ClusterRole/cluster-admin")
+	assert.NotContains(t, got, "--namespace")
 }
