@@ -2,11 +2,11 @@ package scan
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	contractv1alpha1 "github.com/kubescape/kubescape/v4/core/pkg/scancontract/v1alpha1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/spf13/cobra"
@@ -290,18 +290,19 @@ func ordinaryCLIOverrides(cmd *cobra.Command, contract contractv1alpha1.Contract
 }
 
 func safeScanContractSource(path string) string {
-	clean := filepath.Clean(path)
-	if filepath.IsAbs(clean) {
-		if workingDirectory, err := os.Getwd(); err == nil {
-			if relative, err := filepath.Rel(workingDirectory, clean); err == nil {
-				clean = relative
-			}
-		}
-	}
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || filepath.IsAbs(clean) {
+	base, err := pathcontainment.ResolveBaseDir(".")
+	if err != nil {
 		return "external"
 	}
-	return filepath.ToSlash(clean)
+	resolved, err := pathcontainment.ResolveContainedPath(base, path)
+	if err != nil {
+		return "external"
+	}
+	relative, err := filepath.Rel(base, resolved)
+	if err != nil || relative == "." {
+		return "external"
+	}
+	return filepath.ToSlash(relative)
 }
 
 func splitContractNamespaces(value string) []string {

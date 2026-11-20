@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -292,25 +293,17 @@ func validateContractArtifactURI(path string) string {
 	if path == "" {
 		return ""
 	}
+	if source := safeScanContractSource(path); source != "external" {
+		path = source
+	} else if resolved, err := resolvePath(path); err == nil {
+		path = resolved
+	}
+	uri := url.URL{Path: filepath.ToSlash(path)}
 	if filepath.IsAbs(path) {
-		cwd, cwdErr := os.Getwd()
-		if cwdErr == nil {
-			base := validateContractCleanPath(cwd)
-			target := validateContractCleanPath(path)
-			relative, err := filepath.Rel(base, target)
-			if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
-				return filepath.ToSlash(relative)
-			}
+		uri.Scheme = "file"
+		if !strings.HasPrefix(uri.Path, "/") {
+			uri.Path = "/" + uri.Path
 		}
 	}
-	cleaned := filepath.ToSlash(filepath.Clean(path))
-	return cleaned
-}
-
-func validateContractCleanPath(path string) string {
-	cleaned := filepath.Clean(path)
-	if evaluated, err := filepath.EvalSymlinks(cleaned); err == nil {
-		return evaluated
-	}
-	return cleaned
+	return uri.String()
 }

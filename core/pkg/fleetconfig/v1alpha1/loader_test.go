@@ -3,6 +3,8 @@ package v1alpha1
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -97,6 +99,28 @@ func TestLoadFile_Valid(t *testing.T) {
 	doc, err := LoadFile(path)
 	require.NoError(t, err)
 	require.NotNil(t, doc)
+	require.NotNil(t, doc.Spec.Contexts)
+	assert.Equal(t, ContextList{"prod", "staging", "dr"}, *doc.Spec.Contexts)
+}
+
+func TestLoadFile_PreservesSymlinkParentTraversal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink parent traversal uses different path semantics on Windows")
+	}
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target", "child")
+	require.NoError(t, os.MkdirAll(target, 0o700))
+	link := filepath.Join(dir, "link")
+	require.NoError(t, os.Symlink(target, link))
+
+	// Cleaning link/.. would silently select the other cluster configuration.
+	otherConfig := strings.Replace(fullConfig, "[prod, staging, dr]", "[wrong-cluster]", 1)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "fleet.yaml"), []byte(otherConfig), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "target", "fleet.yaml"), []byte(fullConfig), 0o600))
+
+	doc, err := LoadFile(link + "/../fleet.yaml")
+	require.NoError(t, err)
 	require.NotNil(t, doc.Spec.Contexts)
 	assert.Equal(t, ContextList{"prod", "staging", "dr"}, *doc.Spec.Contexts)
 }
