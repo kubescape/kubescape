@@ -15,12 +15,13 @@ import (
 
 const (
 	annotateSubCommand   string = "annotate"
+	patchSubCommand      string = "patch"
 	quarantineSubCommand string = "quarantine"
 	revertSubCommand     string = "revert"
 )
 
 // remediateActions is the set of actions the CLI accepts, in help/error order.
-var remediateActions = []string{annotateSubCommand, quarantineSubCommand, revertSubCommand}
+var remediateActions = []string{annotateSubCommand, patchSubCommand, quarantineSubCommand, revertSubCommand}
 
 func isSupportedRemediateAction(action string) bool {
 	for _, a := range remediateActions {
@@ -43,6 +44,15 @@ var operatorRemediateExamples = fmt.Sprintf(`
 
   # Apply the quarantine
   %[1]s operator remediate quarantine --kind Deployment --target-namespace payments --name api --reason "C-0016" --confirm
+
+  # Preview (dry-run) patching a workload — applies a Strategic Merge Patch
+  %[1]s operator remediate patch --kind Deployment --target-namespace payments --name api --patch '{"spec":{"template":{"spec":{"containers":[{"name":"web","securityContext":{"allowPrivilegeEscalation":false}}]}}}}'
+
+  # Apply the patch
+  %[1]s operator remediate patch --kind Deployment --target-namespace payments --name api --patch '{"spec":{"template":{"spec":{"containers":[{"name":"web","securityContext":{"allowPrivilegeEscalation":false}}]}}}}' --confirm
+
+  # Apply a JSON Merge Patch
+  %[1]s operator remediate patch --kind Deployment --target-namespace payments --name api --patch-type merge --patch '{"metadata":{"labels":{"remediated":"true"}}}' --confirm
 
   # Revert a previously applied action (removes the annotation and/or NetworkPolicy on the target)
   %[1]s operator remediate revert --kind Deployment --target-namespace payments --name api --confirm
@@ -67,7 +77,7 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 
 	remediateCmd := &cobra.Command{
 		Use:     "remediate <action>",
-		Short:   "Act on scan findings via the Kubescape Operator (annotate, quarantine, revert — dry-run by default)",
+		Short:   "Act on scan findings via the Kubescape Operator (annotate, patch, quarantine, revert — dry-run by default)",
 		Long:    ``,
 		Example: operatorRemediateExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -94,8 +104,8 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 				return err
 			}
 
-			// annotate and quarantine write an audit trail; nudge (don't block) for a justification.
-			if (remediationInfo.Action == annotateSubCommand || remediationInfo.Action == quarantineSubCommand) && remediationInfo.Reason == "" {
+			// annotate, patch and quarantine write an audit trail; nudge (don't block) for a justification.
+			if (remediationInfo.Action == annotateSubCommand || remediationInfo.Action == patchSubCommand || remediationInfo.Action == quarantineSubCommand) && remediationInfo.Reason == "" {
 				logger.L().Warning(fmt.Sprintf("no --reason provided; %s records an audit trail, consider adding --reason to justify the action", remediationInfo.Action))
 			}
 
@@ -152,6 +162,8 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 	remediateCmd.PersistentFlags().StringVar(&remediationInfo.MinSeverity, "min-severity", "", "act on workloads with a failing finding at or above this severity: Critical, High, Medium, Low or Unknown (mutually exclusive with --kind/--name)")
 	remediateCmd.PersistentFlags().StringVar(&remediationInfo.Reason, "reason", "", "human-readable justification recorded in the audit trail")
 	remediateCmd.PersistentFlags().StringVar(&remediationInfo.FindingRef, "finding-ref", "", "scan-result reference that justifies the action, e.g. workloadconfigurationscansummaries/payments/api")
+	remediateCmd.PersistentFlags().StringVar(&remediationInfo.Patch, "patch", "", "patch body to apply (JSON object; required for the patch action)")
+	remediateCmd.PersistentFlags().StringVar(&remediationInfo.PatchType, "patch-type", "", "patch type for the patch action: strategic (default) or merge")
 	remediateCmd.PersistentFlags().BoolVar(&remediationInfo.Confirm, "confirm", false, "perform the real cluster write; without it the action is a dry-run preview")
 
 	return remediateCmd
