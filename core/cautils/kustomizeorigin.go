@@ -68,6 +68,11 @@ type originPlan struct {
 	allowedRoots []string
 }
 
+type inspectKey struct {
+	loaderDir string
+	config    string
+}
+
 // originModeFor inspects the scanned kustomization and its configuration graph
 // (referenced bases and components included) to decide how its resources'
 // origins can be learned safely. Kustomize hands the outermost kustomization's
@@ -106,8 +111,8 @@ func inspectKustomizationGraph(directory string) (safe bool, preserved []string,
 		return false, nil, false, nil
 	}
 
-	visited := map[string]struct{}{}
-	visiting := map[string]struct{}{}
+	visited := map[inspectKey]struct{}{}
+	visiting := map[inspectKey]struct{}{}
 	var allowedDirs []string
 	cleanDir := filepath.Clean(directory)
 	allowedDirs = append(allowedDirs, cleanDir)
@@ -121,7 +126,7 @@ func inspectKustomizationGraph(directory string) (safe bool, preserved []string,
 	return safe, preserved, ownOrigins, allowedRoots
 }
 
-func inspectKustomizationNode(file string, isRoot bool, visited, visiting map[string]struct{}, allowedDirs *[]string) (bool, []string, bool) {
+func inspectKustomizationNode(file string, isRoot bool, visited, visiting map[inspectKey]struct{}, allowedDirs *[]string) (bool, []string, bool) {
 	canonical, err := filepath.EvalSymlinks(file)
 	if err != nil {
 		return false, nil, false
@@ -133,7 +138,7 @@ func inspectKustomizationNode(file string, isRoot bool, visited, visiting map[st
 	dir := loaderDir
 	*allowedDirs = append(*allowedDirs, loaderDir, filepath.Dir(canonical))
 
-	nodeKey := loaderDir + "|" + canonical
+	nodeKey := inspectKey{loaderDir, canonical}
 	if _, inStack := visiting[nodeKey]; inStack {
 		return false, nil, false
 	}
@@ -232,7 +237,7 @@ func inspectKustomizationNode(file string, isRoot bool, visited, visiting map[st
 		}
 	}
 
-	references := make([]string, 0, len(k.Resources)+len(k.Components)+len(k.Bases))
+	references := make([]string, 0, len(k.Resources)+len(k.Components)+len(k.Bases)) //nolint:staticcheck
 	references = append(references, k.Resources...)
 	references = append(references, k.Components...)
 	references = append(references, k.Bases...) //nolint:staticcheck
@@ -355,8 +360,10 @@ func isRemoteReference(ref string) bool {
 	if strings.Contains(ref, "@") && strings.Contains(ref, ":") {
 		return true
 	}
-	// Kustomize tries Git before a local directory and accepts scp-like and shorthand forms (git@host:org/repo, github.com:org/repo, gh:org/repo). No trusted local path contains a colon.
-	if strings.Contains(ref, ":") && !(filepath.IsAbs(ref) && len(ref) > 1 && ref[1] == ':') {
+	// Kustomize tries Git before a local directory and accepts scp-like and
+	// shorthand forms (git@host:org/repo, github.com:org/repo, gh:org/repo).
+	// No trusted local path contains a colon.
+	if strings.Contains(ref, ":") && (!filepath.IsAbs(ref) || len(ref) < 2 || ref[1] != ':') {
 		return true
 	}
 	return false

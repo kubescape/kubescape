@@ -1411,7 +1411,7 @@ patches:
 	t.Run("inline patchesJson6902 replacing /spec/replicas yields originWrapper", func(t *testing.T) {
 		dir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "deploy.yaml"),
-			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  replicas: 1\n"), 0o600))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(`resources:
 - deploy.yaml
 patchesJson6902:
@@ -1424,6 +1424,10 @@ patchesJson6902:
       value: 3
 `), 0o600))
 		assert.Equal(t, originWrapper, originModeFor(dir).mode)
+		byName, origins := renderedKustomizeWorkloads(t, dir)
+		require.Contains(t, byName, "Deployment/demo")
+		assert.Equal(t, int64(3), replicasOf(t, byName["Deployment/demo"]))
+		assert.Equal(t, filepath.Join(dir, "deploy.yaml"), origins[byName["Deployment/demo"].GetID()])
 	})
 
 	t.Run("patchesStrategicMerge entry replicas.json containing a spec-only strategic-merge patch yields originWrapper", func(t *testing.T) {
