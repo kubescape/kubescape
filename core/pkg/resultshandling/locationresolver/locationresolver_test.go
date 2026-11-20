@@ -315,3 +315,60 @@ func newWorkloadResolverFor(t *testing.T, manifest string) *PathLocationResolver
 	require.NoError(t, err)
 	return resolver
 }
+
+func TestFindDocumentIndexAndRawDocument(t *testing.T) {
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  namespace: prod
+spec:
+  replicas: 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo
+  namespace: prod
+spec:
+  ports:
+  - port: 80
+`
+	path := filepath.Join(t.TempDir(), "multi.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(manifest), 0o600))
+
+	resolver, err := NewPathLocationResolver(path)
+	require.NoError(t, err)
+	assert.Equal(t, 2, resolver.DocumentCount())
+
+	// Exact match on Deployment demo
+	idx, ok := resolver.FindDocumentIndex("Deployment", "demo", "prod")
+	assert.True(t, ok)
+	assert.Equal(t, 0, idx)
+
+	// Exact match on Service demo
+	idx, ok = resolver.FindDocumentIndex("Service", "demo", "prod")
+	assert.True(t, ok)
+	assert.Equal(t, 1, idx)
+
+	// Non-matching kind
+	_, ok = resolver.FindDocumentIndex("ConfigMap", "demo", "prod")
+	assert.False(t, ok)
+
+	// Non-matching name
+	_, ok = resolver.FindDocumentIndex("Deployment", "other", "prod")
+	assert.False(t, ok)
+
+	// RawDocument on valid doc
+	raw, err := resolver.RawDocument(0)
+	require.NoError(t, err)
+	assert.Equal(t, "Deployment", raw["kind"])
+	spec, ok := raw["spec"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, 1, spec["replicas"])
+
+	// RawDocument out of range
+	_, err = resolver.RawDocument(5)
+	assert.Error(t, err)
+}
+
