@@ -55,6 +55,23 @@ var typedResourceGVK = map[string]struct{ apiVersion, kind string }{
 	"kubernetes_role_binding_v1":         {"rbac.authorization.k8s.io/v1", "RoleBinding"},
 	"kubernetes_cluster_role_v1":         {"rbac.authorization.k8s.io/v1", "ClusterRole"},
 	"kubernetes_cluster_role_binding_v1": {"rbac.authorization.k8s.io/v1", "ClusterRoleBinding"},
+
+	"kubernetes_persistent_volume_claim":           {"v1", "PersistentVolumeClaim"},
+	"kubernetes_persistent_volume_claim_v1":        {"v1", "PersistentVolumeClaim"},
+	"kubernetes_persistent_volume":                 {"v1", "PersistentVolume"},
+	"kubernetes_persistent_volume_v1":              {"v1", "PersistentVolume"},
+	"kubernetes_pod_disruption_budget":             {"policy/v1", "PodDisruptionBudget"},
+	"kubernetes_pod_disruption_budget_v1":          {"policy/v1", "PodDisruptionBudget"},
+	"kubernetes_resource_quota":                    {"v1", "ResourceQuota"},
+	"kubernetes_resource_quota_v1":                 {"v1", "ResourceQuota"},
+	"kubernetes_limit_range":                       {"v1", "LimitRange"},
+	"kubernetes_limit_range_v1":                    {"v1", "LimitRange"},
+	"kubernetes_horizontal_pod_autoscaler":         {"autoscaling/v1", "HorizontalPodAutoscaler"},
+	"kubernetes_horizontal_pod_autoscaler_v1":      {"autoscaling/v1", "HorizontalPodAutoscaler"},
+	"kubernetes_horizontal_pod_autoscaler_v2":      {"autoscaling/v2", "HorizontalPodAutoscaler"},
+	"kubernetes_horizontal_pod_autoscaler_v2beta2": {"autoscaling/v2beta2", "HorizontalPodAutoscaler"},
+	"kubernetes_priority_class":                    {"scheduling.k8s.io/v1", "PriorityClass"},
+	"kubernetes_priority_class_v1":                 {"scheduling.k8s.io/v1", "PriorityClass"},
 }
 
 // pluralOverrides maps an HCL block label to the K8s array field name it must
@@ -77,9 +94,13 @@ var pluralOverrides = map[string]string{
 	"image_pull_secret":     "imagePullSecrets",
 	"image_pull_secrets":    "imagePullSecrets",
 	"match_expressions":     "matchExpressions",
+	"match_expression":      "matchExpressions",
 	"volume_claim_template": "volumeClaimTemplates",
 	"http_header":           "httpHeaders",
 	"sysctl":                "sysctls",
+	"limit":                 "limits",
+	"metric":                "metrics",
+	"policy":                "policies",
 }
 
 // repeatableBlocks lists HCL block labels that always encode as a JSON array,
@@ -90,9 +111,10 @@ var repeatableBlocks = map[string]bool{
 	"env": true, "env_from": true, "port": true, "ports": true, "toleration": true,
 	"host_alias": true, "host_aliases": true, "rule": true, "subject": true,
 	"image_pull_secret": true, "image_pull_secrets": true,
-	"match_expressions": true, "volume_claim_template": true, "http_header": true,
+	"match_expressions": true, "match_expression": true, "volume_claim_template": true, "http_header": true,
 	"sysctl": true, "ingress": true, "egress": true, "from": true, "to": true,
 	"path": true, "tls": true,
+	"limit": true, "metric": true, "policy": true,
 }
 
 // resourceMetaAttributes are Terraform meta-argument attributes valid on any
@@ -119,6 +141,7 @@ var resourceMetaBlocks = map[string]bool{
 
 var fieldInitialisms = map[string]string{
 	"api":  "API",
+	"cpu":  "CPU",
 	"id":   "ID",
 	"ip":   "IP",
 	"ipc":  "IPC",
@@ -290,6 +313,20 @@ func isStringTypedNumberField(path, name string) bool {
 	return isServiceTargetPortField(path, name) || isHandlerPortField(path, name) || isSecurityContextIDField(path, name)
 }
 
+// isPDBIntOrStringField reports whether name is min_available or
+// max_unavailable in a PodDisruptionBudget spec. The provider declares them as
+// strings (or int-or-string) and intstr.Parse converts digit strings to
+// integers while preserving percentage strings.
+func isPDBIntOrStringField(path, name string) bool {
+	if name != "min_available" && name != "max_unavailable" {
+		return false
+	}
+	if !strings.HasSuffix(path, ".spec") && path != "spec" {
+		return false
+	}
+	return strings.Contains(path, "kubernetes_pod_disruption_budget")
+}
+
 func attributeValueFor(path, name string, val interface{}) interface{} {
 	// The provider keeps the security context IDs in strings so that "" can
 	// leave them unset: it sets runAsUser, runAsGroup and fsGroup only from a
@@ -297,7 +334,7 @@ func attributeValueFor(path, name string, val interface{}) interface{} {
 	if s, ok := val.(string); ok && s == "" && isSecurityContextIDField(path, name) {
 		return nil
 	}
-	if s, ok := val.(string); ok && (isConvertiblePortField(path, name) || isStringTypedNumberField(path, name)) && isDigitOnly(s) {
+	if s, ok := val.(string); ok && (isConvertiblePortField(path, name) || isStringTypedNumberField(path, name) || isPDBIntOrStringField(path, name)) && isDigitOnly(s) {
 		return json.Number(canonicalizeNumericString(s))
 	}
 	return val
@@ -533,6 +570,8 @@ var clusterScopedTypedKinds = map[string]bool{
 	"Namespace":          true,
 	"ClusterRole":        true,
 	"ClusterRoleBinding": true,
+	"PersistentVolume":   true,
+	"PriorityClass":      true,
 }
 
 // providerNamespaceDefault is the namespace the provider writes into a block
