@@ -887,3 +887,100 @@ func TestAddContainerNameToAssistedRemediation_EdgeCases(t *testing.T) {
 		})
 	}
 }
+
+func TestResourceTable_NilSafety(t *testing.T) {
+	// failedResourcesInPrintOrder nil session
+	assert.NotPanics(t, func() {
+		assert.Nil(t, failedResourcesInPrintOrder(nil))
+	})
+
+	// failedResourcesInPrintOrder session with nil report
+	sessionNilReport := &cautils.OPASessionObj{
+		ResourcesResult: map[string]resourcesresults.Result{
+			"res-1": {
+				ResourceID: "res-1",
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: "C-0001",
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+					},
+				},
+			},
+		},
+	}
+	assert.NotPanics(t, func() {
+		ordered := failedResourcesInPrintOrder(sessionNilReport)
+		assert.Empty(t, ordered)
+	})
+
+	// resourceTable with nil session
+	pp := NewPrettyPrinter(false, "v2", false, cautils.ResourceViewType, cautils.ScanTypeCluster, []string{}, "cluster", false, false)
+	assert.NotPanics(t, func() {
+		pp.resourceTable(nil)
+	})
+
+	// resourceTable with session having nil report
+	assert.NotPanics(t, func() {
+		pp.resourceTable(sessionNilReport)
+	})
+
+	// pathLineResolver with nil session
+	assert.NotPanics(t, func() {
+		resolver := pp.pathLineResolver(nil, nil, scannedResource{})
+		assert.Nil(t, resolver)
+	})
+
+	// generateResourceRows with nil summaryDetails
+	assert.NotPanics(t, func() {
+		rows := generateResourceRows([]resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: "C-0001",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			},
+		}, nil, nil, true, false, "", nil)
+		assert.NotEmpty(t, rows)
+	})
+
+	// generateResourceRows with nil summaryDetails.Controls
+	assert.NotPanics(t, func() {
+		rows := generateResourceRows([]resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: "C-0001",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			},
+		}, &reportsummary.SummaryDetails{}, nil, false, false, "", nil)
+		assert.NotEmpty(t, rows)
+	})
+
+	// Path formatting helpers with nil control
+	assert.NotPanics(t, func() {
+		assert.Nil(t, fixPathsToString(nil, false))
+		assert.Nil(t, fixPathsToString(nil, true))
+		assert.Nil(t, deletePathsToString(nil))
+		assert.Nil(t, reviewPathsToString(nil))
+		assert.Nil(t, AssistedRemediationPathsToString(nil))
+	})
+
+	// annotatePathLines with nil paths or nil control
+	assert.NotPanics(t, func() {
+		annotatePathLines(nil, nil, nil)
+		paths := []string{"path1"}
+		annotatePathLines(&paths, nil, nil)
+		assert.Equal(t, []string{"path1"}, paths)
+	})
+
+	// addContainerNameToAssistedRemediation with nil paths
+	assert.NotPanics(t, func() {
+		addContainerNameToAssistedRemediation(nil, nil)
+	})
+
+	// shortFormatResource with nil / non-string path cell
+	assert.NotPanics(t, func() {
+		rows := []table.Row{
+			{"High", "Control 1", "https://example.com", nil},
+			{"Low", "Control 2", "https://example.com", 123},
+		}
+		formatted := shortFormatResource(rows)
+		assert.Len(t, formatted, 2)
+	})
+}

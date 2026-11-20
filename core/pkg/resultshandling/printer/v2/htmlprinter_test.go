@@ -577,3 +577,49 @@ func TestHtmlPrinter_ActionPrint_ValidHTMLTableStructure(t *testing.T) {
 	// Ensure no stray </div> in failed resources section
 	assert.NotContains(t, htmlContent, "</div>")
 }
+
+func TestHtmlPrinter_ResourceTable_NilSafety(t *testing.T) {
+	assert.NotPanics(t, func() {
+		assert.Nil(t, buildResourceTableView(nil, false))
+	})
+
+	sessionNilReport := &cautils.OPASessionObj{
+		ResourcesResult: map[string]resourcesresults.Result{
+			"res-1": {
+				ResourceID: "res-1",
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: "C-0001",
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+					},
+				},
+			},
+		},
+	}
+	assert.NotPanics(t, func() {
+		tv := buildResourceTableView(sessionNilReport, false)
+		assert.Empty(t, tv)
+	})
+
+	assert.NotPanics(t, func() {
+		ctlResult := buildResourceControlResult(resourcesresults.ResourceAssociatedControl{}, nil, nil, false)
+		assert.Equal(t, "", ctlResult.Severity)
+	})
+
+	assert.NotPanics(t, func() {
+		ctlResults := buildResourceControlResultTable([]resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: "C-0001",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			},
+		}, nil, nil, false)
+		assert.Empty(t, ctlResults)
+	})
+
+	assert.NotPanics(t, func() {
+		sorted := sortHTMLResourceTableView([]ResourceResult{
+			{Resource: nil},
+		})
+		assert.Len(t, sorted, 1)
+	})
+}

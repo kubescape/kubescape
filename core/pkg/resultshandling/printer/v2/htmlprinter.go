@@ -119,22 +119,30 @@ func sortHTMLResourceTableView(resourceTableView ResourceTableView) ResourceTabl
 	sort.SliceStable(
 		sortedResourceTableView,
 		func(i, j int) bool {
-			nsI := sortedResourceTableView[i].Resource.GetNamespace()
-			nsJ := sortedResourceTableView[j].Resource.GetNamespace()
+			rI := sortedResourceTableView[i].Resource
+			rJ := sortedResourceTableView[j].Resource
+			if rI == nil {
+				return false
+			}
+			if rJ == nil {
+				return true
+			}
+			nsI := rI.GetNamespace()
+			nsJ := rJ.GetNamespace()
 			if nsI != nsJ {
 				return nsI < nsJ
 			}
-			kindI := sortedResourceTableView[i].Resource.GetKind()
-			kindJ := sortedResourceTableView[j].Resource.GetKind()
+			kindI := rI.GetKind()
+			kindJ := rJ.GetKind()
 			if kindI != kindJ {
 				return kindI < kindJ
 			}
-			nameI := sortedResourceTableView[i].Resource.GetName()
-			nameJ := sortedResourceTableView[j].Resource.GetName()
+			nameI := rI.GetName()
+			nameJ := rJ.GetName()
 			if nameI != nameJ {
 				return nameI < nameJ
 			}
-			return sortedResourceTableView[i].Resource.GetID() < sortedResourceTableView[j].Resource.GetID()
+			return rI.GetID() < rJ.GetID()
 		},
 	)
 	return sortedResourceTableView
@@ -228,16 +236,23 @@ func (hp *HtmlPrinter) Score(score float32) {
 }
 
 func buildResourceTableView(opaSessionObj *cautils.OPASessionObj, showSecrets bool) ResourceTableView {
+	if opaSessionObj == nil {
+		return nil
+	}
 	resourceTableView := make(ResourceTableView, 0)
+	var summary *reportsummary.SummaryDetails
+	if opaSessionObj.Report != nil {
+		summary = &opaSessionObj.Report.SummaryDetails
+	}
 	for resourceID, result := range opaSessionObj.ResourcesResult {
-		if cautils.ResourceStatus(&opaSessionObj.Report.SummaryDetails, &result).IsFailed() {
+		if cautils.ResourceStatus(summary, &result).IsFailed() {
 			resource, ok := opaSessionObj.GetResource(resourceID)
 			if !ok || resource == nil {
 				logger.L().Debug("resource missing from AllResources, skipping",
 					helpers.String("resourceID", resourceID))
 				continue
 			}
-			ctlResults := buildResourceControlResultTable(result.AssociatedControls, &opaSessionObj.Report.SummaryDetails, resource, showSecrets)
+			ctlResults := buildResourceControlResultTable(result.AssociatedControls, summary, resource, showSecrets)
 			resourceTableView = append(resourceTableView, ResourceResult{resource, ctlResults})
 		}
 	}
@@ -246,7 +261,10 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj, showSecrets bo
 }
 
 func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary, resource workloadinterface.IMetadata, showSecrets bool) ResourceControlResult {
-	ctlSeverity := apis.ControlSeverityToString(control.GetScoreFactor())
+	ctlSeverity := ""
+	if control != nil {
+		ctlSeverity = apis.ControlSeverityToString(control.GetScoreFactor())
+	}
 	ctlName := resourceControl.GetName()
 	ctlID := resourceControl.GetID()
 	ctlURL := cautils.GetControlLink(resourceControl.GetID())
@@ -260,7 +278,10 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 	var ctlResults []ResourceControlResult
 	for _, resourceControl := range resourceControls {
 		if cautils.ControlStatus(summaryDetails, &resourceControl).IsFailed() {
-			control := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, resourceControl.GetID())
+			var control reportsummary.IControlSummary
+			if summaryDetails != nil && summaryDetails.Controls != nil {
+				control = summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, resourceControl.GetID())
+			}
 			if control == nil {
 				continue
 			}
