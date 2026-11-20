@@ -1709,6 +1709,11 @@ func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err
 		}
 	}()
 
+	// A UTF-8 byte order mark is not part of the JSON text. Windows editors and
+	// PowerShell's Out-File -Encoding utf8 write one, the YAML reader skips it,
+	// and fastjson would reject the whole file at the first byte.
+	jsonFile = bytes.TrimPrefix(jsonFile, []byte("\xef\xbb\xbf"))
+
 	var p fastjson.Parser
 	v, err := p.ParseBytes(jsonFile)
 	if err != nil {
