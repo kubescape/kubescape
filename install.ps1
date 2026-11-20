@@ -82,27 +82,29 @@ $downloadUrl = "$releaseUrl/$asset"
 Write-Host "Downloading from: $downloadUrl" -ForegroundColor Cyan
 
 $outputPath = Join-Path $BASE_DIR $KUBESCAPE_EXEC
+$downloadPath = Join-Path $BASE_DIR "$KUBESCAPE_EXEC.$([guid]::NewGuid().ToString('N')).tmp"
 
 # Download the binary
 try {
     $useBitTransfer = $null -ne (Get-Module -Name BitsTransfer -ListAvailable) -and ($PSVersionTable.PSVersion.Major -le 5)
     if ($useBitTransfer) {
         Write-Host "Using BitsTransfer for download..." -ForegroundColor Gray
-        Start-BitsTransfer -Source $downloadUrl -Destination $outputPath
+        Start-BitsTransfer -Source $downloadUrl -Destination $downloadPath
     } else {
         $ProgressPreference = 'SilentlyContinue'  # Speeds up Invoke-WebRequest
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $outputPath -UseBasicParsing
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -UseBasicParsing
     }
 } catch {
     Write-Host "Error: Failed to download kubescape" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
+    Remove-Item $downloadPath -ErrorAction SilentlyContinue
     exit 1
 }
 
 # Verify download was successful
-if (-not (Test-Path $outputPath) -or (Get-Item $outputPath).Length -eq 0) {
+if (-not (Test-Path $downloadPath) -or (Get-Item $downloadPath).Length -eq 0) {
     Write-Host "Error: Download failed or file is empty" -ForegroundColor Red
-    Remove-Item $outputPath -ErrorAction SilentlyContinue
+    Remove-Item $downloadPath -ErrorAction SilentlyContinue
     exit 1
 }
 
@@ -155,7 +157,7 @@ try {
 } catch {
     Write-Host "Error: Failed to download the checksum manifest from $releaseUrl/checksums.sha256" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
-    Remove-Item $outputPath -ErrorAction SilentlyContinue
+    Remove-Item $downloadPath -ErrorAction SilentlyContinue
     exit 1
 }
 
@@ -172,22 +174,41 @@ foreach ($line in $manifest -split "`n") {
 
 if (-not $expected) {
     Write-Host "Error: $asset has no entry in the checksum manifest" -ForegroundColor Red
-    Remove-Item $outputPath -ErrorAction SilentlyContinue
+    Remove-Item $downloadPath -ErrorAction SilentlyContinue
     exit 1
 }
 
 # Get-FileHash returns uppercase, the manifest is lowercase; normalise both
 # rather than leaning on -ne being case-insensitive.
-$actual = (Get-FileHash -Path $outputPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$actual = (Get-FileHash -Path $downloadPath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) {
     Write-Host "Error: checksum mismatch for $asset" -ForegroundColor Red
     Write-Host "  expected: $expected" -ForegroundColor Red
     Write-Host "  actual:   $actual" -ForegroundColor Red
-    Remove-Item $outputPath -ErrorAction SilentlyContinue
+    Remove-Item $downloadPath -ErrorAction SilentlyContinue
     exit 1
 }
 
+
 Write-Host "Checksum verified." -ForegroundColor Green
+
+try {
+    if (Test-Path -LiteralPath $outputPath) {
+        $backupPath = Join-Path $BASE_DIR "$KUBESCAPE_EXEC.$([guid]::NewGuid().ToString('N')).bak"
+
+        [System.IO.File]::Replace($downloadPath, $outputPath, $backupPath)
+
+        Remove-Item $backupPath -ErrorAction SilentlyContinue
+    } else {
+        [System.IO.File]::Move($downloadPath, $outputPath)
+    }
+} catch {
+    Write-Host "Error: Failed to install kubescape" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Remove-Item $downloadPath -ErrorAction SilentlyContinue
+    exit 1
+}
+
 
 # Update user PATH if needed
 $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
