@@ -163,6 +163,42 @@ func TestPathFilterExcluded(t *testing.T) {
 			path:     "testdata/pod.yaml",
 			want:     true,
 		},
+		{
+			name:     "explicit relative prefix anchors a single name at the root",
+			patterns: []string{"./testdata"},
+			path:     "src/testdata/pod.yaml",
+			want:     false,
+		},
+		{
+			name:     "explicit relative prefix anchors a directory pattern at the root",
+			patterns: []string{"./testdata/"},
+			path:     "src/testdata/pod.yaml",
+			want:     false,
+		},
+		{
+			name:     "explicit relative prefix anchors a wildcard at the root",
+			patterns: []string{"./*.yaml"},
+			path:     "deploy/pod.yaml",
+			want:     false,
+		},
+		{
+			name:     "explicit relative prefix still matches a wildcard at the root",
+			patterns: []string{"./*.yaml"},
+			path:     "pod.yaml",
+			want:     true,
+		},
+		{
+			name:     "explicit relative prefix re-includes only at the root",
+			patterns: []string{"*.yaml", "!./keep.yaml"},
+			path:     "keep.yaml",
+			want:     false,
+		},
+		{
+			name:     "explicit relative prefix leaves a nested re-include excluded",
+			patterns: []string{"*.yaml", "!./keep.yaml"},
+			path:     "sub/keep.yaml",
+			want:     true,
+		},
 	}
 
 	for _, tt := range tests {
