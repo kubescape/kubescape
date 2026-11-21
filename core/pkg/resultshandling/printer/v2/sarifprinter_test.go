@@ -2367,3 +2367,21 @@ func TestSARIFActionPrint_NoDataReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no data provided")
 }
+
+func TestSARIFActionPrint_NilWriterReturnsError(t *testing.T) {
+	ctx := context.Background()
+	sp := NewSARIFPrinter(false)
+	require.Nil(t, sp.writer)
+
+	// Posture scan data with nil writer returns descriptive error and does not panic
+	session := configurationOutputFixture(t, 1)
+	err := sp.ActionPrint(ctx, session, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write sarif results: output writer is nil")
+
+	// Image scan data with nil writer returns descriptive error and does not panic
+	imageScan := buildSeverityExceptionImageScanData()
+	err = sp.ActionPrint(ctx, nil, []cautils.ImageScanData{imageScan})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write sarif results: output writer is nil")
+}
