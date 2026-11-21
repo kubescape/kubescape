@@ -22,6 +22,7 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -340,6 +341,38 @@ func controlInReportScope(report *reporthandlingv2.PostureReport, targetControlI
 	return false
 }
 
+// canonicalControlIDFromSummary resolves the canonical control ID from report summary
+// (Controls or Frameworks), matching normalized IDs. If not found in summary,
+// it returns controlID as fallback.
+func canonicalControlIDFromSummary(summary *reportsummary.SummaryDetails, controlID string) string {
+	if summary == nil {
+		return controlID
+	}
+	norm := normalizeControlID(controlID)
+	if norm == "" {
+		return controlID
+	}
+	for id, ctrl := range summary.Controls {
+		if normalizeControlID(id) == norm || normalizeControlID(ctrl.GetID()) == norm {
+			if id != "" {
+				return id
+			}
+			return ctrl.GetID()
+		}
+	}
+	for i := range summary.Frameworks {
+		for id, ctrl := range summary.Frameworks[i].Controls {
+			if normalizeControlID(id) == norm || normalizeControlID(ctrl.GetID()) == norm {
+				if id != "" {
+					return id
+				}
+				return ctrl.GetID()
+			}
+		}
+	}
+	return controlID
+}
+
 // isPostureReport checks whether raw JSON bytes or the decoded report match the structure of a Kubescape posture report.
 func isPostureReport(raw []byte, report *reporthandlingv2.PostureReport) bool {
 	if diff.ReportKindOfJSON(raw) == diff.PostureReport {
@@ -371,6 +404,10 @@ func extractFailingResources(report *reporthandlingv2.PostureReport, targetContr
 	rejectedResourceIDs := make(map[string]bool)
 	hasFixPath := false
 	normTargetID := normalizeControlID(targetControlID)
+	canonicalTargetID := canonicalControlIDFromSummary(&report.SummaryDetails, targetControlID)
+	if canonicalTargetID == "" {
+		canonicalTargetID = targetControlID
+	}
 
 	for i := range report.Results {
 		resResult := &report.Results[i]
@@ -389,11 +426,22 @@ func extractFailingResources(report *reporthandlingv2.PostureReport, targetContr
 				continue
 			}
 
-			if !cautils.ControlStatus(&report.SummaryDetails, ctrl).IsFailed() {
+			canonicalID := canonicalTargetID
+			if canonicalID == "" || canonicalID == targetControlID {
+				if id := canonicalControlIDFromSummary(&report.SummaryDetails, ctrl.GetID()); id != "" {
+					canonicalID = id
+				}
+			}
+
+			canonicalCtrl := *ctrl
+			canonicalCtrl.SetID(canonicalID)
+			canonicalCtrl.ControlID = canonicalID
+
+			if !cautils.ControlStatus(&report.SummaryDetails, &canonicalCtrl).IsFailed() {
 				continue
 			}
 
-			failedCtrl := cautils.FailedRules(&report.SummaryDetails, *ctrl)
+			failedCtrl := cautils.FailedRules(&report.SummaryDetails, canonicalCtrl)
 
 			entry, exists := byResourceID[resResult.ResourceID]
 			if !exists {

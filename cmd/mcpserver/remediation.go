@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -182,9 +183,14 @@ func newRemediationInputError(format string, args ...any) error {
 }
 
 // normalizeControlID makes control IDs comparable regardless of how the caller
-// spelled them: parseControlIDs only trims, so "c-0013" must still match the
-// report's "C-0013".
+// spelled or padded them: "c-0013", "c-13", and "C-013" all normalize to "C-0013".
 func normalizeControlID(id string) string {
+	id = strings.ToUpper(strings.TrimSpace(id))
+	if strings.HasPrefix(id, "C-") {
+		if n, err := strconv.Atoi(strings.TrimPrefix(id, "C-")); err == nil {
+			return fmt.Sprintf("C-%04d", n)
+		}
+	}
 	return remediationverify.NormalizeControlID(id)
 }
 
