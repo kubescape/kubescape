@@ -72,7 +72,10 @@ func TestFieldNameFor(t *testing.T) {
 		{"plural override for metric", "metric", "metrics"},
 		{"plural override for policy", "policy", "policies"},
 		{"plural override for match_expression", "match_expression", "matchExpressions"},
+		{"plural override for match_fields", "match_fields", "matchFields"},
+		{"plural override for match_field", "match_field", "matchFields"},
 		{"plural override for node_selector_term", "node_selector_term", "nodeSelectorTerms"},
+		{"block override for ceph_fs", "ceph_fs", "cephfs"},
 		{"non-overridden label falls back to camelCase", "metadata", "metadata"},
 		{"multi-word fallback", "image_pull_policy", "imagePullPolicy"},
 	}
@@ -88,6 +91,7 @@ func TestAttributeNameFor(t *testing.T) {
 	assert.Equal(t, "containerPort", attributeNameFor("container_port"))
 	assert.Equal(t, "protocol", attributeNameFor("protocol"))
 	assert.Equal(t, "diskURI", attributeNameFor("data_disk_uri"))
+	assert.Equal(t, "targetWWNs", attributeNameFor("target_ww_ns"))
 }
 
 func TestAttributeValueFor(t *testing.T) {
@@ -387,6 +391,25 @@ container {
 		require.Empty(t, errs)
 		want := map[string]interface{}{
 			"containers": []interface{}{map[string]interface{}{"name": "solo"}},
+		}
+		assert.Equal(t, want, out)
+	})
+
+	t.Run("single match_fields block encodes as an array", func(t *testing.T) {
+		src := `
+match_fields {
+  key      = "metadata.name"
+  operator = "In"
+}
+`
+		var errs []error
+		out := hclBodyToMap(parseTypedHCL(t, src), &hcl.EvalContext{}, &errs, "node_selector_term")
+
+		require.Empty(t, errs)
+		want := map[string]interface{}{
+			"matchFields": []interface{}{
+				map[string]interface{}{"key": "metadata.name", "operator": "In"},
+			},
 		}
 		assert.Equal(t, want, out)
 	})
@@ -1234,6 +1257,11 @@ resource "kubernetes_persistent_volume" "pv" {
             operator = "In"
             values   = ["us-east-1a"]
           }
+          match_fields {
+            key      = "metadata.name"
+            operator = "In"
+            values   = ["node-1"]
+          }
         }
       }
     }
@@ -1412,11 +1440,39 @@ resource "kubernetes_priority_class_v1" "pc_v1" {
   }
   value = 2000000
 }
+
+resource "kubernetes_persistent_volume" "pv_fc" {
+  metadata {
+    name = "fc-pv"
+  }
+  spec {
+    persistent_volume_source {
+      fc {
+        target_ww_ns = ["50060e801049cf00"]
+        lun          = 0
+      }
+    }
+  }
+}
+
+resource "kubernetes_persistent_volume" "pv_cephfs" {
+  metadata {
+    name = "cephfs-pv"
+  }
+  spec {
+    persistent_volume_source {
+      ceph_fs {
+        monitors = ["1.2.3.4:6789"]
+        path     = "/cephfs"
+      }
+    }
+  }
+}
 `
 
 	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
 	require.Empty(t, errs)
-	require.Len(t, manifests, 16)
+	require.Len(t, manifests, 18)
 
 	// PVC: namespaced, receives provider default namespace "default"
 	pvc := manifests[0]
@@ -1457,6 +1513,13 @@ resource "kubernetes_priority_class_v1" "pc_v1" {
 	assert.Equal(t, "In", expr0["operator"])
 	assert.Equal(t, []interface{}{"us-east-1a"}, expr0["values"])
 
+	matchFields := term0["matchFields"].([]interface{})
+	require.Len(t, matchFields, 1)
+	field0 := matchFields[0].(map[string]interface{})
+	assert.Equal(t, "metadata.name", field0["key"])
+	assert.Equal(t, "In", field0["operator"])
+	assert.Equal(t, []interface{}{"node-1"}, field0["values"])
+
 	// PV v1: cluster-scoped, azure_disk with diskURI
 	pvV1 := manifests[3]
 	assert.Equal(t, "v1", pvV1["apiVersion"])
@@ -1469,7 +1532,7 @@ resource "kubernetes_priority_class_v1" "pc_v1" {
 
 	// PDB: namespaced, numeric minAvailable string converts to json.Number
 	pdb := manifests[4]
-	assert.Equal(t, "policy/v1", pdb["apiVersion"])
+	assert.Equal(t, "policy/v1beta1", pdb["apiVersion"])
 	assert.Equal(t, "PodDisruptionBudget", pdb["kind"])
 	assert.Equal(t, map[string]interface{}{"name": "api-pdb", "namespace": "default"}, pdb["metadata"])
 	pdbSpec := pdb["spec"].(map[string]interface{})
@@ -1571,6 +1634,26 @@ resource "kubernetes_priority_class_v1" "pc_v1" {
 	assert.Equal(t, "PriorityClass", pcV1["kind"])
 	assert.Equal(t, map[string]interface{}{"name": "critical-priority"}, pcV1["metadata"])
 	assert.Equal(t, json.Number("2000000"), pcV1["value"])
+
+	// PV FC: target_ww_ns converts to targetWWNs
+	pvFC := manifests[16]
+	assert.Equal(t, "v1", pvFC["apiVersion"])
+	assert.Equal(t, "PersistentVolume", pvFC["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "fc-pv"}, pvFC["metadata"])
+	pvFCSpec := pvFC["spec"].(map[string]interface{})
+	fc := pvFCSpec["fc"].(map[string]interface{})
+	assert.Equal(t, []interface{}{"50060e801049cf00"}, fc["targetWWNs"])
+	assert.Equal(t, json.Number("0"), fc["lun"])
+
+	// PV CephFS: ceph_fs converts to cephfs
+	pvCephFS := manifests[17]
+	assert.Equal(t, "v1", pvCephFS["apiVersion"])
+	assert.Equal(t, "PersistentVolume", pvCephFS["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "cephfs-pv"}, pvCephFS["metadata"])
+	pvCephFSSpec := pvCephFS["spec"].(map[string]interface{})
+	cephfs := pvCephFSSpec["cephfs"].(map[string]interface{})
+	assert.Equal(t, []interface{}{"1.2.3.4:6789"}, cephfs["monitors"])
+	assert.Equal(t, "/cephfs", cephfs["path"])
 }
 
 func TestExtractTypedResources_AdmissionStorageIngressInfrastructure(t *testing.T) {
