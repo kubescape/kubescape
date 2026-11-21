@@ -1439,3 +1439,46 @@ func TestActionPrint_Csv_EmptyReportStillWritesHeader(t *testing.T) {
 	assert.Equal(t, "Control Name", records[0][0])
 	assert.Equal(t, "Control ID", records[0][1])
 }
+
+func TestActionPrint_Csv_NilWriterReturnsError(t *testing.T) {
+	cp := NewCsvPrinter(false)
+
+	// Posture scan path
+	require.NotPanics(t, func() {
+		err := cp.ActionPrint(context.Background(), cautils.NewOPASessionObjMock(), nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	// Image scan fallback path
+	require.NotPanics(t, func() {
+		err := cp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{{Image: "nginx:1.23"}})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestWriteImageScanCompanion_NilWriterDoesNotPanic(t *testing.T) {
+	cp := NewCsvPrinter(false)
+	require.NotPanics(t, func() {
+		err := cp.writeImageScanCompanion(context.Background(), []cautils.ImageScanData{{Image: "nginx:1.23"}})
+		assert.NoError(t, err)
+	})
+}
+
+func TestActionPrint_Csv_NilSummaryControlsDoesNotPanic(t *testing.T) {
+	tmpCsv, err := os.CreateTemp("", "csv-nil-summary-controls-*.csv")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.Remove(tmpCsv.Name()) })
+
+	session := cautils.NewOPASessionObjMock()
+	session.Report.SummaryDetails.Controls = nil
+
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpCsv
+	require.NotPanics(t, func() {
+		err := cp.ActionPrint(context.Background(), session, nil)
+		require.NoError(t, err)
+	})
+	require.NoError(t, cp.CloseWriter())
+}
