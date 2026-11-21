@@ -585,3 +585,24 @@ func TestPdfPrinter_getTableObjects_NilSafety(t *testing.T) {
 		})
 	})
 }
+
+func TestActionPrint_Pdf_NilWriterReturnsError(t *testing.T) {
+	pp := NewPdfPrinter()
+
+	// Posture scan path
+	require.NotPanics(t, func() {
+		err := pp.ActionPrint(context.Background(), cautils.NewOPASessionObjMock(), nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	// Image scan fallback path
+	images := []cautils.ImageScanData{
+		{Image: "clean-image:latest", Matches: match.NewMatches()},
+	}
+	require.NotPanics(t, func() {
+		err := pp.ActionPrint(context.Background(), nil, images)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}

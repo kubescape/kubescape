@@ -77,16 +77,21 @@ func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 	if err := printer.PrepareOutput(pp.writer); err != nil {
 		return err
 	}
+	hasPosture := opaSessionObj != nil && opaSessionObj.Report != nil
+	if !hasPosture && len(imageScanData) == 0 {
+		return fmt.Errorf("failed to print results, missing data")
+	}
+	if pp.writer == nil {
+		return fmt.Errorf("failed to write PDF results: output writer is nil")
+	}
 	var outBuff []byte
 	var err error
 
 	switch {
-	case opaSessionObj != nil && opaSessionObj.Report != nil:
+	case hasPosture:
 		outBuff, err = pp.generatePdf(&opaSessionObj.Report.SummaryDetails, opaSessionObj, imageScanData)
 	case len(imageScanData) > 0:
 		outBuff, err = pp.generateImagePdf(imageScanData)
-	default:
-		return fmt.Errorf("failed to print results, missing data")
 	}
 
 	if err != nil {
