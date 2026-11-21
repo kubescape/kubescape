@@ -104,6 +104,10 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - name: Test Windows installer upgrade safety
+        run: go test -v -count=1 -timeout 5m ./internal/ghworkflows -run '^TestInstallScriptWindowsUpgradeSafety$'
+        timeout-minutes: 5
+
       - name: Test Windows core package suite
         run: go test -v -count=1 ./core/core
 
