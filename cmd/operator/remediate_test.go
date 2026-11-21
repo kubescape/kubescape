@@ -287,6 +287,12 @@ func TestOperatorRemediateCmd_ReasonWarning(t *testing.T) {
 
 // TestOperatorRemediateCmd_PatchSuccess verifies successful execution of patch remediation in dry-run and apply modes.
 func TestOperatorRemediateCmd_PatchSuccess(t *testing.T) {
+	prevCheck := checkOperatorVersion
+	checkOperatorVersion = func(ctx context.Context, namespace string, minVersion string) error {
+		return nil
+	}
+	t.Cleanup(func() { checkOperatorVersion = prevCheck })
+
 	for _, confirm := range []bool{false, true} {
 		name := "dry-run"
 		if confirm {
@@ -314,12 +320,48 @@ func TestOperatorRemediateCmd_PatchSuccess(t *testing.T) {
 			if confirm {
 				assert.Contains(t, output, "Applying remediation \"patch\" via Kubescape Operator")
 				assert.Contains(t, output, "Submitted remediation (apply)")
+				assert.Contains(t, output, "patch modifications cannot be automatically reverted via 'revert'")
 			} else {
 				assert.Contains(t, output, "Previewing remediation \"patch\" via Kubescape Operator")
 				assert.Contains(t, output, "Submitted remediation (dry-run)")
+				assert.Contains(t, output, "--- Remediation Plan (dry-run) ---")
+				assert.Contains(t, output, "Target:     Deployment/default/api")
+				assert.Contains(t, output, "Patch Type: merge")
+				assert.Contains(t, output, `"replicas": 2`)
+				assert.NotContains(t, output, "patch modifications cannot be automatically reverted via 'revert'")
 			}
 		})
 	}
+}
+
+// TestOperatorRemediateCmd_PatchDryRun_SelectorRetainsScope verifies that dry-run plan retains the selector scope alongside the sample resolved target.
+func TestOperatorRemediateCmd_PatchDryRun_SelectorRetainsScope(t *testing.T) {
+	prevCheck := checkOperatorVersion
+	checkOperatorVersion = func(ctx context.Context, namespace string, minVersion string) error {
+		return nil
+	}
+	t.Cleanup(func() { checkOperatorVersion = prevCheck })
+
+	op := newFakeOperatorWithPayload(t, `{"target":{"kind":"Deployment","namespace":"prod","name":"web"},"patch":"{\"spec\":{\"replicas\":3}}","patchType":"merge","description":"auto-fix"}`)
+	op.install(t)
+
+	cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
+	cmd.SetArgs([]string{"patch", "--control", "C-0016", "--patch", `{"spec":{"replicas":3}}`, "--patch-type", "merge", "--reason", "fix finding"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	var err error
+	output := captureLog(t, func() {
+		err = cmd.Execute()
+	})
+
+	require.NoError(t, err)
+	assert.Contains(t, output, "Previewing remediation \"patch\" via Kubescape Operator")
+	assert.Contains(t, output, "--- Remediation Plan (dry-run) ---")
+	assert.Contains(t, output, "Target:     selector: control=C-0016 (sample resolved target: Deployment/prod/web)")
+	assert.Contains(t, output, "Summary:    auto-fix")
+	assert.Contains(t, output, "Patch Type: merge")
+	assert.Contains(t, output, `"replicas": 3`)
 }
 
 // TestOperatorRemediateCmd_SelectorClusterWideWarningAndEvents verifies cluster-wide warning and events scope for selectors.
@@ -380,4 +422,37 @@ func TestOperatorRemediateCmd_GenericScanError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed: scan blew up")
 	assert.Contains(t, output, "Failed to submit remediation to Kubescape Operator")
+}
+
+// TestOperatorRemediateCmd_OperatorVersionEnforcement verifies minimum operator version enforcement for patch action.
+func TestOperatorRemediateCmd_OperatorVersionEnforcement(t *testing.T) {
+	prevCheck := checkOperatorVersion
+	t.Cleanup(func() { checkOperatorVersion = prevCheck })
+
+	checkOperatorVersion = func(ctx context.Context, namespace string, minVersion string) error {
+		return fmt.Errorf("operator remediate patch requires Kubescape Operator >= %s (found v0.2.224 in namespace %q)", minVersion, namespace)
+	}
+
+	// 1. Patch action fails when operator version is below minimum.
+	cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
+	cmd.SetArgs([]string{"patch", "--kind", "Deployment", "--name", "api", "--target-namespace", "default", "--patch", `{"spec":{"replicas":1}}`})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "operator remediate patch requires Kubescape Operator >= v0.2.240")
+	assert.Contains(t, err.Error(), "found v0.2.224 in namespace \"kubescape\"")
+
+	// 2. Non-patch actions (e.g. revert) do not invoke or fail on operator version check.
+	op := newFakeOperator(t, "")
+	op.install(t)
+
+	cmdNonPatch := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
+	cmdNonPatch.SetArgs([]string{"revert", "--kind", "Deployment", "--name", "api", "--target-namespace", "default"})
+	cmdNonPatch.SetOut(io.Discard)
+	cmdNonPatch.SetErr(io.Discard)
+
+	err = cmdNonPatch.Execute()
+	require.NoError(t, err)
 }

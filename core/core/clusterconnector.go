@@ -64,10 +64,14 @@ func (a *OperatorAdapter) OperatorScan(ctx ...context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := WaitForOperatorCommands(c, a.dyn, a.namespace, names, timeout); err != nil {
+	payloads, err := WaitForOperatorCommandsWithPayloads(c, a.dyn, a.namespace, names, timeout)
+	if err != nil {
 		return "", err
 	}
 	logger.L().Info("All operator commands completed")
+	if len(names) == 1 && payloads[names[0]] != "" {
+		return payloads[names[0]], nil
+	}
 	return "success", nil
 }
 

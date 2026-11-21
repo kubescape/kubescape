@@ -1,7 +1,9 @@
 package operator
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,6 +11,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/spf13/cobra"
 )
@@ -18,7 +21,12 @@ const (
 	patchSubCommand      string = "patch"
 	quarantineSubCommand string = "quarantine"
 	revertSubCommand     string = "revert"
+
+	minOperatorVersionForPatch string = "v0.2.240"
 )
+
+// checkOperatorVersion is a test seam over core.CheckOperatorVersion.
+var checkOperatorVersion = core.CheckOperatorVersion
 
 // remediateActions is the set of actions the CLI accepts, in help/error order.
 var remediateActions = []string{annotateSubCommand, patchSubCommand, quarantineSubCommand, revertSubCommand}
@@ -104,9 +112,21 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 				return err
 			}
 
+			// Enforce minimum operator version for the patch action.
+			if remediationInfo.Action == patchSubCommand {
+				if err := checkOperatorVersion(cmd.Context(), operatorInfo.Namespace, minOperatorVersionForPatch); err != nil {
+					return err
+				}
+			}
+
 			// annotate, patch and quarantine write an audit trail; nudge (don't block) for a justification.
 			if (remediationInfo.Action == annotateSubCommand || remediationInfo.Action == patchSubCommand || remediationInfo.Action == quarantineSubCommand) && remediationInfo.Reason == "" {
 				logger.L().Warning(fmt.Sprintf("no --reason provided; %s records an audit trail, consider adding --reason to justify the action", remediationInfo.Action))
+			}
+
+			// Confirmed patches directly mutate the workload spec and cannot be automatically undone by revert.
+			if remediationInfo.Action == patchSubCommand && !remediationInfo.IsDryRun() {
+				logger.L().Warning("patch modifications cannot be automatically reverted via 'revert'; ensure the workload's prior state is preserved before applying")
 			}
 
 			// A confirmed selector run resolves cluster-wide and can write to many
@@ -137,7 +157,8 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 			eventsHint := fmt.Sprintf("kubectl get events %s --field-selector reason=KubescapeRemediation", eventsScope)
 
 			logger.L().Start(fmt.Sprintf("%s remediation %q via Kubescape Operator", verb, remediationInfo.Action))
-			if _, err := operatorAdapter.OperatorScan(cmd.Context()); err != nil {
+			resultPayload, err := operatorAdapter.OperatorScan(cmd.Context())
+			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(cmd.Context().Err(), context.Canceled) {
 					logger.L().StopError(fmt.Sprintf("Remediation submission canceled; submission outcome is unknown. Check remediation events via '%s' or the operator logs before retrying", eventsHint), helpers.Error(err))
 				} else {
@@ -147,6 +168,9 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 			}
 			if remediationInfo.IsDryRun() {
 				logger.L().StopSuccess(fmt.Sprintf("Submitted remediation (dry-run) — no changes are applied. Check the plan via '%s' or the operator logs; re-run with --confirm to apply.", eventsHint))
+				if remediationInfo.Action == patchSubCommand {
+					displayPatchPlan(remediationInfo, resultPayload)
+				}
 			} else {
 				logger.L().StopSuccess(fmt.Sprintf("Submitted remediation (apply). Check the result via '%s' or the operator logs.", eventsHint))
 			}
@@ -167,4 +191,73 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 	remediateCmd.PersistentFlags().BoolVar(&remediationInfo.Confirm, "confirm", false, "perform the real cluster write; without it the action is a dry-run preview")
 
 	return remediateCmd
+}
+
+func displayPatchPlan(info *cautils.RemediationInfo, resultPayload string) {
+	target := fmt.Sprintf("%s/%s/%s", info.Kind, info.Namespace, info.Name)
+	if info.HasSelector() {
+		var parts []string
+		if info.Control != "" {
+			parts = append(parts, fmt.Sprintf("control=%s", info.Control))
+		}
+		if info.MinSeverity != "" {
+			parts = append(parts, fmt.Sprintf("minSeverity=%s", info.MinSeverity))
+		}
+		target = fmt.Sprintf("selector: %s", strings.Join(parts, " "))
+	}
+	patchType := info.PatchType
+	if patchType == "" {
+		patchType = "strategic"
+	}
+
+	formattedPatch := info.Patch
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, []byte(info.Patch), "", "  "); err == nil {
+		formattedPatch = pretty.String()
+	}
+
+	var description string
+	if resultPayload != "" && resultPayload != "success" {
+		var res struct {
+			Description string `json:"description"`
+			Patch       string `json:"patch"`
+			PatchType   string `json:"patchType"`
+			Target      struct {
+				Kind      string `json:"kind"`
+				Namespace string `json:"namespace"`
+				Name      string `json:"name"`
+			} `json:"target"`
+		}
+		if err := json.Unmarshal([]byte(resultPayload), &res); err == nil {
+			if res.Description != "" {
+				description = res.Description
+			}
+			if res.Target.Name != "" {
+				if info.HasSelector() {
+					target = fmt.Sprintf("%s (sample resolved target: %s/%s/%s)", target, res.Target.Kind, res.Target.Namespace, res.Target.Name)
+				} else {
+					target = fmt.Sprintf("%s/%s/%s", res.Target.Kind, res.Target.Namespace, res.Target.Name)
+				}
+			}
+			if res.PatchType != "" {
+				patchType = res.PatchType
+			}
+			if res.Patch != "" {
+				var p bytes.Buffer
+				if err := json.Indent(&p, []byte(res.Patch), "", "  "); err == nil {
+					formattedPatch = p.String()
+				} else {
+					formattedPatch = res.Patch
+				}
+			}
+		}
+	}
+
+	planMsg := fmt.Sprintf("\n--- Remediation Plan (dry-run) ---\nAction:     patch\nTarget:     %s\nPatch Type: %s", target, patchType)
+	if description != "" {
+		planMsg += fmt.Sprintf("\nSummary:    %s", description)
+	}
+	planMsg += fmt.Sprintf("\nPatch:\n%s\n----------------------------------", formattedPatch)
+
+	logger.L().Info(planMsg)
 }
