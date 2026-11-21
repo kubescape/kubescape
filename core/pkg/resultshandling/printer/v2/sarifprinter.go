@@ -695,12 +695,21 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 			return fmt.Errorf("failed to write results in sarif format: no data provided")
 		}
 
+		if sp.writer == nil {
+			return fmt.Errorf("failed to write sarif results: output writer is nil")
+		}
+
 		// image scan
 		if err := sp.printImageScan(imageScanData); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
 			return fmt.Errorf("failed to write results in sarif format: %w", err)
 		}
 	} else {
+		if sp.writer == nil {
+			return fmt.Errorf("failed to write sarif results: output writer is nil")
+		}
+
+		// configuration scan, with image scan runs appended when present
 		// configuration scan, with image scan runs appended when present
 		var imageRuns []*sarif.Run
 		if len(imageScanData) > 0 {
