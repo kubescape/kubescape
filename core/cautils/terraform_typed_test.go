@@ -47,6 +47,8 @@ func TestSnakeToCamel(t *testing.T) {
 		{"api as first word stays lowercase", "api_groups", "apiGroups"},
 		{"initialism as first word stays lowercase", "ip_families", "ipFamilies"},
 		{"word containing an initialism is not changed", "pid_limit", "pidLimit"},
+		{"target cpu utilization percentage initialism", "target_cpu_utilization_percentage", "targetCPUUtilizationPercentage"},
+		{"cpu as first word stays lowercase", "cpu_limit", "cpuLimit"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -66,6 +68,11 @@ func TestFieldNameFor(t *testing.T) {
 		{"plural override for path", "path", "paths"},
 		{"plural override for sysctl", "sysctl", "sysctls"},
 		{"plural override for http_header", "http_header", "httpHeaders"},
+		{"plural override for limit", "limit", "limits"},
+		{"plural override for metric", "metric", "metrics"},
+		{"plural override for policy", "policy", "policies"},
+		{"plural override for match_expression", "match_expression", "matchExpressions"},
+		{"plural override for node_selector_term", "node_selector_term", "nodeSelectorTerms"},
 		{"non-overridden label falls back to camelCase", "metadata", "metadata"},
 		{"multi-word fallback", "image_pull_policy", "imagePullPolicy"},
 	}
@@ -80,6 +87,7 @@ func TestAttributeNameFor(t *testing.T) {
 	assert.Equal(t, "port", attributeNameFor("port"))
 	assert.Equal(t, "containerPort", attributeNameFor("container_port"))
 	assert.Equal(t, "protocol", attributeNameFor("protocol"))
+	assert.Equal(t, "diskURI", attributeNameFor("data_disk_uri"))
 }
 
 func TestAttributeValueFor(t *testing.T) {
@@ -222,6 +230,34 @@ func TestAttributeValueFor(t *testing.T) {
 			attrName: "port",
 			in:       "",
 			want:     "",
+		},
+		{
+			name:     "quoted numeric min_available in PDB converts to json.Number",
+			path:     "kubernetes_pod_disruption_budget.pdb.spec",
+			attrName: "min_available",
+			in:       "1",
+			want:     json.Number("1"),
+		},
+		{
+			name:     "percentage string min_available in PDB preserved as string",
+			path:     "kubernetes_pod_disruption_budget_v1.pdb.spec",
+			attrName: "min_available",
+			in:       "50%",
+			want:     "50%",
+		},
+		{
+			name:     "quoted numeric max_unavailable in PDB converts to json.Number",
+			path:     "kubernetes_pod_disruption_budget.pdb.spec",
+			attrName: "max_unavailable",
+			in:       "0",
+			want:     json.Number("0"),
+		},
+		{
+			name:     "percentage string max_unavailable in PDB preserved as string",
+			path:     "kubernetes_pod_disruption_budget_v1.pdb.spec",
+			attrName: "max_unavailable",
+			in:       "25%",
+			want:     "25%",
 		},
 	}
 
@@ -1148,4 +1184,391 @@ resource "kubernetes_ingress_v1" "ing_null_path_type" {
 	require.Len(t, typedIng.Spec.Rules[0].HTTP.Paths, 1)
 	require.NotNil(t, typedIng.Spec.Rules[0].HTTP.Paths[0].PathType)
 	assert.Equal(t, networkingv1.PathTypeImplementationSpecific, *typedIng.Spec.Rules[0].HTTP.Paths[0].PathType)
+}
+
+func TestExtractTypedResourcesStorageAndPolicyResources(t *testing.T) {
+	src := `
+resource "kubernetes_persistent_volume_claim" "pvc" {
+  metadata {
+    name = "data-pvc"
+  }
+  spec {
+    access_modes = ["ReadWriteOnce"]
+    storage_class_name = "fast"
+    resources {
+      requests = {
+        storage = "10Gi"
+      }
+    }
+  }
+}
+
+resource "kubernetes_persistent_volume_claim_v1" "pvc_v1" {
+  metadata {
+    name      = "log-pvc"
+    namespace = "monitoring"
+  }
+}
+
+resource "kubernetes_persistent_volume" "pv" {
+  metadata {
+    name = "data-pv"
+  }
+  spec {
+    capacity = {
+      storage = "50Gi"
+    }
+    access_modes                     = ["ReadWriteMany"]
+    persistent_volume_reclaim_policy = "Retain"
+    persistent_volume_source {
+      nfs {
+        path   = "/export"
+        server = "nfs.internal"
+      }
+    }
+    node_affinity {
+      required {
+        node_selector_term {
+          match_expressions {
+            key      = "topology.kubernetes.io/zone"
+            operator = "In"
+            values   = ["us-east-1a"]
+          }
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_persistent_volume_v1" "pv_v1" {
+  metadata {
+    name = "log-pv"
+  }
+  spec {
+    persistent_volume_source {
+      azure_disk {
+        caching_mode  = "None"
+        data_disk_uri = "https://example.blob.core.windows.net/vhds/disk.vhd"
+        disk_name     = "disk.vhd"
+      }
+    }
+  }
+}
+
+resource "kubernetes_pod_disruption_budget" "pdb" {
+  metadata {
+    name = "api-pdb"
+  }
+  spec {
+    min_available = "1"
+    selector {
+      match_labels = {
+        app = "api"
+      }
+    }
+  }
+}
+
+resource "kubernetes_pod_disruption_budget_v1" "pdb_v1" {
+  metadata {
+    name      = "worker-pdb"
+    namespace = "workers"
+  }
+  spec {
+    max_unavailable = "30%"
+  }
+}
+
+resource "kubernetes_resource_quota" "quota" {
+  metadata {
+    name = "compute-quota"
+  }
+  spec {
+    hard = {
+      pods = "20"
+    }
+    scope_selector {
+      match_expression {
+        scope_name = "PriorityClass"
+        operator   = "In"
+        values     = ["high"]
+      }
+    }
+  }
+}
+
+resource "kubernetes_resource_quota_v1" "quota_v1" {
+  metadata {
+    name      = "mem-quota"
+    namespace = "apps"
+  }
+}
+
+resource "kubernetes_limit_range" "limits" {
+  metadata {
+    name = "core-limits"
+  }
+  spec {
+    limit {
+      type = "Container"
+      default_request = {
+        cpu = "100m"
+      }
+    }
+  }
+}
+
+resource "kubernetes_limit_range_v1" "limits_v1" {
+  metadata {
+    name      = "pod-limits"
+    namespace = "dev"
+  }
+}
+
+resource "kubernetes_horizontal_pod_autoscaler" "hpa" {
+  metadata {
+    name = "web-hpa"
+  }
+  spec {
+    max_replicas                      = 10
+    target_cpu_utilization_percentage = 80
+    scale_target_ref {
+      kind = "Deployment"
+      name = "web"
+    }
+  }
+}
+
+resource "kubernetes_horizontal_pod_autoscaler_v1" "hpa_v1" {
+  metadata {
+    name      = "api-hpa"
+    namespace = "api"
+  }
+}
+
+resource "kubernetes_horizontal_pod_autoscaler_v2" "hpa_v2" {
+  metadata {
+    name = "v2-hpa"
+  }
+  spec {
+    min_replicas = 2
+    max_replicas = 5
+    scale_target_ref {
+      api_version = "apps/v1"
+      kind        = "Deployment"
+      name        = "v2-app"
+    }
+    metric {
+      type = "Resource"
+      resource {
+        name = "cpu"
+        target {
+          type                = "Utilization"
+          average_utilization = 60
+        }
+      }
+    }
+    metric {
+      type = "External"
+      external {
+        metric {
+          name = "queue_messages"
+        }
+        target {
+          type  = "Value"
+          value = "30"
+        }
+      }
+    }
+    behavior {
+      scale_up {
+        policy {
+          type           = "Percent"
+          value          = 100
+          period_seconds = 15
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_horizontal_pod_autoscaler_v2beta2" "hpa_v2beta2" {
+  metadata {
+    name = "v2beta2-hpa"
+  }
+}
+
+resource "kubernetes_priority_class" "pc" {
+  metadata {
+    name = "high-priority"
+  }
+  value          = 1000000
+  global_default = true
+}
+
+resource "kubernetes_priority_class_v1" "pc_v1" {
+  metadata {
+    name = "critical-priority"
+  }
+  value = 2000000
+}
+`
+
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+	require.Empty(t, errs)
+	require.Len(t, manifests, 16)
+
+	// PVC: namespaced, receives provider default namespace "default"
+	pvc := manifests[0]
+	assert.Equal(t, "v1", pvc["apiVersion"])
+	assert.Equal(t, "PersistentVolumeClaim", pvc["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "data-pvc", "namespace": "default"}, pvc["metadata"])
+	pvcSpec := pvc["spec"].(map[string]interface{})
+	assert.Equal(t, []interface{}{"ReadWriteOnce"}, pvcSpec["accessModes"])
+	assert.Equal(t, "fast", pvcSpec["storageClassName"])
+
+	// PVC v1 with explicit namespace
+	pvcV1 := manifests[1]
+	assert.Equal(t, "v1", pvcV1["apiVersion"])
+	assert.Equal(t, "PersistentVolumeClaim", pvcV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "log-pvc", "namespace": "monitoring"}, pvcV1["metadata"])
+
+	// PV: cluster-scoped, NO namespace in metadata; persistent_volume_source is flattened
+	pv := manifests[2]
+	assert.Equal(t, "v1", pv["apiVersion"])
+	assert.Equal(t, "PersistentVolume", pv["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "data-pv"}, pv["metadata"])
+	pvSpec := pv["spec"].(map[string]interface{})
+	assert.Equal(t, "Retain", pvSpec["persistentVolumeReclaimPolicy"])
+	assert.Equal(t, []interface{}{"ReadWriteMany"}, pvSpec["accessModes"])
+	assert.Equal(t, map[string]interface{}{"path": "/export", "server": "nfs.internal"}, pvSpec["nfs"])
+	assert.NotContains(t, pvSpec, "persistentVolumeSource")
+
+	// PV node_affinity node_selector_term encodes as nodeSelectorTerms array
+	nodeAffinity := pvSpec["nodeAffinity"].(map[string]interface{})
+	requiredAffinity := nodeAffinity["required"].(map[string]interface{})
+	nodeSelectorTerms := requiredAffinity["nodeSelectorTerms"].([]interface{})
+	require.Len(t, nodeSelectorTerms, 1)
+	term0 := nodeSelectorTerms[0].(map[string]interface{})
+	matchExprs := term0["matchExpressions"].([]interface{})
+	require.Len(t, matchExprs, 1)
+	expr0 := matchExprs[0].(map[string]interface{})
+	assert.Equal(t, "topology.kubernetes.io/zone", expr0["key"])
+	assert.Equal(t, "In", expr0["operator"])
+	assert.Equal(t, []interface{}{"us-east-1a"}, expr0["values"])
+
+	// PV v1: cluster-scoped, azure_disk with diskURI
+	pvV1 := manifests[3]
+	assert.Equal(t, "v1", pvV1["apiVersion"])
+	assert.Equal(t, "PersistentVolume", pvV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "log-pv"}, pvV1["metadata"])
+	pvV1Spec := pvV1["spec"].(map[string]interface{})
+	azureDisk := pvV1Spec["azureDisk"].(map[string]interface{})
+	assert.Equal(t, "https://example.blob.core.windows.net/vhds/disk.vhd", azureDisk["diskURI"])
+	assert.Equal(t, "disk.vhd", azureDisk["diskName"])
+
+	// PDB: namespaced, numeric minAvailable string converts to json.Number
+	pdb := manifests[4]
+	assert.Equal(t, "policy/v1", pdb["apiVersion"])
+	assert.Equal(t, "PodDisruptionBudget", pdb["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "api-pdb", "namespace": "default"}, pdb["metadata"])
+	pdbSpec := pdb["spec"].(map[string]interface{})
+	assert.Equal(t, json.Number("1"), pdbSpec["minAvailable"])
+
+	// PDB v1: percentage maxUnavailable preserved as string
+	pdbV1 := manifests[5]
+	assert.Equal(t, "policy/v1", pdbV1["apiVersion"])
+	assert.Equal(t, "PodDisruptionBudget", pdbV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "worker-pdb", "namespace": "workers"}, pdbV1["metadata"])
+	pdbV1Spec := pdbV1["spec"].(map[string]interface{})
+	assert.Equal(t, "30%", pdbV1Spec["maxUnavailable"])
+
+	// ResourceQuota: namespaced, scope_selector.match_expression -> matchExpressions array
+	quota := manifests[6]
+	assert.Equal(t, "v1", quota["apiVersion"])
+	assert.Equal(t, "ResourceQuota", quota["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "compute-quota", "namespace": "default"}, quota["metadata"])
+	quotaSpec := quota["spec"].(map[string]interface{})
+	assert.Equal(t, map[string]interface{}{"pods": "20"}, quotaSpec["hard"])
+	scopeSel := quotaSpec["scopeSelector"].(map[string]interface{})
+	quotaMatchExprs := scopeSel["matchExpressions"].([]interface{})
+	require.Len(t, quotaMatchExprs, 1)
+
+	// ResourceQuota v1
+	quotaV1 := manifests[7]
+	assert.Equal(t, "v1", quotaV1["apiVersion"])
+	assert.Equal(t, "ResourceQuota", quotaV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "mem-quota", "namespace": "apps"}, quotaV1["metadata"])
+
+	// LimitRange: namespaced, limit block becomes limits array, default_request -> defaultRequest
+	limits := manifests[8]
+	assert.Equal(t, "v1", limits["apiVersion"])
+	assert.Equal(t, "LimitRange", limits["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "core-limits", "namespace": "default"}, limits["metadata"])
+	limitsSpec := limits["spec"].(map[string]interface{})
+	limitsArr := limitsSpec["limits"].([]interface{})
+	require.Len(t, limitsArr, 1)
+	l0 := limitsArr[0].(map[string]interface{})
+	assert.Equal(t, "Container", l0["type"])
+	assert.Equal(t, map[string]interface{}{"cpu": "100m"}, l0["defaultRequest"])
+
+	// LimitRange v1
+	limitsV1 := manifests[9]
+	assert.Equal(t, "v1", limitsV1["apiVersion"])
+	assert.Equal(t, "LimitRange", limitsV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "pod-limits", "namespace": "dev"}, limitsV1["metadata"])
+
+	// HPA: target_cpu_utilization_percentage -> targetCPUUtilizationPercentage
+	hpa := manifests[10]
+	assert.Equal(t, "autoscaling/v1", hpa["apiVersion"])
+	assert.Equal(t, "HorizontalPodAutoscaler", hpa["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "web-hpa", "namespace": "default"}, hpa["metadata"])
+	hpaSpec := hpa["spec"].(map[string]interface{})
+	assert.Equal(t, json.Number("80"), hpaSpec["targetCPUUtilizationPercentage"])
+
+	// HPA v1
+	hpaV1 := manifests[11]
+	assert.Equal(t, "autoscaling/v1", hpaV1["apiVersion"])
+	assert.Equal(t, "HorizontalPodAutoscaler", hpaV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "api-hpa", "namespace": "api"}, hpaV1["metadata"])
+
+	// HPA v2: metric block -> metrics array, policy block -> policies array
+	hpaV2 := manifests[12]
+	assert.Equal(t, "autoscaling/v2", hpaV2["apiVersion"])
+	assert.Equal(t, "HorizontalPodAutoscaler", hpaV2["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "v2-hpa", "namespace": "default"}, hpaV2["metadata"])
+	hpaV2Spec := hpaV2["spec"].(map[string]interface{})
+	assert.Equal(t, json.Number("2"), hpaV2Spec["minReplicas"])
+	metricsArr := hpaV2Spec["metrics"].([]interface{})
+	require.Len(t, metricsArr, 2)
+	extMetric := metricsArr[1].(map[string]interface{})
+	assert.Equal(t, "External", extMetric["type"])
+	extBlock := extMetric["external"].(map[string]interface{})
+	metricIdent := extBlock["metric"].(map[string]interface{})
+	assert.Equal(t, "queue_messages", metricIdent["name"])
+	assert.NotContains(t, extBlock, "metrics")
+	behavior := hpaV2Spec["behavior"].(map[string]interface{})
+	scaleUp := behavior["scaleUp"].(map[string]interface{})
+	policies := scaleUp["policies"].([]interface{})
+	require.Len(t, policies, 1)
+
+	// HPA v2beta2
+	hpaV2beta2 := manifests[13]
+	assert.Equal(t, "autoscaling/v2beta2", hpaV2beta2["apiVersion"])
+	assert.Equal(t, "HorizontalPodAutoscaler", hpaV2beta2["kind"])
+
+	// PriorityClass: cluster-scoped, NO namespace in metadata
+	pc := manifests[14]
+	assert.Equal(t, "scheduling.k8s.io/v1", pc["apiVersion"])
+	assert.Equal(t, "PriorityClass", pc["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "high-priority"}, pc["metadata"])
+	assert.Equal(t, json.Number("1000000"), pc["value"])
+	assert.Equal(t, true, pc["globalDefault"])
+
+	// PriorityClass v1: cluster-scoped
+	pcV1 := manifests[15]
+	assert.Equal(t, "scheduling.k8s.io/v1", pcV1["apiVersion"])
+	assert.Equal(t, "PriorityClass", pcV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "critical-priority"}, pcV1["metadata"])
+	assert.Equal(t, json.Number("2000000"), pcV1["value"])
 }
