@@ -63,3 +63,24 @@ func TestPrinters_KeepOldFileUntilActionPrintThenReplaceIt(t *testing.T) {
 		}
 	}
 }
+
+// Every printer without a writer must return an error from ActionPrint and must not panic.
+func TestPrinters_NilWriterDoesNotPanic(t *testing.T) {
+	formats := printer.AllFormats
+	for _, format := range formats {
+		for _, version := range []string{"", "v1"} {
+			if version == "v1" && format != printer.JsonFormat {
+				continue
+			}
+			t.Run(format+version, func(t *testing.T) {
+				ctx := context.Background()
+				p := NewPrinter(ctx, format, &cautils.ScanInfo{FormatVersion: version}, "cluster")
+				require.NotPanics(t, func() {
+					err := p.ActionPrint(ctx, nil, nil)
+					assert.Error(t, err, "ActionPrint without writer must return an error")
+					p.Score(100)
+				})
+			})
+		}
+	}
+}

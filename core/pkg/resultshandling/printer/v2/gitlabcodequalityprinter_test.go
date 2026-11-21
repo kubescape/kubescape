@@ -217,7 +217,12 @@ func TestGitLabCodeQuality_SkipsControlMissingFromSummary(t *testing.T) {
 }
 
 func TestGitLabCodeQuality_RejectsImageScans(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "gl-*.json")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	cp := NewGitLabCodeQualityPrinter(false)
+	cp.writer = tmpFile
 	images := []cautils.ImageScanData{{Image: "nginx:1.23"}}
 
 	assert.ErrorContains(t, cp.ActionPrint(context.Background(), nil, images), "only supported for configuration scanning")
@@ -228,7 +233,12 @@ func TestGitLabCodeQuality_NilReportDoesNotPanic(t *testing.T) {
 	session := gitLabSessionFixture(t, "C-0057", 8.0)
 	session.Report = nil
 
+	tmpFile, err := os.CreateTemp(t.TempDir(), "gl-*.json")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	cp := NewGitLabCodeQualityPrinter(false)
+	cp.writer = tmpFile
 	require.NotPanics(t, func() {
 		err := cp.ActionPrint(context.Background(), session, nil)
 		assert.ErrorContains(t, err, "only supported for configuration scanning")
