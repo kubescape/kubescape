@@ -638,3 +638,32 @@ func TestIsRuleKubescapeVersionCompatible_NoWarningForValidSemverWithoutV(t *tes
 	assert.NotContains(t, string(b), "invalid useFromKubescapeVersion")
 	assert.NotContains(t, string(b), "invalid useUntilKubescapeVersion")
 }
+
+func TestPolicies_Set_NilSafety(t *testing.T) {
+	control := reporthandling.Control{
+		ControlID: "C-0001",
+		Rules: []reporthandling.PolicyRule{
+			{Name: "test-rule"},
+		},
+	}
+	framework := reporthandling.Framework{
+		Name:     "test-framework",
+		Controls: []reporthandling.Control{control},
+	}
+
+	// 1. Calling Set on nil policies pointer should not panic.
+	var nilPolicies *Policies
+	assert.NotPanics(t, func() {
+		nilPolicies.Set([]reporthandling.Framework{framework}, nil, reporthandling.ScopeFile)
+	})
+
+	// 2. Calling Set on &Policies{} with nil Controls map should not panic and initialize Controls.
+	emptyPolicies := &Policies{}
+	assert.Nil(t, emptyPolicies.Controls)
+	assert.NotPanics(t, func() {
+		emptyPolicies.Set([]reporthandling.Framework{framework}, nil, reporthandling.ScopeFile)
+	})
+	assert.NotNil(t, emptyPolicies.Controls)
+	assert.Contains(t, emptyPolicies.Controls, "C-0001")
+	assert.Contains(t, emptyPolicies.Frameworks, "test-framework")
+}
