@@ -90,13 +90,18 @@ func prepareClusterScan(t *testing.T, serverURL string) string {
 		// Naming the context resets the loaded config and the connection state, so
 		// they are put back after it. Restore no explicit context, not the name
 		// the kubeconfig resolved to, which later tests' kubeconfigs may not have.
+		// The scan also caches the parsed kubeconfig, which a context name that
+		// is already empty does not clear.
 		k8sinterface.SetClusterContextName("")
+		k8sinterface.SetClientConfigAPI(nil)
 		k8sinterface.K8SConfig = previousConfig
 		k8sinterface.SetConnectedToCluster(previousConnected)
 	})
 	// Another test may have left a context name that this kubeconfig does not
-	// have, a loaded config, or a failed connection. Start from none of them.
+	// have, a loaded or parsed kubeconfig, or a failed connection. Start from
+	// none of them.
 	k8sinterface.SetClusterContextName("")
+	k8sinterface.SetClientConfigAPI(nil)
 	k8sinterface.K8SConfig = nil
 	k8sinterface.SetConnectedToCluster(true)
 	return dir
