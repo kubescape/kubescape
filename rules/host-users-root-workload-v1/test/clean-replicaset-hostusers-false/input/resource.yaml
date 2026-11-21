@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: isolated-worker
+  namespace: edge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: isolated-worker
+  template:
+    metadata:
+      labels:
+        app: isolated-worker
+    spec:
+      hostUsers: false
+      containers:
+      - name: worker
+        image: registry.example.com/worker:4.2.0

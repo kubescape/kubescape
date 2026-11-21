@@ -1,0 +1,22 @@
+# Helm renders `securityContext: {{ toYaml .Values.securityContext }}` as null
+# when the chart value is not set. The API server treats it as unset.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-api
+  namespace: shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inventory-api
+  template:
+    metadata:
+      labels:
+        app: inventory-api
+    spec:
+      securityContext: null
+      containers:
+      - name: api
+        image: registry.example.com/inventory-api:3.0.1
+        securityContext: null

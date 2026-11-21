@@ -1,0 +1,54 @@
+[
+    {
+        "alertMessage": "container warmer in ReplicaSet cache-warmer runs as root in the host user namespace; set spec.hostUsers: false to map container root to an unprivileged host UID (GA in Kubernetes 1.36)",
+        "failedPaths": [
+            "spec.template.spec.containers[0]"
+        ],
+        "reviewPaths": [
+            "spec.template.spec.containers[0]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 7,
+        "alertObject": {
+            "k8sApiObjects": [
+                {
+                    "apiVersion": "apps/v1",
+                    "kind": "ReplicaSet",
+                    "metadata": {
+                        "name": "cache-warmer",
+                        "namespace": "edge"
+                    },
+                    "spec": {
+                        "replicas": 2,
+                        "selector": {
+                            "matchLabels": {
+                                "app": "cache-warmer"
+                            }
+                        },
+                        "template": {
+                            "metadata": {
+                                "labels": {
+                                    "app": "cache-warmer"
+                                }
+                            },
+                            "spec": {
+                                "containers": [
+                                    {
+                                        "image": "registry.example.com/cache-warmer:1.0.3",
+                                        "name": "warmer",
+                                        "securityContext": {
+                                            "runAsUser": 0
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    }
+]

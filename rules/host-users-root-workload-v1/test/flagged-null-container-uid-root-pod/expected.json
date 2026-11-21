@@ -1,0 +1,58 @@
+[
+    {
+        "alertMessage": "container db in StatefulSet ledger-db runs as root in the host user namespace; set spec.hostUsers: false to map container root to an unprivileged host UID (GA in Kubernetes 1.36)",
+        "failedPaths": [
+            "spec.template.spec.containers[0]"
+        ],
+        "reviewPaths": [
+            "spec.template.spec.containers[0]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 7,
+        "alertObject": {
+            "k8sApiObjects": [
+                {
+                    "apiVersion": "apps/v1",
+                    "kind": "StatefulSet",
+                    "metadata": {
+                        "name": "ledger-db",
+                        "namespace": "finance"
+                    },
+                    "spec": {
+                        "selector": {
+                            "matchLabels": {
+                                "app": "ledger-db"
+                            }
+                        },
+                        "serviceName": "ledger-db",
+                        "template": {
+                            "metadata": {
+                                "labels": {
+                                    "app": "ledger-db"
+                                }
+                            },
+                            "spec": {
+                                "containers": [
+                                    {
+                                        "image": "registry.example.com/ledger-db:14.2",
+                                        "name": "db",
+                                        "securityContext": {
+                                            "allowPrivilegeEscalation": false,
+                                            "runAsUser": null
+                                        }
+                                    }
+                                ],
+                                "securityContext": {
+                                    "runAsUser": 0
+                                }
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    }
+]
