@@ -48,6 +48,9 @@ func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) e
 }
 
 func (pp *PrometheusPrinter) Score(score float32) {
+	if pp.writer == nil {
+		return
+	}
 	// Handle invalid scores
 	if score > 100 {
 		score = 100

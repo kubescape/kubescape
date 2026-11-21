@@ -119,8 +119,13 @@ func TestGetWriterNoFallback_StillTruncatesOnOpen(t *testing.T) {
 	assert.Zero(t, info.Size())
 }
 
-func TestPrepareAndCloseOutput_AreNoOpsForStdoutAndNil(t *testing.T) {
-	assert.NoError(t, PrepareOutput(nil))
+func TestPrepareOutput_NilWriterReturnsError(t *testing.T) {
+	err := PrepareOutput(nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "output writer is nil")
+}
+
+func TestPrepareAndCloseOutput_StdoutAndCloseNil(t *testing.T) {
 	assert.NoError(t, PrepareOutput(os.Stdout))
 	assert.NoError(t, CloseOutput(nil))
 }

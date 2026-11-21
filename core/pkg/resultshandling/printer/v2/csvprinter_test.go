@@ -1407,9 +1407,14 @@ func TestActionPrint_Csv_NeutralizesFormulaInjection(t *testing.T) {
 // posture report. FinalizeResults returns nil, and the printer used to read
 // SummaryDetails from that nil value.
 func TestActionPrint_Csv_NilReportReturnsError(t *testing.T) {
-	cp := NewCsvPrinter(false)
+	tmpCsv, err := os.CreateTemp(t.TempDir(), "csv-nil-report-*.csv")
+	require.NoError(t, err)
+	defer tmpCsv.Close()
 
-	err := cp.ActionPrint(context.Background(), nil, nil)
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpCsv
+
+	err = cp.ActionPrint(context.Background(), nil, nil)
 	require.EqualError(t, err, "no data provided for CSV output")
 
 	err = cp.ActionPrint(context.Background(), &cautils.OPASessionObj{}, nil)

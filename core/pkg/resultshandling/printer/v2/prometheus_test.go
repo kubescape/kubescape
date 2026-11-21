@@ -314,8 +314,13 @@ func TestPrometheusActionPrint_CombinedScanEmitsBothPostureAndImageMetrics(t *te
 }
 
 func TestPrometheusActionPrint_MissingDataReturnsError(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "prom-*.txt")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	promPrinter := NewPrometheusPrinter(false)
-	err := promPrinter.ActionPrint(context.Background(), nil, nil)
+	promPrinter.writer = tmpFile
+	err = promPrinter.ActionPrint(context.Background(), nil, nil)
 	assert.EqualError(t, err, "failed to print results, missing data")
 }
 
@@ -362,9 +367,14 @@ func TestPrometheusActionPrint_NilReportFallbackToImageScan(t *testing.T) {
 }
 
 func TestPrometheusActionPrint_NilReportNoDataReturnsError(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "prom-*.txt")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	promPrinter := NewPrometheusPrinter(false)
+	promPrinter.writer = tmpFile
 	session := &cautils.OPASessionObj{}
-	err := promPrinter.ActionPrint(context.Background(), session, nil)
+	err = promPrinter.ActionPrint(context.Background(), session, nil)
 	assert.EqualError(t, err, "failed to print results, missing data")
 }
 
