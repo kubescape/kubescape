@@ -399,8 +399,10 @@ Explain a Kubescape security control by ID, returning its metadata (name, descri
 | `auto_fix_available` | boolean | Whether Kubescape provides automatic remediation via `kubescape fix` |
 | `failing_resources` | array | Present when scan context is provided (`path` or `report_path`). Lists failing resources and specific failed paths |
 | `degraded` | boolean | Present only when true: indicates the scan did not fully complete or rule processing partially failed |
-| `not_evaluated` | boolean | Present only when true: indicates this control could not be evaluated during the scan |
+| `not_evaluated` | boolean | Present only when true: indicates this control could not be evaluated during the scan or falls outside the report's scope; check `not_evaluated_reason` for details (rerunning the same selection will not help when the control is outside report scope) |
 | `not_evaluated_reason` | string | Diagnostic reason why the control was not evaluated |
+| `excluded_resources` | integer | Present only when positive: count of failing resources excluded because their file paths fall outside `base_path` |
+| `warning` | string | Informational warning message (e.g., when failures were excluded by `base_path`) |
 
 **Example Response** (`control_id: "C-0017"`):
 ```json

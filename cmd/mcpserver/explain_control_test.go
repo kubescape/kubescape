@@ -266,7 +266,13 @@ func TestExplainControl_WithReportScanContext(t *testing.T) {
 	ks := newExplainTestServer(t)
 	dir := t.TempDir()
 
+	manifestPath := filepath.Join(dir, "deploy.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: nginx\n  namespace: default\n"), 0o600))
+
 	res := remediationClusterResource("Deployment", "nginx", "default")
+	res.GetObject()["sourcePath"] = "deploy.yaml:0"
+	res.IMetadata = nil
+	res.ResourceID = res.GetID()
 	res.Source = &reporthandling.Source{
 		FileType:     reporthandling.SourceTypeYaml,
 		Path:         dir,
@@ -364,6 +370,207 @@ func TestExplainControl_WithReportScanContext(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, callRes)), &resp))
 
 		assert.True(t, resp.AutoFixAvailable, "cluster resource without file source in cluster posture report must report auto-fix available from valid fix path")
+	})
+
+	t.Run("untagged control on local resource without sourcePath reports auto-fix unavailable", func(t *testing.T) {
+		resNoSP := remediationClusterResource("Deployment", "nginx-no-sp", "default")
+		resNoSP.Source = &reporthandling.Source{
+			FileType:     reporthandling.SourceTypeYaml,
+			Path:         dir,
+			RelativePath: "deploy.yaml",
+		}
+		resultNoSP := remediationClusterResult(resNoSP, ctrl)
+		reportNoSP := remediationClusterReport([]resourcesresults.Result{resultNoSP}, resNoSP)
+		reportNoSP.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Directory
+		reportNoSP.Metadata.ContextMetadata.ClusterContextMetadata = nil
+		reportNoSP.Metadata.ContextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{BasePath: dir}
+		noSPPath := writeRemediationReport(t, dir, reportNoSP, nil)
+
+		callRes, err := ks.CallTool(context.Background(), "explain_control", map[string]any{
+			"control_id":  "C-0041",
+			"report_path": noSPPath,
+		})
+		require.NoError(t, err)
+		assert.False(t, callRes.IsError, toolResultText(t, callRes))
+
+		var resp explainControlResponse
+		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, callRes)), &resp))
+
+		assert.False(t, resp.AutoFixAvailable, "local resource without sourcePath must not report auto_fix_available")
+		require.NotNil(t, resp.FailingResources)
+		require.Len(t, *resp.FailingResources, 1, "failing resource must still be returned for manual remediation")
+		assert.Equal(t, "nginx-no-sp", (*resp.FailingResources)[0].Name)
+	})
+
+	t.Run("tagged control on local resource without sourcePath reports auto-fix unavailable", func(t *testing.T) {
+		resNoSP := remediationClusterResource("Deployment", "nginx-no-sp-tagged", "default")
+		resNoSP.Source = &reporthandling.Source{
+			FileType:     reporthandling.SourceTypeYaml,
+			Path:         dir,
+			RelativePath: "deploy.yaml",
+		}
+		ctrlTagged := remediationFailedControl("C-0017", "Immutable container filesystem", rule)
+		resultNoSP := remediationClusterResult(resNoSP, ctrlTagged)
+		reportNoSP := remediationClusterReport([]resourcesresults.Result{resultNoSP}, resNoSP)
+		reportNoSP.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Directory
+		reportNoSP.Metadata.ContextMetadata.ClusterContextMetadata = nil
+		reportNoSP.Metadata.ContextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{BasePath: dir}
+		noSPPath := writeRemediationReport(t, dir, reportNoSP, nil)
+
+		callRes, err := ks.CallTool(context.Background(), "explain_control", map[string]any{
+			"control_id":  "C-0017",
+			"report_path": noSPPath,
+		})
+		require.NoError(t, err)
+		assert.False(t, callRes.IsError, toolResultText(t, callRes))
+
+		var resp explainControlResponse
+		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, callRes)), &resp))
+
+		assert.False(t, resp.AutoFixAvailable, "control tag must not override ineligible local resource lacking sourcePath")
+		require.NotNil(t, resp.FailingResources)
+		require.Len(t, *resp.FailingResources, 1)
+	})
+
+	t.Run("local resource with path but without sourcePath reports auto-fix unavailable", func(t *testing.T) {
+		resPathOnly := remediationClusterResource("Deployment", "nginx-path-only", "default")
+		resPathOnly.GetObject()["path"] = "deploy.yaml:0"
+		resPathOnly.Source = &reporthandling.Source{
+			FileType:     reporthandling.SourceTypeYaml,
+			Path:         dir,
+			RelativePath: "deploy.yaml",
+		}
+		resultPathOnly := remediationClusterResult(resPathOnly, ctrl)
+		reportPathOnly := remediationClusterReport([]resourcesresults.Result{resultPathOnly}, resPathOnly)
+		reportPathOnly.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Directory
+		reportPathOnly.Metadata.ContextMetadata.ClusterContextMetadata = nil
+		reportPathOnly.Metadata.ContextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{BasePath: dir}
+		pathOnlyFile := writeRemediationReport(t, dir, reportPathOnly, nil)
+
+		callRes, err := ks.CallTool(context.Background(), "explain_control", map[string]any{
+			"control_id":  "C-0041",
+			"report_path": pathOnlyFile,
+		})
+		require.NoError(t, err)
+		assert.False(t, callRes.IsError, toolResultText(t, callRes))
+
+		var resp explainControlResponse
+		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, callRes)), &resp))
+
+		assert.False(t, resp.AutoFixAvailable, "resource with only path and no sourcePath must not report auto_fix_available")
+	})
+
+	t.Run("failed paths with equals suffix are normalized and deduplicated", func(t *testing.T) {
+		resSuffixed := remediationClusterResource("Deployment", "nginx-suffix", "default")
+		resSuffixed.GetObject()["sourcePath"] = "deploy.yaml:0"
+		resSuffixed.IMetadata = nil
+		resSuffixed.ResourceID = resSuffixed.GetID()
+		resSuffixed.Source = &reporthandling.Source{
+			FileType:     reporthandling.SourceTypeYaml,
+			Path:         dir,
+			RelativePath: "deploy.yaml",
+		}
+		ruleSuffixed := resourcesresults.ResourceAssociatedRule{
+			Name:   "host-network-access",
+			Status: apis.StatusFailed,
+			Paths: []armotypes.PosturePaths{
+				{
+					FailedPath: "spec.template.spec.hostNetwork=true",
+					FixPath:    armotypes.FixPath{Path: "spec.template.spec.hostNetwork", Value: "false"},
+				},
+			},
+		}
+		ctrlSuffixed := remediationFailedControl("C-0041", "HostNetwork access", ruleSuffixed)
+		resultSuffixed := remediationClusterResult(resSuffixed, ctrlSuffixed)
+		reportSuffixed := remediationClusterReport([]resourcesresults.Result{resultSuffixed}, resSuffixed)
+		reportSuffixed.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Directory
+		reportSuffixed.Metadata.ContextMetadata.ClusterContextMetadata = nil
+		reportSuffixed.Metadata.ContextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{BasePath: dir}
+		suffixedPath := writeRemediationReport(t, dir, reportSuffixed, nil)
+
+		callRes, err := ks.CallTool(context.Background(), "explain_control", map[string]any{
+			"control_id":  "C-0041",
+			"report_path": suffixedPath,
+		})
+		require.NoError(t, err)
+		assert.False(t, callRes.IsError, toolResultText(t, callRes))
+
+		var resp explainControlResponse
+		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, callRes)), &resp))
+
+		require.NotNil(t, resp.FailingResources)
+		require.Len(t, *resp.FailingResources, 1)
+		assert.Equal(t, []string{"spec.template.spec.hostNetwork"}, (*resp.FailingResources)[0].FailedPaths, "suffix =true must be stripped and path deduplicated against FixPath")
+	})
+
+	t.Run("failed paths preserve equals inside quoted path keys", func(t *testing.T) {
+		resQuoted := remediationClusterResource("Deployment", "nginx-quoted", "default")
+		resQuoted.GetObject()["sourcePath"] = "deploy.yaml:0"
+		resQuoted.IMetadata = nil
+		resQuoted.ResourceID = resQuoted.GetID()
+		resQuoted.Source = &reporthandling.Source{
+			FileType:     reporthandling.SourceTypeYaml,
+			Path:         dir,
+			RelativePath: "deploy.yaml",
+		}
+		ruleQuoted := resourcesresults.ResourceAssociatedRule{
+			Name:   "quoted-paths",
+			Status: apis.StatusFailed,
+			Paths: []armotypes.PosturePaths{
+				{
+					FailedPath: `spec.options."a=b"=true`,
+					FixPath:    armotypes.FixPath{Path: `spec.options."a=b"`, Value: "val"},
+				},
+				{
+					FailedPath: `spec.options."a=c"`,
+				},
+			},
+		}
+		ctrlQuoted := remediationFailedControl("C-0041", "HostNetwork access", ruleQuoted)
+		resultQuoted := remediationClusterResult(resQuoted, ctrlQuoted)
+		reportQuoted := remediationClusterReport([]resourcesresults.Result{resultQuoted}, resQuoted)
+		reportQuoted.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Directory
+		reportQuoted.Metadata.ContextMetadata.ClusterContextMetadata = nil
+		reportQuoted.Metadata.ContextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{BasePath: dir}
+		quotedReportPath := writeRemediationReport(t, dir, reportQuoted, nil)
+
+		callRes, err := ks.CallTool(context.Background(), "explain_control", map[string]any{
+			"control_id":  "C-0041",
+			"report_path": quotedReportPath,
+		})
+		require.NoError(t, err)
+		assert.False(t, callRes.IsError, toolResultText(t, callRes))
+
+		var resp explainControlResponse
+		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, callRes)), &resp))
+
+		require.NotNil(t, resp.FailingResources)
+		require.Len(t, *resp.FailingResources, 1)
+		assert.Equal(t, []string{`spec.options."a=b"`, `spec.options."a=c"`}, (*resp.FailingResources)[0].FailedPaths)
+	})
+
+	t.Run("whitespace-padded control ID in findings is matched", func(t *testing.T) {
+		ctrlPadded := remediationFailedControl(" C-0041 ", "HostNetwork access", rule)
+		resultPadded := remediationClusterResult(res, ctrlPadded)
+		reportPadded := remediationClusterReport([]resourcesresults.Result{resultPadded}, res)
+		reportPadded.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Directory
+		reportPadded.Metadata.ContextMetadata.ClusterContextMetadata = nil
+		reportPadded.Metadata.ContextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{BasePath: dir}
+		paddedPath := writeRemediationReport(t, dir, reportPadded, nil)
+
+		callRes, err := ks.CallTool(context.Background(), "explain_control", map[string]any{
+			"control_id":  "C-0041",
+			"report_path": paddedPath,
+		})
+		require.NoError(t, err)
+		assert.False(t, callRes.IsError, toolResultText(t, callRes))
+
+		var resp explainControlResponse
+		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, callRes)), &resp))
+
+		assert.False(t, resp.NotEvaluated)
+		require.NotNil(t, resp.FailingResources)
+		require.Len(t, *resp.FailingResources, 1, "whitespace-padded control ID must match targetControlID")
 	})
 
 	t.Run("control outside report scope signals not_evaluated", func(t *testing.T) {
@@ -549,6 +756,8 @@ func TestExplainControl_BasePathEnforcement(t *testing.T) {
 		require.Len(t, *resp.FailingResources, 1, "escaping resource must be excluded")
 		assert.Equal(t, "nginx-inside", (*resp.FailingResources)[0].Name)
 		assert.Equal(t, "inside/deploy.yaml", (*resp.FailingResources)[0].FilePath)
+		assert.Equal(t, 1, resp.ExcludedResources, "omission count must be reported when resources are excluded")
+		assert.Contains(t, resp.Warning, "excluded because file references fall outside base_path")
 	})
 
 	t.Run("invalid non-existent base_path", func(t *testing.T) {
@@ -593,6 +802,8 @@ func TestExplainControl_BasePathEnforcement(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, callRes)), &resp))
 		require.NotNil(t, resp.FailingResources)
 		assert.Empty(t, *resp.FailingResources, "resource whose Source.Path is outside base_path must be excluded")
+		assert.Equal(t, 1, resp.ExcludedResources, "omission count must be reported when all resources are excluded")
+		assert.Contains(t, resp.Warning, "excluded because file references fall outside base_path")
 	})
 
 	t.Run("nil raw resource does not panic with base_path", func(t *testing.T) {
@@ -1082,6 +1293,9 @@ func TestExplainControl_InvalidFixPathNotReportedAsAutoFix(t *testing.T) {
 	dir := t.TempDir()
 
 	res := remediationClusterResource("Deployment", "nginx", "default")
+	res.GetObject()["sourcePath"] = "deploy.yaml:0"
+	res.IMetadata = nil
+	res.ResourceID = res.GetID()
 	res.Source = &reporthandling.Source{
 		FileType:     reporthandling.SourceTypeYaml,
 		Path:         dir,
@@ -1153,6 +1367,9 @@ func TestExplainControl_PosturePathsResourceIDFiltering(t *testing.T) {
 	dir := t.TempDir()
 
 	res := remediationClusterResource("Deployment", "nginx", "default")
+	res.GetObject()["sourcePath"] = "deploy.yaml:0"
+	res.IMetadata = nil
+	res.ResourceID = res.GetID()
 	res.Source = &reporthandling.Source{
 		FileType:     reporthandling.SourceTypeYaml,
 		Path:         dir,
@@ -1197,4 +1414,14 @@ func TestExplainControl_PosturePathsResourceIDFiltering(t *testing.T) {
 	require.Len(t, *resp.FailingResources, 1)
 	assert.Equal(t, []string{"spec.matchingResourcePath"}, (*resp.FailingResources)[0].FailedPaths, "paths belonging to other resources must not be attributed to this entry")
 	assert.False(t, resp.AutoFixAvailable, "fix path belonging to other resource must not trigger auto_fix_available for this resource")
+}
+
+func TestNormalizeFailedPath(t *testing.T) {
+	assert.Equal(t, "spec.securityContext.runAsNonRoot", normalizeFailedPath("spec.securityContext.runAsNonRoot=true"))
+	assert.Equal(t, `spec.options."a=b"`, normalizeFailedPath(`spec.options."a=b"`))
+	assert.Equal(t, `spec.options."a=b"`, normalizeFailedPath(`spec.options."a=b"=true`))
+	assert.Equal(t, `spec.options."a=b"`, normalizeFailedPath(`spec.options."a=b"=false`))
+	assert.Equal(t, `metadata.annotations."app.kubernetes.io/name"`, normalizeFailedPath(`metadata.annotations."app.kubernetes.io/name"`))
+	assert.Equal(t, `metadata.annotations."foo=bar"`, normalizeFailedPath(`metadata.annotations."foo=bar"=val`))
+	assert.Equal(t, "spec.containers[0].name", normalizeFailedPath("spec.containers[0].name"))
 }

@@ -18,6 +18,8 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/fixhandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/diff"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -46,6 +48,8 @@ type explainControlResponse struct {
 	Degraded           bool                      `json:"degraded,omitempty"`
 	NotEvaluated       bool                      `json:"not_evaluated,omitempty"`
 	NotEvaluatedReason string                    `json:"not_evaluated_reason,omitempty"`
+	ExcludedResources  int                       `json:"excluded_resources,omitempty"`
+	Warning            string                    `json:"warning,omitempty"`
 }
 
 func createExplainControlTools(ksServer *KubescapeMcpserver) {
@@ -182,6 +186,7 @@ func (ksServer *KubescapeMcpserver) ExplainControl(ctx context.Context, argument
 	degraded := false
 	notEvaluated := false
 	notEvaluatedReason := ""
+	excludedResources := 0
 
 	if reportPath != "" {
 		raw, err := readRemediationReportWithRoot(reportPath, workspaceRoot)
@@ -205,7 +210,7 @@ func (ksServer *KubescapeMcpserver) ExplainControl(ctx context.Context, argument
 				degraded = true
 			}
 			for _, ne := range cov.NotEvaluatedControls {
-				if strings.EqualFold(ne.ControlID, canonicalID) {
+				if normalizeControlID(ne.ControlID) == normalizeControlID(canonicalID) {
 					notEvaluated = true
 					notEvaluatedReason = ne.ReasonString()
 					degraded = true
@@ -219,9 +224,10 @@ func (ksServer *KubescapeMcpserver) ExplainControl(ctx context.Context, argument
 				notEvaluatedReason = fmt.Sprintf("control '%s' is outside report scope", canonicalID)
 			}
 		}
-		rsrcs, fixable := extractFailingResources(&report, canonicalID, basePath)
+		rsrcs, fixable, excluded := extractFailingResources(&report, canonicalID, basePath)
 		failingResources = &rsrcs
 		scanFixable = fixable
+		excludedResources = excluded
 	} else if path != "" {
 		var scanKey string
 		if rev := pathRevision(path); rev != "" {
@@ -244,19 +250,25 @@ func (ksServer *KubescapeMcpserver) ExplainControl(ctx context.Context, argument
 			degraded = true
 		}
 		for _, ne := range outcome.NotEvaluatedControls {
-			if strings.EqualFold(ne.ControlID, canonicalID) {
+			if normalizeControlID(ne.ControlID) == normalizeControlID(canonicalID) {
 				notEvaluated = true
 				notEvaluatedReason = ne.ReasonString()
 				degraded = true
 				break
 			}
 		}
-		rsrcs, fixable := extractFailingResources(&report, canonicalID, basePath)
+		rsrcs, fixable, excluded := extractFailingResources(&report, canonicalID, basePath)
 		failingResources = &rsrcs
 		scanFixable = fixable
+		excludedResources = excluded
 	}
 
-	autoFixAvailable := controlHasAutoFix(control, scanFixable)
+	autoFixAvailable := controlHasAutoFix(control, failingResources != nil, scanFixable)
+
+	var warning string
+	if excludedResources > 0 {
+		warning = fmt.Sprintf("%d failing resource(s) excluded because file references fall outside base_path", excludedResources)
+	}
 
 	response := explainControlResponse{
 		ControlID:          canonicalID,
@@ -269,6 +281,8 @@ func (ksServer *KubescapeMcpserver) ExplainControl(ctx context.Context, argument
 		Degraded:           degraded,
 		NotEvaluated:       notEvaluated,
 		NotEvaluatedReason: notEvaluatedReason,
+		ExcludedResources:  excludedResources,
+		Warning:            warning,
 	}
 
 	responseJSON, err := json.MarshalIndent(response, "", "  ")
@@ -342,7 +356,7 @@ func isPostureReport(raw []byte, report *reporthandlingv2.PostureReport) bool {
 // extractFailingResources searches a PostureReport for resources that failed the given control,
 // collecting the unique failed paths for each resource and checking if any rule provides a FixPath.
 // If basePath is non-empty, file references that escape basePath are rejected.
-func extractFailingResources(report *reporthandlingv2.PostureReport, targetControlID, basePath string) ([]explainFailingResource, bool) {
+func extractFailingResources(report *reporthandlingv2.PostureReport, targetControlID, basePath string) ([]explainFailingResource, bool, int) {
 	resourcesMap := make(map[string]*reporthandling.Resource)
 	for i := range report.Resources {
 		resourcesMap[report.Resources[i].GetID()] = &report.Resources[i]
@@ -356,6 +370,7 @@ func extractFailingResources(report *reporthandlingv2.PostureReport, targetContr
 	byResourceID := make(map[string]*explainFailingResource)
 	rejectedResourceIDs := make(map[string]bool)
 	hasFixPath := false
+	normTargetID := normalizeControlID(targetControlID)
 
 	for i := range report.Results {
 		resResult := &report.Results[i]
@@ -370,7 +385,7 @@ func extractFailingResources(report *reporthandlingv2.PostureReport, targetContr
 
 		for j := range resResult.AssociatedControls {
 			ctrl := &resResult.AssociatedControls[j]
-			if !strings.EqualFold(ctrl.ControlID, targetControlID) && !strings.EqualFold(ctrl.GetID(), targetControlID) {
+			if normalizeControlID(ctrl.ControlID) != normTargetID && normalizeControlID(ctrl.GetID()) != normTargetID {
 				continue
 			}
 
@@ -470,6 +485,7 @@ func extractFailingResources(report *reporthandlingv2.PostureReport, targetContr
 						hasFixPath = true
 					}
 					for _, candidate := range []string{p.FailedPath, p.FixPath.Path, p.DeletePath, p.ReviewPath} {
+						candidate = normalizeFailedPath(candidate)
 						if candidate != "" && !seenPaths[candidate] {
 							seenPaths[candidate] = true
 							entry.FailedPaths = append(entry.FailedPaths, candidate)
@@ -493,13 +509,15 @@ func extractFailingResources(report *reporthandlingv2.PostureReport, targetContr
 		return result[i].Name < result[j].Name
 	})
 
-	return result, hasFixPath
+	return result, hasFixPath, len(rejectedResourceIDs)
 }
 
-// controlHasAutoFix checks if the control has auto-fix available through kubescape fix.
-func controlHasAutoFix(ctrl *reporthandling.Control, scanFixable bool) bool {
-	if scanFixable {
-		return true
+// controlHasAutoFix checks if auto-fix is available for the control. When local scan context
+// is supplied, resource eligibility determines the result. When no scan context is supplied,
+// it falls back to checking whether control metadata declares auto-fix capability.
+func controlHasAutoFix(ctrl *reporthandling.Control, hasScanContext bool, scanFixable bool) bool {
+	if hasScanContext {
+		return scanFixable
 	}
 	if ctrl == nil {
 		return false
@@ -593,10 +611,76 @@ func joinPathNoClean(base, rel string) string {
 	return strings.TrimSuffix(base, string(filepath.Separator)) + string(filepath.Separator) + strings.TrimPrefix(rel, string(filepath.Separator))
 }
 
+// normalizeFailedPath strips an "=<expected>" suffix that some FailedPath
+// values carry (e.g. "spec.securityContext.runAsNonRoot=true") outside of
+// quoted path components, so YAML locations are returned cleanly and deduplicated
+// against unsuffixed paths without truncating quoted keys like spec.options."a=b".
+func normalizeFailedPath(p string) string {
+	inQuotes := false
+	for i := 0; i < len(p); i++ {
+		switch p[i] {
+		case '\\':
+			if inQuotes && i+1 < len(p) {
+				i++
+			}
+		case '"':
+			inQuotes = !inQuotes
+		case '=':
+			if !inQuotes {
+				return p[:i]
+			}
+		}
+	}
+	return p
+}
+
+func getPathFromRawResource(obj map[string]any) string {
+	if obj == nil {
+		return ""
+	}
+	if localworkload.IsTypeLocalWorkload(obj) {
+		localwork := localworkload.NewLocalWorkload(obj)
+		return localwork.GetPath()
+	} else if objectsenvelopes.IsTypeRegoResponseVector(obj) {
+		regoResponseVectorObject := objectsenvelopes.NewRegoResponseVectorObject(obj)
+		for _, relatedObject := range regoResponseVectorObject.GetRelatedObjects() {
+			if localworkload.IsTypeLocalWorkload(relatedObject.GetObject()) {
+				return relatedObject.(*localworkload.LocalWorkload).GetPath()
+			}
+		}
+	}
+	if sp, ok := obj["sourcePath"].(string); ok && sp != "" {
+		return sp
+	}
+	return ""
+}
+
+func getFilePathAndIndex(filePathWithIndex string) (string, int, error) {
+	volume := filepath.VolumeName(filePathWithIndex)
+	pathWithoutVolume := filePathWithIndex[len(volume):]
+
+	lastColon := strings.LastIndex(pathWithoutVolume, ":")
+	if lastColon == -1 {
+		return "", 0, fmt.Errorf("expected to find ':' in file path")
+	}
+	lastColon += len(volume)
+
+	filePath := filePathWithIndex[:lastColon]
+	indexStr := filePathWithIndex[lastColon+1:]
+
+	documentIndex, err := strconv.Atoi(indexStr)
+	if err != nil {
+		return "", 0, err
+	}
+
+	return filePath, documentIndex, nil
+}
+
 // isFixableResource reports whether kubescape fix can remediate this resource.
 // For cluster scans, kubescape fix plans and renders manifest changes directly from
 // the scanned cluster object without requiring a local file source. For local scans,
-// it requires an eligible YAML or JSON manifest file that the fix engine can mutate.
+// it requires an eligible YAML or JSON manifest file and a usable manifest reference
+// (sourcePath with document index) that the fix engine can mutate.
 func isFixableResource(report *reporthandlingv2.PostureReport, rawRes *reporthandling.Resource) bool {
 	if rawRes == nil {
 		return false
@@ -609,15 +693,28 @@ func isFixableResource(report *reporthandlingv2.PostureReport, rawRes *reporthan
 		return false
 	}
 	ft := strings.ToUpper(strings.TrimSpace(src.FileType))
+	isYamlOrJson := false
 	if ft == reporthandling.SourceTypeYaml || ft == reporthandling.SourceTypeJson || ft == "YML" {
-		return true
-	}
-	if ft == "" {
+		isYamlOrJson = true
+	} else if ft == "" {
 		ext := strings.ToLower(filepath.Ext(src.RelativePath))
 		if ext == "" {
 			ext = strings.ToLower(filepath.Ext(src.Path))
 		}
-		return ext == ".yaml" || ext == ".yml" || ext == ".json"
+		isYamlOrJson = ext == ".yaml" || ext == ".yml" || ext == ".json"
 	}
-	return false
+	if !isYamlOrJson {
+		return false
+	}
+
+	// For local reports, kubescape fix requires a usable manifest reference
+	// on the resource before it can plan and apply fixes.
+	reportedPath := getPathFromRawResource(rawRes.GetObject())
+	if reportedPath == "" {
+		return false
+	}
+	if _, _, err := getFilePathAndIndex(reportedPath); err != nil {
+		return false
+	}
+	return true
 }
