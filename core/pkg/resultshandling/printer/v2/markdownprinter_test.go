@@ -1147,3 +1147,83 @@ func TestMarkdownPrinter_ActionPrint_FailedControlHeadingPreservesPipeInControlI
 	// Summary table cell must still escape pipe to preserve table structure
 	assert.Contains(t, out, "| Critical | Custom Control | C-0099\\|local |")
 }
+
+func TestMarkdownActionPrint_NilWriterReturnsError(t *testing.T) {
+	mp := NewMarkdownPrinter()
+	session := mdSessionFixture()
+
+	require.NotPanics(t, func() {
+		err := mp.ActionPrint(context.Background(), session, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	require.NotPanics(t, func() {
+		err := mp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{{Image: "nginx:1.23"}})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestMdWriteSummaryTable_NilResourcesListDoesNotPanic(t *testing.T) {
+	ctrl := reportsummary.ControlSummary{
+		ControlID:   "C-0001",
+		Name:        "Test Control",
+		ScoreFactor: 5.0,
+		StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusPassed},
+	}
+	var buf strings.Builder
+	require.NotPanics(t, func() {
+		err := mdWriteSummaryTable(&buf, []reportsummary.ControlSummary{ctrl})
+		require.NoError(t, err)
+	})
+	assert.Contains(t, buf.String(), "| Medium | Test Control | C-0001 | ✅ Passed | 0 | 0 |")
+}
+
+func TestMdWriteFailedSection_NilSafety(t *testing.T) {
+	t.Run("nil status does not panic", func(t *testing.T) {
+		ctrl := reportsummary.ControlSummary{
+			ControlID:   "C-0001",
+			Name:        "Test Control",
+			ScoreFactor: 5.0,
+		}
+		var buf strings.Builder
+		require.NotPanics(t, func() {
+			err := mdWriteFailedSection(context.Background(), &buf, []reportsummary.ControlSummary{ctrl}, nil)
+			require.NoError(t, err)
+		})
+		assert.Empty(t, buf.String())
+	})
+
+	t.Run("nil resources list with failed status does not panic", func(t *testing.T) {
+		ctrl := reportsummary.ControlSummary{
+			ControlID:   "C-0001",
+			Name:        "Failed Control",
+			ScoreFactor: 9.0,
+			StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		}
+		var buf strings.Builder
+		require.NotPanics(t, func() {
+			err := mdWriteFailedSection(context.Background(), &buf, []reportsummary.ControlSummary{ctrl}, nil)
+			require.NoError(t, err)
+		})
+		assert.Contains(t, buf.String(), "Failed Controls")
+		assert.Contains(t, buf.String(), "### Failed Control — Critical (`C-0001`)")
+	})
+
+	t.Run("nil session does not panic when resolving failed resources", func(t *testing.T) {
+		ctrl := reportsummary.ControlSummary{
+			ControlID:   "C-0001",
+			Name:        "Failed Control",
+			ScoreFactor: 9.0,
+			StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		}
+		ctrl.Append(&apis.StatusInfo{InnerStatus: apis.StatusFailed}, "res-missing")
+		var buf strings.Builder
+		require.NotPanics(t, func() {
+			err := mdWriteFailedSection(context.Background(), &buf, []reportsummary.ControlSummary{ctrl}, nil)
+			require.NoError(t, err)
+		})
+		assert.Contains(t, buf.String(), "| res-missing | — | — |")
+	})
+}
