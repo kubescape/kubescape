@@ -21,11 +21,11 @@ Prerequisites (runner)
 
 High-level TODOs
 ----------------
-1. Ensure goreleaser hook is a single script
+1. [DONE] Ensure goreleaser hook is a single script
    - Update `builds[].hooks.post` in `.goreleaser.yaml` to be one multi-line script (YAML literal) so the entire script runs in a single shell.
    - Confirm behavior locally by running goreleaser snapshot in an environment with `RUN_E2E=true`.
 
-2. Add opt-in trigger and documented env flag
+2. [DONE] Add opt-in trigger and documented env flag
    - Use `RUN_E2E` (boolean-like) to decide whether to run post-build tests.
    - Document how to enable it in CI:
      - Example (GitHub Actions env):
@@ -34,7 +34,7 @@ High-level TODOs
        - `CLIENT: ${{ inputs.CLIENT }}`
    - Consider also adding a `GORELEASER_E2E_MODE` with values `smoke|system|none`.
 
-3. Artifact discovery
+3. [DONE] Artifact discovery
    - Avoid relying on a single filename. Implement a small discovery step:
      - Look for `dist/kubescape*` and pick the most appropriate artifact (prefer linux binary or the packaged format you want).
      - Example logic:
@@ -42,13 +42,13 @@ High-level TODOs
        - Use `ART_PATH="$(pwd)/dist/$ARTIFACT"`
    - Add a fallback or an informative message when no artifact is found.
 
-4. Decide failure policy
+4. [DONE] Decide failure policy
    - Two possible behaviors:
      - Fail the goreleaser run when tests fail (useful for gating releases).
      - Allow the release to continue and treat tests as best-effort (useful when you want to still publish).
    - Implement via environment flag `E2E_FAIL_ON_ERROR=true|false`. If `false`, wrap test command with `|| true`.
 
-5. Integrate with existing smoke tests
+5. [DONE] Integrate with existing smoke tests
    - Use the existing `smoke_testing/init.py` to run basic smoke tests.
    - Ensure the test runner can accept local artifact path as an argument (it already does in repository).
    - If tests require additional args or secrets, allow passing them via env vars into the goreleaser hook.
