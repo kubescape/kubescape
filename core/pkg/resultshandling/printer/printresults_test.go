@@ -526,6 +526,38 @@ func TestResolveOutputFile(t *testing.T) {
 			wantExplicit: true,
 		},
 		{
+			name:         "current directory names a directory",
+			format:       JsonFormat,
+			outputFile:   ".",
+			defaultBase:  "report",
+			wantFile:     "." + string(filepath.Separator) + "report.json",
+			wantExplicit: true,
+		},
+		{
+			name:         "parent directory names a directory",
+			format:       JsonFormat,
+			outputFile:   "..",
+			defaultBase:  "report",
+			wantFile:     ".." + string(filepath.Separator) + "report.json",
+			wantExplicit: true,
+		},
+		{
+			name:         "relative directory ending in dot names a directory",
+			format:       JsonFormat,
+			outputFile:   "reports" + string(filepath.Separator) + ".",
+			defaultBase:  "report",
+			wantFile:     "reports" + string(filepath.Separator) + "." + string(filepath.Separator) + "report.json",
+			wantExplicit: true,
+		},
+		{
+			name:         "current directory uses the printer's default base",
+			format:       CycloneDXFormat,
+			outputFile:   ".",
+			defaultBase:  "sbom",
+			wantFile:     "." + string(filepath.Separator) + "sbom.cdx.json",
+			wantExplicit: true,
+		},
+		{
 			name:         "devnull sink keeps explicit path without extension",
 			format:       JsonFormat,
 			outputFile:   os.DevNull,
@@ -579,6 +611,36 @@ func TestResolveOutputFile_DirectoryThroughSymlinkParent(t *testing.T) {
 	require.NoError(t, f.Close())
 	assert.FileExists(t, filepath.Join(storage, "report.json"))
 	assert.NoFileExists(t, filepath.Join(work, "report.json"))
+}
+
+// TestResolveOutputFile_DotWritesReportIntoDirectory: "--output ." and
+// "--output .." name directories, so the report must be created inside them
+// instead of in a hidden file "..json" (or "...json") in the working directory.
+func TestResolveOutputFile_DotWritesReportIntoDirectory(t *testing.T) {
+	root := t.TempDir()
+	work := filepath.Join(root, "work")
+	require.NoError(t, os.MkdirAll(work, 0o755))
+	t.Chdir(work)
+
+	for _, tt := range []struct {
+		output  string
+		wantDir string
+	}{
+		{output: ".", wantDir: work},
+		{output: "..", wantDir: root},
+	} {
+		t.Run(tt.output, func(t *testing.T) {
+			got, explicit := ResolveOutputFile(JsonFormat, tt.output, "report")
+			require.True(t, explicit)
+
+			f, err := os.Create(got)
+			require.NoError(t, err)
+			require.NoError(t, f.Close())
+
+			assert.FileExists(t, filepath.Join(tt.wantDir, "report.json"))
+			assert.NoFileExists(t, filepath.Join(work, tt.output+".json"))
+		})
+	}
 }
 
 // TestGetWriterNoFallback_NewDirectoryThroughSymlinkParent: the missing
