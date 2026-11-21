@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -113,6 +114,15 @@ func readPolicyFile(path string) ([]byte, error) {
 	return data, nil
 }
 
+// unmarshalPolicy decodes the JSON contents of a local policy file. A leading
+// UTF-8 byte order mark is not part of the JSON text: Windows editors and
+// PowerShell's Out-File -Encoding utf8 write one, and the decoder would reject
+// the whole file at the first byte. Only the decoded text drops it; digests
+// of the file still cover its exact bytes.
+func unmarshalPolicy(buf []byte, v any) error {
+	return json.Unmarshal(bytes.TrimPrefix(buf, []byte("\xef\xbb\xbf")), v)
+}
+
 // ReadPolicyFile returns the contents of the policy file at path, reading at most
 // maxPolicyFileBytes bytes so that reading remains bounded (CWE-400).
 func ReadPolicyFile(path string) ([]byte, error) {
@@ -208,7 +218,7 @@ func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, err
 
 		// check if the file is a control descriptor: a ControlID field is populated.
 		var control reporthandling.Control
-		if err = json.Unmarshal(buf, &control); err == nil && control.ControlID != "" {
+		if err = unmarshalPolicy(buf, &control); err == nil && control.ControlID != "" {
 			usable = true
 			if matcher.offer(&control) {
 				return &control, nil
@@ -218,7 +228,7 @@ func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, err
 
 		// check if the file is a framework descriptor
 		var framework reporthandling.Framework
-		if err = json.Unmarshal(buf, &framework); err == nil && len(framework.Controls) > 0 {
+		if err = unmarshalPolicy(buf, &framework); err == nil && len(framework.Controls) > 0 {
 			usable = true
 			for _, toPin := range framework.Controls {
 				ctrl := toPin
@@ -265,7 +275,7 @@ func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framew
 		}
 
 		var framework reporthandling.Framework
-		if err = json.Unmarshal(buf, &framework); err != nil {
+		if err = unmarshalPolicy(buf, &framework); err != nil {
 			logger.L().Debug("skipping unparsable policy file", helpers.String("path", filePath), helpers.Error(err))
 			continue
 		}
@@ -291,7 +301,7 @@ func (lp *LoadPolicy) GetFrameworks() ([]reporthandling.Framework, error) {
 		}
 
 		var framework reporthandling.Framework
-		if err = json.Unmarshal(buf, &framework); err != nil {
+		if err = unmarshalPolicy(buf, &framework); err != nil {
 			// ignore invalid framework files
 			continue
 		}
@@ -321,7 +331,7 @@ func (lp *LoadPolicy) ListFrameworks() ([]string, error) {
 		}
 
 		var framework reporthandling.Framework
-		if err := json.Unmarshal(buf, &framework); err != nil {
+		if err := unmarshalPolicy(buf, &framework); err != nil {
 			continue
 		}
 
@@ -354,7 +364,7 @@ func (lp *LoadPolicy) ListControls() ([]string, error) {
 
 		// check if the file is a control descriptor: a ControlID field is populated.
 		var control reporthandling.Control
-		if err = json.Unmarshal(buf, &control); err == nil && control.ControlID != "" {
+		if err = unmarshalPolicy(buf, &control); err == nil && control.ControlID != "" {
 			info, exists := controlsMap[control.ControlID]
 			if !exists {
 				info = &controlInfo{id: control.ControlID}
@@ -369,7 +379,7 @@ func (lp *LoadPolicy) ListControls() ([]string, error) {
 
 		// check if the file is a framework descriptor
 		var framework reporthandling.Framework
-		if err = json.Unmarshal(buf, &framework); err == nil && framework.Name != "" {
+		if err = unmarshalPolicy(buf, &framework); err == nil && framework.Name != "" {
 			isAllControls := strings.EqualFold(framework.Name, "allcontrols")
 			for _, ctrl := range framework.Controls {
 				info, exists := controlsMap[ctrl.ControlID]
@@ -421,7 +431,7 @@ func (lp *LoadPolicy) GetExceptions(_ context.Context, _ /* clusterName */ strin
 	}
 
 	exception := make([]armotypes.PostureExceptionPolicy, 0, 300)
-	err = json.Unmarshal(buf, &exception)
+	err = unmarshalPolicy(buf, &exception)
 	if err == nil {
 		lp.recordConsumedFile(filePath, buf)
 	}
@@ -478,7 +488,7 @@ func ReadControlsInputsFile(path string) (map[string][]string, error) {
 
 func decodeControlsInputs(buf []byte) (map[string][]string, error) {
 	controlInputs := make(map[string][]string, 100) // from armotypes.Settings.PostureControlInputs
-	if err := json.Unmarshal(buf, &controlInputs); err != nil {
+	if err := unmarshalPolicy(buf, &controlInputs); err != nil {
 		return nil, err
 	}
 	return controlInputs, nil
@@ -517,7 +527,7 @@ func (lp *LoadPolicy) GetAttackTracks() ([]v1alpha1.AttackTrack, error) {
 		return nil, err
 	}
 
-	if err = json.Unmarshal(buf, &attackTracks); err != nil {
+	if err = unmarshalPolicy(buf, &attackTracks); err != nil {
 		return nil, err
 	}
 

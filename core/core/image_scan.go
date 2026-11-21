@@ -195,6 +195,11 @@ func GetImageExceptionsFromFile(filePath string) ([]VulnerabilitiesIgnorePolicy,
 		return nil, fmt.Errorf("error reading exceptions file: %w", err)
 	}
 
+	// A UTF-8 byte order mark is not part of the JSON text. Windows editors and
+	// PowerShell's Out-File -Encoding utf8 write one, and the decoder would
+	// reject the whole file at the first byte.
+	jsonFile = bytes.TrimPrefix(jsonFile, []byte("\xef\xbb\xbf"))
+
 	// Decode with DisallowUnknownFields so misspelled keys are caught
 	// instead of silently falling through to zero-value (empty) patterns,
 	// which the regex matcher treats as "match everything".
