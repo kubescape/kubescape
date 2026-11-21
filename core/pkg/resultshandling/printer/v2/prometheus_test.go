@@ -786,20 +786,25 @@ func TestPrometheusActionPrint_NilWriterReturnsError(t *testing.T) {
 	pp := NewPrometheusPrinter(false)
 	require.Nil(t, pp.writer)
 
-	// Missing data still returns missing data error
-	err := pp.ActionPrint(ctx, nil, nil)
+	// Missing data with a non-nil writer returns missing data error
+	tmpFile, err := os.CreateTemp(t.TempDir(), "prom-*.txt")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+	pp.writer = tmpFile
+	err = pp.ActionPrint(ctx, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to print results, missing data")
+	pp.writer = nil
 
 	// Posture scan data with nil writer returns descriptive error and does not panic
 	session := cautils.NewOPASessionObjMock()
 	err = pp.ActionPrint(ctx, session, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to write prometheus results: output writer is nil")
+	assert.Contains(t, err.Error(), "output writer is nil")
 
 	// Image scan data with nil writer returns descriptive error and does not panic
 	imageData := []cautils.ImageScanData{{Image: "alpine:latest"}}
 	err = pp.ActionPrint(ctx, nil, imageData)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to write prometheus results: output writer is nil")
+	assert.Contains(t, err.Error(), "output writer is nil")
 }

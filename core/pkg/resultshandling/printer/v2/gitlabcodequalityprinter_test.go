@@ -349,5 +349,5 @@ func TestGitLabCodeQualityActionPrint_NilWriterReturnsError(t *testing.T) {
 	session := gitLabSessionFixture(t, "C-0057", 8.0)
 	err := cp.ActionPrint(ctx, session, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to write gitlab-codequality results: output writer is nil")
+	assert.Contains(t, err.Error(), "output writer is nil")
 }

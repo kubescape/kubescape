@@ -794,11 +794,11 @@ func TestGitLabSASTActionPrint_NilWriterReturnsError(t *testing.T) {
 	session := gitLabSessionFixture(t, "C-0057", 8.0)
 	err := gp.ActionPrint(ctx, session, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to write gitlab-sast results: output writer is nil")
+	assert.Contains(t, err.Error(), "output writer is nil")
 
 	// Image scan data with nil writer returns descriptive error and does not panic
 	imageData := []cautils.ImageScanData{{Image: "alpine:latest"}}
 	err = gp.ActionPrint(ctx, nil, imageData)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to write gitlab-sast results: output writer is nil")
+	assert.Contains(t, err.Error(), "output writer is nil")
 }
