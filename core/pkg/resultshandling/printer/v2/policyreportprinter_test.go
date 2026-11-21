@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -563,4 +564,103 @@ func TestBuildPolicyReports_RetainsClusterVerdictAndEmitsSkippedControlOnTimeout
 			assert.Empty(t, skipResult.Resources)
 		})
 	}
+}
+
+func TestPolicyReportActionPrint_NilWriterReturnsError(t *testing.T) {
+	pp := NewPolicyReportPrinter()
+	session := cautils.NewOPASessionObjMock()
+
+	require.NotPanics(t, func() {
+		err := pp.ActionPrint(context.Background(), session, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestBuildPolicyReports_NilSafety(t *testing.T) {
+	t.Run("nil session returns nil without panic", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			reports := buildPolicyReports(nil)
+			assert.Nil(t, reports)
+		})
+	})
+
+	t.Run("empty session does not panic", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			reports := buildPolicyReports(&cautils.OPASessionObj{})
+			assert.Empty(t, reports)
+		})
+	})
+
+	t.Run("session with nil report and resources does not panic", func(t *testing.T) {
+		const resID = "apps/v1//Deployment/default/test-deploy"
+		lw := localworkload.NewLocalWorkload(map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata":   map[string]interface{}{"name": "test-deploy", "namespace": "default"},
+			"spec":       map[string]interface{}{},
+		})
+
+		session := &cautils.OPASessionObj{
+			AllResources: map[string]workloadinterface.IMetadata{
+				resID: lw,
+			},
+			ResourcesResult: map[string]resourcesresults.Result{
+				resID: {
+					ResourceID: resID,
+					AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+						{
+							ControlID: "C-0001",
+							Name:      "Test Control",
+							Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+						},
+					},
+				},
+			},
+		}
+
+		require.NotPanics(t, func() {
+			reports := buildPolicyReports(session)
+			assert.NotEmpty(t, reports)
+		})
+	})
+
+	t.Run("session with nil controls summary does not panic", func(t *testing.T) {
+		const resID = "apps/v1//Deployment/default/test-deploy"
+		lw := localworkload.NewLocalWorkload(map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata":   map[string]interface{}{"name": "test-deploy", "namespace": "default"},
+			"spec":       map[string]interface{}{},
+		})
+
+		session := &cautils.OPASessionObj{
+			Report: &reporthandlingv2.PostureReport{
+				ReportGenerationTime: time.Now().UTC(),
+				SummaryDetails: reportsummary.SummaryDetails{
+					Controls: nil,
+				},
+			},
+			AllResources: map[string]workloadinterface.IMetadata{
+				resID: lw,
+			},
+			ResourcesResult: map[string]resourcesresults.Result{
+				resID: {
+					ResourceID: resID,
+					AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+						{
+							ControlID: "C-0001",
+							Name:      "Test Control",
+							Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+						},
+					},
+				},
+			},
+		}
+
+		require.NotPanics(t, func() {
+			reports := buildPolicyReports(session)
+			assert.NotEmpty(t, reports)
+		})
+	})
 }

@@ -129,6 +129,9 @@ func (pp *PolicyReportPrinter) ActionPrint(ctx context.Context, opaSessionObj *c
 	if !hasPosture && len(imageScanData) == 0 {
 		return fmt.Errorf("failed to write results in PolicyReport format: no data provided")
 	}
+	if pp.writer == nil {
+		return fmt.Errorf("failed to write policyreport results: output writer is nil")
+	}
 	if err := printer.PrepareOutput(pp.writer); err != nil {
 		return err
 	}
@@ -173,20 +176,23 @@ func (pp *PolicyReportPrinter) ActionPrint(ctx context.Context, opaSessionObj *c
 // buildPolicyReports constructs PolicyReport and ClusterPolicyReport objects from an OPA session,
 // including cluster-wide skipped controls and diagnostics (#3989).
 func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
+	if opaSessionObj == nil {
+		return nil
+	}
+
 	var timestamp time.Time
+	var summaryDetails *reportsummary.SummaryDetails
+	var summaryControls reportsummary.ControlSummaries
 	if opaSessionObj.Report != nil {
 		timestamp = opaSessionObj.Report.ReportGenerationTime
+		summaryDetails = &opaSessionObj.Report.SummaryDetails
+		summaryControls = summaryDetails.Controls
 	}
 	if timestamp.IsZero() {
 		timestamp = time.Now().UTC()
 	}
 	reportTime := metav1.NewTime(timestamp)
 	resultTimestamp := *reportTime.ProtoTime()
-
-	var summaryControls reportsummary.ControlSummaries
-	if opaSessionObj.Report != nil {
-		summaryControls = opaSessionObj.Report.SummaryDetails.Controls
-	}
 
 	byNamespace := map[string][]policyReportResult{}
 	summaries := map[string]policyReportSummary{}
@@ -215,9 +221,9 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 
 		for _, assocCtrl := range result.AssociatedControls {
 			ac := assocCtrl
-			status := cautils.ControlStatus(&opaSessionObj.Report.SummaryDetails, &ac)
+			status := cautils.ControlStatus(summaryDetails, &ac)
 
-			if status.Status() == "" {
+			if status == nil || status.Status() == "" {
 				continue
 			}
 
@@ -229,10 +235,12 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 			}
 			severity := "Unknown"
 			message := ac.GetName()
-			if ctl := summaryControls.GetControl(reportsummary.EControlCriteriaID, ac.GetID()); ctl != nil {
-				severity = apis.ControlSeverityToString(ctl.GetScoreFactor())
-				if desc := ctl.GetDescription(); desc != "" {
-					message = desc
+			if summaryControls != nil {
+				if ctl := summaryControls.GetControl(reportsummary.EControlCriteriaID, ac.GetID()); ctl != nil {
+					severity = apis.ControlSeverityToString(ctl.GetScoreFactor())
+					if desc := ctl.GetDescription(); desc != "" {
+						message = desc
+					}
 				}
 			}
 
@@ -300,7 +308,7 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 		}
 
 		severity := apis.ControlSeverityToString(sc.scoreFactor)
-		if severity == "" || severity == "Unknown" {
+		if (severity == "" || severity == "Unknown") && summaryControls != nil {
 			if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, sc.controlID); ctrl != nil && ctrl.GetScoreFactor() > 0 {
 				severity = apis.ControlSeverityToString(ctrl.GetScoreFactor())
 			}
