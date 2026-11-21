@@ -1826,3 +1826,47 @@ func TestWorkloadDocuments(t *testing.T) {
 	_, err := WorkloadDocuments([]byte(loneCR))
 	assert.ErrorContains(t, err, "the loader reads")
 }
+
+func TestRelativeToRoot(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "k8s"), 0o750))
+	manifest := filepath.Join(root, "k8s", "pod.yaml")
+	require.NoError(t, os.WriteFile(manifest, []byte("kind: Pod\n"), 0o600))
+
+	linkedRoot := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(root, linkedRoot); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	// a symlink inside the repository to another file in it
+	inRepoLink := filepath.Join(root, "k8s", "alias.yaml")
+	require.NoError(t, os.Symlink(manifest, inRepoLink))
+	outside := filepath.Join(t.TempDir(), "outside.yaml")
+	require.NoError(t, os.WriteFile(outside, []byte("kind: Pod\n"), 0o600))
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "path inside the root", path: manifest, want: filepath.Join("k8s", "pod.yaml")},
+		{name: "root reached through a symlink", path: filepath.Join(linkedRoot, "k8s", "pod.yaml"), want: filepath.Join("k8s", "pod.yaml")},
+		// the plain relation stays inside the root, so the link keeps the name the caller selected
+		{name: "repository-local symlink keeps its own path", path: inRepoLink, want: filepath.Join("k8s", "alias.yaml")},
+		{name: "path outside the root is unchanged", path: outside, want: mustRel(t, root, outside)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := RelativeToRoot(root, tt.path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func mustRel(t *testing.T, base, target string) string {
+	t.Helper()
+	rel, err := filepath.Rel(base, target)
+	require.NoError(t, err)
+	return rel
+}

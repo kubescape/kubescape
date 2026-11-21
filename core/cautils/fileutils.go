@@ -675,6 +675,33 @@ func lexicalAbsPath(path string) string {
 	return filepath.Clean(absPath)
 }
 
+// RelativeToRoot returns path relative to root, the repository root reported
+// paths are anchored on. The repository root comes from go-git, which resolves
+// symlinks, while path keeps the form the scan was given. When the scan reached
+// the repository through a symlink (on macOS, anything under /tmp or /var), the
+// two differ in their leading components and the plain relation climbs out of
+// the root. Only then is path's own target tried, so a repository-local symlink
+// keeps the path the caller selected, as lexicalAbsPath requires. If neither
+// form lands inside root, the plain relation is returned as before.
+func RelativeToRoot(root, path string) (string, error) {
+	rel, err := filepath.Rel(root, path)
+	if err == nil && !escapesRoot(rel) {
+		return rel, nil
+	}
+	if resolved, evalErr := filepath.EvalSymlinks(path); evalErr == nil {
+		if resolvedRel, relErr := filepath.Rel(root, resolved); relErr == nil && !escapesRoot(resolvedRel) {
+			return resolvedRel, nil
+		}
+	}
+	return rel, err
+}
+
+// escapesRoot reports whether a filepath.Rel result leaves the directory it was
+// computed against.
+func escapesRoot(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func canonicalPath(path string) (string, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -1298,7 +1325,7 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 			wSlice := workloads[path]
 			for j := range w {
 				lw := localworkload.NewLocalWorkload(w[j].GetObject())
-				if relPath, err := filepath.Rel(rootPath, path); err == nil {
+				if relPath, err := RelativeToRoot(rootPath, path); err == nil {
 					lw.SetPath(fmt.Sprintf("%s:%d", relPath, j))
 				} else {
 					lw.SetPath(fmt.Sprintf("%s:%d", path, j))

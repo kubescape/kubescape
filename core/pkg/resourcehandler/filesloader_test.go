@@ -1286,6 +1286,43 @@ func TestExcludeFilesUnderDirectories_CanonicalizesSymlinkedDirs(t *testing.T) {
 	assert.NotContains(t, sources, lexicalSource, "the input is under the physical directory, so it must be excluded")
 }
 
+// TestGetResourcesFromPath_RepositoryReachedThroughSymlink verifies that a scan of a
+// repository reached through a symlinked path still reports repository-relative
+// paths. go-git resolves the repository root, while discovered files keep the path
+// the scan was given; on macOS every temporary directory is such a path (/var is a
+// link to /private/var). Comparing the two forms produced "../<link>/..." or a
+// climb to the filesystem root, which SARIF and GitLab then reported as files
+// outside the repository.
+func TestGetResourcesFromPath_RepositoryReachedThroughSymlink(t *testing.T) {
+	const manifest = "k8s/pod.yaml"
+	repoRoot := newRepoWithUnusableGitMetadata(t, manifest)
+
+	link := filepath.Join(t.TempDir(), "linked-repo")
+	if err := os.Symlink(repoRoot, link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		scanPath string
+	}{
+		{name: "directory scan", scanPath: filepath.Join(link, "k8s")},
+		{name: "single file scan", scanPath: filepath.Join(link, filepath.FromSlash(manifest))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workloadIDToSource, workloads, _, err := getResourcesFromPath(context.Background(), tt.scanPath, cautils.HelmValueOptions{}, nil)
+			require.NoError(t, err)
+			require.Len(t, workloads, 1)
+
+			src, ok := workloadIDToSource[workloads[0].GetID()]
+			require.True(t, ok, "the workload must have a source")
+			assert.Equal(t, repoRoot, src.Path)
+			assert.Equal(t, manifest, filepath.ToSlash(src.RelativePath))
+		})
+	}
+}
+
 func TestHelmValueOptionsFromScanInfo(t *testing.T) {
 	assert.True(t, helmValueOptionsFromScanInfo(nil).IsEmpty())
 

@@ -457,7 +457,7 @@ func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath 
 }
 
 func getWorkloadSourceHelmChart(repoRoot string, source string, gitRepo *cautils.LocalGitRepository, helmChart cautils.Chart) reporthandling.Source {
-	relSource, err := filepath.Rel(repoRoot, source)
+	relSource, err := cautils.RelativeToRoot(repoRoot, source)
 	if err == nil {
 		source = relSource
 	}
@@ -613,7 +613,7 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 	// merge Terraform-derived workloads, same pattern as the Kustomize block below
 	for source, ws := range terraformSourceToWorkloads {
 		workloads = append(workloads, ws...)
-		relSource, err := filepath.Rel(repoRoot, source)
+		relSource, err := cautils.RelativeToRoot(repoRoot, source)
 		if err == nil {
 			source = relSource
 		}
@@ -664,7 +664,7 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 		}
 		workloads = append(workloads, ws...)
 
-		relSource, err := filepath.Rel(repoRoot, source)
+		relSource, err := cautils.RelativeToRoot(repoRoot, source)
 
 		if err == nil {
 			source = relSource
@@ -782,7 +782,7 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 		// (before it is rewritten to a repo-relative path below) is that directory's name — the
 		// correct owner for each entry even when several Kustomize directories were rendered.
 		kustomizeDirectoryName := source
-		relSource, err := filepath.Rel(repoRoot, source)
+		relSource, err := cautils.RelativeToRoot(repoRoot, source)
 
 		if err == nil {
 			source = relSource
