@@ -39,6 +39,9 @@ type PatchResult struct {
 // It is all or nothing: if any manifest cannot be fixed, no patch is returned,
 // since one that left a file out would read as complete.
 func (h *FixHandler) BuildPatch(ctx context.Context, resourcesToFix []ResourceFixInfo) (*PatchResult, error) {
+	if h == nil {
+		return nil, errors.New("uninitialized fix handler")
+	}
 	names, err := h.patchNames(resourcesToFix)
 	if err != nil {
 		return nil, err
@@ -133,6 +136,9 @@ func changedResources(ctx context.Context, source, original string, fixes []Reso
 // PatchNames maps each manifest to the slash-separated path its section of the
 // patch carries.
 func (h *FixHandler) PatchNames(resourcesToFix []ResourceFixInfo) (map[string]string, error) {
+	if h == nil {
+		return nil, errors.New("uninitialized fix handler")
+	}
 	return h.patchNames(resourcesToFix)
 }
 
@@ -191,6 +197,12 @@ func readManifest(source string) (string, error) {
 // exists when overwrite is false, a scanned manifest, or the report being
 // fixed. The last two would destroy an input, which exporting exists to avoid.
 func (h *FixHandler) CheckPatchDestination(destination string, resourcesToFix []ResourceFixInfo, overwrite bool) error {
+	if h == nil {
+		return errors.New("uninitialized fix handler")
+	}
+	if strings.TrimSpace(destination) == "" {
+		return errors.New("patch destination path cannot be empty")
+	}
 	destination = filepath.Clean(destination)
 	if parent, err := os.Stat(filepath.Dir(destination)); err != nil {
 		return fmt.Errorf("cannot write the patch: %w", err)
@@ -235,6 +247,9 @@ func (h *FixHandler) CheckPatchDestination(destination string, resourcesToFix []
 // only, as a patch holds the manifests' content and may carry what they do not
 // intend to share.
 func WritePatch(destination, patch string) (err error) {
+	if strings.TrimSpace(destination) == "" {
+		return errors.New("patch destination path cannot be empty")
+	}
 	destination = filepath.Clean(destination)
 	temp, err := os.CreateTemp(filepath.Dir(destination), "."+filepath.Base(destination)+".*.tmp")
 	if err != nil {

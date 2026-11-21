@@ -104,6 +104,9 @@ func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
 // handler has finished preparing and rendering fixes. A nil root preserves the
 // path-based behavior of NewFixHandler.
 func NewFixHandlerWithRoot(fixInfo *metav1.FixInfo, root *os.Root) (*FixHandler, error) {
+	if fixInfo == nil {
+		return nil, errors.New("uninitialized fix parameters")
+	}
 	byteValue, err := readReportFile(fixInfo.ReportFile)
 	if err != nil {
 		return nil, err

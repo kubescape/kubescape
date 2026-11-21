@@ -460,6 +460,21 @@ func TestCheckPatchDestination(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "scanned manifest")
 	})
+	t.Run("empty destination path", func(t *testing.T) {
+		err := h.CheckPatchDestination("", fixes, true)
+		require.Error(t, err)
+		assert.Equal(t, "patch destination path cannot be empty", err.Error())
+
+		err = h.CheckPatchDestination("   ", fixes, true)
+		require.Error(t, err)
+		assert.Equal(t, "patch destination path cannot be empty", err.Error())
+	})
+	t.Run("nil handler receiver", func(t *testing.T) {
+		var nilHandler *FixHandler
+		err := nilHandler.CheckPatchDestination(filepath.Join(t.TempDir(), "new.patch"), fixes, false)
+		require.Error(t, err)
+		assert.Equal(t, "uninitialized fix handler", err.Error())
+	})
 }
 
 func TestWritePatch(t *testing.T) {
@@ -525,6 +540,32 @@ func TestWritePatch(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "error writing the patch")
 	})
+
+	t.Run("empty destination path", func(t *testing.T) {
+		err := WritePatch("", "patch content")
+		require.Error(t, err)
+		assert.Equal(t, "patch destination path cannot be empty", err.Error())
+
+		err = WritePatch("   ", "patch content")
+		require.Error(t, err)
+		assert.Equal(t, "patch destination path cannot be empty", err.Error())
+	})
+}
+
+func TestBuildPatch_NilHandler(t *testing.T) {
+	var nilHandler *FixHandler
+	res, err := nilHandler.BuildPatch(context.Background(), nil)
+	assert.Nil(t, res)
+	assert.Error(t, err)
+	assert.Equal(t, "uninitialized fix handler", err.Error())
+}
+
+func TestPatchNames_NilHandler(t *testing.T) {
+	var nilHandler *FixHandler
+	names, err := nilHandler.PatchNames(nil)
+	assert.Nil(t, names)
+	assert.Error(t, err)
+	assert.Equal(t, "uninitialized fix handler", err.Error())
 }
 
 // TestBuildPatch_ResourceCount pins what PatchResult.Resources counts: the

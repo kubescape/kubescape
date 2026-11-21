@@ -1182,6 +1182,16 @@ func TestGetFilePathAndIndex(t *testing.T) {
 	}
 }
 
+func TestNewFixHandler_NilFixInfo(t *testing.T) {
+	_, err := NewFixHandler(nil)
+	assert.Error(t, err)
+	assert.Equal(t, "uninitialized fix parameters", err.Error())
+
+	_, err = NewFixHandlerWithRoot(nil, nil)
+	assert.Error(t, err)
+	assert.Equal(t, "uninitialized fix parameters", err.Error())
+}
+
 func TestNewFixHandler_WrongJSON(t *testing.T) {
 	// Regression test: arbitrary JSON must return invalidReportFileErr, not unsupported-target error
 	reportJSON := `{"key":"value"}`
