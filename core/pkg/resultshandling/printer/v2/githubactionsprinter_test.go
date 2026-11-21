@@ -260,11 +260,16 @@ func TestGitHubActionsPrinter_SkipsResourcesWithoutFilePath(t *testing.T) {
 // TestGitHubActionsPrinter_RejectsImageScanData pins the config-scan boundary:
 // image findings have no manifest location to anchor an annotation to.
 func TestGitHubActionsPrinter_RejectsImageScanData(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "gha-*.txt")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	gp := NewGitHubActionsPrinter()
+	gp.writer = tmpFile
 	images := []cautils.ImageScanData{{Image: "nginx:1.23"}}
 
 	// Standalone image scan with nil session
-	err := gp.ActionPrint(context.Background(), nil, images)
+	err = gp.ActionPrint(context.Background(), nil, images)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "only supported for configuration scanning")
 

@@ -272,8 +272,13 @@ func TestActionPrint_PdfCombinedWritesBothSections(t *testing.T) {
 
 // TestActionPrint_PdfMissingData checks that ActionPrint returns an error when neither posture nor image data is present.
 func TestActionPrint_PdfMissingData(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "pdf-*.pdf")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	pp := NewPdfPrinter()
-	err := pp.ActionPrint(context.Background(), nil, nil)
+	pp.writer = tmpFile
+	err = pp.ActionPrint(context.Background(), nil, nil)
 	require.EqualError(t, err, "failed to print results, missing data")
 }
 
@@ -548,9 +553,14 @@ func TestPdfPrinter_ActionPrint_NilReportFallbackToImageScan(t *testing.T) {
 }
 
 func TestPdfPrinter_ActionPrint_NilReportNoData(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "pdf-*.pdf")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	pp := NewPdfPrinter()
+	pp.writer = tmpFile
 	session := &cautils.OPASessionObj{Report: nil}
-	err := pp.ActionPrint(context.Background(), session, nil)
+	err = pp.ActionPrint(context.Background(), session, nil)
 	assert.ErrorContains(t, err, "failed to print results, missing data")
 }
 

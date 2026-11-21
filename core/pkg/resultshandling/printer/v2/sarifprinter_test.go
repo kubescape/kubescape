@@ -2346,8 +2346,13 @@ func TestSARIFActionPrint_CombinedScanAggregatesPostureAndImageRuns(t *testing.T
 // TestSARIFActionPrint_NoDataReturnsError asserts that ActionPrint returns a clear error
 // when neither an OPA session object nor image scan data is provided.
 func TestSARIFActionPrint_NoDataReturnsError(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "sarif-*.sarif")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	sp := NewSARIFPrinter(false)
-	err := sp.ActionPrint(context.Background(), nil, nil)
+	sp.writer = tmpFile
+	err = sp.ActionPrint(context.Background(), nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no data provided")
 }

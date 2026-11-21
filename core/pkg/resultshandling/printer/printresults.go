@@ -281,11 +281,12 @@ func openOutputFile(path string, deferTruncate bool) (*os.File, error) {
 
 // PrepareOutput clears the previous content of an output file that
 // openFileForPrinter left untouched. Each printer calls it at the top of
-// ActionPrint, once the scan has a report to write. It does nothing for
-// stdout, a device, or a file that is already prepared.
+// ActionPrint, once the scan has a report to write. It returns an error
+// if the output writer is nil. It does nothing for stdout, a device, or
+// a file that is already prepared.
 func PrepareOutput(f *os.File) error {
 	if f == nil {
-		return nil
+		return fmt.Errorf("failed to write output: output writer is nil")
 	}
 	if _, pending := pendingOutputs.LoadAndDelete(f); !pending {
 		return nil

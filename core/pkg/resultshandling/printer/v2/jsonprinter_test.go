@@ -923,7 +923,12 @@ func TestWriteConfigurationJSON_NilReportReturnsError(t *testing.T) {
 	err = writeConfigurationJSON(io.Discard, &cautils.OPASessionObj{}, []cautils.ImageScanData{{}})
 	require.EqualError(t, err, "no data provided for JSON output")
 
+	tmpFile, err := os.CreateTemp(t.TempDir(), "json-*.json")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	jp := NewJsonPrinter()
+	jp.writer = tmpFile
 	err = jp.ActionPrint(context.Background(), &cautils.OPASessionObj{}, nil)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "no data provided for JSON output")
