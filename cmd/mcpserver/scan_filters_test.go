@@ -204,6 +204,9 @@ func TestParseScanFilterArgs_ExcludeControls(t *testing.T) {
 		_, errResult := parseScanFilterArgs(args, "")
 		require.NotNil(t, errResult)
 		assert.True(t, errResult.IsError)
+		errPayload := toolResultText(t, errResult)
+		assert.Contains(t, errPayload, "exclude_controls")
+		assert.NotContains(t, errPayload, "control_ids")
 	})
 }
 
@@ -275,7 +278,33 @@ func TestCallTool_ScanFilters_ForwardedAndValidated(t *testing.T) {
 		require.NotNil(t, res)
 		assert.True(t, res.IsError)
 		errPayload := toolResultText(t, res)
-		assert.Contains(t, errPayload, ErrCodeInvalidArgument)
+		assert.Contains(t, errPayload, string(ErrCodeInvalidArgument))
 		assert.Contains(t, errPayload, "min_severity")
+	})
+
+	t.Run("scan_local_iac rejects label_selector", func(t *testing.T) {
+		res, err := ksServer.CallTool(context.Background(), "scan_local_iac", map[string]any{
+			"path":           "/valid/path",
+			"label_selector": "app=web",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		assert.True(t, res.IsError)
+		errPayload := toolResultText(t, res)
+		assert.Contains(t, errPayload, string(ErrCodeInvalidArgument))
+		assert.Contains(t, errPayload, "label_selector is not supported for local IaC scans")
+	})
+
+	t.Run("scan_local_iac rejects exclude_namespaces", func(t *testing.T) {
+		res, err := ksServer.CallTool(context.Background(), "scan_local_iac", map[string]any{
+			"path":               "/valid/path",
+			"exclude_namespaces": "kube-system",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		assert.True(t, res.IsError)
+		errPayload := toolResultText(t, res)
+		assert.Contains(t, errPayload, string(ErrCodeInvalidArgument))
+		assert.Contains(t, errPayload, "exclude_namespaces is not supported for local IaC scans")
 	})
 }

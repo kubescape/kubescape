@@ -205,6 +205,15 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, req scanRequest)
 		summary = &scanData.Report.SummaryDetails
 		degraded = scanData.ScanCoverage.Degraded || processErr != nil
 		notEvaluated = len(scanData.ScanCoverage.NotEvaluatedControls)
+		if (req.minSeverity != "" || req.maxSeverity != "") && notEvaluated > 0 {
+			count := 0
+			for _, ne := range scanData.ScanCoverage.NotEvaluatedControls {
+				if _, ok := scanData.Report.SummaryDetails.Controls[ne.ControlID]; ok {
+					count++
+				}
+			}
+			notEvaluated = count
+		}
 		totalControls = len(scanData.Report.SummaryDetails.Controls)
 
 		if req.wantComplianceScore && len(scanData.Report.SummaryDetails.Frameworks) > 0 {
@@ -307,25 +316,28 @@ func resourceMaxSeverityRank(summary *reportsummary.SummaryDetails, result *reso
 }
 
 func buildScanResponse(summary *reportsummary.SummaryDetails, results map[string]resourcesresults.Result, complianceScore *float32, frameworkName string, degraded bool, notEvaluated int, totalControls int) scanResponse {
-	failedKeys := make([]string, 0, len(results))
+	type rankedResource struct {
+		key  string
+		rank int
+	}
+	failed := make([]rankedResource, 0, len(results))
 	for k, result := range results {
 		if cautils.ResourceStatus(summary, &result).IsFailed() {
-			failedKeys = append(failedKeys, k)
+			failed = append(failed, rankedResource{
+				key:  k,
+				rank: resourceMaxSeverityRank(summary, &result),
+			})
 		}
 	}
 
-	sort.SliceStable(failedKeys, func(i, j int) bool {
-		resI := results[failedKeys[i]]
-		resJ := results[failedKeys[j]]
-		rankI := resourceMaxSeverityRank(summary, &resI)
-		rankJ := resourceMaxSeverityRank(summary, &resJ)
-		if rankI != rankJ {
-			return rankI > rankJ
+	sort.SliceStable(failed, func(i, j int) bool {
+		if failed[i].rank != failed[j].rank {
+			return failed[i].rank > failed[j].rank
 		}
-		return failedKeys[i] < failedKeys[j]
+		return failed[i].key < failed[j].key
 	})
 
-	totalFailed := len(failedKeys)
+	totalFailed := len(failed)
 	returnedCount := totalFailed
 	if returnedCount > maxFailedResources {
 		returnedCount = maxFailedResources
@@ -333,7 +345,7 @@ func buildScanResponse(summary *reportsummary.SummaryDetails, results map[string
 
 	failedResources := make([]interface{}, 0, returnedCount)
 	for i := 0; i < returnedCount; i++ {
-		failedResources = append(failedResources, results[failedKeys[i]])
+		failedResources = append(failedResources, results[failed[i].key])
 	}
 
 	return scanResponse{

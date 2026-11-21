@@ -101,6 +101,24 @@ func scanFilterOptions() []mcp.ToolOption {
 	}
 }
 
+func iacScanFilterOptions() []mcp.ToolOption {
+	return []mcp.ToolOption{
+		mcp.WithString("min_severity",
+			mcp.Description("Minimum control severity to include in the scan results: Critical, High, Medium, Low (optional, case-insensitive)"),
+		),
+		mcp.WithString("max_severity",
+			mcp.Description("Maximum control severity to include in the scan results: Critical, High, Medium, Low (optional, case-insensitive)"),
+		),
+		mcp.WithString("include_kinds",
+			mcp.Description("Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. \"Deployment,DaemonSet\")"),
+		),
+		mcp.WithString("exclude_kinds",
+			mcp.Description("Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. \"Job,CronJob\")"),
+		),
+		withOptionalExcludeControlsProperty("Control IDs to exclude from the scan: a comma-separated string (e.g. \"C-0012,C-0017\") or an array of strings (optional)"),
+	}
+}
+
 func workloadScanFilterOptions() []mcp.ToolOption {
 	return []mcp.ToolOption{
 		mcp.WithString("min_severity",
@@ -220,7 +238,7 @@ func parseScanFilterArgs(arguments map[string]any, activeNamespace string) (scan
 	}
 
 	if rawExcludeControls, hasExcludeControls := arguments["exclude_controls"]; hasExcludeControls {
-		excludeControls, toolErr := parseControlIDs(rawExcludeControls, hasExcludeControls)
+		excludeControls, toolErr := parseControlIDsNamed("exclude_controls", rawExcludeControls, hasExcludeControls)
 		if toolErr != nil {
 			return filters, toolErr
 		}
@@ -230,3 +248,16 @@ func parseScanFilterArgs(arguments map[string]any, activeNamespace string) (scan
 	return filters, nil
 }
 
+func parseLocalIaCFilterArgs(arguments map[string]any) (scanFilterArgs, *mcp.CallToolResult) {
+	if _, ok := arguments["label_selector"]; ok {
+		return scanFilterArgs{}, mcpToolError(ErrCodeInvalidArgument,
+			"label_selector is not supported for local IaC scans: a local IaC scan evaluates files, not cluster resources",
+			map[string]any{"argument": "label_selector"})
+	}
+	if _, ok := arguments["exclude_namespaces"]; ok {
+		return scanFilterArgs{}, mcpToolError(ErrCodeInvalidArgument,
+			"exclude_namespaces is not supported for local IaC scans: a local IaC scan evaluates files, not Kubernetes namespaces",
+			map[string]any{"argument": "exclude_namespaces"})
+	}
+	return parseScanFilterArgs(arguments, "")
+}

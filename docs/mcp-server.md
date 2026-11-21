@@ -487,6 +487,11 @@ Scan local Infrastructure-as-Code (Helm charts, Kustomize directories, YAML mani
 |-----------|------|----------|-------------|
 | `path` | string | Yes | Absolute or relative path to the local directory or file |
 | `framework` | string | No | Security framework to scan against (optional, e.g., `'nsa'` (default) or `'mitre'`) |
+| `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"Deployment,DaemonSet"`) |
+| `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. `"Job,CronJob"`) |
+| `exclude_controls` | string or array of strings | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
 
 #### `scan_local_iac_controls`
 
@@ -498,6 +503,11 @@ Scan local Infrastructure-as-Code files against specific control IDs rather than
 |-----------|------|----------|-------------|
 | `path` | string | Yes | Path to local directory or manifest file |
 | `control_ids` | string or array of strings | Yes | Control IDs to check, as a comma-separated string or an array, e.g. `"C-0012,C-0057"` or `["C-0012", "C-0057"]` |
+| `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"Deployment,DaemonSet"`) |
+| `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. `"Job,CronJob"`) |
+| `exclude_controls` | string or array of strings | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
 
 ### Live Scanning Tools
 

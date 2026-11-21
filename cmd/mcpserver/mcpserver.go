@@ -524,13 +524,12 @@ func parseVulnManifestURI(uri string) (*vulnManifestURI, error) {
 	return parsed, nil
 }
 
-// parseControlIDs extracts a list of trimmed, non-empty control IDs from an
+// parseControlIDsNamed extracts a list of trimmed, non-empty control IDs from an
 // argument value that may be either a comma-separated string or a JSON array
-// of strings. It returns a ToolResultError when the value is absent, has the
-// wrong type, or yields no valid IDs after trimming.
-func parseControlIDs(raw any, present bool) ([]string, *mcp.CallToolResult) {
+// of strings, attributing errors to argName.
+func parseControlIDsNamed(argName string, raw any, present bool) ([]string, *mcp.CallToolResult) {
 	if !present {
-		return nil, mcpToolError(ErrCodeInvalidArgument, "control_ids argument is required", map[string]any{"argument": "control_ids"})
+		return nil, mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("%s argument is required", argName), map[string]any{"argument": argName})
 	}
 	var ids []string
 	switch v := raw.(type) {
@@ -544,19 +543,27 @@ func parseControlIDs(raw any, present bool) ([]string, *mcp.CallToolResult) {
 		for _, item := range v {
 			s, ok := item.(string)
 			if !ok {
-				return nil, mcpToolError(ErrCodeInvalidArgument, "control_ids array elements must be strings", map[string]any{"argument": "control_ids"})
+				return nil, mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("%s array elements must be strings", argName), map[string]any{"argument": argName})
 			}
 			if s = strings.TrimSpace(s); s != "" {
 				ids = append(ids, s)
 			}
 		}
 	default:
-		return nil, mcpToolError(ErrCodeInvalidArgument, "control_ids must be a comma-separated string or array", map[string]any{"argument": "control_ids"})
+		return nil, mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("%s must be a comma-separated string or array", argName), map[string]any{"argument": argName})
 	}
 	if len(ids) == 0 {
-		return nil, mcpToolError(ErrCodeInvalidArgument, "control_ids must contain at least one control ID", map[string]any{"argument": "control_ids"})
+		return nil, mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("%s must contain at least one control ID", argName), map[string]any{"argument": argName})
 	}
 	return ids, nil
+}
+
+// parseControlIDs extracts a list of trimmed, non-empty control IDs from an
+// argument value that may be either a comma-separated string or a JSON array
+// of strings. It returns a ToolResultError when the value is absent, has the
+// wrong type, or yields no valid IDs after trimming.
+func parseControlIDs(raw any, present bool) ([]string, *mcp.CallToolResult) {
+	return parseControlIDsNamed("control_ids", raw, present)
 }
 
 // withControlIDsProperty adds control_ids to the tool schema as a required
@@ -740,7 +747,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		filters, toolErr := parseScanFilterArgs(arguments, "")
+		filters, toolErr := parseLocalIaCFilterArgs(arguments)
 		if toolErr != nil {
 			return toolErr, nil
 		}
@@ -766,7 +773,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		filters, toolErr := parseScanFilterArgs(arguments, "")
+		filters, toolErr := parseLocalIaCFilterArgs(arguments)
 		if toolErr != nil {
 			return toolErr, nil
 		}
@@ -1323,7 +1330,7 @@ func createIaCScanningTools(ksServer *KubescapeMcpserver) {
 			mcp.Description("Framework to scan against (optional, defaults to nsa)"),
 		),
 	}
-	opts = append(opts, scanFilterOptions()...)
+	opts = append(opts, iacScanFilterOptions()...)
 	iacScanTool := mcp.NewTool("scan_local_iac", opts...)
 	ksServer.s.AddTool(iacScanTool, ksServer.toolHandler(iacScanTool.Name))
 }
@@ -1337,7 +1344,7 @@ func createIaCControlScanningTool(ksServer *KubescapeMcpserver) {
 		),
 		withControlIDsProperty("Control IDs to scan against: a comma-separated string (e.g. \"C-0012,C-0017\") or an array of strings (e.g. [\"C-0012\",\"C-0017\"]). At least one ID is required."),
 	}
-	opts = append(opts, scanFilterOptions()...)
+	opts = append(opts, iacScanFilterOptions()...)
 	iacControlScanTool := mcp.NewTool("scan_local_iac_controls", opts...)
 	ksServer.s.AddTool(iacControlScanTool, ksServer.toolHandler(iacControlScanTool.Name))
 }

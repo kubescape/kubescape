@@ -395,12 +395,14 @@ func TestBuildScanResponse_SeveritySortingTruncation(t *testing.T) {
 	}
 
 	results := make(map[string]resourcesresults.Result)
+	// Low-resource keys sort lexically BEFORE critical-resource keys ("a-low-" < "z-crit-").
+	// This enforces that severity ranking takes precedence over lexical ordering before truncation.
 	for i := 0; i < 50; i++ {
-		id, res := makeFailingResource(fmt.Sprintf("crit-%02d", i), "C-CRIT")
+		id, res := makeFailingResource(fmt.Sprintf("z-crit-%02d", i), "C-CRIT")
 		results[id] = res
 	}
 	for i := 0; i < 70; i++ {
-		id, res := makeFailingResource(fmt.Sprintf("low-%02d", i), "C-LOW")
+		id, res := makeFailingResource(fmt.Sprintf("a-low-%02d", i), "C-LOW")
 		results[id] = res
 	}
 
@@ -410,11 +412,13 @@ func TestBuildScanResponse_SeveritySortingTruncation(t *testing.T) {
 	assert.True(t, resp.Truncated)
 	require.Len(t, resp.FailedResources, 100)
 
+	// All 50 critical resources must be retained first, despite lexical disadvantage
 	for i := 0; i < 50; i++ {
-		assert.Equal(t, fmt.Sprintf("crit-%02d", i), resp.FailedResources[i].(resourcesresults.Result).ResourceID)
+		assert.Equal(t, fmt.Sprintf("z-crit-%02d", i), resp.FailedResources[i].(resourcesresults.Result).ResourceID)
 	}
+	// The next 50 must be low resources
 	for i := 50; i < 100; i++ {
-		assert.Contains(t, resp.FailedResources[i].(resourcesresults.Result).ResourceID, "low-")
+		assert.Contains(t, resp.FailedResources[i].(resourcesresults.Result).ResourceID, "a-low-")
 	}
 }
 
