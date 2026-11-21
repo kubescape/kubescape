@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: star-pod-patcher
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  resourceNames: ["debug-pod"]
+  verbs: ["create"]
+- apiGroups: [""]
+  resources: ["pods"]
+  resourceNames: ["*"]
+  verbs: ["patch"]

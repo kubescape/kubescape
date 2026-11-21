@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: disjoint-pod-applier
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  resourceNames: ["debug-pod"]
+  verbs: ["create"]
+- apiGroups: [""]
+  resources: ["pods"]
+  resourceNames: ["other-pod"]
+  verbs: ["patch"]
