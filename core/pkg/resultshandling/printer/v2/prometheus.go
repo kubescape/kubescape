@@ -48,6 +48,9 @@ func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) e
 }
 
 func (pp *PrometheusPrinter) Score(score float32) {
+	if pp.writer == nil {
+		return
+	}
 	// Handle invalid scores
 	if score > 100 {
 		score = 100
@@ -112,6 +115,10 @@ func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 		metrics = pp.generateImagePrometheusFormat(imageScanData)
 	} else {
 		return fmt.Errorf("failed to print results, missing data")
+	}
+
+	if pp.writer == nil {
+		return fmt.Errorf("failed to write prometheus results: output writer is nil")
 	}
 
 	if _, err := pp.writer.Write([]byte(metrics.String())); err != nil {
