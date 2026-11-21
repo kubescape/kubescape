@@ -15,8 +15,10 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor"
 	"github.com/kubescape/kubescape/v4/core/pkg/policyhandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/kubescape/opa-utils/resources"
@@ -75,18 +77,31 @@ type scanRequest struct {
 	scanObject *objectsenvelopes.ScanObject
 	// workspaceDir, when non-empty, confines local scans to files within this directory.
 	workspaceDir string
+
+	// Optional CLI filter fields
+	includeKinds       string
+	excludeKinds       string
+	labelSelector      string
+	excludeControls    []string
+	minSeverity        string
+	maxSeverity        string
+	excludedNamespaces string
 }
 
-func runControlScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string, controlIDs []string, label string) ([]byte, error) {
+func runControlScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string, controlIDs []string, label string, filters ...scanFilterArgs) ([]byte, error) {
 	policyIdentifiers := make([]cautils.PolicyIdentifier, len(controlIDs))
 	for i, id := range controlIDs {
 		policyIdentifiers[i] = cautils.PolicyIdentifier{Kind: apisv1.KindControl, Identifier: id}
 	}
-	return runScan(ctx, ksServer, scanRequest{
+	req := scanRequest{
 		namespace:         namespace,
 		policyIdentifiers: policyIdentifiers,
 		label:             label,
-	})
+	}
+	if len(filters) > 0 {
+		filters[0].applyToRequest(&req)
+	}
+	return runScan(ctx, ksServer, req)
 }
 
 // executeScan runs the collect-policies → collect-resources → OPA pipeline and
@@ -175,6 +190,10 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, req scanRequest)
 		return nil, err
 	}
 
+	if req.minSeverity != "" || req.maxSeverity != "" {
+		resultshandling.ApplySeverityFilters(scanData, req.minSeverity, req.maxSeverity)
+	}
+
 	var complianceScore *float32
 	var frameworkName string
 	degraded := false
@@ -254,33 +273,67 @@ func buildScanInfo(req scanRequest) *cautils.ScanInfo {
 		namespace = ""
 	}
 	return &cautils.ScanInfo{
-		ScanAll:           false,
-		IncludeNamespaces: namespace,
-		ScanTimeout:       timeout,
-		InputPatterns:     req.inputPatterns,
-		ScanObject:        req.scanObject,
-		WorkspaceDir:      req.workspaceDir,
+		ScanAll:            false,
+		IncludeNamespaces:  namespace,
+		ExcludedNamespaces: req.excludedNamespaces,
+		ScanTimeout:        timeout,
+		InputPatterns:      req.inputPatterns,
+		ScanObject:         req.scanObject,
+		WorkspaceDir:       req.workspaceDir,
+		IncludeKinds:       req.includeKinds,
+		ExcludeKinds:       req.excludeKinds,
+		LabelSelector:      req.labelSelector,
+		ExcludeControls:    req.excludeControls,
 	}
 }
 
-func buildScanResponse(summary *reportsummary.SummaryDetails, results map[string]resourcesresults.Result, complianceScore *float32, frameworkName string, degraded bool, notEvaluated int, totalControls int) scanResponse {
-	failedResources := make([]interface{}, 0)
-	totalFailed := 0
-
-	keys := make([]string, 0, len(results))
-	for k := range results {
-		keys = append(keys, k)
+func resourceMaxSeverityRank(summary *reportsummary.SummaryDetails, result *resourcesresults.Result) int {
+	if summary == nil || len(summary.Controls) == 0 {
+		return 0
 	}
-	sort.Strings(keys)
-
-	for _, k := range keys {
-		result := results[k]
-		if cautils.ResourceStatus(summary, &result).IsFailed() {
-			totalFailed++
-			if len(failedResources) < maxFailedResources {
-				failedResources = append(failedResources, result)
+	maxRank := 0
+	for _, ac := range result.AssociatedControls {
+		if !cautils.ControlStatus(summary, &ac).IsFailed() {
+			continue
+		}
+		if ctrl, ok := summary.Controls[ac.GetID()]; ok {
+			rank := apis.ControlSeverityToInt(ctrl.GetScoreFactor())
+			if rank > maxRank {
+				maxRank = rank
 			}
 		}
+	}
+	return maxRank
+}
+
+func buildScanResponse(summary *reportsummary.SummaryDetails, results map[string]resourcesresults.Result, complianceScore *float32, frameworkName string, degraded bool, notEvaluated int, totalControls int) scanResponse {
+	failedKeys := make([]string, 0, len(results))
+	for k, result := range results {
+		if cautils.ResourceStatus(summary, &result).IsFailed() {
+			failedKeys = append(failedKeys, k)
+		}
+	}
+
+	sort.SliceStable(failedKeys, func(i, j int) bool {
+		resI := results[failedKeys[i]]
+		resJ := results[failedKeys[j]]
+		rankI := resourceMaxSeverityRank(summary, &resI)
+		rankJ := resourceMaxSeverityRank(summary, &resJ)
+		if rankI != rankJ {
+			return rankI > rankJ
+		}
+		return failedKeys[i] < failedKeys[j]
+	})
+
+	totalFailed := len(failedKeys)
+	returnedCount := totalFailed
+	if returnedCount > maxFailedResources {
+		returnedCount = maxFailedResources
+	}
+
+	failedResources := make([]interface{}, 0, returnedCount)
+	for i := 0; i < returnedCount; i++ {
+		failedResources = append(failedResources, results[failedKeys[i]])
 	}
 
 	return scanResponse{

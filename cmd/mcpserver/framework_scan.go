@@ -11,17 +11,21 @@ import (
 
 // RunFrameworkScan executes a headless, highly-optimized on-demand scan using the Kubescape engine,
 // isolated to just the given framework (e.g. nsa, mitre) to ensure rapid return times for MCP.
-func (ksServer *KubescapeMcpserver) RunFrameworkScan(ctx context.Context, namespace string, frameworkName string) ([]byte, error) {
+func (ksServer *KubescapeMcpserver) RunFrameworkScan(ctx context.Context, namespace string, frameworkName string, filters ...scanFilterArgs) ([]byte, error) {
 	if strings.EqualFold(frameworkName, "allcontrols") {
 		return nil, fmt.Errorf("the 'allcontrols' framework is exceptionally heavy and is not supported in the headless MCP scanner")
 	}
 	policyIdentifiers := []cautils.PolicyIdentifier{
 		{Kind: apisv1.KindFramework, Identifier: frameworkName},
 	}
-	return runScan(ctx, ksServer, scanRequest{
+	req := scanRequest{
 		namespace:           namespace,
 		policyIdentifiers:   policyIdentifiers,
 		label:               "Framework",
 		wantComplianceScore: true,
-	})
+	}
+	if len(filters) > 0 {
+		filters[0].applyToRequest(&req)
+	}
+	return runScan(ctx, ksServer, req)
 }

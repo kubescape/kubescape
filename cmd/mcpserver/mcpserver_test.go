@@ -339,15 +339,15 @@ func TestCallTool_NamespaceStarMapsToClusterWide(t *testing.T) {
 		namespace string
 	}
 	var calls []scanCall
-	rbacScanFn = func(_ *KubescapeMcpserver, _ context.Context, namespace string) ([]byte, error) {
+	rbacScanFn = func(_ *KubescapeMcpserver, _ context.Context, namespace string, _ ...scanFilterArgs) ([]byte, error) {
 		calls = append(calls, scanCall{tool: "rbac", namespace: namespace})
 		return []byte(`{"ok":true}`), nil
 	}
-	networkScanFn = func(_ *KubescapeMcpserver, _ context.Context, namespace string) ([]byte, error) {
+	networkScanFn = func(_ *KubescapeMcpserver, _ context.Context, namespace string, _ ...scanFilterArgs) ([]byte, error) {
 		calls = append(calls, scanCall{tool: "network", namespace: namespace})
 		return []byte(`{"ok":true}`), nil
 	}
-	frameworkScanFn = func(_ *KubescapeMcpserver, _ context.Context, namespace, _ string) ([]byte, error) {
+	frameworkScanFn = func(_ *KubescapeMcpserver, _ context.Context, namespace, _ string, _ ...scanFilterArgs) ([]byte, error) {
 		calls = append(calls, scanCall{tool: "framework", namespace: namespace})
 		return []byte(`{"ok":true}`), nil
 	}

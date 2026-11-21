@@ -501,9 +501,13 @@ Scan local Infrastructure-as-Code files against specific control IDs rather than
 
 ### Live Scanning Tools
 
+The live scanning tools run on-demand scans against the cluster or local files.
+All live scan tools support optional filtering parameters (`min_severity`, `max_severity`, `include_kinds`, `exclude_kinds`, `label_selector`, `exclude_namespaces`, `exclude_controls`).
+Returned `failed_resources` are prioritized by severity rank descending (`Critical` > `High` > `Medium` > `Low`, with alphabetical resource ID as tie-breaker) before being capped at 100 entries.
+
 #### `run_framework_security_scan`
 
-Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the failed resources along with the compliance score. Check the `degraded` flag in the response to ensure the scan fully completed (e.g. no control timeouts). Note that `compliance_score` is optional and may be omitted if the scan produces no framework summary. The `failed_resources` array is truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
+Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the failed resources along with the compliance score. Check the `degraded` flag in the response to ensure the scan fully completed (e.g. no control timeouts). Note that `compliance_score` is optional and may be omitted if the scan produces no framework summary. The `failed_resources` array is sorted by severity and truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
 
 **Parameters:**
 
@@ -511,6 +515,13 @@ Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the 
 |-----------|------|----------|-------------|
 | `framework_name` | string | Yes | Name of the framework to scan (e.g. nsa, mitre, cis-v1.23-t1.0.1) |
 | `namespace` | string | No | Namespace to scope the Framework scan (optional, defaults to cluster-wide if omitted) |
+| `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"Deployment,DaemonSet"`) |
+| `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. `"Job,CronJob"`) |
+| `label_selector` | string | No | Kubernetes label selector to filter collected resources (optional, e.g. `"app=web,env!=dev"`) |
+| `exclude_namespaces` | string | No | Comma-separated namespaces to exclude from scan (optional; mutually exclusive with `namespace`) |
+| `exclude_controls` | string or array of strings | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
 
 **Example Response:**
 ```json
@@ -527,15 +538,40 @@ Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the 
 }
 ```
 
+#### `scan_controls`
+
+Run an on-demand, live security scan restricted to a given set of controls by control ID (e.g. C-0012, C-0017) and return the failed resources. Use `list_controls` to discover valid IDs first.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `control_ids` | string or array of strings | Yes | Control IDs to scan: comma-separated string (e.g. `"C-0012,C-0017"`) or array of strings |
+| `namespace` | string | No | Namespace to scope the scan (optional, defaults to cluster-wide if omitted) |
+| `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"Deployment,DaemonSet"`) |
+| `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. `"Job,CronJob"`) |
+| `label_selector` | string | No | Kubernetes label selector to filter collected resources (optional, e.g. `"app=web,env!=dev"`) |
+| `exclude_namespaces` | string | No | Comma-separated namespaces to exclude from scan (optional; mutually exclusive with `namespace`) |
+| `exclude_controls` | string or array of strings | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
+
 #### `run_rbac_security_scan`
 
-Run an on-demand, live RBAC security scan (evaluating RBAC-related controls) and return the failed resources. The `failed_resources` array is truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
+Run an on-demand, live RBAC security scan (evaluating RBAC-related controls) and return the failed resources. The `failed_resources` array is sorted by severity and truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `namespace` | string | No | Namespace to scope the RBAC scan (optional, defaults to cluster-wide if omitted) |
+| `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"ClusterRole,RoleBinding"`) |
+| `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive) |
+| `label_selector` | string | No | Kubernetes label selector to filter collected resources (optional) |
+| `exclude_namespaces` | string | No | Comma-separated namespaces to exclude from scan (optional; mutually exclusive with `namespace`) |
+| `exclude_controls` | string or array of strings | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
 
 **Example Response:**
 ```json
@@ -552,13 +588,20 @@ Run an on-demand, live RBAC security scan (evaluating RBAC-related controls) and
 
 #### `run_network_security_scan`
 
-Run an on-demand, live Network security scan (evaluating network-related controls) and return the failed resources. The `failed_resources` array is truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
+Run an on-demand, live Network security scan (evaluating network-related controls) and return the failed resources. The `failed_resources` array is sorted by severity and truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `namespace` | string | No | Namespace to scope the Network scan (optional, defaults to cluster-wide if omitted) |
+| `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"NetworkPolicy,Pod"`) |
+| `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive) |
+| `label_selector` | string | No | Kubernetes label selector to filter collected resources (optional) |
+| `exclude_namespaces` | string | No | Comma-separated namespaces to exclude from scan (optional; mutually exclusive with `namespace`) |
+| `exclude_controls` | string or array of strings | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
 
 **Example Response:**
 ```json
@@ -592,6 +635,9 @@ A workload that is owned by another resource — a Pod belonging to a ReplicaSet
 | `namespace` | string | No | Namespace of the workload (optional; defaults to `'default'` for live-cluster scans, or unconstrained when `path` is given). Pass `"*"` to search across all namespaces in a live cluster (requires cluster-wide list permissions). Must not conflict with a namespace prefix in the workload identifier |
 | `path` | string | No | Path to local YAML manifests. When set, the workload is resolved from those files instead of the live cluster (must resolve within `--workspace` if configured) |
 | `framework` | string | No | Framework to scan against (optional, defaults to the full workload control set) |
+| `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `exclude_controls` | string or array of strings | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
 
 **Example Response:**
 ```json
