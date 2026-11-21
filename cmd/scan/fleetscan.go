@@ -413,15 +413,10 @@ func resolvePath(path string) (string, error) {
 // splitPath breaks path into its components, dropping the leading root and any
 // empty segments left by repeated or trailing separators.
 func splitPath(path string) []string {
-	normalised := strings.ReplaceAll(path, "\\", "/")
-	trimmed := strings.TrimPrefix(normalised, strings.ReplaceAll(rootOf(path), "\\", "/"))
-	components := make([]string, 0, 8)
-	for _, part := range strings.Split(trimmed, "/") {
-		if part != "" {
-			components = append(components, part)
-		}
-	}
-	return components
+	trimmed := strings.TrimPrefix(path, filepath.VolumeName(path))
+	return strings.FieldsFunc(trimmed, func(r rune) bool {
+		return r == '/' || r == filepath.Separator
+	})
 }
 
 // rootOf returns the anchor a walk over path starts from: the volume name plus
