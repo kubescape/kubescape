@@ -623,3 +623,35 @@ func TestHtmlPrinter_ResourceTable_NilSafety(t *testing.T) {
 		assert.Len(t, sorted, 1)
 	})
 }
+
+func TestActionPrint_Html_NilWriterReturnsError(t *testing.T) {
+	hp := NewHtmlPrinter(false)
+
+	// Posture scan path
+	require.NotPanics(t, func() {
+		err := hp.ActionPrint(context.Background(), cautils.NewOPASessionObjMock(), nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	// Image scan fallback path
+	require.NotPanics(t, func() {
+		err := hp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{{Image: "nginx:1.23"}})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	// No data path
+	require.NotPanics(t, func() {
+		err := hp.ActionPrint(context.Background(), nil, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestSortHTMLControlsBySeverityName_NilDoesNotPanic(t *testing.T) {
+	require.NotPanics(t, func() {
+		sorted := sortHTMLControlsBySeverityName(nil)
+		assert.Nil(t, sorted)
+	})
+}
