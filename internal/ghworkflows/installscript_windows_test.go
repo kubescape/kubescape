@@ -1,6 +1,7 @@
 package ghworkflows
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kubescape/kubescape/v4/internal/testutils"
 )
@@ -190,7 +192,14 @@ throw "Simulated replacement failure after moving existing executable"`
 				t.Fatal(err)
 			}
 
-			cmd := exec.Command(
+			ctx, cancel := context.WithTimeout(
+				context.Background(),
+				2*time.Minute,
+			)
+			defer cancel()
+
+			cmd := exec.CommandContext(
+				ctx,
 				powershell,
 				"-NoProfile",
 				"-NonInteractive",
@@ -200,6 +209,10 @@ throw "Simulated replacement failure after moving existing executable"`
 				"-n",
 			)
 
+			// Prevent CombinedOutput from waiting indefinitely
+			// if a child process keeps the output pipes open.
+			cmd.WaitDelay = 10 * time.Second
+
 			cmd.Env = replaceEnvValueForInstallTest(
 				os.Environ(),
 				"USERPROFILE",
@@ -207,6 +220,15 @@ throw "Simulated replacement failure after moving existing executable"`
 			)
 
 			output, runErr := cmd.CombinedOutput()
+
+			if ctx.Err() != nil {
+				t.Fatalf(
+					"PowerShell execution timed out: %v\n%s",
+					ctx.Err(),
+					output,
+				)
+			}
+
 			if tt.mode == "replace-failure" &&
 				!strings.Contains(string(output), "Restored the previous kubescape executable.") {
 				t.Errorf("expected previous executable to be restored, got:\n%s", output)
