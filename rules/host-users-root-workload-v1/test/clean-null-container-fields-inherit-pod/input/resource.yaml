@@ -1,0 +1,23 @@
+# Null container-level fields are unset, so the pod-level runAsNonRoot and
+# runAsUser still apply and no container runs as root.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-report
+  namespace: reports
+spec:
+  schedule: "0 2 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+          containers:
+          - name: report
+            image: registry.example.com/report:5.1.0
+            securityContext:
+              runAsNonRoot: null
+              runAsUser: null

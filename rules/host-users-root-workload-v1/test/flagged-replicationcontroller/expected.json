@@ -1,0 +1,49 @@
+[
+    {
+        "alertMessage": "container nginx in ReplicationController legacy-frontend runs as root in the host user namespace; set spec.hostUsers: false to map container root to an unprivileged host UID (GA in Kubernetes 1.36)",
+        "failedPaths": [
+            "spec.template.spec.containers[0]"
+        ],
+        "reviewPaths": [
+            "spec.template.spec.containers[0]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 7,
+        "alertObject": {
+            "k8sApiObjects": [
+                {
+                    "apiVersion": "v1",
+                    "kind": "ReplicationController",
+                    "metadata": {
+                        "name": "legacy-frontend",
+                        "namespace": "web"
+                    },
+                    "spec": {
+                        "replicas": 3,
+                        "selector": {
+                            "app": "legacy-frontend"
+                        },
+                        "template": {
+                            "metadata": {
+                                "labels": {
+                                    "app": "legacy-frontend"
+                                }
+                            },
+                            "spec": {
+                                "containers": [
+                                    {
+                                        "image": "registry.example.com/nginx:1.25",
+                                        "name": "nginx"
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    }
+]

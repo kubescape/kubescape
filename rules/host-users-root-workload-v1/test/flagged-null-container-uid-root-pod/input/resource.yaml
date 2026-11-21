@@ -1,0 +1,24 @@
+# The container's null runAsUser is unset, so the pod-level UID 0 applies.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ledger-db
+  namespace: finance
+spec:
+  serviceName: ledger-db
+  selector:
+    matchLabels:
+      app: ledger-db
+  template:
+    metadata:
+      labels:
+        app: ledger-db
+    spec:
+      securityContext:
+        runAsUser: 0
+      containers:
+      - name: db
+        image: registry.example.com/ledger-db:14.2
+        securityContext:
+          runAsUser: null
+          allowPrivilegeEscalation: false
