@@ -623,3 +623,31 @@ func TestHasFailedControl_IgnoresEmptyControlIDs(t *testing.T) {
 func TestSourcePath_NilResourceDoesNotPanic(t *testing.T) {
 	assert.Empty(t, sourcePath(nil))
 }
+
+func TestBuildExceptionPolicies_PreservesRawControlIDWhitespace(t *testing.T) {
+	session := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			ReportGenerationTime: time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC),
+		},
+		AllResources: map[string]workloadinterface.IMetadata{
+			"api": exceptionsWorkload(t, "Deployment", "prod", "api"),
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			"api": {
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					failedControl(" custom-foo "),
+					failedControl("custom-foo"),
+				},
+			},
+		},
+	}
+
+	policies := buildExceptionPolicies(context.Background(), session)
+	require.Len(t, policies, 2)
+	assert.Equal(t, "exclude- custom-foo ", policies[0].Name)
+	require.Len(t, policies[0].PosturePolicies, 1)
+	assert.Equal(t, " custom-foo ", policies[0].PosturePolicies[0].ControlID)
+	assert.Equal(t, "exclude-custom-foo", policies[1].Name)
+	require.Len(t, policies[1].PosturePolicies, 1)
+	assert.Equal(t, "custom-foo", policies[1].PosturePolicies[0].ControlID)
+}
