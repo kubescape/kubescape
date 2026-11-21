@@ -10,6 +10,7 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -44,6 +45,17 @@ func (m *scanInputCaptureKubescape) ScanContext(_ context.Context, scanInfo *cau
 	return m.Scan(scanInfo, policyIdentifiers)
 }
 
+// requireStagedStdinPath checks that path is the stdin manifest staged by
+// prepareScanLocalInput: a file named stdin.yaml inside a kubescape-stdin-*
+// directory created in the system temp dir.
+func requireStagedStdinPath(t *testing.T, path string) {
+	t.Helper()
+	dir := filepath.Dir(path)
+	assert.Equal(t, "stdin.yaml", filepath.Base(path))
+	assert.True(t, strings.HasPrefix(filepath.Base(dir), "kubescape-stdin-"), "staging dir %q should be named kubescape-stdin-*", dir)
+	assert.Equal(t, filepath.Clean(os.TempDir()), filepath.Dir(dir))
+}
+
 func TestPrepareScanLocalInput(t *testing.T) {
 	t.Run("positional inputs populate input patterns", func(t *testing.T) {
 		scanInfo := cautils.ScanInfo{}
@@ -72,7 +84,7 @@ func TestPrepareScanLocalInput(t *testing.T) {
 		assert.Equal(t, []string{"manifests/app.yaml"}, scanInfo.InputPatterns)
 	})
 
-	t.Run("stdin input is copied to system temp dir and cleaned up", func(t *testing.T) {
+	t.Run("stdin input is staged as stdin.yaml in a private temp dir and cleaned up", func(t *testing.T) {
 		scanInfo := cautils.ScanInfo{}
 		stdin := bytes.NewBufferString("apiVersion: v1\nkind: Pod\nmetadata:\n  name: nginx\n")
 
@@ -82,7 +94,7 @@ func TestPrepareScanLocalInput(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Len(t, scanInfo.InputPatterns, 1)
-		assert.Equal(t, filepath.Clean(os.TempDir()), filepath.Dir(scanInfo.InputPatterns[0]))
+		requireStagedStdinPath(t, scanInfo.InputPatterns[0])
 
 		got, err := os.ReadFile(scanInfo.InputPatterns[0])
 		require.NoError(t, err)
@@ -91,6 +103,29 @@ func TestPrepareScanLocalInput(t *testing.T) {
 		cleanup()
 		_, err = os.Stat(scanInfo.InputPatterns[0])
 		assert.True(t, os.IsNotExist(err), "temporary stdin manifest should be removed by cleanup")
+		_, err = os.Stat(filepath.Dir(scanInfo.InputPatterns[0]))
+		assert.True(t, os.IsNotExist(err), "temporary stdin directory should be removed by cleanup")
+	})
+
+	t.Run("two stdin inputs share the file name but not the directory", func(t *testing.T) {
+		var first, second cautils.ScanInfo
+		opts := scanLocalInputOptions{FirstInputArg: 1, RejectMixedStdin: true}
+
+		cleanupFirst, err := prepareScanLocalInput(bytes.NewBufferString("kind: Pod\n"), []string{"nsa", "-"}, &first, opts)
+		require.NoError(t, err)
+		defer cleanupFirst()
+		cleanupSecond, err := prepareScanLocalInput(bytes.NewBufferString("kind: Service\n"), []string{"nsa", "-"}, &second, opts)
+		require.NoError(t, err)
+		defer cleanupSecond()
+
+		require.Len(t, first.InputPatterns, 1)
+		require.Len(t, second.InputPatterns, 1)
+		assert.Equal(t, filepath.Base(first.InputPatterns[0]), filepath.Base(second.InputPatterns[0]))
+		assert.NotEqual(t, first.InputPatterns[0], second.InputPatterns[0])
+
+		got, err := os.ReadFile(first.InputPatterns[0])
+		require.NoError(t, err)
+		assert.Contains(t, string(got), "kind: Pod")
 	})
 
 	t.Run("mixed stdin and positional inputs are rejected", func(t *testing.T) {
@@ -132,7 +167,7 @@ func TestFrameworkCmd_StdinUsesCommandInput(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, ks.scanInfo)
 	require.Len(t, ks.scanInfo.InputPatterns, 1)
-	assert.Equal(t, filepath.Clean(os.TempDir()), filepath.Dir(ks.scanInfo.InputPatterns[0]))
+	requireStagedStdinPath(t, ks.scanInfo.InputPatterns[0])
 	assert.NoFileExists(t, ks.scanInfo.InputPatterns[0])
 	require.Len(t, ks.inputContents, 1)
 	assert.Contains(t, ks.inputContents[0], "framework-stdin")
@@ -152,7 +187,7 @@ func TestControlCmd_StdinUsesCommandInput(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, ks.scanInfo)
 	require.Len(t, ks.scanInfo.InputPatterns, 1)
-	assert.Equal(t, filepath.Clean(os.TempDir()), filepath.Dir(ks.scanInfo.InputPatterns[0]))
+	requireStagedStdinPath(t, ks.scanInfo.InputPatterns[0])
 	assert.NoFileExists(t, ks.scanInfo.InputPatterns[0])
 	require.Len(t, ks.inputContents, 1)
 	assert.Contains(t, ks.inputContents[0], "control-stdin")
@@ -172,7 +207,7 @@ func TestWorkloadCmd_StdinUsesCommandInput(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, ks.scanInfo)
 	require.Len(t, ks.scanInfo.InputPatterns, 1)
-	assert.Equal(t, filepath.Clean(os.TempDir()), filepath.Dir(ks.scanInfo.InputPatterns[0]))
+	requireStagedStdinPath(t, ks.scanInfo.InputPatterns[0])
 	assert.NoFileExists(t, ks.scanInfo.InputPatterns[0])
 	require.Len(t, ks.inputContents, 1)
 	assert.Contains(t, ks.inputContents[0], "nginx")
@@ -192,7 +227,7 @@ func TestScanCmd_SecurityView_StdinUsesCommandInput(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, ks.scanInfo)
 	require.Len(t, ks.scanInfo.InputPatterns, 1)
-	assert.Equal(t, filepath.Clean(os.TempDir()), filepath.Dir(ks.scanInfo.InputPatterns[0]))
+	requireStagedStdinPath(t, ks.scanInfo.InputPatterns[0])
 	assert.NoFileExists(t, ks.scanInfo.InputPatterns[0])
 	require.Len(t, ks.inputContents, 1)
 	assert.Contains(t, ks.inputContents[0], "security-view-stdin")
@@ -238,4 +273,26 @@ func TestScanCmd_FallbackFramework_FilePathWithoutPositionalInputs(t *testing.T)
 	require.NotNil(t, ks.scanInfo)
 	assert.Equal(t, []string{"manifests/app.yaml"}, ks.scanInfo.InputPatterns)
 	assert.Equal(t, cautils.ScanTypeFramework, ks.scanInfo.ScanType)
+}
+
+func TestPrepareScanLocalInput_StdinSourceNameIsStable(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{}
+	stdin := strings.NewReader("apiVersion: v1\nkind: Pod\nmetadata:\n  name: nginx\nspec:\n  containers:\n  - name: nginx\n    image: nginx\n")
+	cleanup, err := prepareScanLocalInput(stdin, []string{"nsa", "-"}, scanInfo, scanLocalInputOptions{
+		FirstInputArg:    1,
+		RejectMixedStdin: true,
+	})
+	require.NoError(t, err)
+	defer cleanup()
+
+	session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+	_, _, _, _, err = resourcehandler.NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+	require.NoError(t, err)
+
+	// Reports print this source for each finding, so it must not carry the
+	// random part of a temporary name.
+	require.Len(t, session.ResourceSource, 1)
+	for _, source := range session.ResourceSource {
+		assert.Equal(t, "stdin.yaml", source.RelativePath)
+	}
 }
