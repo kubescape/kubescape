@@ -305,6 +305,43 @@ func TestNewScanPathFilterAnchorsAFileInputAtItsDirectory(t *testing.T) {
 	assert.True(t, filter.Excluded(filepath.Join(root, "skipped.yaml"), false))
 }
 
+func TestNewScanPathFilterIgnoreFileWithBOM(t *testing.T) {
+	const bom = "\xef\xbb\xbf"
+	tests := []struct {
+		name     string
+		content  string
+		patterns []string
+	}{
+		{name: "without BOM", content: "a.yaml\n", patterns: []string{"a.yaml"}},
+		{name: "with BOM", content: bom + "a.yaml\n", patterns: []string{"a.yaml"}},
+		{name: "with BOM and comment first", content: bom + "# skip\na.yaml\n", patterns: []string{"a.yaml"}},
+		{name: "with BOM and CRLF lines", content: bom + "a.yaml\r\nb/\r\n", patterns: []string{"a.yaml", "b/"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeIgnoreFile(t, root, tc.content)
+
+			filter, err := NewScanPathFilter(root, nil, true)
+			require.NoError(t, err)
+			require.NotNil(t, filter)
+
+			assert.Equal(t, tc.patterns, filter.Patterns())
+			assert.True(t, filter.Excluded(filepath.Join(root, "a.yaml"), false))
+			assert.False(t, filter.Excluded(filepath.Join(root, "c.yaml"), false))
+		})
+	}
+}
+
+func TestLoadIgnoreFilePatternsBOMOnlyFile(t *testing.T) {
+	root := t.TempDir()
+	writeIgnoreFile(t, root, "\xef\xbb\xbf")
+
+	patterns, err := LoadIgnoreFilePatterns(root)
+	require.NoError(t, err)
+	assert.Empty(t, patterns)
+}
+
 func TestLoadIgnoreFilePatternsWithoutFile(t *testing.T) {
 	patterns, err := LoadIgnoreFilePatterns(t.TempDir())
 	require.NoError(t, err)

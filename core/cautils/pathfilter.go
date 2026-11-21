@@ -225,6 +225,10 @@ func LoadIgnoreFilePatterns(root string) ([]string, error) {
 		return nil, fmt.Errorf("failed to read %s: %w", path, err)
 	}
 
+	// Editors such as Windows Notepad may prefix the file with a UTF-8 byte order mark,
+	// which would otherwise become part of the first pattern.
+	content = bytes.TrimPrefix(content, []byte("\xef\xbb\xbf"))
+
 	var patterns []string
 	scanner := bufio.NewScanner(bytes.NewReader(content))
 	for scanner.Scan() {
