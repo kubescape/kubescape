@@ -164,9 +164,6 @@ func (gp *GitLabSASTPrinter) PrintNextSteps() {
 // ActionPrint writes a GitLab SAST report for a configuration scan, or a GitLab Dependency Scanning
 // report for an image scan (#2782)
 func (gp *GitLabSASTPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
-	if err := printer.PrepareOutput(gp.writer); err != nil {
-		return err
-	}
 	// GitLab expects SAST and dependency scanning in separate artifacts. A
 	// successful SAST report must not silently discard image vulnerabilities.
 	if opaSessionObj != nil && opaSessionObj.Report != nil && len(imageScanData) > 0 {
@@ -176,12 +173,25 @@ func (gp *GitLabSASTPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 		if len(imageScanData) == 0 {
 			return fmt.Errorf("failed to write results in GitLab SAST format: no data provided")
 		}
+		if gp.writer == nil {
+			return fmt.Errorf("failed to write gitlab-sast results: output writer is nil")
+		}
+		if err := printer.PrepareOutput(gp.writer); err != nil {
+			return err
+		}
 		if err := gp.printImageScan(imageScanData); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in GitLab dependency scanning format", helpers.Error(err))
 			return fmt.Errorf("failed to write results in GitLab dependency scanning format: %w", err)
 		}
 		printer.LogOutputFile(gp.writer.Name())
 		return nil
+	}
+
+	if gp.writer == nil {
+		return fmt.Errorf("failed to write gitlab-sast results: output writer is nil")
+	}
+	if err := printer.PrepareOutput(gp.writer); err != nil {
+		return err
 	}
 
 	if err := gp.printConfigurationScan(ctx, opaSessionObj); err != nil {

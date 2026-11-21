@@ -81,14 +81,17 @@ func (cp *GitLabCodeQualityPrinter) SetWriter(ctx context.Context, outputFile st
 }
 
 func (cp *GitLabCodeQualityPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
-	if err := printer.PrepareOutput(cp.writer); err != nil {
-		return err
-	}
 	if opaSessionObj == nil || opaSessionObj.Report == nil {
 		return fmt.Errorf("gitlab-codequality output is only supported for configuration scanning: image findings have no repository file to anchor to")
 	}
 	if len(imageScanData) > 0 {
 		return fmt.Errorf("gitlab-codequality cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
+	}
+	if cp.writer == nil {
+		return fmt.Errorf("failed to write gitlab-codequality results: output writer is nil")
+	}
+	if err := printer.PrepareOutput(cp.writer); err != nil {
+		return err
 	}
 
 	encoded, err := json.MarshalIndent(cp.collectIssues(ctx, opaSessionObj), "", "  ")
