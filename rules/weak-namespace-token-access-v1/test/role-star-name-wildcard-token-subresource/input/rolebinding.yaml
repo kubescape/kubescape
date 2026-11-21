@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: star-name-any-token-rb
+  namespace: staging
+subjects:
+- kind: ServiceAccount
+  name: release-bot
+  namespace: dev
+roleRef:
+  kind: Role
+  name: star-name-any-token
+  apiGroup: rbac.authorization.k8s.io
