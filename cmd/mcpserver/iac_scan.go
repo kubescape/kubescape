@@ -10,7 +10,7 @@ import (
 )
 
 // runIaCScan executes a scan against local Infrastructure-as-Code files using the FileResourceHandler.
-func (ksServer *KubescapeMcpserver) runIaCScan(ctx context.Context, path string, frameworkName string) ([]byte, error) {
+func (ksServer *KubescapeMcpserver) runIaCScan(ctx context.Context, path string, frameworkName string, filters ...scanFilterArgs) ([]byte, error) {
 	resolvedPath, err := pathcontainment.ResolveContainedPath(ksServer.workspaceDir, path)
 	if err != nil {
 		return nil, err
@@ -27,12 +27,17 @@ func (ksServer *KubescapeMcpserver) runIaCScan(ctx context.Context, path string,
 
 	fileHandler := resourcehandler.NewFileResourceHandler()
 
-	return runScan(ctx, ksServer, scanRequest{
+	req := scanRequest{
 		policyIdentifiers:   policyIdentifiers,
 		label:               "Local IaC",
 		wantComplianceScore: true,
 		rsrcHandler:         fileHandler,
 		inputPatterns:       []string{path},
 		workspaceDir:        ksServer.workspaceDir,
-	})
+	}
+	if len(filters) > 0 {
+		filters[0].applyToRequest(&req)
+	}
+
+	return runScan(ctx, ksServer, req)
 }

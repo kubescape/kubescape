@@ -102,7 +102,7 @@ func buildWorkloadScanRequest(workload, namespace, path, frameworkName string) (
 // RunWorkloadScan scans a single named workload and returns the summarized
 // scanResponse JSON. When path is non-empty the workload is resolved from local
 // manifests, otherwise it is fetched from the live cluster.
-func (ksServer *KubescapeMcpserver) RunWorkloadScan(ctx context.Context, workload, namespace, path, frameworkName string) ([]byte, error) {
+func (ksServer *KubescapeMcpserver) RunWorkloadScan(ctx context.Context, workload, namespace, path, frameworkName string, filters ...scanFilterArgs) ([]byte, error) {
 	if strings.TrimSpace(path) != "" {
 		resolvedPath, err := pathcontainment.ResolveContainedPath(ksServer.workspaceDir, strings.TrimSpace(path))
 		if err != nil {
@@ -116,6 +116,9 @@ func (ksServer *KubescapeMcpserver) RunWorkloadScan(ctx context.Context, workloa
 		return nil, err
 	}
 	req.workspaceDir = ksServer.workspaceDir
+	if len(filters) > 0 {
+		filters[0].applyToRequest(&req)
+	}
 	resp, err := runScan(ctx, ksServer, req)
 	if err != nil {
 		if req.namespaceDefaulted && (errors.Is(err, resourcehandler.ErrResourceNotFound) || errors.Is(err, resourcehandler.ErrResourceNotInDiscovery)) {
@@ -128,13 +131,12 @@ func (ksServer *KubescapeMcpserver) RunWorkloadScan(ctx context.Context, workloa
 
 // workloadScanFn is a package-level var so CallTool tests can observe argument
 // mapping without running a scan, matching rbacScanFn and its siblings.
-var workloadScanFn = func(s *KubescapeMcpserver, ctx context.Context, workload, namespace, path, frameworkName string) ([]byte, error) {
-	return s.RunWorkloadScan(ctx, workload, namespace, path, frameworkName)
+var workloadScanFn = func(s *KubescapeMcpserver, ctx context.Context, workload, namespace, path, frameworkName string, filters ...scanFilterArgs) ([]byte, error) {
+	return s.RunWorkloadScan(ctx, workload, namespace, path, frameworkName, filters...)
 }
 
 func createWorkloadScanningTools(ksServer *KubescapeMcpserver) {
-	runWorkloadScanTool := mcp.NewTool(
-		"scan_workload",
+	opts := []mcp.ToolOption{
 		mcp.WithDescription("Scan a single named Kubernetes workload (e.g. one Deployment) for misconfigurations and return its failed controls. Prefer this over scan_controls or run_framework_security_scan when you already know which workload you care about: only the rules that apply to that resource's kind are evaluated, so it is much cheaper and returns far fewer results. Scans the live cluster by default, or local manifests when path is given."),
 		mcp.WithString("workload",
 			mcp.Required(),
@@ -149,6 +151,8 @@ func createWorkloadScanningTools(ksServer *KubescapeMcpserver) {
 		mcp.WithString("framework",
 			mcp.Description("Framework to scan against (optional, defaults to the full workload control set)."),
 		),
-	)
+	}
+	opts = append(opts, workloadScanFilterOptions()...)
+	runWorkloadScanTool := mcp.NewTool("scan_workload", opts...)
 	ksServer.s.AddTool(runWorkloadScanTool, ksServer.toolHandler(runWorkloadScanTool.Name))
 }

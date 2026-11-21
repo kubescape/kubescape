@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func (ksServer *KubescapeMcpserver) ScanControls(ctx context.Context, namespace string, controlIDs []string) ([]byte, error) {
+func (ksServer *KubescapeMcpserver) ScanControls(ctx context.Context, namespace string, controlIDs []string, filters ...scanFilterArgs) ([]byte, error) {
 	filtered := make([]string, 0, len(controlIDs))
 	for _, id := range controlIDs {
 		if id = strings.TrimSpace(id); id != "" {
@@ -16,5 +16,5 @@ func (ksServer *KubescapeMcpserver) ScanControls(ctx context.Context, namespace 
 	if len(filtered) == 0 {
 		return nil, fmt.Errorf("at least one control ID is required")
 	}
-	return runControlScan(ctx, ksServer, namespace, filtered, "Control")
+	return runControlScan(ctx, ksServer, namespace, filtered, "Control", filters...)
 }
