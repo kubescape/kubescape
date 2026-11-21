@@ -52,10 +52,11 @@ deny contains msga if {
 # named service account without touching a secret at all, which is the same
 # outcome by the supported route.
 #
-# resourceNames is deliberately not consulted here. Unlike a top-level create,
-# a create against a subresource carries the name of its parent object, so a
-# narrowed entry still authorizes the request; it only decides which service
-# account the subject may mint a token for, and minting one at all is the abuse.
+# A narrowed entry is still reported. Unlike a top-level create, a create
+# against a subresource carries the name of its parent object, so a narrowed
+# entry still authorizes the request; it only decides which service account the
+# subject may mint a token for, and minting one at all is the abuse. It does
+# have to name a service account, though (see names_a_service_account).
 deny contains msga if {
 	subjectVector := input[_]
 	role := subjectVector.relatedObjects[i]
@@ -66,6 +67,7 @@ deny contains msga if {
 	core_api_group(rule)
 	targets_subresource(rule, "serviceaccounts/token")
 	rule.verbs[_] in {"create", "*"}
+	names_a_service_account(rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -130,6 +132,18 @@ token_verbs(rule) := {"list", "watch", "*"} if {
 # "*" is matched literally (RBAC does not expand it), which no secret can be
 # named.
 names_a_secret(rule) if {
+	some name in resource_names(rule)
+	not name in {"", "*"}
+}
+
+# A TokenRequest is authorized with the name of the service account it is for.
+# That name is never "", and "*" is matched literally (RBAC does not expand it)
+# while no service account can be called "*", as the name has to be a DNS
+# subdomain. An entry narrowed to those two alone therefore reaches no service
+# account. create-serviceaccount-token-v1 skips the same entries.
+names_a_service_account(rule) if unrestricted_rule(rule)
+
+names_a_service_account(rule) if {
 	some name in resource_names(rule)
 	not name in {"", "*"}
 }

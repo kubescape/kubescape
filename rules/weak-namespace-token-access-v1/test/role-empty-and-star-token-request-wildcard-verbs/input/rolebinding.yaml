@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: placeholder-token-minter-rb
+  namespace: staging
+subjects:
+- kind: ServiceAccount
+  name: release-bot
+  namespace: dev
+roleRef:
+  kind: Role
+  name: placeholder-token-minter
+  apiGroup: rbac.authorization.k8s.io

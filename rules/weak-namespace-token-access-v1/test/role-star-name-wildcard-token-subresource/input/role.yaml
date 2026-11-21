@@ -1,0 +1,10 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: star-name-any-token
+  namespace: staging
+rules:
+- apiGroups: ["*"]
+  resources: ["*/token"]
+  resourceNames: ["*"]
+  verbs: ["create"]
