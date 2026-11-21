@@ -1306,6 +1306,8 @@ func TestGetResourcesFromPath_RepositoryReachedThroughSymlink(t *testing.T) {
 		name     string
 		scanPath string
 	}{
+		// the link itself is the root: discovery used to list nothing below it
+		{name: "repository root scan", scanPath: link},
 		{name: "directory scan", scanPath: filepath.Join(link, "k8s")},
 		{name: "single file scan", scanPath: filepath.Join(link, filepath.FromSlash(manifest))},
 	}
@@ -1321,6 +1323,28 @@ func TestGetResourcesFromPath_RepositoryReachedThroughSymlink(t *testing.T) {
 			assert.Equal(t, manifest, filepath.ToSlash(src.RelativePath))
 		})
 	}
+}
+
+// TestGetResources_SymlinkedInputOutsideWorkspace pins that following a scan
+// input that is itself a symlink does not read past the workspace: the link is
+// inside it, its target is not.
+func TestGetResources_SymlinkedInputOutsideWorkspace(t *testing.T) {
+	wsDir := t.TempDir()
+	outsideDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outsideDir, "pod.yaml"), []byte(singlePodManifest), 0o600))
+	link := filepath.Join(wsDir, "linked")
+	if err := os.Symlink(outsideDir, link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	scanInfo := &cautils.ScanInfo{InputPatterns: []string{link}, WorkspaceDir: wsDir}
+	session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+
+	_, workloads, _, _, _ := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+	assert.Empty(t, workloads, "a manifest outside the workspace must not be loaded")
+	require.Len(t, session.SkippedManifests, 1)
+	assert.Equal(t, filepath.Join(link, "pod.yaml"), session.SkippedManifests[0].Path)
+	assert.Contains(t, session.SkippedManifests[0].Reason, "escapes workspace root")
 }
 
 func TestHelmValueOptionsFromScanInfo(t *testing.T) {

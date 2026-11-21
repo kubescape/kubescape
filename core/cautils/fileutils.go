@@ -2118,7 +2118,23 @@ func IsJson(filePath string) bool {
 func glob(root, pattern string, onlyDirectories bool, filter *PathFilter) ([]string, error) {
 	var matches []string
 
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	// filepath.Walk does not follow symlinks, the root included, so a scan of a
+	// directory given as a symlink (a linked checkout, say) would list nothing.
+	// Walk its target and report each path under the root as given, which is
+	// the form the rest of the scan keeps.
+	walkRoot := root
+	if info, err := os.Lstat(root); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			walkRoot = resolved
+		}
+	}
+
+	err := filepath.Walk(walkRoot, func(path string, info os.FileInfo, err error) error {
+		if walkRoot != root {
+			if rel, relErr := filepath.Rel(walkRoot, path); relErr == nil {
+				path = filepath.Join(root, rel)
+			}
+		}
 		if err != nil {
 			return err
 		}

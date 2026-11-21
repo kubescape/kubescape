@@ -1864,6 +1864,31 @@ func TestRelativeToRoot(t *testing.T) {
 	}
 }
 
+func TestListFilesAndDirsUnderSymlinkedRoot(t *testing.T) {
+	target := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(target, "k8s"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(target, "k8s", "pod.yaml"), []byte("kind: Pod\n"), 0o600))
+	link := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	// filepath.Walk alone reports the link itself and does not descend, so
+	// a scan of the link found no manifests.
+	files, errs := listFiles(link, nil)
+	assert.Empty(t, errs)
+	assert.Equal(t, []string{filepath.Join(link, "k8s", "pod.yaml")}, files, "paths stay under the link the scan was given")
+
+	dirs, errs := listDirs(link, nil)
+	assert.Empty(t, errs)
+	assert.Equal(t, []string{link, filepath.Join(link, "k8s")}, dirs)
+
+	filter, err := NewPathFilter(link, []string{"k8s/"})
+	require.NoError(t, err)
+	files, _ = listFiles(link, filter)
+	assert.Empty(t, files, "exclusions anchored at the link still apply")
+}
+
 func mustRel(t *testing.T, base, target string) string {
 	t.Helper()
 	rel, err := filepath.Rel(base, target)

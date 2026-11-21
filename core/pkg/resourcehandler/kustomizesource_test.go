@@ -79,4 +79,24 @@ func TestKustomizeWorkloadSource(t *testing.T) {
 
 		assert.Equal(t, filepath.Join("alias", "deployment.yaml"), got.RelativePath)
 	})
+
+	t.Run("a repository reached through a symlink still reports its own file", func(t *testing.T) {
+		// The root comes from go-git, which resolves symlinks, while Kustomize
+		// records the file under the path the scan was given.
+		repo, err := filepath.EvalSymlinks(t.TempDir())
+		require.NoError(t, err)
+		require.NoError(t, os.MkdirAll(filepath.Join(repo, "base"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(repo, "base", "deployment.yaml"), []byte("kind: Deployment\n"), 0o600))
+		link := filepath.Join(t.TempDir(), "repo")
+		if err := os.Symlink(repo, link); err != nil {
+			t.Skipf("cannot create a symlink here: %v", err)
+		}
+		linked := directory
+		linked.Path = repo
+
+		got := kustomizeWorkloadSource(linked, filepath.Join(link, "base", "deployment.yaml"), repo, lastCommitOf)
+
+		assert.Equal(t, filepath.Join("base", "deployment.yaml"), got.RelativePath)
+		assert.Equal(t, "commit-of-base/deployment.yaml", got.LastCommit.Hash)
+	})
 }

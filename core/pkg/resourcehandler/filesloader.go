@@ -827,12 +827,15 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 //
 // Only a file inside the scan root is used, after symlinks are resolved. One
 // outside it would make a path that is relative to the root escape it, which
-// printers that refuse such a location would then drop.
+// printers that refuse such a location would then drop. Kustomize records the
+// file under the path the scan was given, which may reach the repository
+// through a symlink its root does not have, so the two are related the way the
+// other sources are.
 func kustomizeWorkloadSource(directorySource reporthandling.Source, originFile, repoRoot string, lastCommitOf func(string) reporthandling.LastCommit) reporthandling.Source {
 	if originFile == "" || repoRoot == "" {
 		return directorySource
 	}
-	relative, err := filepath.Rel(repoRoot, originFile)
+	relative, err := cautils.RelativeToRoot(repoRoot, originFile)
 	if err != nil || !filepath.IsLocal(relative) {
 		return directorySource
 	}
