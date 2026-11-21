@@ -1,0 +1,53 @@
+[
+    {
+        "alertMessage": "container api in Deployment inventory-api runs as root in the host user namespace; set spec.hostUsers: false to map container root to an unprivileged host UID (GA in Kubernetes 1.36)",
+        "failedPaths": [
+            "spec.template.spec.containers[0]"
+        ],
+        "reviewPaths": [
+            "spec.template.spec.containers[0]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 7,
+        "alertObject": {
+            "k8sApiObjects": [
+                {
+                    "apiVersion": "apps/v1",
+                    "kind": "Deployment",
+                    "metadata": {
+                        "name": "inventory-api",
+                        "namespace": "shop"
+                    },
+                    "spec": {
+                        "replicas": 1,
+                        "selector": {
+                            "matchLabels": {
+                                "app": "inventory-api"
+                            }
+                        },
+                        "template": {
+                            "metadata": {
+                                "labels": {
+                                    "app": "inventory-api"
+                                }
+                            },
+                            "spec": {
+                                "containers": [
+                                    {
+                                        "image": "registry.example.com/inventory-api:3.0.1",
+                                        "name": "api",
+                                        "securityContext": null
+                                    }
+                                ],
+                                "securityContext": null
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    }
+]
