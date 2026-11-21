@@ -1439,3 +1439,33 @@ func TestActionPrint_Csv_EmptyReportStillWritesHeader(t *testing.T) {
 	assert.Equal(t, "Control Name", records[0][0])
 	assert.Equal(t, "Control ID", records[0][1])
 }
+
+func TestActionPrint_Csv_NilWriterReturnsError(t *testing.T) {
+	ctx := context.Background()
+	cp := NewCsvPrinter(false)
+	require.Nil(t, cp.writer)
+
+	// Posture scan data with nil writer returns descriptive error and does not panic
+	session := cautils.NewOPASessionObjMock()
+	err := cp.ActionPrint(ctx, session, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write CSV results: output writer is nil")
+
+	// Image scan data with nil writer returns descriptive error and does not panic
+	imageData := []cautils.ImageScanData{{Image: "alpine:latest"}}
+	err = cp.ActionPrint(ctx, nil, imageData)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write CSV results: output writer is nil")
+}
+
+func TestWriteImageScanCompanion_NilWriterDoesNotPanic(t *testing.T) {
+	ctx := context.Background()
+	cp := NewCsvPrinter(false)
+	require.Nil(t, cp.writer)
+
+	imageData := []cautils.ImageScanData{{Image: "alpine:latest"}}
+	assert.NotPanics(t, func() {
+		err := cp.writeImageScanCompanion(ctx, imageData)
+		assert.NoError(t, err)
+	})
+}
