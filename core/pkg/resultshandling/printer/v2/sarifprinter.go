@@ -687,14 +687,20 @@ func (sp *SARIFPrinter) PrintNextSteps() {
 // it streams the configuration run and appends any container image vulnerability runs.
 // For standalone image scans, it generates a multi-run vulnerability report.
 func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	hasPosture := opaSessionObj != nil && opaSessionObj.Report != nil
+	if !hasPosture && len(imageScanData) == 0 {
+		return fmt.Errorf("failed to write results in sarif format: no data provided")
+	}
+
+	if sp.writer == nil {
+		return fmt.Errorf("failed to write sarif results: output writer is nil")
+	}
+
 	if err := printer.PrepareOutput(sp.writer); err != nil {
 		return err
 	}
-	if opaSessionObj == nil || opaSessionObj.Report == nil {
-		if len(imageScanData) == 0 {
-			return fmt.Errorf("failed to write results in sarif format: no data provided")
-		}
 
+	if !hasPosture {
 		// image scan
 		if err := sp.printImageScan(imageScanData); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
