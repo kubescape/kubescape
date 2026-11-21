@@ -1147,3 +1147,21 @@ func TestMarkdownPrinter_ActionPrint_FailedControlHeadingPreservesPipeInControlI
 	// Summary table cell must still escape pipe to preserve table structure
 	assert.Contains(t, out, "| Critical | Custom Control | C-0099\\|local |")
 }
+
+func TestMarkdownPrinter_ActionPrint_NilWriterReturnsError(t *testing.T) {
+	ctx := context.Background()
+	mp := NewMarkdownPrinter()
+	require.Nil(t, mp.writer)
+
+	// Posture scan data with nil writer returns descriptive error and does not panic
+	session := mdSessionFixture()
+	err := mp.ActionPrint(ctx, session, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write markdown results: output writer is nil")
+
+	// Image scan data with nil writer returns descriptive error and does not panic
+	imageData := mdImageScanDataFixture()
+	err = mp.ActionPrint(ctx, nil, imageData)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write markdown results: output writer is nil")
+}

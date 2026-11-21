@@ -56,20 +56,24 @@ func (mp *MarkdownPrinter) Score(score float32) {
 }
 
 func (mp *MarkdownPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	hasReport := opaSessionObj != nil && opaSessionObj.Report != nil
+	if !hasReport && len(imageScanData) == 0 {
+		logger.L().Ctx(ctx).Error("no data provided for markdown output")
+		return nil
+	}
+
+	if mp.writer == nil {
+		return fmt.Errorf("failed to write markdown results: output writer is nil")
+	}
+
 	if err := printer.PrepareOutput(mp.writer); err != nil {
 		return err
 	}
-	hasReport := opaSessionObj != nil && opaSessionObj.Report != nil
 	if !hasReport && len(imageScanData) > 0 {
 		if err := mdWriteImageScanReport(mp.writer, imageScanData); err != nil {
 			return err
 		}
 		printer.LogOutputFile(mp.writer.Name())
-		return nil
-	}
-
-	if !hasReport {
-		logger.L().Ctx(ctx).Error("no data provided for markdown output")
 		return nil
 	}
 
