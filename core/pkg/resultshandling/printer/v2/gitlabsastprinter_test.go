@@ -784,3 +784,21 @@ func TestGitLabImageScan_ExploitDetails(t *testing.T) {
 	}, byID["CVE-2026-0002"].Details)
 	assert.Nil(t, byID["GHSA-aaaa-bbbb-cccc"].Details, "unknown KEV status must not be reported as false")
 }
+
+func TestGitLabSASTActionPrint_NilWriterReturnsError(t *testing.T) {
+	ctx := context.Background()
+	gp := NewGitLabSASTPrinter(false)
+	require.Nil(t, gp.writer)
+
+	// Posture scan data with nil writer returns descriptive error and does not panic
+	session := gitLabSessionFixture(t, "C-0057", 8.0)
+	err := gp.ActionPrint(ctx, session, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write gitlab-sast results: output writer is nil")
+
+	// Image scan data with nil writer returns descriptive error and does not panic
+	imageData := []cautils.ImageScanData{{Image: "alpine:latest"}}
+	err = gp.ActionPrint(ctx, nil, imageData)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write gitlab-sast results: output writer is nil")
+}

@@ -90,6 +90,9 @@ func (cp *GitLabCodeQualityPrinter) ActionPrint(ctx context.Context, opaSessionO
 	if len(imageScanData) > 0 {
 		return fmt.Errorf("gitlab-codequality cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
 	}
+	if cp.writer == nil {
+		return fmt.Errorf("failed to write gitlab-codequality results: output writer is nil")
+	}
 
 	encoded, err := json.MarshalIndent(cp.collectIssues(ctx, opaSessionObj), "", "  ")
 	if err == nil {

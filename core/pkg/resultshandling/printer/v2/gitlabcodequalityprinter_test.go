@@ -330,3 +330,14 @@ func TestToCodeQualityIssue_RedactsSecretValuesUnlessShowSecrets(t *testing.T) {
 	revealed := toCodeQualityIssue(control, ac, resource, "v1/Secret/default/demo", "secret.yaml", 1, true)
 	assert.Contains(t, revealed.Content.Body, "s3cr3t-plaintext-password")
 }
+
+func TestGitLabCodeQualityActionPrint_NilWriterReturnsError(t *testing.T) {
+	ctx := context.Background()
+	cp := NewGitLabCodeQualityPrinter(false)
+	require.Nil(t, cp.writer)
+
+	session := gitLabSessionFixture(t, "C-0057", 8.0)
+	err := cp.ActionPrint(ctx, session, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write gitlab-codequality results: output writer is nil")
+}

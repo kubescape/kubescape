@@ -176,12 +176,19 @@ func (gp *GitLabSASTPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 		if len(imageScanData) == 0 {
 			return fmt.Errorf("failed to write results in GitLab SAST format: no data provided")
 		}
+		if gp.writer == nil {
+			return fmt.Errorf("failed to write gitlab-sast results: output writer is nil")
+		}
 		if err := gp.printImageScan(imageScanData); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in GitLab dependency scanning format", helpers.Error(err))
 			return fmt.Errorf("failed to write results in GitLab dependency scanning format: %w", err)
 		}
 		printer.LogOutputFile(gp.writer.Name())
 		return nil
+	}
+
+	if gp.writer == nil {
+		return fmt.Errorf("failed to write gitlab-sast results: output writer is nil")
 	}
 
 	if err := gp.printConfigurationScan(ctx, opaSessionObj); err != nil {
