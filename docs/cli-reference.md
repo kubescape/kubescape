@@ -812,11 +812,16 @@ Scan for a specific control.
 kubescape scan control <control-id> [target] [flags]
 ```
 
+A control is named by its ID (`C-0057`), by its name as `kubescape list controls` prints it (`"privileged container"`, case-insensitive) or, for a control that carries one, by its framework section number (`CIS-5.2.1`).
+
 ### Examples
 
 ```bash
 # Scan for privileged containers
 kubescape scan control C-0057 -v
+
+# Scan for privileged containers, naming the control
+kubescape scan control "privileged container" -v
 
 # Scan specific files for a control
 kubescape scan control C-0013 /path/to/deployment.yaml
