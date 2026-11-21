@@ -555,8 +555,14 @@ func sanitizeImageScanData(scan cautils.ImageScanData) cautils.ImageScanData {
 
 // buildImageScanRuns constructs SARIF runs for the provided container image scan results,
 // applying image source metadata sanitization, VEX status enrichment, Kubescape driver
-// naming, and finding fingerprints.
-func (sp *SARIFPrinter) buildImageScanRuns(scanResults []cautils.ImageScanData) ([]*sarif.Run, error) {
+// naming, and finding fingerprints. When isCombinedScan is true, or when multiple image
+// results are scanned, each image run receives its own automationDetails.id so that
+// its category does not collide with the configuration scan run or sibling image runs.
+func (sp *SARIFPrinter) buildImageScanRuns(scanResults []cautils.ImageScanData, isCombinedScanOpt ...bool) ([]*sarif.Run, error) {
+	isCombinedScan := false
+	if len(isCombinedScanOpt) > 0 {
+		isCombinedScan = isCombinedScanOpt[0]
+	}
 	var runs []*sarif.Run
 	for _, scan := range scanResults {
 		sanitizedScan := sanitizeImageScanData(scan)
@@ -632,8 +638,11 @@ func (sp *SARIFPrinter) buildImageScanRuns(scanResults []cautils.ImageScanData) 
 			addImageSARIFFingerprints(run)
 			// GitHub Code Scanning rejects a file in which two runs share a tool and
 			// a category, and every image run has the same driver name. A lone run
-			// keeps no category, so one given at upload time still applies to it.
-			if len(scanResults) > 1 {
+			// (a standalone scan of exactly one image) keeps no category, so one
+			// given at upload time still applies to it. In a multi-image scan or a
+			// combined posture+image scan, the report contains several runs and each
+			// image run must carry its own category to avoid collisions.
+			if len(scanResults) > 1 || isCombinedScan {
 				run.WithAutomationDetails(sarifImageRunCategory(sanitizedScan))
 			}
 			runs = append(runs, run)
@@ -705,7 +714,7 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 		var imageRuns []*sarif.Run
 		if len(imageScanData) > 0 {
 			var err error
-			imageRuns, err = sp.buildImageScanRuns(imageScanData)
+			imageRuns, err = sp.buildImageScanRuns(imageScanData, true)
 			if err != nil {
 				logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
 				return fmt.Errorf("failed to write results in sarif format: %w", err)
