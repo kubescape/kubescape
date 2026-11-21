@@ -771,3 +771,35 @@ func TestResourceMetrics_SubjectWithSeveralBindingsIsOneSeries(t *testing.T) {
 	assert.Contains(t, output, "kubescape_resource_count_controls_failed"+labels+" 2\n")
 	assert.Contains(t, output, "kubescape_resource_count_controls_passed"+labels+" 0\n")
 }
+
+func TestPrometheusScore_NilWriterDoesNotPanic(t *testing.T) {
+	pp := NewPrometheusPrinter(false)
+	require.Nil(t, pp.writer)
+
+	assert.NotPanics(t, func() {
+		pp.Score(85.0)
+	})
+}
+
+func TestPrometheusActionPrint_NilWriterReturnsError(t *testing.T) {
+	ctx := context.Background()
+	pp := NewPrometheusPrinter(false)
+	require.Nil(t, pp.writer)
+
+	// Missing data still returns missing data error
+	err := pp.ActionPrint(ctx, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to print results, missing data")
+
+	// Posture scan data with nil writer returns descriptive error and does not panic
+	session := cautils.NewOPASessionObjMock()
+	err = pp.ActionPrint(ctx, session, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write prometheus results: output writer is nil")
+
+	// Image scan data with nil writer returns descriptive error and does not panic
+	imageData := []cautils.ImageScanData{{Image: "alpine:latest"}}
+	err = pp.ActionPrint(ctx, nil, imageData)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to write prometheus results: output writer is nil")
+}

@@ -117,6 +117,10 @@ func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 		return fmt.Errorf("failed to print results, missing data")
 	}
 
+	if pp.writer == nil {
+		return fmt.Errorf("failed to write prometheus results: output writer is nil")
+	}
+
 	if _, err := pp.writer.Write([]byte(metrics.String())); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
 		return fmt.Errorf("failed to write results: %w", err)
