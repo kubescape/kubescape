@@ -156,6 +156,31 @@ func TestCollect_ReadsFromServedVersion(t *testing.T) {
 	assert.Empty(t, bindings)
 }
 
+func TestCollectControlConfigurations(t *testing.T) {
+	config := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": paramGroup + "/" + paramVersion,
+		"kind":       "ControlConfiguration",
+		"metadata":   map[string]any{"name": "permissive-config"},
+	}}
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		{Group: paramGroup, Version: paramVersion, Resource: paramResource}: "ControlConfigurationList",
+	}, config)
+	k8s := &k8sinterface.KubernetesApi{DynamicClient: client}
+
+	objects, err := CollectControlConfigurations(context.Background(), k8s)
+
+	require.NoError(t, err)
+	require.Len(t, objects, 1)
+	assert.Equal(t, "permissive-config", objects[0].GetName())
+}
+
+func TestCollectControlConfigurations_WithoutClientIsUnsupported(t *testing.T) {
+	objects, err := CollectControlConfigurations(context.Background(), nil)
+
+	assert.ErrorIs(t, err, ErrUnsupported)
+	assert.Nil(t, objects)
+}
+
 func TestCollect_UnsupportedClusterIsNotAFailure(t *testing.T) {
 	k8s := &k8sinterface.KubernetesApi{
 		DiscoveryClient: &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}},
