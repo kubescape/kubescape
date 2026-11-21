@@ -18,6 +18,12 @@ func NewPolicies() *Policies {
 }
 
 func (policies *Policies) Set(frameworks []reporthandling.Framework, excludedRules map[string]bool, scanningScope reporthandling.ScanningScopeType) {
+	if policies == nil {
+		return
+	}
+	if policies.Controls == nil {
+		policies.Controls = make(map[string]reporthandling.Control)
+	}
 	warned := make(map[string]struct{})
 	for i := range frameworks {
 		if !isFrameworkFitToScanScope(frameworks[i], scanningScope) {
