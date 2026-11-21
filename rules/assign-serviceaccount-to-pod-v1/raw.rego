@@ -19,14 +19,19 @@ deny contains msga if {
 
 	# A top-level create is authorized with the empty name, since the object has
 	# no name at authorization time, so an entry narrowed to other names grants no
-	# pod creation at all. Updating an existing pod is no substitute:
-	# spec.serviceAccountName is immutable once the pod exists.
-	grants_unnamed_requests(rule)
+	# plain pod creation. Server-side apply is the exception (see creates_pods).
+	# Updating an existing pod is no substitute: spec.serviceAccountName is
+	# immutable once the pod exists.
+	creates_pods(role, rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
 
-	finalpath := matched_paths(rule, i, j, k, p, verbs, api_groups, resources)
+	create_paths := matched_paths(rule, i, j, k, p, verbs, api_groups, resources)
+	finalpath := array.concat(create_paths, [path |
+		some path in apply_patch_paths(role, rule, i)
+		not path in create_paths
+	])
 
 	msga := {
 		"alertMessage": sprintf("Subject: %s-%s can create pods in privileged namespaces and assign them any service account", [subjectVector.kind, subjectVector.name]),
@@ -78,6 +83,66 @@ deny contains msga if {
 			"externalObjects": subjectVector,
 		},
 	}
+}
+
+# A pod is created either by a plain create, which needs an entry that admits
+# the empty name, or through server-side apply. Apply creates a missing object
+# with a patch request, and the API server authorizes that create with the
+# object's own name, so create and patch on pods reach a named pod even when
+# both are narrowed with resourceNames. The new pod can then name any service
+# account in the namespace. issue-token-secrets-v1, approve-csr-v1 and
+# create-persistentvolumes-v1 accept the same route. Only entries of this role
+# are paired, the same limitation those rules accept.
+creates_pods(_, rule) if grants_unnamed_requests(rule)
+
+creates_pods(role, rule) if {
+	some patch_rule in role.rules
+	pod_patch_rule(patch_rule)
+	names_overlap(rule, patch_rule)
+}
+
+pod_patch_rule(rule) if {
+	rule.apiGroups[_] in {"", "*"}
+	rule.resources[_] in {"pods", "*"}
+	rule.verbs[_] in {"patch", "*"}
+}
+
+# The patch entries that make a narrowed create reachable are evidence too. A
+# plain create needs no patch, so none is reported then.
+apply_patch_paths(role, rule, i) := [] if {
+	grants_unnamed_requests(rule)
+} else := paths if {
+	paths := sort([path |
+		some q
+		patch_rule := role.rules[q]
+		pod_patch_rule(patch_rule)
+		names_overlap(rule, patch_rule)
+		some field, values in {
+			"resources": {"pods", "*"},
+			"verbs": {"patch", "*"},
+			"apiGroups": {"", "*"},
+		}
+		value := patch_rule[field][l]
+		value in values
+		path := sprintf("relatedObjects[%d].rules[%d].%s[%d]", [i, q, field, l])
+	])
+}
+
+# The create and the patch have to reach one common pod name: create on "a" and
+# patch on "b" cannot create either pod. An unrestricted patch reaches whatever
+# name the create admits. Names are literal, as RBAC has no wildcard form for
+# resourceNames. "" is the name a plain create is authorized with, not a pod
+# apply could create, and "*" cannot be a pod's name, which has to be a DNS
+# subdomain, so neither counts as the common name.
+names_overlap(create_rule, patch_rule) if {
+	unrestricted_rule(patch_rule)
+	names_any_object(create_rule)
+}
+
+names_overlap(create_rule, patch_rule) if {
+	some name in create_rule.resourceNames
+	not name in {"", "*"}
+	name in patch_rule.resourceNames
 }
 
 # Which write verbs on a pod controller are reachable for this rule entry.
