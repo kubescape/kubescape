@@ -22,8 +22,8 @@ func writeWithAndWithoutBOM(t *testing.T, src string) (plain, withBOM string, bo
 	plain = filepath.Join(dir, "plain.json")
 	withBOM = filepath.Join(dir, "bom.json")
 	bomContents = append([]byte("\xef\xbb\xbf"), body...)
-	require.NoError(t, os.WriteFile(plain, body, 0o600))
-	require.NoError(t, os.WriteFile(withBOM, bomContents, 0o600))
+	require.NoError(t, os.WriteFile(plain, body, 0o600)) //nolint:gosec // G703: test-only; the path is generated under t.TempDir(), never external input
+	require.NoError(t, os.WriteFile(withBOM, bomContents, 0o600)) //nolint:gosec // G703: test-only; the path is generated under t.TempDir(), never external input
 	return plain, withBOM, bomContents
 }
 

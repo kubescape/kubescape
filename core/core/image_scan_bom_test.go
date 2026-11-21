@@ -23,7 +23,7 @@ func TestGetImageExceptionsFromFile_UTF8BOM(t *testing.T) {
 	assert.Equal(t, []string{"medium"}, want[0].Severities)
 
 	path := filepath.Join(t.TempDir(), "exceptions.json")
-	require.NoError(t, os.WriteFile(path, append([]byte("\xef\xbb\xbf"), body...), 0o600))
+	require.NoError(t, os.WriteFile(path, append([]byte("\xef\xbb\xbf"), body...), 0o600)) //nolint:gosec // G703: test-only; the path is generated under t.TempDir(), never external input
 
 	got, err := GetImageExceptionsFromFile(path)
 	require.NoError(t, err)
