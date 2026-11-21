@@ -115,11 +115,15 @@ func ResolveOutputFile(format, outputFile, defaultBaseName string) (string, bool
 		return outputFile, true
 	}
 
-	// A trailing separator names a directory: write the default report name
-	// inside it rather than a hidden file such as "reports/.json". Append
-	// instead of filepath.Join, which would clean "link/../" lexically and
-	// pick a different directory than the filesystem does through a symlink.
-	if defaultBaseName != "" && os.IsPathSeparator(outputFile[len(outputFile)-1]) {
+	// A trailing separator, or a final path element of "." or "..", names a
+	// directory: write the default report name inside it rather than a hidden
+	// file such as "reports/.json" or "..json". Append instead of
+	// filepath.Join, which would clean "link/../" lexically and pick a
+	// different directory than the filesystem does through a symlink.
+	if defaultBaseName != "" && namesDirectory(outputFile) {
+		if !os.IsPathSeparator(outputFile[len(outputFile)-1]) {
+			outputFile += string(filepath.Separator)
+		}
 		outputFile += defaultBaseName
 	}
 
@@ -139,6 +143,22 @@ func ResolveOutputFile(format, outputFile, defaultBaseName string) (string, bool
 func ResolveDefaultOutputFile(format, defaultBaseName string) string {
 	outputFile, _ := ResolveOutputFile(format, " ", defaultBaseName)
 	return outputFile
+}
+
+// namesDirectory reports whether outputFile names a directory rather than a
+// file. A trailing separator says so directly; a final path element of "." or
+// ".." does too, since neither can name a file. Both would otherwise be
+// extended into a hidden file such as "..json" in the wrong directory.
+func namesDirectory(outputFile string) bool {
+	if os.IsPathSeparator(outputFile[len(outputFile)-1]) {
+		return true
+	}
+	switch filepath.Base(outputFile) {
+	case ".", "..":
+		return true
+	default:
+		return false
+	}
 }
 
 // DefaultBaseNameForFormat returns the fallback base file name used when
