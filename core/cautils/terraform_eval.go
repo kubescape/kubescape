@@ -169,6 +169,9 @@ func evaluateCoalesce(args []cty.Value) (cty.Value, error) {
 			if err != nil {
 				return cty.NilVal, err
 			}
+			if terraformValueSize(converted, maxTerraformFunctionSize) > maxTerraformFunctionSize {
+				return cty.NilVal, fmt.Errorf("coalesce: argument exceeds the size limit of %d bytes", maxTerraformFunctionSize)
+			}
 			return converted, nil
 		}
 	}
