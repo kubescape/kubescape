@@ -237,7 +237,7 @@ func parseScanFilterArgs(arguments map[string]any, activeNamespace string) (scan
 		filters.excludedNamespaces = strings.TrimSpace(excludeNS)
 	}
 
-	if rawExcludeControls, hasExcludeControls := arguments["exclude_controls"]; hasExcludeControls {
+	if rawExcludeControls, hasExcludeControls := arguments["exclude_controls"]; hasExcludeControls && !unsetControlList(rawExcludeControls) {
 		excludeControls, toolErr := parseControlIDsNamed("exclude_controls", rawExcludeControls, hasExcludeControls)
 		if toolErr != nil {
 			return filters, toolErr
@@ -246,6 +246,22 @@ func parseScanFilterArgs(arguments map[string]any, activeNamespace string) (scan
 	}
 
 	return filters, nil
+}
+
+// unsetControlList reports whether an optional control-ID list argument was sent
+// without a value: JSON null, a blank string or an empty array. Like the other
+// optional filters, that leaves the filter off instead of failing the call (see
+// mcpStringArg). A value that holds only separators is still rejected.
+func unsetControlList(raw any) bool {
+	switch v := raw.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(v) == ""
+	case []any:
+		return len(v) == 0
+	}
+	return false
 }
 
 func parseLocalIaCFilterArgs(arguments map[string]any) (scanFilterArgs, *mcp.CallToolResult) {
