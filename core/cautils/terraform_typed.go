@@ -428,14 +428,29 @@ func attributeValueFor(path, name string, val interface{}) interface{} {
 // terraform-provider-kubernetes snake_case -> camelCase convention and known
 // block pluralization so the result matches K8s JSON shape. Unresolved
 // attribute expressions are recorded in errs and left unset rather than
-// guessed at, matching the kubernetes_manifest policy.
+// guessed at, matching the kubernetes_manifest policy. Known dynamic blocks
+// are expanded with their iterator context before field conversion.
 func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error, path string) map[string]interface{} {
+	converter := terraformBodyConverter{errs: errs, remaining: maxTerraformLocalSize}
+	return converter.bodyToMap(body, evalCtx, path, false, false)
+}
+
+func (c *terraformBodyConverter) bodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, path string, resource, generated bool) map[string]interface{} {
 	out := map[string]interface{}{}
 
 	for name, attr := range body.Attributes {
+		if c.exhausted {
+			break
+		}
+		if resource && resourceMetaAttributes[name] {
+			continue
+		}
 		val, diags := attr.Expr.Value(evalCtx)
 		if diags.HasErrors() {
-			*errs = append(*errs, fmt.Errorf("%s: attribute %q: %w", path, name, diags))
+			*c.errs = append(*c.errs, fmt.Errorf("%s: attribute %q: %w", path, name, diags))
+			continue
+		}
+		if generated && !c.reserve(terraformValueSize(val, c.remaining)+len(name), path) {
 			continue
 		}
 		value := attributeValueFor(path, name, ctyToGo(val))
@@ -447,6 +462,9 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 		}
 		out[attributeNameFor(name)] = value
 	}
+	if c.exhausted {
+		return out
+	}
 	if isPodSpecBlockPath(path) {
 		applyProviderDefaults(body, evalCtx, out, providerPodSpecDefaults)
 	}
@@ -454,9 +472,15 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 		applyProviderDefaults(body, evalCtx, out, providerNamespaceDefault)
 	}
 
-	grouped := map[string][]*hclsyntax.Block{}
+	grouped := map[string][]terraformBlock{}
 	var order []string
-	for _, b := range body.Blocks {
+	for _, b := range c.blocks(body, evalCtx, path, generated) {
+		if resource && resourceMetaBlocks[b.Type] {
+			if b.generated {
+				*c.errs = append(*c.errs, fmt.Errorf("%s: dynamic cannot generate Terraform meta-block %q", path, b.Type))
+			}
+			continue
+		}
 		if _, seen := grouped[b.Type]; !seen {
 			order = append(order, b.Type)
 		}
@@ -466,11 +490,11 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 	for _, blockType := range order {
 		blocks := grouped[blockType]
 		if isBackendServicePortBlock(path, blockType) {
-			out["port"] = hclBodyToMap(blocks[0].Body, evalCtx, errs, path+"."+blockType)
+			out["port"] = c.bodyToMap(blocks[0].Body, blocks[0].evalCtx, path+"."+blockType, false, blocks[0].generated)
 			continue
 		}
 		if isPersistentVolumeSourceBlock(path, blockType) {
-			pvSource := hclBodyToMap(blocks[0].Body, evalCtx, errs, path+"."+blockType)
+			pvSource := c.bodyToMap(blocks[0].Body, blocks[0].evalCtx, path+"."+blockType, false, blocks[0].generated)
 			for k, v := range pvSource {
 				out[k] = v
 			}
@@ -490,12 +514,12 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 		if isRepeatable {
 			var arr []interface{}
 			for _, b := range blocks {
-				arr = append(arr, hclBodyToMap(b.Body, evalCtx, errs, path+"."+blockType))
+				arr = append(arr, c.bodyToMap(b.Body, b.evalCtx, path+"."+blockType, false, b.generated))
 			}
 			out[field] = arr
 			continue
 		}
-		out[field] = hclBodyToMap(blocks[0].Body, evalCtx, errs, path+"."+blockType)
+		out[field] = c.bodyToMap(blocks[0].Body, blocks[0].evalCtx, path+"."+blockType, false, blocks[0].generated)
 	}
 
 	if strings.HasSuffix(path, ".path") && strings.HasPrefix(path, "kubernetes_ingress_v1") {
@@ -514,64 +538,8 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 // Kubernetes fields with the same names (e.g. a container's own "lifecycle"
 // block) are unaffected.
 func hclResourceBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error, path string) map[string]interface{} {
-	out := map[string]interface{}{}
-
-	for name, attr := range body.Attributes {
-		if resourceMetaAttributes[name] {
-			continue
-		}
-		val, diags := attr.Expr.Value(evalCtx)
-		if diags.HasErrors() {
-			*errs = append(*errs, fmt.Errorf("%s: attribute %q: %w", path, name, diags))
-			continue
-		}
-		value := attributeValueFor(path, name, ctyToGo(val))
-		if value == nil {
-			// Terraform treats an argument set to null as if it were not there,
-			// and so does the provider; leaving it in the manifest as null makes
-			// a rule read the field as set.
-			continue
-		}
-		out[attributeNameFor(name)] = value
-	}
-
-	grouped := map[string][]*hclsyntax.Block{}
-	var order []string
-	for _, b := range body.Blocks {
-		if resourceMetaBlocks[b.Type] {
-			continue
-		}
-		if _, seen := grouped[b.Type]; !seen {
-			order = append(order, b.Type)
-		}
-		grouped[b.Type] = append(grouped[b.Type], b)
-	}
-
-	for _, blockType := range order {
-		blocks := grouped[blockType]
-		field := fieldNameFor(blockType)
-		isRepeatable := len(blocks) > 1 || repeatableBlocks[blockType]
-		if isServiceAccountSecretBlock(path, blockType) {
-			field = "secrets"
-			isRepeatable = true
-		}
-		if isNestedHPAMetricBlock(path, blockType) {
-			field = "metric"
-			isRepeatable = false
-		}
-
-		if isRepeatable {
-			var arr []interface{}
-			for _, b := range blocks {
-				arr = append(arr, hclBodyToMap(b.Body, evalCtx, errs, path+"."+blockType))
-			}
-			out[field] = arr
-			continue
-		}
-		out[field] = hclBodyToMap(blocks[0].Body, evalCtx, errs, path+"."+blockType)
-	}
-
-	return out
+	converter := terraformBodyConverter{errs: errs, remaining: maxTerraformLocalSize}
+	return converter.bodyToMap(body, evalCtx, path, true, false)
 }
 
 // extractTypedResources finds resource "kubernetes_<type>" "name" { ... }

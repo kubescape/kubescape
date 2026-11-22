@@ -1153,6 +1153,13 @@ func LoadResourcesFromTerraform(ctx context.Context, basePath string) (map[strin
 // the files and directories filter excludes. When workspace containment is configured via workspaceOpt,
 // files and directories resolving outside the workspace are contained or skipped.
 func LoadResourcesFromTerraformFiltered(ctx context.Context, basePath string, filter *PathFilter, workspaceOpt ...string) (map[string][]workloadinterface.IMetadata, error) {
+	workloads, _, err := LoadResourcesFromTerraformFilteredWithSkips(ctx, basePath, filter, workspaceOpt...)
+	return workloads, err
+}
+
+// LoadResourcesFromTerraformFilteredWithSkips also reports nested modules that
+// failed to render, so best-effort repository scans can mark coverage incomplete.
+func LoadResourcesFromTerraformFilteredWithSkips(ctx context.Context, basePath string, filter *PathFilter, workspaceOpt ...string) (map[string][]workloadinterface.IMetadata, []SkippedManifest, error) {
 	var workspaceDir string
 	if len(workspaceOpt) > 0 {
 		workspaceDir = workspaceOpt[0]
@@ -1160,18 +1167,18 @@ func LoadResourcesFromTerraformFiltered(ctx context.Context, basePath string, fi
 
 	if IsTerraformFile(basePath) {
 		if filter.Excluded(basePath, false) {
-			return nil, nil
+			return nil, nil, nil
 		}
 		if workspaceDir != "" && !pathcontainment.IsPathContained(workspaceDir, basePath) {
-			return nil, fmt.Errorf("%w: Terraform file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, basePath)
+			return nil, nil, fmt.Errorf("%w: Terraform file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, basePath)
 		}
 		dir := filepath.Dir(basePath)
 		td := NewTerraformDirectory(dir, workspaceDir)
 		wls, errs := td.GetWorkloads(dir)
 		if len(errs) > 0 {
-			return wls, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(errs...))
+			return wls, nil, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(errs...))
 		}
-		return wls, nil
+		return wls, nil, nil
 	}
 
 	dirs, discoveryErrs := listTerraformDirs(basePath, filter)
@@ -1179,16 +1186,17 @@ func LoadResourcesFromTerraformFiltered(ctx context.Context, basePath string, fi
 		logger.L().Ctx(ctx).Warning("Skipping path while discovering Terraform directories", helpers.Error(err))
 	}
 	if len(dirs) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	explicitTerraformDir := isTerraformDirectory(basePath)
 
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
+	var skips []SkippedManifest
 	for _, dir := range dirs {
 		if workspaceDir != "" && !pathcontainment.IsPathContained(workspaceDir, dir) {
 			if explicitTerraformDir && dir == basePath {
-				return nil, fmt.Errorf("%w: Terraform directory %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, dir)
+				return nil, skips, fmt.Errorf("%w: Terraform directory %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, dir)
 			}
 			logger.L().Ctx(ctx).Warning("Skipping Terraform directory outside workspace root", helpers.String("path", dir))
 			continue
@@ -1197,14 +1205,17 @@ func LoadResourcesFromTerraformFiltered(ctx context.Context, basePath string, fi
 		wls, dirErrs := td.GetWorkloads(dir)
 		if len(dirErrs) > 0 {
 			if explicitTerraformDir && dir == basePath {
-				return sourceToWorkloads, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(dirErrs...))
+				return sourceToWorkloads, skips, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(dirErrs...))
 			}
 			logger.L().Ctx(ctx).Warning("Skipping nested Terraform configuration that failed to render", helpers.String("path", dir), helpers.Error(errors.Join(dirErrs...)))
+			// HCL diagnostics contain source filenames and resource labels that
+			// report anonymization cannot safely identify; keep them in logs.
+			skips = append(skips, SkippedManifest{Path: dir, Reason: "failed to render Terraform configuration; see scan logs for details"})
 			continue
 		}
 		maps.Copy(sourceToWorkloads, wls)
 	}
-	return sourceToWorkloads, nil
+	return sourceToWorkloads, skips, nil
 }
 
 // LoadResourcesFromFiles globs input for plain YAML/JSON manifests and loads them. renderedCharts
