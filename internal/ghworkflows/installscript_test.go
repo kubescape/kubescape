@@ -82,6 +82,10 @@ func TestInstallScriptReportsLatestVersionLookupFailure(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(homeDir, ".kubescape")); !os.IsNotExist(err) {
 		t.Errorf("expected no installation directory, stat error: %v", err)
 	}
+	// Verify that the installer resets terminal colors when it exits.
+	if !strings.HasSuffix(stdout.String(), "\x1b[0m") {
+		t.Errorf("expected installer output to end with terminal reset sequence, got: %q", stdout.String())
+	}
 }
 
 func replaceEnvValueForInstallTest(env []string, key, value string) []string {
