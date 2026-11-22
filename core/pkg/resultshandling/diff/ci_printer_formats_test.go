@@ -300,6 +300,8 @@ func TestMarkdownEscape_NormalizesEmptyAndWhitespace(t *testing.T) {
 	assert.Equal(t, "a b", markdownEscape("a\r\nb"))
 	assert.Equal(t, `a\\b`, markdownEscape(`a\b`))
 	assert.Equal(t, `a\|b`, markdownEscape(`a|b`))
+	assert.Equal(t, "a'b", markdownEscape("a`b"))
+	assert.Equal(t, "ab", markdownEscape("a\x00\x07\x1bb"))
 }
 
 func TestJUnitCaseName_UsesOnlyNonEmptyParts(t *testing.T) {
