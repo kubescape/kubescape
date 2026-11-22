@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -194,7 +195,8 @@ func loadManifest(path string) *manifest {
 }
 
 func readBounded(path string) ([]byte, error) {
-	f, err := os.Open(filepath.Clean(path))
+	// Open nonblocking so a FIFO reaches the regular-file check below.
+	f, err := os.OpenFile(filepath.Clean(path), os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
