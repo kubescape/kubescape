@@ -675,6 +675,54 @@ func lexicalAbsPath(path string) string {
 	return filepath.Clean(absPath)
 }
 
+// RelativeToRoot returns path relative to root, the repository root reported
+// paths are anchored on. The repository root comes from go-git, which resolves
+// symlinks, while path keeps the form the scan was given. When the scan reached
+// the repository through a symlink (on macOS, anything under /tmp or /var), the
+// two differ in their leading components and the plain relation climbs out of
+// the root. Only then is the outermost ancestor of path that is the root's own
+// directory looked for, and path is taken relative to it: a repository-local
+// link back to the root (reenter -> .) is another such ancestor, below the one
+// the scan crossed, and keeps its name. Only that prefix is resolved:
+// every name below it, a repository-local symlink included, stays the one the
+// caller selected, as lexicalAbsPath requires, and path itself need not exist
+// (a template inside a packaged Helm dependency does not). If no ancestor is
+// the root, the plain relation is returned as before.
+func RelativeToRoot(root, path string) (string, error) {
+	rel, err := filepath.Rel(root, path)
+	if err == nil && !escapesRoot(rel) {
+		return rel, nil
+	}
+	rootInfo, statErr := os.Stat(root)
+	if statErr != nil {
+		return rel, err
+	}
+	outermost := ""
+	for ancestor := filepath.Clean(path); ; {
+		if info, statErr := os.Stat(ancestor); statErr == nil && os.SameFile(rootInfo, info) {
+			outermost = ancestor
+		}
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			break
+		}
+		ancestor = parent
+	}
+	if outermost == "" {
+		return rel, err
+	}
+	if ancestorRel, relErr := filepath.Rel(outermost, path); relErr == nil {
+		return ancestorRel, nil
+	}
+	return rel, err
+}
+
+// escapesRoot reports whether a filepath.Rel result leaves the directory it was
+// computed against.
+func escapesRoot(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func canonicalPath(path string) (string, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -1298,7 +1346,7 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 			wSlice := workloads[path]
 			for j := range w {
 				lw := localworkload.NewLocalWorkload(w[j].GetObject())
-				if relPath, err := filepath.Rel(rootPath, path); err == nil {
+				if relPath, err := RelativeToRoot(rootPath, path); err == nil {
 					lw.SetPath(fmt.Sprintf("%s:%d", relPath, j))
 				} else {
 					lw.SetPath(fmt.Sprintf("%s:%d", path, j))
@@ -2091,7 +2139,23 @@ func IsJson(filePath string) bool {
 func glob(root, pattern string, onlyDirectories bool, filter *PathFilter) ([]string, error) {
 	var matches []string
 
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	// filepath.Walk does not follow symlinks, the root included, so a scan of a
+	// directory given as a symlink (a linked checkout, say) would list nothing.
+	// Walk its target and report each path under the root as given, which is
+	// the form the rest of the scan keeps.
+	walkRoot := root
+	if info, err := os.Lstat(root); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			walkRoot = resolved
+		}
+	}
+
+	err := filepath.Walk(walkRoot, func(path string, info os.FileInfo, err error) error {
+		if walkRoot != root {
+			if rel, relErr := filepath.Rel(walkRoot, path); relErr == nil {
+				path = filepath.Join(root, rel)
+			}
+		}
 		if err != nil {
 			return err
 		}

@@ -1826,3 +1826,86 @@ func TestWorkloadDocuments(t *testing.T) {
 	_, err := WorkloadDocuments([]byte(loneCR))
 	assert.ErrorContains(t, err, "the loader reads")
 }
+
+func TestRelativeToRoot(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "k8s"), 0o750))
+	manifest := filepath.Join(root, "k8s", "pod.yaml")
+	require.NoError(t, os.WriteFile(manifest, []byte("kind: Pod\n"), 0o600))
+
+	linkedRoot := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(root, linkedRoot); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	// a symlink inside the repository to another file in it
+	inRepoLink := filepath.Join(root, "k8s", "alias.yaml")
+	require.NoError(t, os.Symlink(manifest, inRepoLink))
+	outside := filepath.Join(t.TempDir(), "outside.yaml")
+	require.NoError(t, os.WriteFile(outside, []byte("kind: Pod\n"), 0o600))
+	// a symlink to a differently named file, and a directory symlink, both
+	// reached through the linked root: only the root's link may be resolved
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "shared"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "shared", "pod.tpl"), []byte("kind: Pod\n"), 0o600))
+	require.NoError(t, os.Symlink(filepath.Join("..", "shared", "pod.tpl"), filepath.Join(root, "k8s", "linked.yaml")))
+	require.NoError(t, os.Symlink("shared", filepath.Join(root, "aliased")))
+	// a repository-local link back to the root itself
+	require.NoError(t, os.Symlink(".", filepath.Join(root, "reenter")))
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "path inside the root", path: manifest, want: filepath.Join("k8s", "pod.yaml")},
+		{name: "root reached through a symlink", path: filepath.Join(linkedRoot, "k8s", "pod.yaml"), want: filepath.Join("k8s", "pod.yaml")},
+		// the plain relation stays inside the root, so the link keeps the name the caller selected
+		{name: "repository-local symlink keeps its own path", path: inRepoLink, want: filepath.Join("k8s", "alias.yaml")},
+		{name: "path outside the root is unchanged", path: outside, want: mustRel(t, root, outside)},
+		{name: "file symlink under a linked root keeps its own name", path: filepath.Join(linkedRoot, "k8s", "linked.yaml"), want: filepath.Join("k8s", "linked.yaml")},
+		{name: "directory symlink under a linked root keeps its own name", path: filepath.Join(linkedRoot, "aliased", "pod.tpl"), want: filepath.Join("aliased", "pod.tpl")},
+		{name: "link back to the root under a linked root keeps its own name", path: filepath.Join(linkedRoot, "reenter", "k8s", "pod.yaml"), want: filepath.Join("reenter", "k8s", "pod.yaml")},
+		// Helm names a template of a packaged dependency (charts/dep-1.0.0.tgz)
+		// <chart>/charts/dep/templates/..., a directory that is not on disk
+		{name: "missing file under a linked root", path: filepath.Join(linkedRoot, "chart", "charts", "dep", "templates", "deployment.yaml"), want: filepath.Join("chart", "charts", "dep", "templates", "deployment.yaml")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := RelativeToRoot(root, tt.path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestListFilesAndDirsUnderSymlinkedRoot(t *testing.T) {
+	target := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(target, "k8s"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(target, "k8s", "pod.yaml"), []byte("kind: Pod\n"), 0o600))
+	link := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	// filepath.Walk alone reports the link itself and does not descend, so
+	// a scan of the link found no manifests.
+	files, errs := listFiles(link, nil)
+	assert.Empty(t, errs)
+	assert.Equal(t, []string{filepath.Join(link, "k8s", "pod.yaml")}, files, "paths stay under the link the scan was given")
+
+	dirs, errs := listDirs(link, nil)
+	assert.Empty(t, errs)
+	assert.Equal(t, []string{link, filepath.Join(link, "k8s")}, dirs)
+
+	filter, err := NewPathFilter(link, []string{"k8s/"})
+	require.NoError(t, err)
+	files, _ = listFiles(link, filter)
+	assert.Empty(t, files, "exclusions anchored at the link still apply")
+}
+
+func mustRel(t *testing.T, base, target string) string {
+	t.Helper()
+	rel, err := filepath.Rel(base, target)
+	require.NoError(t, err)
+	return rel
+}

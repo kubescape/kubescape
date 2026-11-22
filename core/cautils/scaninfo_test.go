@@ -159,12 +159,15 @@ func TestSetContextMetadataDirectoryRepoIdentity(t *testing.T) {
 	t.Run("directory inside a repository without commits", func(t *testing.T) {
 		// Without a HEAD the scan is a directory scan. Its identity stays the
 		// scanned directory while its root is the repository root, and a glob in
-		// that directory gets the same identity and root.
-		root := t.TempDir()
+		// that directory gets the same identity and root. The root is go-git's
+		// worktree root, which resolves symlinks, so the expectation is built from
+		// the resolved temporary directory (on macOS /var is a link to /private/var).
+		root, err := filepath.EvalSymlinks(t.TempDir())
+		require.NoError(t, err)
 		manifests := filepath.Join(root, "k8s")
 		require.NoError(t, os.MkdirAll(manifests, 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(manifests, "pod.yaml"), []byte("kind: Pod\n"), 0o600))
-		_, err := git.PlainInit(root, false)
+		_, err = git.PlainInit(root, false)
 		require.NoError(t, err)
 
 		dir := directoryRepoContext(t, manifests)

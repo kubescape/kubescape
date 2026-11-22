@@ -278,6 +278,22 @@ func TestGitLabDisplayPath(t *testing.T) {
 	assert.Equal(t, "k8s/a.yaml", gitLabDisplayPath(filepath.Join(base, "k8s", "a.yaml"), base))
 	assert.Equal(t, "/other/a.yaml", gitLabDisplayPath(filepath.Join(string(filepath.Separator), "other", "a.yaml"), base))
 	assert.Equal(t, "/repo/a.yaml", gitLabDisplayPath(filepath.Join(base, "a.yaml"), ""))
+
+	t.Run("a repository reached through a symlink", func(t *testing.T) {
+		// A repository scan's root comes from go-git with its symlinks resolved;
+		// the skipped manifest keeps the path the scan was given.
+		repo, err := filepath.EvalSymlinks(t.TempDir())
+		require.NoError(t, err)
+		require.NoError(t, os.MkdirAll(filepath.Join(repo, "k8s"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(repo, "k8s", "a.yaml"), []byte("kind: [\n"), 0o600))
+		link := filepath.Join(t.TempDir(), "repo")
+		if err := os.Symlink(repo, link); err != nil {
+			t.Skipf("cannot create a symlink here: %v", err)
+		}
+
+		assert.Equal(t, "k8s/a.yaml", gitLabDisplayPath(filepath.Join(link, "k8s", "a.yaml"), repo),
+			"the runner's path to the link must not reach the report")
+	})
 }
 
 // TestGitLabSASTMessages_MalformedSecretDoesNotLeak runs the real manifest
