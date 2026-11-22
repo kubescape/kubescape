@@ -130,6 +130,11 @@ func TestControlIdentifiers(t *testing.T) {
 			control:  &reporthandling.Control{},
 			expected: []string{},
 		},
+		{
+			name:     "nil control returns empty",
+			control:  nil,
+			expected: []string{},
+		},
 	}
 
 	for _, tt := range tests {
@@ -177,6 +182,11 @@ func TestControlMatchesAny(t *testing.T) {
 			set:      map[string]struct{}{},
 			expected: false,
 		},
+		{
+			name:     "nil set",
+			set:      nil,
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -185,6 +195,14 @@ func TestControlMatchesAny(t *testing.T) {
 			assert.Equal(t, tt.expected, got)
 		})
 	}
+}
+
+func TestControlMatchesAny_NilControl(t *testing.T) {
+	set := map[string]struct{}{
+		"c-0286": {},
+	}
+	assert.False(t, ControlMatchesAny(nil, set), "nil control must return false without panic")
+	assert.False(t, ControlMatchesAny(nil, nil), "nil control and nil set must return false without panic")
 }
 
 func sampleFrameworks() []reporthandling.Framework {
