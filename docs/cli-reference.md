@@ -1765,7 +1765,7 @@ kubescape operator scan <type> [flags]
 
 ### How it works
 
-The command creates one `OperatorCommand` object (`kubescape.io/v1alpha1`) per scan request in the operator's namespace and waits, for up to 10 minutes, until the operator reports each one completed. It reports an error if the operator marks a command as failed. Your kubeconfig identity needs permission to create and get `operatorcommands.kubescape.io` in that namespace. No port-forward to the operator is used.
+The command has up to 10 minutes to create all `OperatorCommand` objects (`kubescape.io/v1alpha1`), one per scan request in the operator's namespace. Once creation succeeds, it waits up to another 10 minutes for the operator to report that all commands have completed. It reports an error if the operator marks a command as failed. Your kubeconfig identity needs permission to create and get `operatorcommands.kubescape.io` in that namespace. No port-forward to the operator is used.
 
 ### Examples
 

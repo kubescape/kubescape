@@ -3,7 +3,9 @@ package core
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/armosec/armoapi-go/apis"
@@ -14,6 +16,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 	clienttesting "k8s.io/client-go/testing"
 )
 
@@ -49,6 +53,49 @@ func (f *fakeOperatorScanInfo) ValidatePayload(*apis.Commands) error {
 }
 
 var _ cautils.OperatorScanInfo = (*fakeOperatorScanInfo)(nil)
+
+func TestOperatorAdapter_OperatorScanCreationTimeout(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		timeout       time.Duration
+		parentTimeout time.Duration
+		wantTimeout   time.Duration
+	}{
+		{name: "configured timeout", timeout: time.Second, wantTimeout: time.Second},
+		{name: "default timeout", wantTimeout: defaultOperatorCommandTimeout},
+		{name: "earlier parent deadline", timeout: time.Second, parentTimeout: time.Millisecond, wantTimeout: time.Millisecond},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx := context.Background()
+				if tt.parentTimeout > 0 {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, tt.parentTimeout)
+					defer cancel()
+				}
+				wantDeadline := time.Now().Add(tt.wantTimeout)
+				client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					require.Equal(t, http.MethodPost, req.Method)
+					deadline, ok := req.Context().Deadline()
+					require.True(t, ok, "the create request must have a deadline")
+					require.Equal(t, wantDeadline, deadline)
+					<-req.Context().Done()
+					return nil, req.Context().Err()
+				})}
+				dyn, err := dynamic.NewForConfigAndClient(&rest.Config{Host: "http://kubernetes.example"}, client)
+				require.NoError(t, err)
+				adapter := NewOperatorAdapterWithClient(&fakeOperatorScanInfo{}, "kubescape", dyn)
+				adapter.timeout = tt.timeout
+
+				got, err := adapter.OperatorScan(ctx)
+
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+				assert.ErrorContains(t, err, "failed to create operator command")
+				assert.Empty(t, got)
+			})
+		})
+	}
+}
 
 func TestOperatorAdapter_OperatorScan(t *testing.T) {
 	t.Run("invalid payload short-circuits before any cluster call", func(t *testing.T) {
