@@ -267,8 +267,9 @@ func (prettyPrinter *PrettyPrinter) pathLineResolver(opaSessionObj *cautils.OPAS
 
 // indexedEntitiesMatch verifies that for every indexed segment in the path (e.g. containers[0]),
 // if the element in renderedObj has a "name" key (identifying the entity like a container or volume),
-// the corresponding element in rawObj has an identical "name". This prevents attributing line
-// numbers when list entries have been reordered by an overlay or composer.
+// the corresponding element in rawObj has an identical "name". When entries have no usable identity
+// (no name key, or non-string name), they are matched only when their complete entries are equal.
+// This prevents attributing line numbers when list entries have been reordered or modified by an overlay.
 func indexedEntitiesMatch(rawObj, renderedObj map[string]any, segments []pathparse.Segment) bool {
 	for i, seg := range segments {
 		if seg.Index >= 0 {
@@ -286,7 +287,18 @@ func indexedEntitiesMatch(rawObj, renderedObj map[string]any, segments []pathpar
 				if hasRName != hasRawName {
 					return false
 				}
-				if hasRName && !reflect.DeepEqual(rName, rawName) {
+				rNameStr, isStr := rName.(string)
+				if hasRName && isStr && rNameStr != "" {
+					if !reflect.DeepEqual(rName, rawName) {
+						return false
+					}
+				} else {
+					if !reflect.DeepEqual(rElem, rawElem) {
+						return false
+					}
+				}
+			} else {
+				if !reflect.DeepEqual(rElem, rawElem) {
 					return false
 				}
 			}

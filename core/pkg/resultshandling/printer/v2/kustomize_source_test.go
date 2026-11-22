@@ -711,3 +711,65 @@ spec:
 		assert.Contains(t, out, "spec.versions[0].schema.openAPIV3Schema.properties.name.type")
 	})
 }
+
+func TestResourceTable_KustomizeReorderedUnnamedListEntriesNoMisattribution(t *testing.T) {
+	baseManifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: nginx:1
+        ports:
+        - containerPort: 80
+          protocol: TCP
+        - containerPort: 443
+          protocol: TCP
+`
+	// Overlay reversed unnamed port entries: [443, 80]
+	renderedObj := map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "demo",
+			"namespace": "default",
+		},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name":  "app",
+							"image": "nginx:1",
+							"ports": []any{
+								map[string]any{
+									"containerPort": 443,
+									"protocol":      "TCP",
+								},
+								map[string]any{
+									"containerPort": 80,
+									"protocol":      "TCP",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Finding is on ports[0].protocol (which is port 443 in rendered, but port 80 in base)
+	paths := []armotypes.PosturePaths{
+		{ReviewPath: "spec.template.spec.containers[0].ports[0].protocol"},
+	}
+
+	session := kustomizeTestSession(t, baseManifest, renderedObj, paths)
+	out := renderResourceTable(t, session, true)
+
+	assert.Contains(t, out, "spec.template.spec.containers[0].ports[0].protocol (current: TCP) (app)")
+	assert.NotContains(t, out, "(line ", "reordered unnamed port must not attribute the other port's line")
+}
