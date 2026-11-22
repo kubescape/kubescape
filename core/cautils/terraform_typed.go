@@ -738,6 +738,24 @@ func hasUnresolvableVariables(expr hcl.Expression, evalCtx *hcl.EvalContext) boo
 		}
 		return false
 	}
+
+	if call, ok := expr.(*hclsyntax.FunctionCallExpr); ok && call.Name == "can" {
+		if len(call.Args) == 0 {
+			return false
+		}
+		arg := unwrapParentheses(call.Args[0])
+		return hasUnresolvableVariables(arg, evalCtx)
+	}
+
+	if call, ok := expr.(*hclsyntax.FunctionCallExpr); ok {
+		for _, rawArg := range call.Args {
+			if hasUnresolvableVariables(rawArg, evalCtx) {
+				return true
+			}
+		}
+		return false
+	}
+
 	if cond, ok := expr.(*hclsyntax.ConditionalExpr); ok {
 		condExpr := unwrapParentheses(cond.Condition)
 		if hasUnresolvableVariables(condExpr, evalCtx) {
@@ -755,6 +773,45 @@ func hasUnresolvableVariables(expr hcl.Expression, evalCtx *hcl.EvalContext) boo
 			return hasUnresolvableVariables(cond.TrueResult, evalCtx)
 		}
 		return hasUnresolvableVariables(cond.FalseResult, evalCtx)
+	}
+
+	if tmpl, ok := expr.(*hclsyntax.TemplateExpr); ok {
+		for _, part := range tmpl.Parts {
+			if hasUnresolvableVariables(part, evalCtx) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if tuple, ok := expr.(*hclsyntax.TupleConsExpr); ok {
+		for _, elem := range tuple.Exprs {
+			if hasUnresolvableVariables(elem, evalCtx) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if obj, ok := expr.(*hclsyntax.ObjectConsExpr); ok {
+		for _, item := range obj.Items {
+			if hasUnresolvableVariables(item.KeyExpr, evalCtx) || hasUnresolvableVariables(item.ValueExpr, evalCtx) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if unary, ok := expr.(*hclsyntax.UnaryOpExpr); ok {
+		return hasUnresolvableVariables(unary.Val, evalCtx)
+	}
+
+	if binary, ok := expr.(*hclsyntax.BinaryOpExpr); ok {
+		return hasUnresolvableVariables(binary.LHS, evalCtx) || hasUnresolvableVariables(binary.RHS, evalCtx)
+	}
+
+	if idx, ok := expr.(*hclsyntax.IndexExpr); ok {
+		return hasUnresolvableVariables(idx.Collection, evalCtx) || hasUnresolvableVariables(idx.Key, evalCtx)
 	}
 
 	vars := expr.Variables()
