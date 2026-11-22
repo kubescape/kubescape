@@ -2485,7 +2485,13 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 		}
 		bindingParamRef = celParamRefForBinding(bindings[0])
 	default:
-		return nil, celOutcome{}, fmt.Errorf("rule: '%s', policy %q is matched by %d live bindings; the offline engine does not yet select per-binding paramRefs, so refusing it to preserve scan/admission parity", rule.Name, vap.PolicyName, len(bindings))
+		// A binding steers a scan only through the params it supplies, so several
+		// bindings that supply none give every object the same verdict as no
+		// binding does, and there is nothing to refuse. Several that supply
+		// params would need each object matched to the right one.
+		if vap.TakesParams() && anyBindingSuppliesParams(bindings) {
+			return nil, celOutcome{}, fmt.Errorf("rule: '%s', policy %q is matched by %d live bindings; the offline engine does not yet select per-binding paramRefs, so refusing it to preserve scan/admission parity", rule.Name, vap.PolicyName, len(bindings))
+		}
 	}
 	findParam := opap.celParamObjectFinder()
 	readsNamespaceObject := evaluator.ReadsNamespaceObjectInValidations(vap)
@@ -2803,6 +2809,17 @@ func celBindingSelectsParams(binding metav1unstructured.Unstructured) bool {
 	}
 	_, found, err := metav1unstructured.NestedMap(binding.Object, "spec", "paramRef", "selector")
 	return err == nil && found
+}
+
+// anyBindingSuppliesParams reports whether any binding names params, by
+// paramRef name or by paramRef selector.
+func anyBindingSuppliesParams(bindings []metav1unstructured.Unstructured) bool {
+	for _, binding := range bindings {
+		if celParamRefForBinding(binding) != nil || celBindingSelectsParams(binding) {
+			return true
+		}
+	}
+	return false
 }
 
 // celParamRefForBinding extracts the binding's spec.paramRef, if any. Missing
