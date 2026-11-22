@@ -118,4 +118,5 @@ jobs:
         run: go test -v -count=1 ./core/pkg/resourcehandler/partitionstore -run '^TestIsDiskFull_WindowsErrors$'
 
       - name: Test Windows file watcher
-        run: go test -v -count=1 ./core/pkg/watch -run '^TestFileWatcher'
+        # A hang fails here with every goroutine's stack, not at the job timeout.
+        run: go test -v -count=1 -timeout 5m ./core/pkg/watch -run '^TestFileWatcher'

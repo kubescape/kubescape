@@ -171,6 +171,37 @@ func startWatcher(t *testing.T, root string, opts FileWatcherOptions) (*FileWatc
 	return w, rec
 }
 
+// discardDeliveries reads and drops what the backend delivers to a watcher
+// the test drives by hand, until the test ends. On Windows the backend runs Add
+// and Remove on the goroutine that delivers events, and that goroutine waits
+// until an event is read, so a test that calls them (directly, or through
+// handle, settled or reconcile) after a change on disk would wait forever. pump
+// does this in a running watcher; the test drives the events itself instead.
+func discardDeliveries(t *testing.T, w *FileWatcher) {
+	t.Helper()
+	discarded := make(chan struct{})
+	go func() {
+		defer close(discarded)
+		events, failures := w.fs.Events, w.fs.Errors
+		for events != nil || failures != nil {
+			select {
+			case _, ok := <-events:
+				if !ok {
+					events = nil
+				}
+			case _, ok := <-failures:
+				if !ok {
+					failures = nil
+				}
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		_ = w.fs.Close()
+		<-discarded
+	})
+}
+
 var sentinels atomic.Int64
 
 // settle makes a manifest in dir that no test rule ignores and waits for its
@@ -666,6 +697,7 @@ func TestFileWatcherReconcilesWhenTheQueueOverflowed(t *testing.T) {
 	root := t.TempDir()
 	w, err := newFileWatcher(root, FileWatcherOptions{}) // no goroutine runs: the test drives it
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 	w.maxQueued = 1
 
@@ -693,6 +725,7 @@ func TestFileWatcherReconcilesASingleFilesDirectory(t *testing.T) {
 		write(t, file, "kind: Pod\n")
 		w, err := newFileWatcher(file, FileWatcherOptions{}) // no goroutine runs: the test drives it
 		require.NoError(t, err)
+		discardDeliveries(t, w)
 		defer w.fs.Close()
 		w.maxQueued = 0 // every delivery is dropped
 
@@ -713,6 +746,7 @@ func TestFileWatcherReconcilesASingleFilesDirectory(t *testing.T) {
 		write(t, file, "kind: Pod\n")
 		w, err := newFileWatcher(file, FileWatcherOptions{})
 		require.NoError(t, err)
+		discardDeliveries(t, w)
 		defer w.fs.Close()
 		w.maxQueued = 0
 
@@ -748,6 +782,7 @@ func TestFileWatcherReconcilesASingleFilesDirectory(t *testing.T) {
 		write(t, file, "kind: Pod\n")
 		w, err := newFileWatcher(file, FileWatcherOptions{})
 		require.NoError(t, err)
+		discardDeliveries(t, w)
 		defer w.fs.Close()
 		w.maxQueued = 0
 		calls := siblingGone(w, 2)
@@ -767,6 +802,7 @@ func TestFileWatcherReconcilesASingleFilesDirectory(t *testing.T) {
 		write(t, file, "kind: Pod\n")
 		w, err := newFileWatcher(file, FileWatcherOptions{})
 		require.NoError(t, err)
+		discardDeliveries(t, w)
 		defer w.fs.Close()
 		w.maxQueued = 0
 		calls := siblingGone(w, rewatchAttempts)
@@ -856,6 +892,7 @@ func TestFileWatcherBurstsLeaveOneSignalAndNeverBlock(t *testing.T) {
 	root := t.TempDir()
 	w, err := newFileWatcher(root, FileWatcherOptions{})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 
 	// Nobody reads Changes, as when a scan is running. The watcher must not wait
@@ -880,8 +917,9 @@ func TestFileWatcherBurstsLeaveOneSignalAndNeverBlock(t *testing.T) {
 func TestFileWatcherEventOverflowSignalsAndReconciles(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	w, err := newFileWatcher(root, FileWatcherOptions{}) // no goroutine reads events: the test drives it
+	w, err := newFileWatcher(root, FileWatcherOptions{}) // the test drives it
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 
 	// What was made while events were lost: a tree no event was seen for.
@@ -893,7 +931,8 @@ func TestFileWatcherEventOverflowSignalsAndReconciles(t *testing.T) {
 
 	require.NoError(t, w.handleError(fsnotify.ErrEventOverflow))
 
-	assert.Len(t, w.changes, 1, "an overflow signals a change: events were lost")
+	// required: the receive below would otherwise wait forever
+	require.Len(t, w.changes, 1, "an overflow signals a change: events were lost")
 	assert.Contains(t, w.dirs, filepath.Join(root, "late"))
 	assert.Contains(t, w.dirs, filepath.Join(root, "late", "inner"), "a directory made while events were lost is watched")
 	assert.NotContains(t, w.dirs, filepath.Join(root, "stale"), "a registration the backend does not have is dropped")
@@ -910,6 +949,7 @@ func TestFileWatcherOtherBackendErrors(t *testing.T) {
 	var reported []error
 	w, err := newFileWatcher(root, FileWatcherOptions{OnError: func(err error) { reported = append(reported, err) }})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 
 	// An error that leaves the watch working is reported, and asks for a scan
@@ -1032,6 +1072,7 @@ func TestFileWatcherWatchesADirectoryMadeAgainUnderTheSameName(t *testing.T) {
 	write(t, filepath.Join(sub, "old.yaml"), "kind: Pod\n")
 	w, err := newFileWatcher(root, FileWatcherOptions{}) // the test drives the events
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 	require.Contains(t, w.dirs, sub)
 
@@ -1057,6 +1098,7 @@ func TestFileWatcherRegistersANewDirectoryOnceItHasSettled(t *testing.T) {
 	root := t.TempDir()
 	w, err := newFileWatcher(root, FileWatcherOptions{})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 
 	dir := filepath.Join(root, "new")
@@ -1086,6 +1128,7 @@ func TestFileWatcherMakesAGoodRegistrationOfADirectoryTheBackendLost(t *testing.
 	write(t, filepath.Join(dir, "a.yaml"), "kind: Pod\n")
 	w, err := newFileWatcher(root, FileWatcherOptions{})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 	require.Contains(t, w.dirs, dir)
 
@@ -1107,6 +1150,7 @@ func TestFileWatcherSettlingSkipsWhatIsNoLongerADirectory(t *testing.T) {
 	root := t.TempDir()
 	w, err := newFileWatcher(root, FileWatcherOptions{})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 
 	gone, file := filepath.Join(root, "gone"), filepath.Join(root, "now-a-file")
@@ -1136,6 +1180,7 @@ func TestFileWatcherReconcileDropsWhatTheIgnoreFileNowExcludes(t *testing.T) {
 		return excluded.Load() && isDir && path == extra
 	}})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 	require.Contains(t, w.dirs, extra)
 
@@ -1156,6 +1201,7 @@ func TestFileWatcherOverflowRefreshesEveryRegistration(t *testing.T) {
 	write(t, filepath.Join(dir, "a.yaml"), "kind: Pod\n")
 	w, err := newFileWatcher(root, FileWatcherOptions{})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 
 	require.NoError(t, w.fs.Remove(dir)) // lost to the backend, still in the watcher's records
@@ -1208,6 +1254,7 @@ func TestFileWatcherWatchesWhatTheIgnoreFileNoLongerExcludes(t *testing.T) {
 		return excluded.Load() && isDir && path == extra
 	}})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 	require.NotContains(t, w.dirs, extra)
 
@@ -1233,6 +1280,7 @@ func TestFileWatcherStopsWatchingWhatTheIgnoreFileNowExcludes(t *testing.T) {
 		return excluded.Load() && isDir && path == extra
 	}})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 	require.Contains(t, w.dirs, extra)
 	require.Contains(t, w.dirs, nested)
@@ -1276,6 +1324,7 @@ func TestFileWatcherDependenciesAreFiles(t *testing.T) {
 		AcceptDependencies: func(string) bool { return true },
 	})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 	require.NotContains(t, w.dirs, extra)
 
@@ -1310,6 +1359,7 @@ func TestFileWatcherSingleFileIgnoreChanges(t *testing.T) {
 			write(t, file, "kind: Pod\n")
 			w, err := newFileWatcher(file, FileWatcherOptions{})
 			require.NoError(t, err)
+			discardDeliveries(t, w)
 			defer w.fs.Close()
 
 			// Unrelated siblings must still be ignored in single-file mode.
@@ -1352,6 +1402,7 @@ func TestFileWatcherSignalsRemovedDependencyFiles(t *testing.T) {
 				AcceptDependencies: func(string) bool { return true },
 			})
 			require.NoError(t, err)
+			discardDeliveries(t, w)
 			defer w.fs.Close()
 
 			if !tc.before {
