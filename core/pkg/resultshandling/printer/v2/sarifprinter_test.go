@@ -1366,6 +1366,17 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 			want: "",
 		},
 		{
+			name: "Directory without metadata",
+			session: &cautils.OPASessionObj{
+				Metadata: &reporthandlingv2.Metadata{
+					ScanMetadata: reporthandlingv2.ScanMetadata{
+						ScanningTarget: reporthandlingv2.Directory,
+					},
+				},
+			},
+			want: "",
+		},
+		{
 			name: "Cluster",
 			session: &cautils.OPASessionObj{
 				Metadata: &reporthandlingv2.Metadata{
@@ -2384,4 +2395,28 @@ func TestSARIFActionPrint_NilWriterReturnsError(t *testing.T) {
 	err = sp.ActionPrint(ctx, nil, []cautils.ImageScanData{imageScan})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "output writer is nil")
+}
+
+func TestSARIF_NilReceiverSafety(t *testing.T) {
+	var sp *SARIFPrinter
+
+	assert.NotPanics(t, func() {
+		err := sp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := sp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := sp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		sp.Score(100)
+		sp.PrintNextSteps()
+	})
 }

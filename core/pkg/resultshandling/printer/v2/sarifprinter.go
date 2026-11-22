@@ -93,6 +93,9 @@ func (sp *SARIFPrinter) Score(score float32) {
 }
 
 func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if sp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.SARIFFormat, outputFile, sarifOutputFile)
 	if explicitOutput {
 		var err error
@@ -696,6 +699,9 @@ func (sp *SARIFPrinter) PrintNextSteps() {
 // it streams the configuration run and appends any container image vulnerability runs.
 // For standalone image scans, it generates a multi-run vulnerability report.
 func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if sp == nil {
+		return fmt.Errorf("failed to write sarif results: printer is nil")
+	}
 	if err := printer.PrepareOutput(sp.writer); err != nil {
 		return err
 	}
@@ -1278,7 +1284,10 @@ func getBasePathFromMetadata(opaSessionObj *cautils.OPASessionObj) string {
 		}
 		return ""
 	case v2.Directory:
-		return opaSessionObj.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
+		if dir := opaSessionObj.Metadata.ContextMetadata.DirectoryContextMetadata; dir != nil {
+			return dir.BasePath
+		}
+		return ""
 	case v2.File:
 		if opaSessionObj.Metadata.ContextMetadata.FileContextMetadata != nil {
 			return cautils.FileScanRootPath(opaSessionObj.Metadata.ContextMetadata.FileContextMetadata.FilePath)
@@ -1312,7 +1321,7 @@ func hashArtifactChange(artifactChange *sarif.ArtifactChange) [32]byte {
 
 // CloseWriter closes the SARIF output writer, returning any error from flushing or closing.
 func (p *SARIFPrinter) CloseWriter() error {
-	if p.writer != nil && p.writer != os.Stdout {
+	if p != nil && p.writer != nil && p.writer != os.Stdout {
 		return printer.CloseOutput(p.writer)
 	}
 	return nil
