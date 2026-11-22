@@ -271,7 +271,14 @@ func extractCredsFromAuths(auths map[string]dockerAuthConfig, domain, repository
 			// auth is base64 encoded username:password. sometimes it's used as token, but actually syft expects username/password if present, or token
 			// Let's decode if username and password are empty
 			if auth.Username == "" && auth.Password == "" {
-				decoded, err := base64.StdEncoding.DecodeString(auth.Auth)
+				// Like the kubelet, accept auth with or without padding:
+				// StdEncoding decodes only padded input and RawStdEncoding
+				// only unpadded input.
+				encoding := base64.RawStdEncoding
+				if strings.HasSuffix(strings.TrimSpace(auth.Auth), "=") {
+					encoding = base64.StdEncoding
+				}
+				decoded, err := encoding.DecodeString(auth.Auth)
 				if err == nil {
 					parts := strings.SplitN(string(decoded), ":", 2)
 					if len(parts) == 2 {

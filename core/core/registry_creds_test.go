@@ -73,6 +73,12 @@ func TestExtractCredsFromAuthsPreservesBasicAuth(t *testing.T) {
 			name: "base64 encoded username and password",
 			auth: dockerAuthConfig{Auth: base64.StdEncoding.EncodeToString([]byte("user:password"))},
 		},
+		{
+			// "user:password" needs padding, and the kubelet also accepts
+			// the auth value with the padding left off.
+			name: "unpadded base64 encoded username and password",
+			auth: dockerAuthConfig{Auth: base64.RawStdEncoding.EncodeToString([]byte("user:password"))},
+		},
 	}
 
 	for _, tt := range tests {
