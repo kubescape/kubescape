@@ -802,3 +802,27 @@ func TestGitLabSASTActionPrint_NilWriterReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "output writer is nil")
 }
+
+func TestGitLabSAST_NilReceiverSafety(t *testing.T) {
+	var gp *GitLabSASTPrinter
+
+	assert.NotPanics(t, func() {
+		err := gp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := gp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := gp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		gp.Score(100)
+		gp.PrintNextSteps()
+	})
+}
