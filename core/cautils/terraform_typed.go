@@ -133,6 +133,9 @@ var pluralOverrides = map[string]string{
 	"token_requests":           "tokenRequests",
 	"subset":                   "subsets",
 	"endpoint":                 "endpoints",
+	"address":                  "addresses",
+	"not_ready_address":        "notReadyAddresses",
+	"condition":                "conditions",
 }
 
 // repeatableBlocks lists HCL block labels that always encode as a JSON array,
@@ -154,6 +157,7 @@ var repeatableBlocks = map[string]bool{
 	"allowed_topology": true, "allowed_topologies": true,
 	"token_request": true, "token_requests": true,
 	"subset": true, "endpoint": true,
+	"address": true, "not_ready_address": true,
 }
 
 // resourceMetaAttributes are Terraform meta-argument attributes valid on any
@@ -308,6 +312,13 @@ func isPersistentVolumeSourceBlock(path, blockType string) bool {
 		strings.HasPrefix(path, "kubernetes_persistent_volume_v1.")
 }
 
+func isEndpointSlicePortField(path, name string) bool {
+	if name != "port" {
+		return false
+	}
+	return strings.Contains(path, "kubernetes_endpoint_slice") && (strings.HasSuffix(path, ".port") || strings.HasSuffix(path, ".ports"))
+}
+
 func isConvertiblePortField(path, name string) bool {
 	return isNetworkPolicyPortField(path, name) || isLegacyIngressBackendPortField(path, name) || isIngressBackendServicePortNumberField(path, name)
 }
@@ -397,7 +408,7 @@ func attributeValueFor(path, name string, val interface{}) interface{} {
 	if s, ok := val.(string); ok && s == "" && isSecurityContextIDField(path, name) {
 		return nil
 	}
-	if s, ok := val.(string); ok && (isConvertiblePortField(path, name) || isStringTypedNumberField(path, name) || isPDBIntOrStringField(path, name)) && isDigitOnly(s) {
+	if s, ok := val.(string); ok && (isConvertiblePortField(path, name) || isStringTypedNumberField(path, name) || isPDBIntOrStringField(path, name) || isEndpointSlicePortField(path, name)) && isDigitOnly(s) {
 		return json.Number(canonicalizeNumericString(s))
 	}
 	return val

@@ -1758,6 +1758,12 @@ resource "kubernetes_endpoints" "ep" {
     address {
       ip = "10.0.0.1"
     }
+    address {
+      ip = "10.0.0.2"
+    }
+    not_ready_address {
+      ip = "10.0.0.3"
+    }
     port {
       name = "http"
       port = 80
@@ -1779,13 +1785,13 @@ resource "kubernetes_endpoint_slice" "eps" {
   address_type = "IPv4"
   endpoint {
     addresses = ["10.0.0.1"]
-    conditions {
-      ready = true
+    condition {
+      ready = false
     }
   }
   port {
     name     = "http"
-    port     = 80
+    port     = "80"
     protocol = "TCP"
   }
 }
@@ -1796,6 +1802,10 @@ resource "kubernetes_endpoint_slice_v1" "eps_v1" {
     namespace = "networking"
   }
   address_type = "IPv4"
+  port {
+    name = "https"
+    port = 443
+  }
 }
 `
 
@@ -1927,6 +1937,18 @@ resource "kubernetes_endpoint_slice_v1" "eps_v1" {
 	assert.Equal(t, map[string]interface{}{"name": "my-service-ep", "namespace": "default"}, ep["metadata"])
 	subsets := ep["subsets"].([]interface{})
 	require.Len(t, subsets, 1)
+	sub0 := subsets[0].(map[string]interface{})
+	addresses := sub0["addresses"].([]interface{})
+	require.Len(t, addresses, 2)
+	assert.Equal(t, "10.0.0.1", addresses[0].(map[string]interface{})["ip"])
+	assert.Equal(t, "10.0.0.2", addresses[1].(map[string]interface{})["ip"])
+	notReady := sub0["notReadyAddresses"].([]interface{})
+	require.Len(t, notReady, 1)
+	assert.Equal(t, "10.0.0.3", notReady[0].(map[string]interface{})["ip"])
+	epPorts := sub0["ports"].([]interface{})
+	require.Len(t, epPorts, 1)
+	assert.Equal(t, "http", epPorts[0].(map[string]interface{})["name"])
+	assert.Equal(t, json.Number("80"), epPorts[0].(map[string]interface{})["port"])
 
 	// Endpoints v1: explicit namespace
 	epV1 := manifests[13]
@@ -1934,7 +1956,7 @@ resource "kubernetes_endpoint_slice_v1" "eps_v1" {
 	assert.Equal(t, "Endpoints", epV1["kind"])
 	assert.Equal(t, map[string]interface{}{"name": "custom-ep", "namespace": "monitoring"}, epV1["metadata"])
 
-	// EndpointSlice: namespaced, defaults to "default" namespace
+	// EndpointSlice: namespaced, defaults to "default" namespace, condition -> conditions, quoted port -> numeric
 	eps := manifests[14]
 	assert.Equal(t, "discovery.k8s.io/v1", eps["apiVersion"])
 	assert.Equal(t, "EndpointSlice", eps["kind"])
@@ -1942,10 +1964,20 @@ resource "kubernetes_endpoint_slice_v1" "eps_v1" {
 	assert.Equal(t, "IPv4", eps["addressType"])
 	endpoints := eps["endpoints"].([]interface{})
 	require.Len(t, endpoints, 1)
+	ep0 := endpoints[0].(map[string]interface{})
+	assert.Equal(t, []interface{}{"10.0.0.1"}, ep0["addresses"])
+	conditions := ep0["conditions"].(map[string]interface{})
+	assert.Equal(t, false, conditions["ready"])
+	epsPorts := eps["ports"].([]interface{})
+	require.Len(t, epsPorts, 1)
+	assert.Equal(t, json.Number("80"), epsPorts[0].(map[string]interface{})["port"])
 
-	// EndpointSlice v1: explicit namespace
+	// EndpointSlice v1: explicit namespace, numeric port
 	epsV1 := manifests[15]
 	assert.Equal(t, "discovery.k8s.io/v1", epsV1["apiVersion"])
 	assert.Equal(t, "EndpointSlice", epsV1["kind"])
 	assert.Equal(t, map[string]interface{}{"name": "custom-eps", "namespace": "networking"}, epsV1["metadata"])
+	epsV1Ports := epsV1["ports"].([]interface{})
+	require.Len(t, epsV1Ports, 1)
+	assert.Equal(t, json.Number("443"), epsV1Ports[0].(map[string]interface{})["port"])
 }
