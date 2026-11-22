@@ -475,3 +475,33 @@ func TestFormatConfigValidationResult_ExportPathsHaveZeroANSI(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(yamlOut), "\x1b[", "YAML export must have zero ANSI codes")
 }
+
+func TestValidateConfig_URLsRejectSurroundingWhitespace(t *testing.T) {
+	// Leading whitespace on cloudAPIURL
+	cfgLeadingAPI := validConfigForValidation()
+	cfgLeadingAPI.CloudAPIURL = " https://api.example.com"
+	resLeadingAPI := ValidateConfig(cfgLeadingAPI, ConfigValidationProfileCloud)
+	assert.False(t, resLeadingAPI.Valid)
+	assertConfigCheck(t, resLeadingAPI.Checks, "cloudAPIURL", ConfigValidationStatusInvalid)
+
+	// Trailing whitespace on cloudAPIURL
+	cfgTrailingAPI := validConfigForValidation()
+	cfgTrailingAPI.CloudAPIURL = "https://api.example.com "
+	resTrailingAPI := ValidateConfig(cfgTrailingAPI, ConfigValidationProfileCloud)
+	assert.False(t, resTrailingAPI.Valid)
+	assertConfigCheck(t, resTrailingAPI.Checks, "cloudAPIURL", ConfigValidationStatusInvalid)
+
+	// Leading/trailing whitespace on optional cloudReportURL
+	cfgReportSpaces := validConfigForValidation()
+	cfgReportSpaces.CloudReportURL = " https://report.example.com "
+	resReportSpaces := ValidateConfig(cfgReportSpaces, ConfigValidationProfileCloud)
+	assert.False(t, resReportSpaces.Valid)
+	assertConfigCheck(t, resReportSpaces.Checks, "cloudReportURL", ConfigValidationStatusInvalid)
+
+	// Whitespace-only cloudReportURL
+	cfgReportOnlySpaces := validConfigForValidation()
+	cfgReportOnlySpaces.CloudReportURL = "   "
+	resReportOnlySpaces := ValidateConfig(cfgReportOnlySpaces, ConfigValidationProfileOffline)
+	assert.False(t, resReportOnlySpaces.Valid)
+	assertConfigCheck(t, resReportOnlySpaces.Checks, "cloudReportURL", ConfigValidationStatusInvalid)
+}
