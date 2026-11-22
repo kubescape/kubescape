@@ -1,7 +1,10 @@
 package cautils
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,6 +13,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/kustomize/api/types"
 )
 
@@ -50,57 +54,28 @@ func TraceKustomizePatch(resource workloadinterface.IMetadata, paths []string, s
 		return ""
 	}
 
-	// 1. Check kustomization.Patches
-	for _, patch := range kustomization.Patches {
-		if !matchKustomizeTarget(patch.Target, resource) {
-			continue
-		}
-		var patchData []byte
-		var patchPath string
-		if patch.Path != "" {
-			patchPath = filepath.Clean(filepath.Join(source.KustomizeDirectoryName, filepath.FromSlash(patch.Path)))
-			data, err := os.ReadFile(patchPath)
-			if err != nil {
-				continue
-			}
-			patchData = data
-		} else if patch.Patch != "" {
-			patchPath = kustFile
-			patchData = []byte(patch.Patch)
-		} else {
-			continue
-		}
+	// Unify all patches in Kustomize application order:
+	// 1. patchesStrategicMerge (legacy)
+	// 2. patchesJson6902 (legacy)
+	// 3. patches (modern)
+	var allPatches []types.Patch
 
-		if patchMatchesPaths(patchData, patch.Target, resource, cleanPaths) {
-			return formatRelativePatchPath(source.Path, patchPath)
-		}
-	}
-
-	// 2. Check kustomization.PatchesStrategicMerge
-	for _, smp := range kustomization.PatchesStrategicMerge {
+	for _, smp := range kustomization.PatchesStrategicMerge { //nolint:staticcheck // SA1019: legacy patchesStrategicMerge must still be traced for backwards compatibility
 		pStr := string(smp)
-		var patchData []byte
-		var patchPath string
 		candidate := filepath.Clean(filepath.Join(source.KustomizeDirectoryName, filepath.FromSlash(pStr)))
 		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
-			patchPath = candidate
-			data, err := os.ReadFile(candidate)
-			if err != nil {
-				continue
-			}
-			patchData = data
+			allPatches = append(allPatches, types.Patch{Path: pStr})
 		} else {
-			patchPath = kustFile
-			patchData = []byte(pStr)
-		}
-
-		if patchMatchesPaths(patchData, nil, resource, cleanPaths) {
-			return formatRelativePatchPath(source.Path, patchPath)
+			allPatches = append(allPatches, types.Patch{Patch: pStr})
 		}
 	}
 
-	// 3. Check kustomization.PatchesJson6902
-	for _, patch := range kustomization.PatchesJson6902 {
+	allPatches = append(allPatches, kustomization.PatchesJson6902...) //nolint:staticcheck // SA1019: legacy patchesJson6902 must still be traced for backwards compatibility
+
+	allPatches = append(allPatches, kustomization.Patches...)
+
+	var effectivePatch string
+	for _, patch := range allPatches {
 		if !matchKustomizeTarget(patch.Target, resource) {
 			continue
 		}
@@ -121,11 +96,11 @@ func TraceKustomizePatch(resource workloadinterface.IMetadata, paths []string, s
 		}
 
 		if patchMatchesPaths(patchData, patch.Target, resource, cleanPaths) {
-			return formatRelativePatchPath(source.Path, patchPath)
+			effectivePatch = formatRelativePatchPath(source.Path, patchPath)
 		}
 	}
 
-	return ""
+	return effectivePatch
 }
 
 // CleanFindingPath extracts the raw dot-notation field path from an evidence entry,
@@ -147,11 +122,36 @@ func CleanFindingPath(p string) string {
 	return strings.TrimSpace(p)
 }
 
+func getMetadataMap(resource workloadinterface.IMetadata, key string) map[string]string {
+	if resource == nil {
+		return nil
+	}
+	obj := resource.GetObject()
+	if obj == nil {
+		return nil
+	}
+	meta, ok := obj["metadata"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := meta[key].(map[string]any)
+	if !ok {
+		return nil
+	}
+	res := make(map[string]string, len(raw))
+	for k, v := range raw {
+		if s, ok := v.(string); ok {
+			res[k] = s
+		}
+	}
+	return res
+}
+
 func matchKustomizeTarget(target *types.Selector, resource workloadinterface.IMetadata) bool {
 	if target == nil {
 		return true
 	}
-	if target.Gvk.Kind != "" && !strings.EqualFold(target.Gvk.Kind, resource.GetKind()) {
+	if target.Kind != "" && !strings.EqualFold(target.Kind, resource.GetKind()) {
 		return false
 	}
 	if target.Name != "" && target.Name != resource.GetName() {
@@ -169,11 +169,43 @@ func matchKustomizeTarget(target *types.Selector, resource workloadinterface.IMe
 	} else {
 		version = parts[0]
 	}
-	if target.Gvk.Group != "" && !strings.EqualFold(target.Gvk.Group, group) {
+	if target.Group != "" && !strings.EqualFold(target.Group, group) {
 		return false
 	}
-	if target.Gvk.Version != "" && !strings.EqualFold(target.Gvk.Version, version) {
+	if target.Version != "" && !strings.EqualFold(target.Version, version) {
 		return false
+	}
+	if target.LabelSelector != "" {
+		sel, err := labels.Parse(target.LabelSelector)
+		if err != nil || !sel.Matches(labels.Set(getMetadataMap(resource, "labels"))) {
+			return false
+		}
+	}
+	if target.AnnotationSelector != "" {
+		sel, err := labels.Parse(target.AnnotationSelector)
+		if err != nil || !sel.Matches(labels.Set(getMetadataMap(resource, "annotations"))) {
+			return false
+		}
+	}
+	return true
+}
+
+func matchYamlHeader(yamlObj map[string]any, resource workloadinterface.IMetadata) bool {
+	if k, ok := yamlObj["kind"].(string); ok && k != "" && !strings.EqualFold(k, resource.GetKind()) {
+		return false
+	}
+	if apiVer, ok := yamlObj["apiVersion"].(string); ok && apiVer != "" {
+		if !strings.EqualFold(apiVer, resource.GetApiVersion()) {
+			return false
+		}
+	}
+	if meta, ok := yamlObj["metadata"].(map[string]any); ok {
+		if n, ok := meta["name"].(string); ok && n != "" && n != resource.GetName() {
+			return false
+		}
+		if ns, ok := meta["namespace"].(string); ok && ns != "" && resource.GetNamespace() != "" && ns != resource.GetNamespace() {
+			return false
+		}
 	}
 	return true
 }
@@ -185,6 +217,9 @@ func patchMatchesPaths(patchData []byte, target *types.Selector, resource worklo
 	}
 	if err := yaml.Unmarshal(patchData, &ops); err == nil && len(ops) > 0 && ops[0].Path != "" {
 		for _, op := range ops {
+			if strings.EqualFold(op.Op, "test") {
+				continue
+			}
 			jsonPath := jsonPointerToDotPath(op.Path)
 			for _, cp := range cleanPaths {
 				if pathMatches(jsonPath, cp) {
@@ -195,27 +230,28 @@ func patchMatchesPaths(patchData []byte, target *types.Selector, resource worklo
 		return false
 	}
 
-	var yamlObj map[string]any
-	if err := yaml.Unmarshal(patchData, &yamlObj); err == nil && len(yamlObj) > 0 {
+	dec := yaml.NewDecoder(bytes.NewReader(patchData))
+	for {
+		var yamlObj map[string]any
+		err := dec.Decode(&yamlObj)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil || len(yamlObj) == 0 {
+			continue
+		}
 		if target == nil {
-			if k, ok := yamlObj["kind"].(string); ok && k != "" && !strings.EqualFold(k, resource.GetKind()) {
-				return false
-			}
-			if meta, ok := yamlObj["metadata"].(map[string]any); ok {
-				if n, ok := meta["name"].(string); ok && n != "" && n != resource.GetName() {
-					return false
-				}
-				if ns, ok := meta["namespace"].(string); ok && ns != "" && resource.GetNamespace() != "" && ns != resource.GetNamespace() {
-					return false
-				}
+			if !matchYamlHeader(yamlObj, resource) {
+				continue
 			}
 		}
 		for _, cp := range cleanPaths {
-			if yamlDefinesField(yamlObj, cp) {
+			if yamlDefinesField(yamlObj, cp, resource) {
 				return true
 			}
 		}
 	}
+
 	return false
 }
 
@@ -256,7 +292,7 @@ func pathMatches(a, b string) bool {
 	return false
 }
 
-func yamlDefinesField(obj map[string]any, dotPath string) bool {
+func yamlDefinesField(obj map[string]any, dotPath string, resource workloadinterface.IMetadata) bool {
 	if len(obj) == 0 || dotPath == "" {
 		return false
 	}
@@ -264,18 +300,18 @@ func yamlDefinesField(obj map[string]any, dotPath string) bool {
 	if len(tokens) == 0 {
 		return false
 	}
-	if walkObject(obj, tokens) {
+	if walkObject(obj, tokens, resource, nil) {
 		return true
 	}
 	if len(tokens) >= 3 && tokens[0] == "spec" && tokens[1] == "template" && tokens[2] == "spec" {
 		shorter := append([]string{"spec"}, tokens[3:]...)
-		if walkObject(obj, shorter) {
+		if walkObject(obj, shorter, resource, []string{"spec", "template"}) {
 			return true
 		}
 	}
 	if len(tokens) >= 2 && tokens[0] == "spec" && tokens[1] != "template" {
 		longer := append([]string{"spec", "template", "spec"}, tokens[1:]...)
-		if walkObject(obj, longer) {
+		if walkObject(obj, longer, resource, nil) {
 			return true
 		}
 	}
@@ -294,7 +330,48 @@ func splitDotPath(p string) []string {
 	return tokens
 }
 
-func walkObject(curr any, tokens []string) bool {
+func getRenderedElementName(resource workloadinterface.IMetadata, prefixTokens []string) string {
+	if resource == nil {
+		return ""
+	}
+	var curr any = resource.GetObject()
+	for _, tok := range prefixTokens {
+		if curr == nil {
+			return ""
+		}
+		if idx := strings.Index(tok, "["); idx >= 0 && strings.HasSuffix(tok, "]") {
+			fieldName := tok[:idx]
+			m, ok := curr.(map[string]any)
+			if !ok {
+				return ""
+			}
+			arr, ok := m[fieldName].([]any)
+			if !ok {
+				return ""
+			}
+			indexStr := tok[idx+1 : len(tok)-1]
+			i, err := strconv.Atoi(indexStr)
+			if err != nil || i < 0 || i >= len(arr) {
+				return ""
+			}
+			curr = arr[i]
+		} else {
+			m, ok := curr.(map[string]any)
+			if !ok {
+				return ""
+			}
+			curr = m[tok]
+		}
+	}
+	if elemMap, ok := curr.(map[string]any); ok {
+		if n, ok := elemMap["name"].(string); ok {
+			return n
+		}
+	}
+	return ""
+}
+
+func walkObject(curr any, tokens []string, resource workloadinterface.IMetadata, traversed []string) bool {
 	if len(tokens) == 0 {
 		return curr != nil
 	}
@@ -312,29 +389,56 @@ func walkObject(curr any, tokens []string) bool {
 			if err != nil {
 				return false
 			}
-			return walkObject(subVal, append([]string{fmt.Sprintf("[%d]", arrIndex)}, tokens[1:]...))
+			prefix := append(traversed, token)
+			targetName := getRenderedElementName(resource, prefix)
+			if subSlice, ok := subVal.([]any); ok {
+				if targetName != "" {
+					for _, item := range subSlice {
+						if itemMap, ok := item.(map[string]any); ok {
+							if n, ok := itemMap["name"].(string); ok && n == targetName {
+								return walkObject(item, tokens[1:], resource, prefix)
+							}
+						}
+					}
+					return false
+				}
+				if arrIndex >= 0 && arrIndex < len(subSlice) {
+					return walkObject(subSlice[arrIndex], tokens[1:], resource, prefix)
+				}
+				return false
+			}
+			return false
 		}
 		subVal, ok := val[token]
 		if !ok {
 			return false
 		}
-		return walkObject(subVal, tokens[1:])
+		return walkObject(subVal, tokens[1:], resource, append(traversed, token))
 	case []any:
 		if strings.HasPrefix(token, "[") && strings.HasSuffix(token, "]") {
 			indexStr := token[1 : len(token)-1]
 			arrIndex, err := strconv.Atoi(indexStr)
-			if err == nil && arrIndex >= 0 && arrIndex < len(val) {
-				return walkObject(val[arrIndex], tokens[1:])
+			if err != nil {
+				return false
 			}
-			for _, item := range val {
-				if walkObject(item, tokens[1:]) {
-					return true
+			targetName := getRenderedElementName(resource, traversed)
+			if targetName != "" {
+				for _, item := range val {
+					if itemMap, ok := item.(map[string]any); ok {
+						if n, ok := itemMap["name"].(string); ok && n == targetName {
+							return walkObject(item, tokens[1:], resource, traversed)
+						}
+					}
 				}
+				return false
+			}
+			if arrIndex >= 0 && arrIndex < len(val) {
+				return walkObject(val[arrIndex], tokens[1:], resource, traversed)
 			}
 			return false
 		}
 		for _, item := range val {
-			if walkObject(item, tokens) {
+			if walkObject(item, tokens, resource, traversed) {
 				return true
 			}
 		}
