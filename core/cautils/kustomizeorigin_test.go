@@ -92,6 +92,40 @@ func TestKustomizeWorkloadsRecordTheirOriginFile(t *testing.T) {
 		"a generated resource is attributed to the kustomization that configures the generator")
 }
 
+// TestKustomizeOriginsWhenTheTemporaryDirectoryIsASymlink pins the origin
+// files when the temporary directory is reached through a symlink, as on macOS,
+// where $TMPDIR is under /var and /var is a link to /private/var. Kustomize
+// resolves the wrapper's directory before it follows the wrapper's relative
+// reference to the scanned one, so a reference computed from the unresolved
+// directory climbed the wrong number of levels, the wrapper build failed, and
+// every resource fell back to its Kustomize directory.
+func TestKustomizeOriginsWhenTheTemporaryDirectoryIsASymlink(t *testing.T) {
+	root := kustomizeOriginFixture(t)
+	overlay := filepath.Join(root, "overlay")
+
+	// The link and its target sit at different depths, so a relative path from
+	// one is not a relative path from the other.
+	target := filepath.Join(t.TempDir(), "a", "b", "c")
+	require.NoError(t, os.MkdirAll(target, 0o700))
+	link := filepath.Join(t.TempDir(), "tmp")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	// os.TempDir reads TMPDIR on Unix and TMP, then TEMP, on Windows.
+	t.Setenv("TMPDIR", link)
+	t.Setenv("TMP", link)
+	t.Setenv("TEMP", link)
+	require.Equal(t, link, os.TempDir(), "the wrapper must be created under the link")
+
+	byName, origins := renderedKustomizeWorkloads(t, overlay)
+
+	require.Len(t, byName, 4)
+	deployment, ok := byName["Deployment/demo"]
+	require.True(t, ok)
+	assert.Equal(t, filepath.Join(root, "base", "deployment.yaml"), origins[deployment.GetID()])
+	assert.Equal(t, filepath.Join(root, "overlay", "extra.yaml"), origins[byName["ConfigMap/extra"].GetID()])
+}
+
 // generatedConfigMap returns the ConfigMap the overlay's generator made. Kustomize
 // adds a hash to its name, so it is found by prefix.
 func generatedConfigMap(t *testing.T, byName map[string]workloadinterface.IMetadata) workloadinterface.IMetadata {
