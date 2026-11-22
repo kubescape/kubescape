@@ -19,6 +19,9 @@ var operatorScanVulnerabilitiesExamples = fmt.Sprintf(`
 `, cautils.ExecName())
 
 func getOperatorScanVulnerabilitiesCmd(ks meta.IKubescape, operatorInfo *cautils.OperatorInfo) *cobra.Command {
+	if operatorInfo == nil {
+		operatorInfo = &cautils.OperatorInfo{}
+	}
 	vulnerabilitiesScanInfo := &cautils.VulnerabilitiesScanInfo{}
 
 	configCmd := &cobra.Command{
