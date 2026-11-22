@@ -201,18 +201,18 @@ func validateOptionalUUIDConfigField(field, value, okMessage, emptyMessage strin
 
 func validateRequiredURLConfigField(field, value, okMessage string) ConfigValidationCheck {
 	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return ConfigValidationCheck{
-			Field:   field,
-			Status:  ConfigValidationStatusMissing,
-			Message: fmt.Sprintf("%s is required", field),
-		}
-	}
 	if trimmed != value {
 		return ConfigValidationCheck{
 			Field:   field,
 			Status:  ConfigValidationStatusInvalid,
 			Message: fmt.Sprintf("%s must be a valid URL without surrounding whitespace", field),
+		}
+	}
+	if value == "" {
+		return ConfigValidationCheck{
+			Field:   field,
+			Status:  ConfigValidationStatusMissing,
+			Message: fmt.Sprintf("%s is required", field),
 		}
 	}
 	parsed, err := url.ParseRequestURI(value)
@@ -245,14 +245,7 @@ func validateRequiredURLConfigField(field, value, okMessage string) ConfigValida
 }
 
 func validateOptionalURLConfigField(field, value, okMessage, emptyMessage string) ConfigValidationCheck {
-	if strings.TrimSpace(value) == "" {
-		if value != "" {
-			return ConfigValidationCheck{
-				Field:   field,
-				Status:  ConfigValidationStatusInvalid,
-				Message: fmt.Sprintf("%s must be a valid URL without surrounding whitespace", field),
-			}
-		}
+	if value == "" {
 		return ConfigValidationCheck{
 			Field:   field,
 			Status:  ConfigValidationStatusOK,

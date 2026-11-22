@@ -491,6 +491,13 @@ func TestValidateConfig_URLsRejectSurroundingWhitespace(t *testing.T) {
 	assert.False(t, resTrailingAPI.Valid)
 	assertConfigCheck(t, resTrailingAPI.Checks, "cloudAPIURL", ConfigValidationStatusInvalid)
 
+	// Whitespace-only on required cloudAPIURL
+	cfgWhitespaceAPI := validConfigForValidation()
+	cfgWhitespaceAPI.CloudAPIURL = "   "
+	resWhitespaceAPI := ValidateConfig(cfgWhitespaceAPI, ConfigValidationProfileCloud)
+	assert.False(t, resWhitespaceAPI.Valid)
+	assertConfigCheck(t, resWhitespaceAPI.Checks, "cloudAPIURL", ConfigValidationStatusInvalid)
+
 	// Leading/trailing whitespace on optional cloudReportURL
 	cfgReportSpaces := validConfigForValidation()
 	cfgReportSpaces.CloudReportURL = " https://report.example.com "
