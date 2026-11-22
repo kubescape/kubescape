@@ -310,6 +310,10 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 		rh.ScanData.VAPCoverage = vapreconcile.BuildCoverage(rh.ScanData.VAPPolicies, rh.ScanData.VAPBindings, failing, namespaceLabels)
 	}
 
+	if rh.ScanData != nil {
+		rh.ScanData.WebhookCoverage = buildWebhookCoverage(rh.ScanData, scanInfo)
+	}
+
 	// Snapshot Report.SummaryDetails.Controls, every
 	// ResourcesResult[id].AssociatedControls, and the derived summary fields
 	// (compliance score, framework compliance scores, severity counters) before

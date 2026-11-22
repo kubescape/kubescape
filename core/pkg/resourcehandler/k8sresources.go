@@ -27,6 +27,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/hostsensorutils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler/partitionstore"
 	"github.com/kubescape/kubescape/v4/core/pkg/vapreconcile"
+	"github.com/kubescape/kubescape/v4/core/pkg/webhookcoverage"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	v1 "k8s.io/api/core/v1"
@@ -302,6 +303,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
 		k8sHandler.collectVAPResources(ctx, sessionObj)
+		k8sHandler.collectWebhookConfigurations(ctx, sessionObj)
 	}
 
 	return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, nil
@@ -341,6 +343,36 @@ func (k8sHandler *K8sResourceHandler) collectVAPResources(ctx context.Context, s
 			}
 		}
 	}
+}
+
+// collectWebhookConfigurations records the cluster's validating and mutating
+// admission webhook configurations on the session. Like VAP state, they only
+// enrich the report, so a list that cannot be read is logged and the failure is
+// kept on the collection (never as an empty list) for the analysis to report.
+func (k8sHandler *K8sResourceHandler) collectWebhookConfigurations(ctx context.Context, sessionObj *cautils.OPASessionObj) {
+	if k8sHandler.k8s == nil {
+		return
+	}
+	collection, err := webhookcoverage.Collect(ctx, k8sHandler.k8s)
+	if err != nil {
+		logger.L().Debug("skipping admission webhook analysis", helpers.Error(err))
+		return
+	}
+	for _, source := range []struct {
+		kind string
+		webhookcoverage.Source
+	}{{"validating", collection.ValidatingSource}, {"mutating", collection.MutatingSource}} {
+		switch {
+		case errors.Is(source.Err, webhookcoverage.ErrUnsupported), errors.Is(source.Err, webhookcoverage.ErrForbidden):
+			logger.L().Debug("admission webhook analysis is partial: "+source.kind+" webhook configurations unavailable", helpers.Error(source.Err))
+		case source.Err != nil:
+			logger.L().Ctx(ctx).Warning("failed to collect "+source.kind+" admission webhook configurations", helpers.Error(source.Err))
+		}
+		for _, decErr := range source.DecodeErrs {
+			logger.L().Ctx(ctx).Warning("skipping undecodable admission webhook configuration", helpers.Error(decErr))
+		}
+	}
+	sessionObj.WebhookConfigurations = collection
 }
 
 // bindingsUseParamRef reports whether any binding names a parameter object via
@@ -742,6 +774,7 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
 		k8sHandler.collectVAPResources(ctx, sessionObj)
+		k8sHandler.collectWebhookConfigurations(ctx, sessionObj)
 	}
 
 	for groupResource, ids := range ksResourceMap {
