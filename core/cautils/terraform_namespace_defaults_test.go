@@ -941,3 +941,254 @@ func TestHasUnresolvableVariables_TemplateWrapExpr(t *testing.T) {
 		})
 	}
 }
+
+func TestHasUnresolvableVariables_CompoundAndCan(t *testing.T) {
+	evalCtx := &hcl.EvalContext{
+		Variables: map[string]cty.Value{
+			"var": cty.ObjectVal(map[string]cty.Value{
+				"declared_null": cty.NullVal(cty.String),
+				"valid_str":     cty.StringVal("prod"),
+				"valid_num":     cty.NumberIntVal(10),
+				"valid_obj": cty.ObjectVal(map[string]cty.Value{
+					"name": cty.StringVal("my-app"),
+				}),
+			}),
+		},
+		Functions: terraformFunctions,
+	}
+
+	tests := []struct {
+		name string
+		expr string
+		want bool
+	}{
+		// Multi-part string templates (TemplateExpr)
+		{
+			name: "multi-part template with coalesce and valid string stops before missing fallback",
+			expr: `"prefix-${coalesce(var.valid_str, var.missing)}"`,
+			want: false,
+		},
+		{
+			name: "multi-part template with trailing literal and coalesce stops before missing fallback",
+			expr: `"${coalesce(var.valid_str, var.missing)}-suffix"`,
+			want: false,
+		},
+		{
+			name: "multi-part template surrounded by literals stops before missing fallback",
+			expr: `"pre-${coalesce(var.valid_str, var.missing)}-post"`,
+			want: false,
+		},
+		{
+			name: "multi-part template with try and declared null stops before missing fallback",
+			expr: `"prefix-${try(var.declared_null, var.missing)}"`,
+			want: false,
+		},
+		{
+			name: "multi-part template with unresolvable reference in coalesce retains protection",
+			expr: `"prefix-${coalesce(var.declared_null, var.missing)}"`,
+			want: true,
+		},
+		{
+			name: "multi-part template directly referencing missing variable retains protection",
+			expr: `"prefix-${var.missing}"`,
+			want: true,
+		},
+
+		// Tuples (TupleConsExpr)
+		{
+			name: "tuple with coalesce and valid string stops before missing fallback",
+			expr: `[coalesce(var.valid_str, var.missing)]`,
+			want: false,
+		},
+		{
+			name: "tuple with multiple elements and valid coalesce stops before missing fallback",
+			expr: `["item", coalesce(var.valid_str, var.missing)]`,
+			want: false,
+		},
+		{
+			name: "tuple with unresolvable fallback in coalesce retains protection",
+			expr: `[coalesce(var.declared_null, var.missing)]`,
+			want: true,
+		},
+		{
+			name: "tuple with missing variable retains protection",
+			expr: `["item", var.missing]`,
+			want: true,
+		},
+
+		// Objects (ObjectConsExpr)
+		{
+			name: "object with coalesce and valid string stops before missing fallback",
+			expr: `{ key = coalesce(var.valid_str, var.missing) }`,
+			want: false,
+		},
+		{
+			name: "object with unresolvable fallback in coalesce retains protection",
+			expr: `{ key = coalesce(var.declared_null, var.missing) }`,
+			want: true,
+		},
+		{
+			name: "object with missing variable value retains protection",
+			expr: `{ key = var.missing }`,
+			want: true,
+		},
+
+		// can(...) function calls
+		{
+			name: "can with valid variable resolves without error",
+			expr: `can(var.valid_str)`,
+			want: false,
+		},
+		{
+			name: "can with missing variable retains protection",
+			expr: `can(var.missing)`,
+			want: true,
+		},
+		{
+			name: "can with missing attribute on known object evaluates safely without unresolvable reference",
+			expr: `can(var.valid_obj.missing_attr)`,
+			want: false,
+		},
+		{
+			name: "can with index out of bounds on empty list evaluates safely",
+			expr: `can([][0])`,
+			want: false,
+		},
+		{
+			name: "can with coalesce stopping before missing fallback resolves without error",
+			expr: `can(coalesce(var.valid_str, var.missing))`,
+			want: false,
+		},
+		{
+			name: "conditional guarded by can with valid variable selects true branch",
+			expr: `can(var.valid_str) ? var.valid_str : "fallback"`,
+			want: false,
+		},
+		{
+			name: "conditional guarded by can with missing variable retains protection",
+			expr: `can(var.missing) ? var.missing : "fallback"`,
+			want: true,
+		},
+		{
+			name: "conditional guarded by can on missing attribute on known object selects false branch cleanly",
+			expr: `can(var.valid_obj.missing_attr) ? var.valid_obj.missing_attr : "fallback"`,
+			want: false,
+		},
+
+		// Operators & general functions
+		{
+			name: "unary negation of can with valid variable",
+			expr: `!can(var.valid_str)`,
+			want: false,
+		},
+		{
+			name: "unary negation of can with missing variable retains protection",
+			expr: `!can(var.missing)`,
+			want: true,
+		},
+		{
+			name: "binary addition with coalesce stops before missing fallback",
+			expr: `coalesce(var.valid_num, var.missing) + 5`,
+			want: false,
+		},
+		{
+			name: "binary addition with missing variable retains protection",
+			expr: `var.missing + 5`,
+			want: true,
+		},
+		{
+			name: "general function call upper wrapping coalesce stops before missing fallback",
+			expr: `upper(coalesce(var.valid_str, var.missing))`,
+			want: false,
+		},
+		{
+			name: "general function call upper with missing variable retains protection",
+			expr: `upper(var.missing)`,
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file, diags := hclsyntax.ParseConfig([]byte("x = "+tt.expr), "test.tf", hcl.Pos{Line: 1, Column: 1})
+			require.False(t, diags.HasErrors())
+			attr := file.Body.(*hclsyntax.Body).Attributes["x"]
+			got := hasUnresolvableVariables(attr.Expr, evalCtx)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestExtractTypedResources_CompoundAndCanExpressions(t *testing.T) {
+	src := `
+resource "kubernetes_service_account_v1" "template_coalesce" {
+  metadata {
+    name      = "template_coalesce"
+    namespace = "ns-${coalesce(var.valid_str, var.missing)}"
+  }
+}
+
+resource "kubernetes_service_account_v1" "template_unresolvable" {
+  metadata {
+    name      = "template_unresolvable"
+    namespace = "ns-${coalesce(var.declared_null, var.missing)}"
+  }
+}
+
+resource "kubernetes_service_account_v1" "can_guard_valid" {
+  metadata {
+    name      = "can_guard_valid"
+    namespace = can(var.valid_str) ? "custom" : var.missing
+  }
+}
+
+resource "kubernetes_service_account_v1" "can_guard_missing" {
+  metadata {
+    name      = "can_guard_missing"
+    namespace = can(var.missing) ? var.missing : null
+  }
+}
+
+resource "kubernetes_service_account_v1" "can_missing_attribute_null" {
+  metadata {
+    name      = "can_missing_attribute_null"
+    namespace = can(var.valid_obj.missing_attr) ? var.valid_obj.missing_attr : null
+  }
+}
+`
+	evalCtx := &hcl.EvalContext{
+		Variables: map[string]cty.Value{
+			"var": cty.ObjectVal(map[string]cty.Value{
+				"declared_null": cty.NullVal(cty.String),
+				"valid_str":     cty.StringVal("prod"),
+				"valid_obj": cty.ObjectVal(map[string]cty.Value{
+					"name": cty.StringVal("my-app"),
+				}),
+			}),
+		},
+		Functions: terraformFunctions,
+	}
+
+	manifests, _ := extractTypedResources(parseTypedHCL(t, src), evalCtx)
+	require.Len(t, manifests, 5)
+
+	byName := map[string]map[string]interface{}{}
+	for _, m := range manifests {
+		byName[m["metadata"].(map[string]interface{})["name"].(string)] = m
+	}
+
+	assert.Equal(t, "ns-prod", byName["template_coalesce"]["metadata"].(map[string]interface{})["namespace"],
+		"multi-part template with resolved coalesce should retain resolved value")
+
+	assert.NotContains(t, byName["template_unresolvable"]["metadata"].(map[string]interface{}), "namespace",
+		"multi-part template falling back to unresolvable variable should not receive provider default")
+
+	assert.Equal(t, "custom", byName["can_guard_valid"]["metadata"].(map[string]interface{})["namespace"],
+		"can() guard on valid variable should select true branch and keep resolved value")
+
+	assert.NotContains(t, byName["can_guard_missing"]["metadata"].(map[string]interface{}), "namespace",
+		"can() guard on unresolvable variable should not receive provider default")
+
+	assert.Equal(t, "default", byName["can_missing_attribute_null"]["metadata"].(map[string]interface{})["namespace"],
+		"can() guard catching missing attribute on known object should evaluate false branch to null and receive provider default")
+}
