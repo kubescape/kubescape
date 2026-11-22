@@ -9,6 +9,7 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/maruel/natural"
 )
 
 const (
@@ -39,10 +40,11 @@ func (ksServer *KubescapeMcpserver) ListFrameworks(ctx context.Context) ([]byte,
 	return json.Marshal(sorted)
 }
 
-// ListControls lists a page of available controls, sorted by ID. When
+// ListControls lists a page of available controls, naturally sorted by ID. When
 // framework is set, only the controls that belong to it are returned; an
-// unknown framework is an *unknownFrameworkError.
-func (ksServer *KubescapeMcpserver) ListControls(ctx context.Context, framework string, limit, offset int) ([]byte, error) {
+// unknown framework is an *unknownFrameworkError. When search is set, only
+// controls matching the query in ID, name, or framework tags are returned.
+func (ksServer *KubescapeMcpserver) ListControls(ctx context.Context, framework, search string, limit, offset int) ([]byte, error) {
 	if limit < 1 || limit > maxControlsListLimit {
 		return nil, fmt.Errorf("limit must be between 1 and %d", maxControlsListLimit)
 	}
@@ -73,8 +75,11 @@ func (ksServer *KubescapeMcpserver) ListControls(ctx context.Context, framework 
 			return nil, err
 		}
 	}
+	if search = strings.TrimSpace(search); search != "" {
+		entries = filterControlsBySearch(entries, search)
+	}
 	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].ID < entries[j].ID
+		return natural.Less(entries[i].ID, entries[j].ID)
 	})
 	response := controlsListResponse{
 		Total:    len(entries),
@@ -148,6 +153,29 @@ func filterControlsByFramework(entries []metav1.ControlListEntry, framework stri
 	}
 	sort.Strings(supported)
 	return nil, &unknownFrameworkError{framework: framework, supported: supported}
+}
+
+// filterControlsBySearch filters control entries matching search in their ID,
+// name, or framework tags, case-insensitively.
+func filterControlsBySearch(entries []metav1.ControlListEntry, search string) []metav1.ControlListEntry {
+	searchLower := strings.ToLower(strings.TrimSpace(search))
+	if searchLower == "" {
+		return entries
+	}
+	out := make([]metav1.ControlListEntry, 0, len(entries))
+	for _, e := range entries {
+		if strings.Contains(strings.ToLower(e.ID), searchLower) || strings.Contains(strings.ToLower(e.Name), searchLower) {
+			out = append(out, e)
+			continue
+		}
+		for _, fw := range e.Frameworks {
+			if strings.Contains(strings.ToLower(fw), searchLower) {
+				out = append(out, e)
+				break
+			}
+		}
+	}
+	return out
 }
 
 func parsePolicyPipe(pipe string) metav1.ControlListEntry {

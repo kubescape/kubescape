@@ -1099,6 +1099,10 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if toolErr != nil {
 			return toolErr, nil
 		}
+		search, toolErr := mcpStringArg(arguments, "search")
+		if toolErr != nil {
+			return toolErr, nil
+		}
 		limit := defaultControlsListLimit
 		if requestedLimit, set, argErr := mcpIntArg(arguments, "limit"); argErr != nil {
 			return argErr, nil
@@ -1117,7 +1121,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if offset < 0 {
 			return mcpToolError(ErrCodeInvalidArgument, "offset must not be negative", map[string]any{"argument": "offset"}), nil
 		}
-		result, err := ksServer.ListControls(ctx, framework, limit, offset)
+		result, err := ksServer.ListControls(ctx, framework, search, limit, offset)
 		var unknown *unknownFrameworkError
 		if errors.As(err, &unknown) {
 			return mcpToolError(ErrCodeInvalidArgument, err.Error(),
@@ -1366,12 +1370,16 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 	listFrameworksTool := mcp.NewTool(
 		"list_frameworks",
 		mcp.WithDescription("List the names of all security frameworks available for scanning (e.g. nsa, mitre, cis-v1.23-t1.0.1). Use a returned name as the framework_name argument to run_framework_security_scan."),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 	listControlsTool := mcp.NewTool(
 		"list_controls",
-		mcp.WithDescription("List the available security controls with their IDs, names, and the frameworks they belong to. Returns total, returned, truncated, and controls; pass framework to filter and use next_offset to request the next page. Use a returned ID as a control_ids value in scan_controls."),
+		mcp.WithDescription("List the available security controls with their IDs, names, and the frameworks they belong to. Returns total, returned, truncated, and controls; pass framework or search to filter and use next_offset to request the next page. Use a returned ID as a control_ids value in scan_controls."),
 		mcp.WithString("framework",
 			mcp.Description("Only return the controls of this framework, e.g. \"NSA\" (optional, case-insensitive; see list_frameworks)"),
+		),
+		mcp.WithString("search",
+			mcp.Description("Substring to search for in control IDs, names, or frameworks (optional, case-insensitive; e.g. \"privileged\", \"container\", \"CIS-1.1\")"),
 		),
 		mcp.WithNumber("limit",
 			mcp.Description("Maximum number of controls to return (optional, default 100, maximum 500)"),
@@ -1379,6 +1387,7 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 		mcp.WithNumber("offset",
 			mcp.Description("Number of controls to skip; pass the previous response's next_offset to get the next page (optional, default 0)"),
 		),
+		mcp.WithReadOnlyHintAnnotation(true),
 	)
 	listAdmissionPoliciesTool := mcp.NewTool(
 		"list_admission_policies",

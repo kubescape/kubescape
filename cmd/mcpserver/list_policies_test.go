@@ -9,6 +9,9 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+	"github.com/maruel/natural"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -66,7 +69,7 @@ func TestListFrameworks_ReturnsJSON(t *testing.T) {
 
 func TestListControls_ReturnsJSON(t *testing.T) {
 	srv := &KubescapeMcpserver{}
-	data, err := srv.ListControls(t.Context(), "", defaultControlsListLimit, 0)
+	data, err := srv.ListControls(t.Context(), "", "", defaultControlsListLimit, 0)
 	if err != nil {
 		t.Skipf("skipping: could not download controls (no network?): %v", err)
 	}
@@ -90,14 +93,14 @@ func TestListFrameworks_IsSorted(t *testing.T) {
 
 func TestListControls_IsSorted(t *testing.T) {
 	srv := &KubescapeMcpserver{}
-	data, err := srv.ListControls(t.Context(), "", defaultControlsListLimit, 0)
+	data, err := srv.ListControls(t.Context(), "", "", defaultControlsListLimit, 0)
 	if err != nil {
 		t.Skipf("skipping: could not download controls (no network?): %v", err)
 	}
 	var response controlsListResponse
 	require.NoError(t, json.Unmarshal(data, &response))
 	for i := 1; i < len(response.Controls); i++ {
-		assert.LessOrEqual(t, response.Controls[i-1].ID, response.Controls[i].ID, "controls must be sorted by ID")
+		assert.True(t, natural.Less(response.Controls[i-1].ID, response.Controls[i].ID) || response.Controls[i-1].ID == response.Controls[i].ID, "controls must be naturally sorted by ID")
 	}
 }
 
@@ -279,4 +282,132 @@ func TestListControlsTool_FrameworkFilterLocalPolicy(t *testing.T) {
 	assert.Equal(t, []string{"C-0001", "C-0012"}, listControlIDs(t, ks, map[string]any{}))
 	assert.Equal(t, []string{"C-0001", "C-0012"}, listControlIDs(t, ks, map[string]any{"framework": "AllControls"}))
 	assert.Equal(t, []string{"C-0012"}, listControlIDs(t, ks, map[string]any{"framework": "nsa"}))
+}
+
+func TestFilterControlsBySearch(t *testing.T) {
+	entries := []metav1.ControlListEntry{
+		{ID: "C-0001", Name: "Forbidden Container Registries", Frameworks: []string{"AllControls"}},
+		{ID: "C-0012", Name: "Applications credentials in configuration files", Frameworks: []string{"AllControls", "NSA", "MITRE"}},
+		{ID: "C-0017", Name: "Immutable container filesystem", Frameworks: []string{"AllControls", "NSA"}},
+		{ID: "C-0030", Name: "Ingress and Egress blocked", Frameworks: []string{}},
+	}
+	ids := func(es []metav1.ControlListEntry) []string {
+		out := make([]string, 0, len(es))
+		for _, e := range es {
+			out = append(out, e.ID)
+		}
+		return out
+	}
+
+	assert.Equal(t, []string{"C-0001", "C-0012", "C-0017", "C-0030"}, ids(filterControlsBySearch(entries, "")))
+	assert.Equal(t, []string{"C-0001", "C-0012", "C-0017", "C-0030"}, ids(filterControlsBySearch(entries, "   ")))
+	assert.Equal(t, []string{"C-0017"}, ids(filterControlsBySearch(entries, "c-0017")), "matching by ID is case-insensitive")
+	assert.Equal(t, []string{"C-0001", "C-0017"}, ids(filterControlsBySearch(entries, "container")), "matching by Name")
+	assert.Equal(t, []string{"C-0012"}, ids(filterControlsBySearch(entries, "CREDENTIALS")), "matching by Name is case-insensitive")
+	assert.Equal(t, []string{"C-0012"}, ids(filterControlsBySearch(entries, "mitre")), "matching by Framework")
+	noMatches := filterControlsBySearch(entries, "nonexistent-keyword")
+	assert.Empty(t, noMatches)
+	assert.NotNil(t, noMatches, "no match returns empty slice, not nil")
+}
+
+func TestListControlsTool_Search(t *testing.T) {
+	ks := listControlsServer(t)
+
+	// Search matching multiple controls by name
+	page := listControls(t, ks, map[string]any{"search": "container"})
+	assert.Equal(t, 2, page.Total)
+	assert.Equal(t, 2, page.Returned)
+	assert.Equal(t, []string{"C-0001", "C-0017"}, listControlIDs(t, ks, map[string]any{"search": "container"}))
+
+	// Search matching single control by ID
+	assert.Equal(t, []string{"C-0012"}, listControlIDs(t, ks, map[string]any{"search": "c-0012"}))
+
+	// Search matching by framework
+	assert.Equal(t, []string{"C-0012"}, listControlIDs(t, ks, map[string]any{"search": "mitre"}))
+
+	// Search with null or whitespace is treated as absent
+	assert.Equal(t, []string{"C-0001", "C-0012", "C-0017"}, listControlIDs(t, ks, map[string]any{"search": nil}))
+	assert.Equal(t, []string{"C-0001", "C-0012", "C-0017"}, listControlIDs(t, ks, map[string]any{"search": "  "}))
+
+	// Combined framework and search
+	// C-0001 has "container" in name but is not in NSA. Only C-0017 matches both.
+	assert.Equal(t, []string{"C-0017"}, listControlIDs(t, ks, map[string]any{"framework": "nsa", "search": "container"}))
+
+	// Search with paging
+	paged := listControls(t, ks, map[string]any{"search": "container", "limit": float64(1)})
+	assert.Equal(t, 2, paged.Total)
+	assert.Equal(t, 1, paged.Returned)
+	assert.True(t, paged.Truncated)
+	require.NotNil(t, paged.NextOffset)
+	assert.Equal(t, 1, *paged.NextOffset)
+	assert.Equal(t, "C-0001", paged.Controls[0].ID)
+
+	pagedNext := listControls(t, ks, map[string]any{"search": "container", "limit": float64(1), "offset": float64(*paged.NextOffset)})
+	assert.Equal(t, 2, pagedNext.Total)
+	assert.Equal(t, 1, pagedNext.Returned)
+	assert.False(t, pagedNext.Truncated)
+	assert.Nil(t, pagedNext.NextOffset)
+	assert.Equal(t, "C-0017", pagedNext.Controls[0].ID)
+
+	// Search with no matches returns empty list
+	empty := listControls(t, ks, map[string]any{"search": "nonexistent"})
+	assert.Equal(t, 0, empty.Total)
+	assert.Equal(t, 0, empty.Returned)
+	assert.False(t, empty.Truncated)
+	assert.Empty(t, empty.Controls)
+	assert.NotNil(t, empty.Controls)
+
+	// Invalid search argument type returns error
+	result, err := ks.CallTool(context.Background(), "list_controls", map[string]any{"search": 123})
+	require.NoError(t, err)
+	assert.True(t, result.IsError)
+	assert.Contains(t, toolResultText(t, result), "search argument must be a string")
+}
+
+func TestListControlsTool_NaturalSort(t *testing.T) {
+	ks := &KubescapeMcpserver{}
+	ks.startPolicyLoad(func() getter.IPolicyGetter {
+		return &fakePolicyGetter{frameworks: []string{"CIS"}, controls: []string{
+			"CIS-1.1.10|Disable automounting service account tokens|CIS",
+			"CIS-1.1.2|Ensure that the permissions on the file are configured|CIS",
+			"CIS-1.1.1|Ensure that the API server pod specification file permissions are set|CIS",
+		}}
+	})
+
+	// Standard lexical sort puts CIS-1.1.10 before CIS-1.1.2.
+	// Natural sort puts CIS-1.1.1, CIS-1.1.2, CIS-1.1.10 in numeric sequence.
+	assert.Equal(t, []string{"CIS-1.1.1", "CIS-1.1.2", "CIS-1.1.10"}, listControlIDs(t, ks, map[string]any{}))
+}
+
+func TestListPolicyTools_RegistrationAndAnnotations(t *testing.T) {
+	s := server.NewMCPServer("test", "0.0.1", server.WithToolCapabilities(false))
+	createPolicyListingTools(&KubescapeMcpserver{s: s})
+
+	resp := s.HandleMessage(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	raw, err := json.Marshal(resp)
+	require.NoError(t, err)
+
+	var parsed struct {
+		Result struct {
+			Tools []mcp.Tool `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &parsed))
+
+	toolMap := make(map[string]mcp.Tool)
+	for _, tool := range parsed.Result.Tools {
+		toolMap[tool.Name] = tool
+	}
+
+	fwTool, ok := toolMap["list_frameworks"]
+	require.True(t, ok, "list_frameworks must be registered")
+	require.NotNil(t, fwTool.Annotations.ReadOnlyHint, "list_frameworks must have ReadOnlyHint annotation")
+	assert.True(t, *fwTool.Annotations.ReadOnlyHint)
+
+	ctrlTool, ok := toolMap["list_controls"]
+	require.True(t, ok, "list_controls must be registered")
+	require.NotNil(t, ctrlTool.Annotations.ReadOnlyHint, "list_controls must have ReadOnlyHint annotation")
+	assert.True(t, *ctrlTool.Annotations.ReadOnlyHint)
+	assert.Contains(t, ctrlTool.InputSchema.Properties, "search", "list_controls schema must have search property")
+	assert.Contains(t, ctrlTool.InputSchema.Properties, "framework", "list_controls schema must have framework property")
 }

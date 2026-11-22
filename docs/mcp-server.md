@@ -354,12 +354,13 @@ List the names of the frameworks available for scanning (for example `NSA`, `MIT
 
 #### `list_controls`
 
-List the security controls with their IDs, names and the frameworks they belong to. Results are paginated to keep responses manageable. Use `framework` to filter to one framework.
+List the security controls with their IDs, names and the frameworks they belong to, naturally sorted by ID. Results are paginated to keep responses manageable. Use `framework` to filter to one framework, or `search` to match keywords across control IDs, names, and frameworks.
 
 **Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `framework` | string | No | Only controls of this framework, case-insensitive (see `list_frameworks`). An unknown name returns an error listing the valid ones |
+| `search` | string | No | Substring to search for in control IDs, names, or frameworks, case-insensitive (e.g. `"privileged"`, `"container"`, `"CIS-1.1"`) |
 | `limit` | number | No | Maximum number of controls per page (default 100, maximum 500) |
 | `offset` | number | No | Number of controls to skip (default 0); use the previous response's `next_offset` to fetch the next page |
 
