@@ -54,16 +54,27 @@ func (yp *YamlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 	if err := printer.PrepareOutput(yp.writer); err != nil {
 		return err
 	}
+	hasReport := opaSessionObj != nil && opaSessionObj.Report != nil
+	if !hasReport && len(imageScanData) == 0 {
+		var err error
+		if opaSessionObj != nil {
+			err = fmt.Errorf("no data provided for YAML output")
+		} else {
+			err = fmt.Errorf("no data provided")
+		}
+		logger.L().Ctx(ctx).Error("failed to write results in yaml format", helpers.Error(err))
+		return fmt.Errorf("failed to write results in yaml format: %w", err)
+	}
+	if yp.writer == nil {
+		return fmt.Errorf("failed to write yaml results: output writer is nil")
+	}
+
 	var err error
 
-	if opaSessionObj != nil && opaSessionObj.Report != nil {
+	if hasReport {
 		err = printConfigurationsScanningYaml(opaSessionObj, imageScanData, yp)
 	} else if len(imageScanData) > 0 {
 		err = printImageScanningYaml(imageScanData, yp)
-	} else if opaSessionObj != nil {
-		err = printConfigurationsScanningYaml(opaSessionObj, imageScanData, yp)
-	} else {
-		err = fmt.Errorf("no data provided")
 	}
 
 	if err != nil {
@@ -76,6 +87,12 @@ func (yp *YamlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 }
 
 func printImageScanningYaml(imageScanData []cautils.ImageScanData, yp *YamlPrinter) error {
+	if len(imageScanData) == 0 {
+		return fmt.Errorf("no data provided for YAML output")
+	}
+	if yp == nil || yp.writer == nil {
+		return fmt.Errorf("failed to write yaml results: output writer is nil")
+	}
 	if len(imageScanData) == 1 {
 		var buf bytes.Buffer
 		if err := presentImageScan(imageScanData[0], &buf); err != nil {
@@ -119,6 +136,9 @@ func printConfigurationsScanningYaml(opaSessionObj *cautils.OPASessionObj, image
 	finalizedReport := FinalizeResults(opaSessionObj)
 	if finalizedReport == nil {
 		return fmt.Errorf("no data provided for YAML output")
+	}
+	if yp == nil || yp.writer == nil {
+		return fmt.Errorf("failed to write yaml results: output writer is nil")
 	}
 
 	if imageScanData != nil {

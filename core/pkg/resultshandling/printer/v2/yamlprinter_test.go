@@ -399,3 +399,49 @@ func TestYamlPrinter_ImageScan_NilReportFallback(t *testing.T) {
 	require.NoError(t, yaml.Unmarshal(raw, &doc))
 	assert.Contains(t, doc, "matches")
 }
+
+func TestActionPrint_Yaml_NilWriterReturnsError(t *testing.T) {
+	yp := NewYamlPrinter()
+
+	// Posture scan path with nil writer returns error without panicking
+	require.NotPanics(t, func() {
+		err := yp.ActionPrint(context.Background(), cautils.NewOPASessionObjMock(), nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	// Single image scan fallback path with nil writer returns error without panicking
+	require.NotPanics(t, func() {
+		err := yp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{buildSeverityExceptionImageScanData()})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	// Multi-image scan path with nil writer returns error without panicking
+	require.NotPanics(t, func() {
+		err := yp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{
+			buildSeverityExceptionImageScanData(),
+			buildSeverityExceptionImageScanData(),
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestPrintConfigurationsScanningYaml_NilWriterReturnsError(t *testing.T) {
+	yp := NewYamlPrinter()
+	require.NotPanics(t, func() {
+		err := printConfigurationsScanningYaml(cautils.NewOPASessionObjMock(), nil, yp)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestPrintImageScanningYaml_NilWriterReturnsError(t *testing.T) {
+	yp := NewYamlPrinter()
+	require.NotPanics(t, func() {
+		err := printImageScanningYaml([]cautils.ImageScanData{buildSeverityExceptionImageScanData()}, yp)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
