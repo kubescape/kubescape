@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -21,14 +22,17 @@ type InfoStars struct {
 	Info  string
 }
 
-func MapInfoToPrintInfoFromIface(ctrls []reportsummary.IControlSummary) []InfoStars {
-	ordered := make([]reportsummary.IControlSummary, 0, len(ctrls))
-	for _, ctrl := range ctrls {
-		if ctrl != nil {
-			ordered = append(ordered, ctrl)
-		}
+// isNilSummary also recognizes a nil summary pointer held in a non-nil interface.
+func isNilSummary(summary any) bool {
+	if summary == nil {
+		return true
 	}
-	return collectInfoStars(ordered)
+	v := reflect.ValueOf(summary)
+	return v.Kind() == reflect.Pointer && v.IsNil()
+}
+
+func MapInfoToPrintInfoFromIface(ctrls []reportsummary.IControlSummary) []InfoStars {
+	return collectInfoStars(ctrls)
 }
 
 func MapInfoToPrintInfo(controls reportsummary.ControlSummaries) []InfoStars {
@@ -47,7 +51,7 @@ func MapInfoToPrintInfo(controls reportsummary.ControlSummaries) []InfoStars {
 func collectInfoStars(ctrls []reportsummary.IControlSummary) []InfoStars {
 	filtered := make([]reportsummary.IControlSummary, 0, len(ctrls))
 	for _, ctrl := range ctrls {
-		if ctrl != nil {
+		if !isNilSummary(ctrl) {
 			filtered = append(filtered, ctrl)
 		}
 	}
@@ -114,7 +118,7 @@ func ImageSeverityToInt(severity string) int {
 func FrameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) string {
 	valid := make([]reportsummary.IFrameworkSummary, 0, len(frameworks))
 	for _, fw := range frameworks {
-		if fw != nil {
+		if !isNilSummary(fw) {
 			valid = append(valid, fw)
 		}
 	}
