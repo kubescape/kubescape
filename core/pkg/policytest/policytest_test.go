@@ -128,6 +128,33 @@ func TestCompare_IgnoresPathOrderAndResponseOrder(t *testing.T) {
 	assert.Empty(t, Compare(got, want), "response order and path order must not affect equality")
 }
 
+// TestCompare_DoesNotReorderCallerSlices guards the shallow copy in normalize:
+// sorting must happen on clones, not on the path lists the caller still owns.
+func TestCompare_DoesNotReorderCallerSlices(t *testing.T) {
+	newResponse := func() reporthandling.RuleResponse {
+		return reporthandling.RuleResponse{
+			AlertMessage: "alert",
+			AssistedRemediation: reporthandling.AssistedRemediation{
+				FailedPaths: []string{"spec.z", "spec.a"},
+				ReviewPaths: []string{"spec.y", "spec.b"},
+				DeletePaths: []string{"spec.x", "spec.c"},
+				FixPaths: []armotypes.FixPath{
+					{Path: "spec.w", Value: "true"},
+					{Path: "spec.d", Value: "false"},
+				},
+			},
+		}
+	}
+	got := []reporthandling.RuleResponse{newResponse()}
+	want := []reporthandling.RuleResponse{newResponse()}
+
+	require.Empty(t, Compare(got, want))
+
+	for name, responses := range map[string][]reporthandling.RuleResponse{"got": got, "want": want} {
+		assert.Equal(t, newResponse(), responses[0], "Compare must leave %s as the caller passed it", name)
+	}
+}
+
 // TestCompare_TreatsNilAndEmptyListsAsEqual covers each list a rule's response
 // can carry: a rule that writes "fixPaths": [] produces an empty list, while a
 // fixture that leaves the field out produces nil.

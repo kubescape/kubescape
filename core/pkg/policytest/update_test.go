@@ -59,6 +59,39 @@ func TestWriteExpected_ReportsChangeOnlyWhenContentDiffers(t *testing.T) {
 	assert.True(t, changed)
 }
 
+// TestWriteExpected_PathOrderDoesNotDependOnStaleFile: the equality check
+// against an existing expected.json must not reorder the responses that are
+// then written, or the same rule output would be recorded differently
+// depending on whether a stale file was there to compare against.
+func TestWriteExpected_PathOrderDoesNotDependOnStaleFile(t *testing.T) {
+	newResponses := func() []reporthandling.RuleResponse {
+		return []reporthandling.RuleResponse{{
+			AlertMessage: "alert",
+			AssistedRemediation: reporthandling.AssistedRemediation{
+				FailedPaths: []string{"spec.z", "spec.a"},
+			},
+		}}
+	}
+	path := func(c Case) string { return filepath.Join(c.Dir, expectedFileName) }
+
+	missing := Case{Name: "missing", Dir: t.TempDir()}
+	changed, err := WriteExpected(missing, newResponses())
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	stale := Case{Name: "stale", Dir: t.TempDir()}
+	require.NoError(t, os.WriteFile(path(stale), []byte("[]\n"), 0o600))
+	changed, err = WriteExpected(stale, newResponses())
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	fromMissing, err := os.ReadFile(path(missing))
+	require.NoError(t, err)
+	fromStale, err := os.ReadFile(path(stale))
+	require.NoError(t, err)
+	assert.Equal(t, string(fromMissing), string(fromStale))
+}
+
 func TestWriteExpected_CreatesMissingFileWithEmptyList(t *testing.T) {
 	rule := scaffoldedRuleUnderTest(t)
 	c := caseByName(t, rule, cleanCaseName)
