@@ -533,10 +533,14 @@ func deriveTimeoutContext(scanInfo *cautils.ScanInfo, ks meta.IKubescape) (conte
 	if ks == nil {
 		return context.Background(), func() {}
 	}
-	if scanInfo.ScanTimeout <= 0 {
-		return ks.Context(), func() {}
+	ctx := ks.Context()
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	return context.WithTimeout(ks.Context(), scanInfo.ScanTimeout)
+	if scanInfo == nil || scanInfo.ScanTimeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, scanInfo.ScanTimeout)
 }
 
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {

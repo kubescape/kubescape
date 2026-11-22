@@ -1062,6 +1062,42 @@ func TestSecurityScan_ZeroTimeoutNoDeadline(t *testing.T) {
 	assert.False(t, hasDeadline, "ScanContext() must not receive a deadline when ScanTimeout is 0")
 }
 
+func TestDeriveTimeoutContext_NilSafety(t *testing.T) {
+	// Nil ks returns Background context and no-op cancel
+	ctx, cancel := deriveTimeoutContext(&cautils.ScanInfo{ScanTimeout: time.Minute}, nil)
+	require.NotNil(t, ctx)
+	require.NotNil(t, cancel)
+	_, hasDeadline := ctx.Deadline()
+	assert.False(t, hasDeadline)
+	cancel()
+
+	// Nil scanInfo returns ks.Context() and no-op cancel without panicking
+	parentCtx := context.Background()
+	ks := &contextTrackingKubescape{ctx: parentCtx}
+	ctx, cancel = deriveTimeoutContext(nil, ks)
+	require.NotNil(t, ctx)
+	require.NotNil(t, cancel)
+	assert.Equal(t, parentCtx, ctx)
+	_, hasDeadline = ctx.Deadline()
+	assert.False(t, hasDeadline)
+	cancel()
+
+	// ks with nil context falls back to Background context without panicking
+	ksNilCtx := &contextTrackingKubescape{ctx: nil}
+	ctx, cancel = deriveTimeoutContext(&cautils.ScanInfo{ScanTimeout: time.Minute}, ksNilCtx)
+	require.NotNil(t, ctx)
+	require.NotNil(t, cancel)
+	_, hasDeadline = ctx.Deadline()
+	assert.True(t, hasDeadline)
+	cancel()
+
+	// Both nil returns Background context and no-op cancel
+	ctx, cancel = deriveTimeoutContext(nil, nil)
+	require.NotNil(t, ctx)
+	require.NotNil(t, cancel)
+	cancel()
+}
+
 func TestGetScanCommand_RegistryCredentialFlags(t *testing.T) {
 	cmd := GetScanCommand(&mocks.MockIKubescape{})
 
