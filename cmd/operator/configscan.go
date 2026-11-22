@@ -18,6 +18,9 @@ var operatorScanConfigExamples = fmt.Sprintf(`
 `, cautils.ExecName())
 
 func getOperatorScanConfigCmd(ks meta.IKubescape, operatorInfo *cautils.OperatorInfo) *cobra.Command {
+	if operatorInfo == nil {
+		operatorInfo = &cautils.OperatorInfo{}
+	}
 	configScanInfo := &cautils.ConfigScanInfo{}
 
 	configCmd := &cobra.Command{

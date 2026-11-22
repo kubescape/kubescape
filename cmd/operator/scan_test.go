@@ -57,6 +57,27 @@ func TestGetOperatorScanCmd(t *testing.T) {
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }
 
+func TestGetOperatorScanCmd_NilOperatorInfo(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+
+	cmd := getOperatorScanCmd(mockKubescape, nil)
+	require.NotNil(t, cmd)
+	assert.Equal(t, "scan", cmd.Use)
+
+	// Verify Args doesn't panic when operatorInfo is nil
+	err := cmd.Args(&cobra.Command{}, []string{"configurations"})
+	assert.NoError(t, err)
+
+	// Verify child commands don't panic when created with nil operatorInfo
+	configCmd := getOperatorScanConfigCmd(mockKubescape, nil)
+	require.NotNil(t, configCmd)
+	assert.NoError(t, configCmd.Args(configCmd, []string{}))
+
+	vulnCmd := getOperatorScanVulnerabilitiesCmd(mockKubescape, nil)
+	require.NotNil(t, vulnCmd)
+	assert.NoError(t, vulnCmd.Args(vulnCmd, []string{}))
+}
+
 // TestOperatorScanCmd_NamespaceFlagPropagatesToChildCommands guards against a
 // regression where operatorInfo was passed by value into the "configurations"
 // and "vulnerabilities" child commands: the child received a copy frozen at
