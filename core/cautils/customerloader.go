@@ -168,12 +168,42 @@ func NewLocalConfig(accountID, accessKey, clusterName, customClusterName string)
 	return lc
 }
 
-func (lc *LocalConfig) GetConfigObj() *ConfigObj  { return lc.configObj }
-func (lc *LocalConfig) GetAccountID() string      { return lc.configObj.AccountID }
-func (lc *LocalConfig) GetContextName() string    { return lc.configObj.ClusterName }
-func (lc *LocalConfig) GetCloudReportURL() string { return lc.configObj.CloudReportURL }
-func (lc *LocalConfig) GetCloudAPIURL() string    { return lc.configObj.CloudAPIURL }
-func (lc *LocalConfig) GetAccessKey() string      { return lc.configObj.AccessKey }
+func (lc *LocalConfig) GetConfigObj() *ConfigObj {
+	if lc == nil {
+		return nil
+	}
+	return lc.configObj
+}
+func (lc *LocalConfig) GetAccountID() string {
+	if lc == nil || lc.configObj == nil {
+		return ""
+	}
+	return lc.configObj.AccountID
+}
+func (lc *LocalConfig) GetContextName() string {
+	if lc == nil || lc.configObj == nil {
+		return ""
+	}
+	return lc.configObj.ClusterName
+}
+func (lc *LocalConfig) GetCloudReportURL() string {
+	if lc == nil || lc.configObj == nil {
+		return ""
+	}
+	return lc.configObj.CloudReportURL
+}
+func (lc *LocalConfig) GetCloudAPIURL() string {
+	if lc == nil || lc.configObj == nil {
+		return ""
+	}
+	return lc.configObj.CloudAPIURL
+}
+func (lc *LocalConfig) GetAccessKey() string {
+	if lc == nil || lc.configObj == nil {
+		return ""
+	}
+	return lc.configObj.AccessKey
+}
 
 func (lc *LocalConfig) GenerateAccountID() (string, error) {
 	lc.configObj.AccountID = uuid.NewString()
@@ -188,6 +218,9 @@ func (lc *LocalConfig) DeleteCredentials() error {
 }
 
 func (lc *LocalConfig) UpdateCachedConfig() error {
+	if lc == nil || lc.configObj == nil {
+		return errors.New("uninitialized local config")
+	}
 	logger.L().Debug("updating cached config", helpers.Interface("configObj", lc.configObj))
 	return updateConfigFile(lc.configObj)
 }
@@ -270,14 +303,47 @@ func NewClusterConfig(ctx context.Context, k8s *k8sinterface.KubernetesApi, acco
 	return c
 }
 
-func (c *ClusterConfig) GetConfigObj() *ConfigObj  { return c.configObj }
-func (c *ClusterConfig) GetDefaultNS() string      { return c.configMapNamespace }
-func (c *ClusterConfig) GetAccountID() string      { return c.configObj.AccountID }
-func (c *ClusterConfig) GetCloudReportURL() string { return c.configObj.CloudReportURL }
-func (c *ClusterConfig) GetCloudAPIURL() string    { return c.configObj.CloudAPIURL }
-func (c *ClusterConfig) GetAccessKey() string      { return c.configObj.AccessKey }
+func (c *ClusterConfig) GetConfigObj() *ConfigObj {
+	if c == nil {
+		return nil
+	}
+	return c.configObj
+}
+func (c *ClusterConfig) GetDefaultNS() string {
+	if c == nil {
+		return ""
+	}
+	return c.configMapNamespace
+}
+func (c *ClusterConfig) GetAccountID() string {
+	if c == nil || c.configObj == nil {
+		return ""
+	}
+	return c.configObj.AccountID
+}
+func (c *ClusterConfig) GetCloudReportURL() string {
+	if c == nil || c.configObj == nil {
+		return ""
+	}
+	return c.configObj.CloudReportURL
+}
+func (c *ClusterConfig) GetCloudAPIURL() string {
+	if c == nil || c.configObj == nil {
+		return ""
+	}
+	return c.configObj.CloudAPIURL
+}
+func (c *ClusterConfig) GetAccessKey() string {
+	if c == nil || c.configObj == nil {
+		return ""
+	}
+	return c.configObj.AccessKey
+}
 
 func (c *ClusterConfig) UpdateCachedConfig() error {
+	if c == nil || c.configObj == nil {
+		return errors.New("uninitialized cluster config")
+	}
 	logger.L().Debug("updating cached config", helpers.Interface("configObj", c.configObj))
 	return updateConfigFile(c.configObj)
 }
@@ -286,6 +352,9 @@ func (c *ClusterConfig) DeleteCachedConfig(_ context.Context) error {
 	return deleteCachedConfigFile()
 }
 func (c *ClusterConfig) GetContextName() string {
+	if c == nil || c.configObj == nil {
+		return ""
+	}
 	return c.configObj.ClusterName
 }
 
