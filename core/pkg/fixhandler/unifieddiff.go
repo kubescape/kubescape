@@ -55,6 +55,31 @@ func unifiedDiff(name, oldContent, newContent string) string {
 	return UnifiedDiff(name, oldContent, newContent)
 }
 
+// UnifiedDiffNewFile returns the unified diff for a newly created file at name,
+// with --- /dev/null as the old-side header so git apply and patch create the file.
+func UnifiedDiffNewFile(name, content string) string {
+	if content == "" {
+		return ""
+	}
+	lines := diffLines("", content)
+
+	var out strings.Builder
+	oldName, newName := patchFileName("a/"+name), patchFileName("b/"+name)
+	out.WriteString("diff --git " + oldName + " " + newName + "\n")
+	out.WriteString("new file mode 100644\n")
+	out.WriteString("--- /dev/null\n")
+	out.WriteString("+++ " + newName + patchNameTerminator(name) + "\n")
+
+	for _, hunk := range diffHunks(lines) {
+		writeHunk(&out, hunk)
+	}
+	return out.String()
+}
+
+func unifiedDiffNewFile(name, content string) string {
+	return UnifiedDiffNewFile(name, content)
+}
+
 // diffLines runs a line diff and numbers every line of the result.
 func diffLines(oldContent, newContent string) []diffLine {
 	dmp := diffmatchpatch.New()
