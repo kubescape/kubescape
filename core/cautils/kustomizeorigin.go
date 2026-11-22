@@ -126,6 +126,13 @@ func renderWithOrigins(newKustomizer func() *krusty.Kustomizer, directory string
 		return nil, "", false
 	}
 	defer func() { _ = os.RemoveAll(wrapperDir) }()
+	// Kustomize resolves the wrapper's directory before it follows the
+	// reference, so the reference has to start from the resolved directory. On
+	// macOS the temporary directory is under /var, a link to /private/var, and a
+	// reference from the unresolved one climbs a level too few.
+	if resolved, err := filepath.EvalSymlinks(wrapperDir); err == nil {
+		wrapperDir = resolved
+	}
 
 	reference, err := filepath.Rel(wrapperDir, directory)
 	if err != nil {
