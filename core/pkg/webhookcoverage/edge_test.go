@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -396,9 +397,12 @@ func TestNamespaceIsTheCoreResourceOnly(t *testing.T) {
 			Rules:             []admissionregistrationv1.RuleWithOperations{rule([]string{"example.io"}, []string{"v1"}, []string{"namespaces"}, admissionregistrationv1.OperationAll)},
 			NamespaceSelector: selector("env", metav1.LabelSelectorOpIn, "prod"), MatchPolicy: exact(),
 		})
+		// DELETE takes the labels from the stored namespace, so the missing
+		// namespace matters. (CREATE and UPDATE read the request object, see
+		// TestNamespacesPluralFollowsTheAPIServerDispatch.)
 		got := verdict(t, idx, Request{
-			Group: "example.io", Version: "v1", Resource: "namespaces", Kind: "Namespace", Operation: create,
-			Name: "x", ObjectLabelsKnown: true,
+			Group: "example.io", Version: "v1", Resource: "namespaces", Kind: "Namespace", Operation: deleteO,
+			Name: "x", OldObjectLabelsKnown: true,
 		})
 		assert.Equal(t, Indeterminate, got.Verdict)
 		assert.Equal(t, []Reason{ReasonNamespaceUnknown}, got.Reasons)
@@ -603,5 +607,165 @@ func TestIncompleteRequestKeepsDefiniteRuleExclusions(t *testing.T) {
 		idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{
 			Rules: []admissionregistrationv1.RuleWithOperations{rule([]string{""}, []string{"v1"}, []string{"pods"}, "PATCH")}, MatchPolicy: exact()})
 		assert.Equal(t, Indeterminate, verdict(t, idx, podRequest(noVersion)).Verdict)
+	})
+}
+
+func widgetRule(scope admissionregistrationv1.ScopeType) admissionregistrationv1.RuleWithOperations {
+	return scoped(rule([]string{"example.org"}, []string{"v1"}, []string{"widgets"}, create), scope)
+}
+
+func widgetRequest(mod func(*Request)) Request {
+	return Request{Group: "example.org", Version: "v1", Resource: "widgets", Kind: "Widget", Operation: create, Name: "w"}.with(mod)
+}
+
+// The Equivalent probe only runs for a scope reading no rule covers directly.
+func TestEquivalentProbeSkipsCoveredScopeReadings(t *testing.T) {
+	idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{
+		Rules: []admissionregistrationv1.RuleWithOperations{widgetRule(admissionregistrationv1.NamespacedScope)}, MatchPolicy: equivalent(),
+	})
+	got := verdict(t, idx, widgetRequest(func(r *Request) { r.ScopeUnknown = true }))
+	assert.Equal(t, Indeterminate, got.Verdict)
+	assert.Equal(t, []Reason{ReasonResourceScopeUnknown}, got.Reasons,
+		"the Namespaced reading is covered directly and the cluster reading cannot be reached by a Namespaced rule")
+
+	t.Run("an uncovered reading an equivalent could cover keeps the reason", func(t *testing.T) {
+		idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{
+			Rules: []admissionregistrationv1.RuleWithOperations{
+				widgetRule(admissionregistrationv1.NamespacedScope),
+				scoped(rule([]string{"other.io"}, []string{"v1"}, []string{"gadgets"}, create), admissionregistrationv1.ClusterScope),
+			}, MatchPolicy: equivalent(),
+		})
+		got := verdict(t, idx, widgetRequest(func(r *Request) { r.ScopeUnknown = true }))
+		assert.Equal(t, Indeterminate, got.Verdict)
+		assert.Equal(t, []Reason{ReasonResourceScopeUnknown, ReasonEquivalentResources}, got.Reasons)
+	})
+}
+
+// Rule and namespaceSelector are judged together for each possible scope.
+func TestUnknownScopeCombinesRuleAndNamespaceSelectorPerScope(t *testing.T) {
+	prod := selector("env", metav1.LabelSelectorOpIn, "prod")
+	unknownScope := func(r *Request) {
+		r.ScopeUnknown = true
+		r.NamespaceLabels, r.NamespaceLabelsKnown = map[string]string{"env": "dev"}, true
+	}
+	hook := func(rules ...admissionregistrationv1.RuleWithOperations) *Index {
+		return validatingIndex(admissionregistrationv1.ValidatingWebhook{Rules: rules, NamespaceSelector: prod, MatchPolicy: exact()})
+	}
+
+	t.Run("both readings are definitely excluded", func(t *testing.T) {
+		got := verdict(t, hook(widgetRule(admissionregistrationv1.NamespacedScope)), widgetRequest(unknownScope))
+		assert.Equal(t, NotMatched, got.Verdict)
+		assert.Equal(t, []Reason{ReasonNamespaceSelectorExcludes, ReasonRulesDoNotMatch}, got.Reasons)
+	})
+	t.Run("a Cluster rule keeps the cluster reading, which no selector filters", func(t *testing.T) {
+		got := verdict(t, hook(widgetRule(admissionregistrationv1.ClusterScope)), widgetRequest(unknownScope))
+		assert.Equal(t, Indeterminate, got.Verdict)
+		assert.Equal(t, []Reason{ReasonResourceScopeUnknown}, got.Reasons)
+	})
+	t.Run("a requirement the known labels satisfy leaves the namespaced reading standing", func(t *testing.T) {
+		got := verdict(t, hook(widgetRule(admissionregistrationv1.NamespacedScope)), widgetRequest(func(r *Request) {
+			unknownScope(r)
+			r.NamespaceLabels = map[string]string{"env": "prod"}
+		}))
+		assert.Equal(t, Indeterminate, got.Verdict)
+		assert.Equal(t, []Reason{ReasonResourceScopeUnknown}, got.Reasons)
+	})
+	t.Run("a requirement on the unknown namespace name stays undecided", func(t *testing.T) {
+		byName := selector(corev1.LabelMetadataName, metav1.LabelSelectorOpIn, "prod")
+		idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{
+			Rules: []admissionregistrationv1.RuleWithOperations{widgetRule(admissionregistrationv1.NamespacedScope)}, NamespaceSelector: byName, MatchPolicy: exact()})
+		got := verdict(t, idx, widgetRequest(unknownScope))
+		assert.Equal(t, Indeterminate, got.Verdict)
+	})
+}
+
+// kube-apiserver dispatches the namespaceSelector on the resource plural.
+func TestNamespacesPluralFollowsTheAPIServerDispatch(t *testing.T) {
+	prod := selector("env", metav1.LabelSelectorOpIn, "prod")
+	idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{
+		Rules:             []admissionregistrationv1.RuleWithOperations{rule([]string{"example.org"}, []string{"v1"}, []string{"namespaces"}, create)},
+		NamespaceSelector: prod, MatchPolicy: exact(),
+	})
+	base := Request{
+		Group: "example.org", Version: "v1", Resource: "namespaces", Kind: "Namespace", Operation: create, Name: "n", Namespace: "ns1",
+		ObjectLabels: map[string]string{"env": "dev"}, ObjectLabelsKnown: true,
+		NamespaceLabels: map[string]string{"env": "prod"}, NamespaceLabelsKnown: true,
+	}
+
+	got := verdict(t, idx, base)
+	assert.Equal(t, NotMatched, got.Verdict, "the object's labels are read, not the stored namespace's")
+	assert.Equal(t, []Reason{ReasonNamespaceSelectorExcludes}, got.Reasons)
+
+	got = verdict(t, idx, base.with(func(r *Request) { r.ObjectLabels = map[string]string{"env": "prod"}; r.NamespaceLabels = nil }))
+	assert.Equal(t, Matched, got.Verdict)
+
+	t.Run("an empty namespace is not bypassed", func(t *testing.T) {
+		got := verdict(t, idx, base.with(func(r *Request) { r.Namespace, r.ClusterScoped = "", true }))
+		assert.Equal(t, NotMatched, got.Verdict, "a cluster-scoped resource called namespaces still has its selector evaluated")
+		assert.Equal(t, []Reason{ReasonNamespaceSelectorExcludes}, got.Reasons)
+	})
+	t.Run("a resource with another plural is bypassed when it has no namespace", func(t *testing.T) {
+		other := validatingIndex(admissionregistrationv1.ValidatingWebhook{
+			Rules:             []admissionregistrationv1.RuleWithOperations{rule([]string{"example.org"}, []string{"v1"}, []string{"widgets"}, create)},
+			NamespaceSelector: prod, MatchPolicy: exact(),
+		})
+		got := verdict(t, other, widgetRequest(func(r *Request) { r.ClusterScoped = true }))
+		assert.Equal(t, Matched, got.Verdict)
+	})
+	t.Run("the core Namespace is still identified by its full GVR for the rule scope", func(t *testing.T) {
+		clusterRule := validatingIndex(admissionregistrationv1.ValidatingWebhook{
+			Rules: []admissionregistrationv1.RuleWithOperations{scoped(rule([]string{""}, []string{"v1"}, []string{"namespaces"}, create), admissionregistrationv1.ClusterScope)}, MatchPolicy: exact()})
+		assert.Equal(t, Matched, verdict(t, clusterRule, Request{Version: "v1", Resource: "namespaces", Kind: "Namespace", Operation: create, Name: "n"}).Verdict)
+		other := validatingIndex(admissionregistrationv1.ValidatingWebhook{
+			Rules: []admissionregistrationv1.RuleWithOperations{scoped(rule([]string{"example.org"}, []string{"v1"}, []string{"namespaces"}, create), admissionregistrationv1.NamespacedScope)}, MatchPolicy: exact()})
+		assert.Equal(t, Matched, verdict(t, other, base).Verdict, "a namespaced resource called namespaces satisfies a Namespaced rule")
+	})
+}
+
+// A label that is present with an empty value is not an absent label.
+func TestNamespaceLabelPresentWithEmptyValue(t *testing.T) {
+	idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{
+		Rules:             []admissionregistrationv1.RuleWithOperations{rule([]string{""}, []string{"v1"}, []string{"namespaces"}, create)},
+		NamespaceSelector: selector(corev1.LabelMetadataName, metav1.LabelSelectorOpExists), MatchPolicy: exact(),
+	})
+	req := Request{Version: "v1", Resource: "namespaces", Kind: "Namespace", Operation: create, Name: "n", ObjectLabelsKnown: true}
+
+	got := verdict(t, idx, req.with(func(r *Request) { r.ObjectLabels = map[string]string{corev1.LabelMetadataName: ""} }))
+	assert.Equal(t, Matched, got.Verdict)
+
+	got = verdict(t, idx, req.with(func(r *Request) { r.ObjectLabels = map[string]string{} }))
+	assert.Equal(t, Indeterminate, got.Verdict, "an absent key may still be added by the apiserver")
+	assert.Equal(t, []Reason{ReasonNamespaceLabelsUnknown}, got.Reasons)
+}
+
+// A missing API version does not undo a scope exclusion the request settles.
+func TestIncompleteRequestKeepsKnownScope(t *testing.T) {
+	noVersion := func(r *Request) { r.Version = "" }
+	for _, policy := range []*admissionregistrationv1.MatchPolicyType{exact(), equivalent()} {
+		idx := func(scope admissionregistrationv1.ScopeType) *Index {
+			return validatingIndex(admissionregistrationv1.ValidatingWebhook{
+				Rules: []admissionregistrationv1.RuleWithOperations{widgetRule(scope)}, MatchPolicy: policy})
+		}
+		t.Run(string(*policy), func(t *testing.T) {
+			got := verdict(t, idx(admissionregistrationv1.NamespacedScope), widgetRequest(func(r *Request) { noVersion(r); r.ClusterScoped = true }))
+			assert.Equal(t, NotMatched, got.Verdict, "a cluster-scoped request cannot satisfy a Namespaced rule")
+			assert.Equal(t, []Reason{ReasonRulesDoNotMatch}, got.Reasons)
+
+			got = verdict(t, idx(admissionregistrationv1.ClusterScope), widgetRequest(func(r *Request) { noVersion(r); r.Namespace = "ns1" }))
+			assert.Equal(t, NotMatched, got.Verdict, "a namespaced request cannot satisfy a Cluster rule")
+
+			got = verdict(t, idx(admissionregistrationv1.NamespacedScope), widgetRequest(func(r *Request) { noVersion(r); r.Namespace = "ns1" }))
+			assert.Equal(t, Indeterminate, got.Verdict)
+			assert.Equal(t, []Reason{ReasonIncompleteRequest}, got.Reasons)
+
+			got = verdict(t, idx(admissionregistrationv1.NamespacedScope), widgetRequest(func(r *Request) { noVersion(r); r.ScopeUnknown = true }))
+			assert.Equal(t, Indeterminate, got.Verdict, "an unknown scope is not settled")
+		})
+	}
+	t.Run("the core Namespace may be the missing version's resource", func(t *testing.T) {
+		idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{
+			Rules: []admissionregistrationv1.RuleWithOperations{scoped(rule([]string{""}, []string{"v1"}, []string{"namespaces"}, create), admissionregistrationv1.ClusterScope)}, MatchPolicy: exact()})
+		got := verdict(t, idx, Request{Resource: "namespaces", Kind: "Namespace", Operation: create, Name: "n", Namespace: "x"})
+		assert.Equal(t, Indeterminate, got.Verdict)
 	})
 }
