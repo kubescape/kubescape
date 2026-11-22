@@ -191,9 +191,19 @@ func TestNamespaceSelector(t *testing.T) {
 			r.ObjectLabels = map[string]string{"env": "prod"}
 			r.NamespaceLabels = map[string]string{"env": "dev"}
 		}, NotMatched, ""},
-		{"Namespace without a name", prod, func(r *Request) {
-			r.Resource, r.Kind, r.Name, r.Namespace = "namespaces", "Namespace", "", ""
+		{"Namespace delete without a name", prod, func(r *Request) {
+			r.Resource, r.Kind, r.Name, r.Namespace, r.Operation = "namespaces", "Namespace", "", "", deleteO
+			r.OldObjectLabelsKnown = true
 		}, Indeterminate, ReasonNamespaceLabelsUnknown},
+		// A create with a pending name (generateName) is decided by the labels
+		// its object already carries.
+		{"Namespace create without a name, labels reject", prod, func(r *Request) {
+			r.Resource, r.Kind, r.Name, r.Namespace = "namespaces", "Namespace", "", ""
+		}, NotMatched, ReasonNamespaceSelectorExcludes},
+		{"Namespace create without a name, labels satisfy", prod, func(r *Request) {
+			r.Resource, r.Kind, r.Name, r.Namespace = "namespaces", "Namespace", "", ""
+			r.ObjectLabels = map[string]string{"env": "prod"}
+		}, Matched, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

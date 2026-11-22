@@ -11,7 +11,11 @@
 // A Request names the API coordinates (group, version, resource, subresource,
 // kind), the operation, and the namespace and name. A cluster-scoped resource
 // other than Namespace sets ClusterScoped; a namespaced request that names no
-// namespace is never taken to be cluster-scoped. Labels of the new object, the
+// namespace is never taken to be cluster-scoped. A caller that cannot tell
+// whether a resource is namespaced, such as a custom resource without CRD or
+// discovery data, sets ScopeUnknown: the three states are never conflated. The
+// core Namespace resource is identified by its complete group, version and
+// resource, and by Name. Labels of the new object, the
 // old object and the request's namespace are optional, and each has a Known
 // flag: unsupplied labels are unknown, which is not the same as empty.
 //
@@ -19,10 +23,13 @@
 //
 // Every webhook gets one of three verdicts:
 //
-//   - Matched: every filter is satisfied, so the API server would evaluate
-//     the webhook's matchConditions (if any) and then call it.
-//   - NotMatched: some filter definitively rejects the request, so the API
-//     server would not call this webhook for it.
+//   - Matched: the supplied request satisfies this webhook's matching
+//     criteria. This is not a promise that the webhook receives a call: an
+//     earlier admission rejection can stop the request first, an earlier
+//     mutation can change the labels a later webhook sees, and matchConditions
+//     are not evaluated here, so a webhook that has them is never Matched.
+//   - NotMatched: the supplied request does not satisfy this webhook's matching
+//     criteria, because some filter definitively rejects it.
 //   - Indeterminate: nothing definitively rejects the request, but at least
 //     one filter cannot be evaluated from the supplied information. Reasons
 //     lists why. Unknown is never reported as NotMatched.
@@ -32,6 +39,11 @@
 // Reasons explain every verdict except Matched: for NotMatched they name each
 // filter that rejected the request, for Indeterminate each that could not be
 // decided.
+//
+// A request that is incomplete or contradicts itself (no operation, version or
+// resource) does not undo a definite exclusion: a webhook whose rules could not
+// match it whatever the missing part is, such as one with no rules or only for
+// another operation, is still NotMatched. The others are Indeterminate.
 //
 // NewIndex reports malformed selectors and rules with an unrecognised
 // operation or scope. Such a webhook is kept and answers Indeterminate when the
@@ -68,6 +80,9 @@
 //   - Objects whose labels were not supplied, when an objectSelector needs
 //     them.
 //   - A namespaced request with no namespace, when a namespaceSelector needs it.
+//   - A resource whose scope is unknown (ScopeUnknown), when a rule's scope or
+//     a namespaceSelector gives a different answer for each scope. A rule that
+//     covers both scopes still matches.
 //   - Rules holding an operation or scope this package does not recognise.
 //   - The automatic kubernetes.io/metadata.name label of a Namespace being
 //     created or updated, for validating and mutating webhooks alike. The
@@ -76,7 +91,12 @@
 //     object carries the label: that depends on the Namespace registry in
 //     k8s.io/kubernetes, which was not checked. A namespaceSelector on that
 //     label is Indeterminate unless the caller supplies the label in
-//     ObjectLabels, which is then taken as authoritative. For every other
+//     ObjectLabels, which is then taken as authoritative and is never
+//     overwritten with the request's name. The object's own labels are
+//     evaluated even when it has no name yet (generateName): requirements
+//     they decide are decided, so a definite rejection is kept and only a
+//     requirement that needs the missing label stays Indeterminate. Labels
+//     marked unknown are ignored whatever the map holds. For every other
 //     request the label is inferred from the namespace name, as
 //     core/pkg/namespaceselector does.
 //   - The API server drops the authentication and authorization review

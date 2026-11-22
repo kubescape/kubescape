@@ -12,14 +12,18 @@ import (
 type Verdict string
 
 const (
-	// Matched: every filter is satisfied; the webhook would be called.
+	// Matched: the supplied request satisfies this webhook's matching criteria.
+	// It does not promise the webhook receives a call: an earlier admission
+	// rejection can stop the request first, an earlier mutation can change the
+	// labels a later webhook sees, and matchConditions are not evaluated here
+	// (a webhook that has them is never Matched, only Indeterminate).
 	Matched Verdict = "Matched"
-	// NotMatched: some filter definitively rejects the request; the webhook
-	// would not be called. This says nothing about whether the request is
-	// otherwise protected.
+	// NotMatched: the supplied request does not satisfy this webhook's matching
+	// criteria, because some filter definitively rejects it. This says nothing
+	// about whether the request is otherwise protected.
 	NotMatched Verdict = "NotMatched"
 	// Indeterminate: nothing definitively rejects the request, but a filter
-	// could not be evaluated. See Result.Reasons.
+	// could not be evaluated from the supplied information. See Result.Reasons.
 	Indeterminate Verdict = "Indeterminate"
 )
 
@@ -62,6 +66,10 @@ const (
 	// ReasonNamespaceUnknown: the request targets a namespaced resource but
 	// names no namespace, so a namespaceSelector cannot be evaluated.
 	ReasonNamespaceUnknown Reason = "NamespaceUnknown"
+	// ReasonResourceScopeUnknown: the caller does not know whether the resource
+	// is namespaced (Request.ScopeUnknown), and a rule's scope or a
+	// namespaceSelector gives a different answer for each scope.
+	ReasonResourceScopeUnknown Reason = "ResourceScopeUnknown"
 	// ReasonInvalidRule: a rule holds an operation or scope this package does
 	// not recognise, so it cannot be ruled out as a match.
 	ReasonInvalidRule Reason = "InvalidRule"
@@ -82,7 +90,8 @@ const (
 	ReasonVersionDependentExclusion Reason = "VersionDependentExclusion"
 	// ReasonIncompleteRequest: the request lacks an operation, version or
 	// resource, or contradicts itself (a ClusterScoped request that names a
-	// namespace), so nothing can be evaluated.
+	// namespace or is also ScopeUnknown), and the webhook's rules do not
+	// already rule it out.
 	ReasonIncompleteRequest Reason = "IncompleteRequest"
 )
 
@@ -116,6 +125,13 @@ type Request struct {
 	// with no Namespace and ClusterScoped unset is namespaced with an unknown
 	// namespace: that is never taken to mean cluster-scoped.
 	ClusterScoped bool
+	// ScopeUnknown marks a resource the caller cannot tell the scope of, such
+	// as a custom resource without CRD or discovery data. It applies only when
+	// Namespace is empty and ClusterScoped is unset; a Namespace settles the
+	// scope, and ScopeUnknown together with ClusterScoped is contradictory.
+	// Rules and selectors that give the same answer for both scopes are still
+	// decided; the others are Indeterminate with ReasonResourceScopeUnknown.
+	ScopeUnknown bool
 
 	// ObjectLabels are the labels of the object being written (CREATE, UPDATE).
 	// OldObjectLabels are the labels of the stored object (UPDATE, DELETE).
@@ -277,8 +293,11 @@ func compileSelector(s *metav1.LabelSelector) (labels.Selector, error) {
 // often than with the real API server, whose equivalent-resource registry is
 // not available here; see the package documentation.
 //
-// A request without an operation, version or resource makes every result
-// Indeterminate with ReasonIncompleteRequest.
+// A request without an operation, version or resource, or one that contradicts
+// itself, is Indeterminate with ReasonIncompleteRequest for every webhook whose
+// rules could still match it once the missing part is supplied. A webhook whose
+// rules rule it out whatever that part is, such as one with no rules or only
+// for another operation, is NotMatched.
 func (idx *Index) Matches(req Request) []Result {
 	if idx == nil {
 		return nil
@@ -287,8 +306,7 @@ func (idx *Index) Matches(req Request) []Result {
 	r, ok := newRequest(req)
 	for _, w := range idx.webhooks {
 		if !ok {
-			out = append(out, Result{Configuration: w.configuration, Webhook: w.name, Type: w.kind,
-				Verdict: Indeterminate, Reasons: []Reason{ReasonIncompleteRequest}})
+			out = append(out, w.matchIncomplete(req))
 			continue
 		}
 		out = append(out, w.match(r))

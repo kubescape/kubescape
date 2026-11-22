@@ -209,3 +209,64 @@ func TestEquivalentMatchPolicyNeverFalselyRejects(t *testing.T) {
 	require.Equal(t, Indeterminate, got.Verdict)
 	require.Equal(t, []Reason{ReasonEquivalentResources}, got.Reasons)
 }
+
+// A Namespace created with generateName has the labels of its object before it
+// has a name. The apiserver's namespace predicate matches on those labels, and
+// so must this package, without inventing a name.
+func TestNamespaceCreateWithGenerateNameParity(t *testing.T) {
+	rules := []admissionregistrationv1.RuleWithOperations{rule([]string{""}, []string{"v1"}, []string{"namespaces"}, admissionregistrationv1.OperationAll)}
+	byTeam := selector("team", metav1.LabelSelectorOpIn, "blue")
+	nsMatcher := &namespace.Matcher{}
+
+	tests := []struct {
+		name   string
+		sel    *metav1.LabelSelector
+		labels map[string]string
+		want   Verdict
+	}{
+		{"known label satisfies the selector", byTeam, map[string]string{"team": "blue"}, Matched},
+		{"known label rejects the selector", byTeam, map[string]string{"team": "red"}, NotMatched},
+		{"no label rejects the selector", byTeam, map[string]string{}, NotMatched},
+		{"a known rejection wins over a requirement on the pending name", &metav1.LabelSelector{
+			MatchLabels: map[string]string{"team": "blue", "kubernetes.io/metadata.name": "x"}}, map[string]string{"team": "red"}, NotMatched},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hook := admissionregistrationv1.ValidatingWebhook{Name: "hook", Rules: rules, MatchPolicy: exact(), NamespaceSelector: tt.sel}
+			defaulted := hook
+			defaulted.ObjectSelector = &metav1.LabelSelector{}
+			accessor := apiwebhook.NewValidatingWebhookAccessor("uid", "cfg", &defaulted)
+			attr := admission.NewAttributesRecord(labelled(tt.labels), nil, schema.GroupVersionKind{Version: "v1", Kind: "Namespace"},
+				"", "", schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}, "", admission.Create, nil, false, nil)
+
+			// The reference, where the name is not involved.
+			if tt.sel.MatchLabels["kubernetes.io/metadata.name"] == "" {
+				selected, err := nsMatcher.MatchNamespaceSelector(accessor, attr)
+				require.Nil(t, err)
+				require.Equal(t, tt.want == Matched, selected, "the apiserver predicate")
+			}
+
+			got := verdict(t, validatingIndex(hook), Request{
+				Version: "v1", Resource: "namespaces", Kind: "Namespace", Operation: create,
+				ObjectLabels: tt.labels, ObjectLabelsKnown: true,
+			})
+			require.Equal(t, tt.want, got.Verdict, "reasons %v", got.Reasons)
+		})
+	}
+
+	t.Run("a requirement on the pending name stays indeterminate", func(t *testing.T) {
+		byName := &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "x"}}
+		got := verdict(t, validatingIndex(admissionregistrationv1.ValidatingWebhook{Rules: rules, MatchPolicy: exact(), NamespaceSelector: byName}), Request{
+			Version: "v1", Resource: "namespaces", Kind: "Namespace", Operation: create,
+			ObjectLabels: map[string]string{"team": "blue"}, ObjectLabelsKnown: true,
+		})
+		require.Equal(t, Indeterminate, got.Verdict)
+		require.Equal(t, []Reason{ReasonNamespaceLabelsUnknown}, got.Reasons)
+	})
+	t.Run("unknown object labels stay indeterminate without a name", func(t *testing.T) {
+		got := verdict(t, validatingIndex(admissionregistrationv1.ValidatingWebhook{Rules: rules, MatchPolicy: exact(), NamespaceSelector: byTeam}), Request{
+			Version: "v1", Resource: "namespaces", Kind: "Namespace", Operation: create,
+		})
+		require.Equal(t, Indeterminate, got.Verdict)
+	})
+}

@@ -17,10 +17,12 @@ import (
 	"k8s.io/apiserver/pkg/admission/plugin/webhook/predicates/rules"
 )
 
-const (
-	admissionRegistrationGroup = "admissionregistration.k8s.io"
-	namespacesResource         = "namespaces"
-)
+const admissionRegistrationGroup = "admissionregistration.k8s.io"
+
+// namespaceGVR is the core Namespace resource. The apiserver's scope predicate
+// identifies a Namespace by this complete GroupVersionResource, not by the
+// resource name alone.
+var namespaceGVR = schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}
 
 // virtualResources are the non-persisted authentication and authorization
 // review resources that kube-apiserver excludes from every webhook once the
@@ -42,12 +44,32 @@ var virtualResources = map[schema.GroupResource]struct{}{
 type request struct {
 	Request
 	attr admission.Attributes
+	// clusterAttr is the same request taken as cluster-scoped, set only when the
+	// resource scope is unknown. attr then carries unknownNamespace, which is
+	// the namespaced reading.
+	clusterAttr admission.Attributes
 	// namespace is what the apiserver reports as the request's namespace: the
 	// object's own name for a Namespace, empty for other cluster-scoped objects
 	// and when the namespace of a namespaced request is unknown.
 	namespace string
 	// namespaceUnknown is set for a namespaced request that names no namespace.
 	namespaceUnknown bool
+	// isNamespace is set for the core Namespace resource only: a resource of
+	// another group that happens to be called "namespaces" is not one.
+	isNamespace bool
+	// scopeUnknown is set when the caller does not know whether the resource is
+	// namespaced.
+	scopeUnknown bool
+}
+
+// validOperation reports whether op is one an admission request can carry.
+func validOperation(op admissionregistrationv1.OperationType) bool {
+	switch op {
+	case admissionregistrationv1.Create, admissionregistrationv1.Update,
+		admissionregistrationv1.Delete, admissionregistrationv1.Connect:
+		return true
+	}
+	return false
 }
 
 // unknownNamespace stands in for the namespace of a namespaced request that
@@ -57,26 +79,30 @@ type request struct {
 const unknownNamespace = "namespace-not-supplied"
 
 func newRequest(r Request) (*request, bool) {
-	switch r.Operation {
-	case admissionregistrationv1.Create, admissionregistrationv1.Update,
-		admissionregistrationv1.Delete, admissionregistrationv1.Connect:
-	default:
+	if !validOperation(r.Operation) {
 		return nil, false
 	}
 	if r.Version == "" || r.Resource == "" {
 		return nil, false
 	}
-	if r.ClusterScoped && r.Namespace != "" && r.Resource != namespacesResource {
+	isNamespace := schema.GroupVersionResource{Group: r.Group, Version: r.Version, Resource: r.Resource} == namespaceGVR
+	if r.ClusterScoped && r.Namespace != "" && !isNamespace {
 		return nil, false
 	}
+	if r.ClusterScoped && r.ScopeUnknown && !isNamespace {
+		// The caller claims to know and not to know the scope.
+		return nil, false
+	}
+	// A namespace name, or the Namespace resource itself, settles the scope.
+	scopeUnknown := r.ScopeUnknown && !isNamespace && r.Namespace == "" && !r.ClusterScoped
 
 	namespace := r.Namespace
-	if r.Resource == namespacesResource {
+	if isNamespace {
 		namespace = r.Name
 	}
-	namespaceUnknown := r.Resource != namespacesResource && r.Namespace == "" && !r.ClusterScoped
+	namespaceUnknown := !isNamespace && r.Namespace == "" && !r.ClusterScoped && !scopeUnknown
 	attrNamespace := namespace
-	if namespaceUnknown {
+	if namespaceUnknown || scopeUnknown {
 		attrNamespace = unknownNamespace
 	}
 
@@ -97,12 +123,19 @@ func newRequest(r Request) (*request, bool) {
 		old = labelsObject(r.OldObjectLabels, r.OldObjectLabelsKnown)
 	}
 
-	attr := admission.NewAttributesRecord(obj, old,
-		schema.GroupVersionKind{Group: r.Group, Version: r.Version, Kind: r.Kind},
-		attrNamespace, r.Name,
-		schema.GroupVersionResource{Group: r.Group, Version: r.Version, Resource: r.Resource},
-		r.Subresource, admission.Operation(r.Operation), nil, false, nil)
-	return &request{Request: r, attr: attr, namespace: namespace, namespaceUnknown: namespaceUnknown}, true
+	newAttr := func(ns string) admission.Attributes {
+		return admission.NewAttributesRecord(obj, old,
+			schema.GroupVersionKind{Group: r.Group, Version: r.Version, Kind: r.Kind},
+			ns, r.Name,
+			schema.GroupVersionResource{Group: r.Group, Version: r.Version, Resource: r.Resource},
+			r.Subresource, admission.Operation(r.Operation), nil, false, nil)
+	}
+	req := &request{Request: r, attr: newAttr(attrNamespace), namespace: namespace,
+		namespaceUnknown: namespaceUnknown, isNamespace: isNamespace, scopeUnknown: scopeUnknown}
+	if scopeUnknown {
+		req.clusterAttr = newAttr("")
+	}
+	return req, true
 }
 
 // labelsObject returns a metadata-only object carrying labels, or a nil
@@ -173,25 +206,47 @@ func (req *request) exemption() filter {
 	return pass
 }
 
-func (w *webhook) rules(req *request) filter {
-	for _, r := range w.ruleSet {
-		if (&rules.Matcher{Rule: r, Attr: req.attr}).Matches() {
-			return pass
-		}
+// readings are the attributes the rule predicate is run against: the request
+// itself, and also its cluster-scoped reading when the resource scope is
+// unknown.
+func (req *request) readings() []admission.Attributes {
+	if req.clusterAttr != nil {
+		return []admission.Attributes{req.attr, req.clusterAttr}
 	}
+	return []admission.Attributes{req.attr}
+}
+
+func (w *webhook) rules(req *request) filter {
 	var reasons []Reason
-	if w.equivalent {
-		// Equivalent matchPolicy also tries the resources the apiserver's
-		// equivalent-resource registry lists for the request, which this
-		// package cannot see. Retry each rule with everything that registry
-		// can change relaxed (see relaxForEquivalence): a hit means the only
-		// thing standing between the rule and the request is that equivalence.
-		for _, r := range w.ruleSet {
-			if (&rules.Matcher{Rule: relaxForEquivalence(r), Attr: req.attr}).Matches() {
-				reasons = append(reasons, ReasonEquivalentResources)
-				break
+	// covered[i] is whether some rule matches reading i. With an unknown scope
+	// the webhook is matched only if every reading is covered, though not
+	// necessarily by the same rule.
+	readings := req.readings()
+	covered := make([]bool, len(readings))
+	nCovered := 0
+	for _, r := range w.ruleSet {
+		for i, attr := range readings {
+			if !covered[i] && (&rules.Matcher{Rule: r, Attr: attr}).Matches() {
+				covered[i] = true
+				nCovered++
 			}
 		}
+	}
+	if nCovered == len(readings) {
+		return pass
+	}
+	scopeDependent := nCovered > 0
+	if scopeDependent {
+		// Some rule matches the request only if the resource is of one scope.
+		reasons = append(reasons, ReasonResourceScopeUnknown)
+	}
+	if w.equivalent && w.equivalentMatch(req) {
+		// Equivalent matchPolicy also tries the resources the apiserver's
+		// equivalent-resource registry lists for the request, which this
+		// package cannot see. A hit on the relaxed rule (see
+		// relaxForEquivalence) means the only thing standing between the rule
+		// and the request is that equivalence.
+		reasons = append(reasons, ReasonEquivalentResources)
 	}
 	if w.invalidRules {
 		// A rule with a value this package does not know matched nothing above,
@@ -204,6 +259,53 @@ func (w *webhook) rules(req *request) filter {
 	return reject(ReasonRulesDoNotMatch)
 }
 
+// equivalentMatch reports whether some rule could match the request through a
+// resource the apiserver's equivalent-resource registry might list for it.
+func (w *webhook) equivalentMatch(req *request) bool {
+	for _, r := range w.ruleSet {
+		for _, attr := range req.readings() {
+			if equivalentRuleMatches(r, attr) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// candidateAttributes is a request re-targeted at an equivalent resource; as in
+// the apiserver, the operation, subresource and namespace stay.
+type candidateAttributes struct {
+	admission.Attributes
+	resource schema.GroupVersionResource
+}
+
+func (a candidateAttributes) GetResource() schema.GroupVersionResource { return a.resource }
+
+// equivalentRuleMatches reports whether rule r could match attr through an
+// equivalent resource. The scope check reads only the resource and the
+// namespace, and the namespace is the request's own, so it is evaluated here
+// rather than relaxed:
+//   - a Namespaced rule fails every candidate when the namespace is empty, and
+//     passes every candidate other than the core Namespace otherwise;
+//   - a Cluster rule passes every candidate when the namespace is empty, and
+//     otherwise only the core Namespace, which the predicate treats as
+//     cluster-scoped.
+func equivalentRuleMatches(r admissionregistrationv1.RuleWithOperations, attr admission.Attributes) bool {
+	if r.Scope != nil {
+		switch *r.Scope {
+		case admissionregistrationv1.NamespacedScope:
+			if attr.GetNamespace() == "" {
+				return false
+			}
+		case admissionregistrationv1.ClusterScope:
+			if attr.GetNamespace() != "" {
+				return (&rules.Matcher{Rule: r, Attr: candidateAttributes{attr, namespaceGVR}}).Matches()
+			}
+		}
+	}
+	return (&rules.Matcher{Rule: relaxForEquivalence(r), Attr: attr}).Matches()
+}
+
 // relaxForEquivalence returns a copy of r that matches every resource the
 // apiserver could consider equivalent to a request, and only those. With
 // matchPolicy Equivalent the apiserver re-runs the rules against each
@@ -214,10 +316,17 @@ func (w *webhook) rules(req *request) filter {
 // groups resources by storage location (the etcd prefix, via
 // NewEquivalentResourceRegistryWithIdentity), and a kube-apiserver can
 // cohabit resources of different groups with AddCohabitatingResources, which
-// does not require them to share a plural name. The scope is relaxed too: the
-// predicate reads the resource when it applies it, so an equivalent resource
-// could change the outcome. The input is left untouched.
+// does not require them to share a plural name. The scope is dropped because
+// equivalentRuleMatches has already settled it. The input is left untouched.
 func relaxForEquivalence(r admissionregistrationv1.RuleWithOperations) admissionregistrationv1.RuleWithOperations {
+	r = relaxResources(r)
+	r.APIGroups, r.APIVersions, r.Scope = []string{"*"}, []string{"*"}, nil
+	return r
+}
+
+// relaxResources returns a copy of r that matches any resource name while
+// keeping each rule resource's subresource.
+func relaxResources(r admissionregistrationv1.RuleWithOperations) admissionregistrationv1.RuleWithOperations {
 	resources := make([]string, 0, len(r.Resources))
 	for _, res := range r.Resources {
 		if _, sub, found := strings.Cut(res, "/"); found {
@@ -226,14 +335,14 @@ func relaxForEquivalence(r admissionregistrationv1.RuleWithOperations) admission
 			resources = append(resources, "*")
 		}
 	}
-	r.APIGroups, r.APIVersions, r.Resources, r.Scope = []string{"*"}, []string{"*"}, resources, nil
+	r.Resources = resources
 	return r
 }
 
 func (w *webhook) namespace(req *request) filter {
 	// The apiserver never applies a namespaceSelector to a cluster-scoped
 	// resource other than Namespace itself.
-	if req.namespace == "" && !req.namespaceUnknown && req.Resource != namespacesResource {
+	if req.namespace == "" && !req.namespaceUnknown && !req.scopeUnknown && !req.isNamespace {
 		return pass
 	}
 	if w.namespaceErr != nil {
@@ -242,21 +351,60 @@ func (w *webhook) namespace(req *request) filter {
 	if w.namespaceSelector.Empty() {
 		return pass
 	}
+	if req.scopeUnknown {
+		// A cluster-scoped resource is never filtered and a namespaced one is,
+		// so the selector's effect depends on the scope.
+		return unknown(ReasonResourceScopeUnknown)
+	}
 	if req.namespaceUnknown {
 		return unknown(ReasonNamespaceUnknown)
 	}
 
 	var matched, determinable bool
 	switch {
-	case req.Resource == namespacesResource && req.Name == "":
-		return unknown(ReasonNamespaceLabelsUnknown)
-	case req.Resource == namespacesResource && req.Subresource == "" &&
+	case req.isNamespace && req.Subresource == "" &&
 		(req.Operation == admissionregistrationv1.Create || req.Operation == admissionregistrationv1.Update):
 		// The apiserver reads the labels of the Namespace being written from
-		// the request object, not from storage.
-		if w.selectsNameLabel() && req.ObjectLabels[corev1.LabelMetadataName] == "" {
-			// UNVERIFIED PREMISE, so this stays indeterminate for CREATE and
-			// UPDATE, and for validating and mutating webhooks alike.
+		// the request object, not from storage. The name is not needed for
+		// that: a Namespace created with generateName has its labels before it
+		// has a name.
+		return w.namespaceObjectLabels(req)
+	case req.isNamespace && req.Name == "":
+		return unknown(ReasonNamespaceLabelsUnknown)
+	default:
+		matched, determinable = namespaceselector.Matches(w.namespaceSelector, req.namespace, req.NamespaceLabels, req.NamespaceLabelsKnown)
+	}
+	switch {
+	case !determinable:
+		return unknown(ReasonNamespaceLabelsUnknown)
+	case matched:
+		return pass
+	default:
+		return reject(ReasonNamespaceSelectorExcludes)
+	}
+}
+
+// namespaceObjectLabels matches the namespaceSelector against the labels of the
+// Namespace being created or updated, exactly as supplied: the name of the
+// request is never added to them. Every requirement is evaluated, so a
+// requirement that definitely fails rejects the request even when another one
+// cannot be decided.
+func (w *webhook) namespaceObjectLabels(req *request) filter {
+	if !req.ObjectLabelsKnown {
+		// Whatever the map holds, it was not supplied as the object's labels.
+		return unknown(ReasonNamespaceLabelsUnknown)
+	}
+	requirements, selectable := w.namespaceSelector.Requirements()
+	if !selectable {
+		return reject(ReasonNamespaceSelectorExcludes)
+	}
+	set := labels.Set(req.ObjectLabels)
+	unresolved := false
+	for _, r := range requirements {
+		if r.Key() == corev1.LabelMetadataName && req.ObjectLabels[corev1.LabelMetadataName] == "" {
+			// UNVERIFIED PREMISE, so a requirement on the label stays
+			// undecided while the object lacks it, for CREATE and UPDATE, and
+			// for validating and mutating webhooks alike.
 			//
 			// Verified in k8s.io/apiserver v0.37.2:
 			//   - the namespace matcher reads only the new object's labels
@@ -278,32 +426,17 @@ func (w *webhook) namespace(req *request) filter {
 			// is not a dependency and was not checked. A caller who knows the
 			// label is present sets it in ObjectLabels, which is then taken as
 			// authoritative.
-			return unknown(ReasonNamespaceLabelsUnknown)
+			unresolved = true
+			continue
 		}
-		matched, determinable = namespaceselector.Matches(w.namespaceSelector, req.Name, req.ObjectLabels, req.ObjectLabelsKnown)
-	default:
-		matched, determinable = namespaceselector.Matches(w.namespaceSelector, req.namespace, req.NamespaceLabels, req.NamespaceLabelsKnown)
+		if !r.Matches(set) {
+			return reject(ReasonNamespaceSelectorExcludes)
+		}
 	}
-	switch {
-	case !determinable:
+	if unresolved {
 		return unknown(ReasonNamespaceLabelsUnknown)
-	case matched:
-		return pass
-	default:
-		return reject(ReasonNamespaceSelectorExcludes)
 	}
-}
-
-// selectsNameLabel reports whether the namespaceSelector has a requirement on
-// the automatic kubernetes.io/metadata.name label.
-func (w *webhook) selectsNameLabel() bool {
-	requirements, _ := w.namespaceSelector.Requirements()
-	for _, r := range requirements {
-		if r.Key() == corev1.LabelMetadataName {
-			return true
-		}
-	}
-	return false
+	return pass
 }
 
 // selectorProvider adapts a parsed selector to the apiserver's
@@ -350,4 +483,53 @@ func (w *webhook) match(req *request) Result {
 	}
 	verdict, reasons := combine(req.exemption(), w.rules(req), w.namespace(req), w.object(req), conditions)
 	return Result{Configuration: w.configuration, Webhook: w.name, Type: w.kind, Verdict: verdict, Reasons: reasons}
+}
+
+// matchIncomplete answers for a request newRequest rejected. Missing or
+// contradictory parts of the request do not undo a definite exclusion: the
+// webhook is NotMatched when none of its rules could match the request
+// whatever the missing parts are, and Indeterminate otherwise.
+func (w *webhook) matchIncomplete(req Request) Result {
+	res := Result{Configuration: w.configuration, Webhook: w.name, Type: w.kind,
+		Verdict: Indeterminate, Reasons: []Reason{ReasonIncompleteRequest}}
+	if w.invalidRules || w.couldMatchIncomplete(req) {
+		return res
+	}
+	res.Verdict, res.Reasons = NotMatched, []Reason{ReasonRulesDoNotMatch}
+	return res
+}
+
+// couldMatchIncomplete reports whether some rule could match req for some
+// value of the parts it lacks. Each missing part is relaxed in a copy of the
+// rule, which is then run through the apiserver's predicate against what the
+// request does say. The scope is relaxed too, since it depends on the resource
+// and the namespace, either of which may be what is missing or contradictory.
+// Under matchPolicy Equivalent the group, version and resource are relaxed as
+// well, as for a complete request.
+func (w *webhook) couldMatchIncomplete(req Request) bool {
+	attr := admission.NewAttributesRecord(nil, nil,
+		schema.GroupVersionKind{Group: req.Group, Version: req.Version, Kind: req.Kind},
+		req.Namespace, req.Name,
+		schema.GroupVersionResource{Group: req.Group, Version: req.Version, Resource: req.Resource},
+		req.Subresource, admission.Operation(req.Operation), nil, false, nil)
+	for _, r := range w.ruleSet {
+		r = *r.DeepCopy()
+		r.Scope = nil
+		if !validOperation(req.Operation) && len(r.Operations) > 0 {
+			r.Operations = []admissionregistrationv1.OperationType{admissionregistrationv1.OperationAll}
+		}
+		if req.Version == "" {
+			r.APIVersions = []string{"*"}
+		}
+		if req.Resource == "" {
+			r = relaxResources(r)
+		}
+		if w.equivalent {
+			r = relaxForEquivalence(r)
+		}
+		if (&rules.Matcher{Rule: r, Attr: attr}).Matches() {
+			return true
+		}
+	}
+	return false
 }

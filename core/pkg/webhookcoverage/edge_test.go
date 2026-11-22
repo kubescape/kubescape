@@ -323,7 +323,13 @@ func TestEquivalentKeepsOnlyOperationAndSubresource(t *testing.T) {
 	}{
 		{"a different resource name stays ambiguous", pods, nil, func(r *Request) { r.Resource = "secrets" }, Indeterminate},
 		{"a different group stays ambiguous", pods, nil, func(r *Request) { r.Group = "apps" }, Indeterminate},
-		{"a different scope stays ambiguous", scoped(pods, admissionregistrationv1.ClusterScope), nil, nil, Indeterminate},
+		// The request keeps its namespace, so only the core Namespace, which the
+		// scope predicate treats as cluster-scoped, can satisfy a Cluster rule.
+		{"a Cluster rule for the core Namespace stays ambiguous", scoped(rule([]string{""}, []string{"v1"}, []string{"namespaces"}, create), admissionregistrationv1.ClusterScope), nil, nil, Indeterminate},
+		{"a Cluster rule for another resource is definite", scoped(pods, admissionregistrationv1.ClusterScope), nil, nil, NotMatched},
+		{"a Namespaced-only rule is definite for a cluster-scoped request", scoped(rule([]string{"*"}, []string{"*"}, []string{"*"}, create), admissionregistrationv1.NamespacedScope), nil, func(r *Request) {
+			r.Resource, r.Kind, r.Name, r.Namespace, r.ClusterScoped = "nodes", "Node", "n", "", true
+		}, NotMatched},
 		{"another operation is definite", pods, nil, func(r *Request) { r.Operation = update }, NotMatched},
 		{"a bare resource does not cover a subresource", pods, nil, func(r *Request) { r.Resource, r.Subresource = "secrets", "status" }, NotMatched},
 		{"another subresource is definite", exec, nil, func(r *Request) {
@@ -360,4 +366,242 @@ func TestRelaxForEquivalenceLeavesItsInputAlone(t *testing.T) {
 	assert.Equal(t, []string{"apps"}, r.APIGroups)
 	assert.Equal(t, []string{"deployments", "deployments/scale"}, r.Resources)
 	assert.Equal(t, &s, r.Scope)
+}
+
+func TestNamespaceIsTheCoreResourceOnly(t *testing.T) {
+	clusterRule := scoped(rule([]string{"example.io"}, []string{"v1"}, []string{"namespaces"}, admissionregistrationv1.OperationAll), admissionregistrationv1.ClusterScope)
+	idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{
+		Rules: []admissionregistrationv1.RuleWithOperations{clusterRule}, MatchPolicy: exact(),
+	})
+	got := verdict(t, idx, Request{
+		Group: "example.io", Version: "v1", Resource: "namespaces", Kind: "Namespace", Operation: create,
+		Name: "x", ClusterScoped: true, ObjectLabelsKnown: true,
+	})
+	assert.Equal(t, Matched, got.Verdict, "a cluster-scoped resource of another group is not a Namespace, so its name is not a namespace")
+	assert.Empty(t, got.Reasons)
+
+	t.Run("it is not given the core Namespace's exception to the Namespaced scope", func(t *testing.T) {
+		namespaced := scoped(rule([]string{"example.io"}, []string{"v1"}, []string{"namespaces"}, admissionregistrationv1.OperationAll), admissionregistrationv1.NamespacedScope)
+		idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{
+			Rules: []admissionregistrationv1.RuleWithOperations{namespaced}, MatchPolicy: exact(),
+		})
+		got := verdict(t, idx, Request{
+			Group: "example.io", Version: "v1", Resource: "namespaces", Kind: "Namespace", Operation: create,
+			Name: "x", ClusterScoped: true, ObjectLabelsKnown: true,
+		})
+		assert.Equal(t, NotMatched, got.Verdict)
+	})
+	t.Run("without ClusterScoped it is a namespaced resource of unknown namespace", func(t *testing.T) {
+		idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{
+			Rules:             []admissionregistrationv1.RuleWithOperations{rule([]string{"example.io"}, []string{"v1"}, []string{"namespaces"}, admissionregistrationv1.OperationAll)},
+			NamespaceSelector: selector("env", metav1.LabelSelectorOpIn, "prod"), MatchPolicy: exact(),
+		})
+		got := verdict(t, idx, Request{
+			Group: "example.io", Version: "v1", Resource: "namespaces", Kind: "Namespace", Operation: create,
+			Name: "x", ObjectLabelsKnown: true,
+		})
+		assert.Equal(t, Indeterminate, got.Verdict)
+		assert.Equal(t, []Reason{ReasonNamespaceUnknown}, got.Reasons)
+	})
+}
+
+func TestNamespaceCreateObjectLabels(t *testing.T) {
+	byEnvAndName := &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+		{Key: "env", Operator: metav1.LabelSelectorOpIn, Values: []string{"prod"}},
+		{Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpIn, Values: []string{"new"}},
+	}}
+	byName := func(name string) *metav1.LabelSelector {
+		return &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": name}}
+	}
+	nsCreate := func(labels map[string]string, known bool) func(*Request) {
+		return func(r *Request) {
+			r.Resource, r.Kind, r.Name, r.Namespace, r.Operation = "namespaces", "Namespace", "new", "", create
+			r.ObjectLabels, r.ObjectLabelsKnown = labels, known
+			r.NamespaceLabelsKnown = false
+		}
+	}
+	rules := []admissionregistrationv1.RuleWithOperations{rule([]string{""}, []string{"v1"}, []string{"namespaces"}, admissionregistrationv1.OperationAll)}
+	tests := []struct {
+		name   string
+		sel    *metav1.LabelSelector
+		mod    func(*Request)
+		want   Verdict
+		reason Reason
+	}{
+		{"a known rejection wins over an unknown name label", byEnvAndName, nsCreate(map[string]string{"env": "dev"}, true), NotMatched, ReasonNamespaceSelectorExcludes},
+		{"an unknown name label with the other requirements met is indeterminate", byEnvAndName, nsCreate(map[string]string{"env": "prod"}, true), Indeterminate, ReasonNamespaceLabelsUnknown},
+		{"unknown labels, matching label in the map, are ignored", byName("new"), nsCreate(map[string]string{"kubernetes.io/metadata.name": "new"}, false), Indeterminate, ReasonNamespaceLabelsUnknown},
+		{"unknown labels, nil map", byName("new"), nsCreate(nil, false), Indeterminate, ReasonNamespaceLabelsUnknown},
+		{"known labels, supplied matching label", byName("new"), nsCreate(map[string]string{"kubernetes.io/metadata.name": "new"}, true), Matched, ""},
+		{"known labels, supplied differing label", byName("other"), nsCreate(map[string]string{"kubernetes.io/metadata.name": "new"}, true), NotMatched, ReasonNamespaceSelectorExcludes},
+		{"the supplied name label is not overwritten by the request name", byName("other"), nsCreate(map[string]string{"kubernetes.io/metadata.name": "other"}, true), Matched, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{Rules: rules, NamespaceSelector: tt.sel, MatchPolicy: exact()})
+			got := verdict(t, idx, podRequest(tt.mod))
+			assert.Equal(t, tt.want, got.Verdict)
+			if tt.reason != "" {
+				assert.Equal(t, []Reason{tt.reason}, got.Reasons)
+			}
+		})
+	}
+
+	t.Run("update keeps the supplied name label too", func(t *testing.T) {
+		idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{Rules: rules, NamespaceSelector: byName("other"), MatchPolicy: exact()})
+		got := verdict(t, idx, podRequest(func(r *Request) {
+			nsCreate(map[string]string{"kubernetes.io/metadata.name": "other"}, true)(r)
+			r.Operation = update
+			r.OldObjectLabels, r.OldObjectLabelsKnown = map[string]string{"kubernetes.io/metadata.name": "other"}, true
+		}))
+		assert.Equal(t, Matched, got.Verdict)
+	})
+}
+
+// A resource scope is one of three states: known namespaced, known
+// cluster-scoped, or unknown. A namespaced resource whose namespace is missing
+// is a different thing from an unknown scope.
+func TestResourceScopeStates(t *testing.T) {
+	widgets := func(s *admissionregistrationv1.ScopeType) admissionregistrationv1.RuleWithOperations {
+		r := rule([]string{"example.org"}, []string{"v1"}, []string{"widgets"}, admissionregistrationv1.OperationAll)
+		r.Scope = s
+		return r
+	}
+	scopeOf := func(s admissionregistrationv1.ScopeType) *admissionregistrationv1.ScopeType { return &s }
+	namespacedOnly := widgets(scopeOf(admissionregistrationv1.NamespacedScope))
+	clusterOnly := widgets(scopeOf(admissionregistrationv1.ClusterScope))
+
+	ruleSets := []struct {
+		name  string
+		rules []admissionregistrationv1.RuleWithOperations
+	}{
+		{"Namespaced", []admissionregistrationv1.RuleWithOperations{namespacedOnly}},
+		{"Cluster", []admissionregistrationv1.RuleWithOperations{clusterOnly}},
+		{"unset scope", []admissionregistrationv1.RuleWithOperations{widgets(nil)}},
+		{"all scopes", []admissionregistrationv1.RuleWithOperations{widgets(scopeOf(admissionregistrationv1.AllScopes))}},
+		{"a Namespaced rule and a Cluster rule", []admissionregistrationv1.RuleWithOperations{namespacedOnly, clusterOnly}},
+	}
+	states := []struct {
+		name string
+		mod  func(*Request)
+	}{
+		{"known namespaced", func(r *Request) { r.Namespace = "ns1" }},
+		{"known cluster-scoped", func(r *Request) { r.ClusterScoped = true }},
+		{"unknown scope", func(r *Request) { r.ScopeUnknown = true }},
+		{"namespaced, namespace missing", func(r *Request) {}},
+	}
+	type outcome struct {
+		verdict Verdict
+		reasons []Reason
+	}
+	scopeUnknown := outcome{Indeterminate, []Reason{ReasonResourceScopeUnknown}}
+	matched, notMatched := outcome{Matched, nil}, outcome{NotMatched, []Reason{ReasonRulesDoNotMatch}}
+	want := map[string][]outcome{ // by rule set, in the order of states
+		"Namespaced":                           {matched, notMatched, scopeUnknown, matched},
+		"Cluster":                              {notMatched, matched, scopeUnknown, notMatched},
+		"unset scope":                          {matched, matched, matched, matched},
+		"all scopes":                           {matched, matched, matched, matched},
+		"a Namespaced rule and a Cluster rule": {matched, matched, matched, matched},
+	}
+	for _, rs := range ruleSets {
+		for i, st := range states {
+			t.Run(rs.name+"/"+st.name, func(t *testing.T) {
+				idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{Rules: rs.rules, MatchPolicy: exact()})
+				got := verdict(t, idx, Request{Group: "example.org", Version: "v1", Resource: "widgets", Kind: "Widget", Operation: create, Name: "w"}.with(st.mod))
+				assert.Equal(t, want[rs.name][i].verdict, got.Verdict)
+				assert.Equal(t, want[rs.name][i].reasons, got.Reasons)
+			})
+		}
+	}
+
+	t.Run("a namespaceSelector depends on the scope, and the reason says so", func(t *testing.T) {
+		sel := selector("env", metav1.LabelSelectorOpIn, "prod")
+		idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{Rules: []admissionregistrationv1.RuleWithOperations{widgets(nil)}, NamespaceSelector: sel, MatchPolicy: exact()})
+		base := Request{Group: "example.org", Version: "v1", Resource: "widgets", Kind: "Widget", Operation: create, Name: "w"}
+		got := verdict(t, idx, base.with(func(r *Request) { r.ScopeUnknown = true }))
+		assert.Equal(t, Indeterminate, got.Verdict)
+		assert.Equal(t, []Reason{ReasonResourceScopeUnknown}, got.Reasons)
+		got = verdict(t, idx, base)
+		assert.Equal(t, []Reason{ReasonNamespaceUnknown}, got.Reasons, "a missing namespace is not an unknown scope")
+		got = verdict(t, idx, base.with(func(r *Request) { r.ClusterScoped = true }))
+		assert.Equal(t, Matched, got.Verdict, "a cluster-scoped resource is never filtered by namespace")
+	})
+	t.Run("an empty namespaceSelector does not depend on the scope", func(t *testing.T) {
+		idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{Rules: []admissionregistrationv1.RuleWithOperations{widgets(nil)}, NamespaceSelector: &metav1.LabelSelector{}, MatchPolicy: exact()})
+		got := verdict(t, idx, Request{Group: "example.org", Version: "v1", Resource: "widgets", Kind: "Widget", Operation: create, Name: "w", ScopeUnknown: true})
+		assert.Equal(t, Matched, got.Verdict)
+	})
+	t.Run("a namespace settles the scope", func(t *testing.T) {
+		idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{Rules: []admissionregistrationv1.RuleWithOperations{clusterOnly}, MatchPolicy: exact()})
+		got := verdict(t, idx, Request{Group: "example.org", Version: "v1", Resource: "widgets", Kind: "Widget", Operation: create, Name: "w", Namespace: "ns1", ScopeUnknown: true})
+		assert.Equal(t, NotMatched, got.Verdict)
+	})
+	t.Run("claiming both scopes is contradictory", func(t *testing.T) {
+		idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{Rules: []admissionregistrationv1.RuleWithOperations{widgets(nil)}, MatchPolicy: exact()})
+		got := verdict(t, idx, Request{Group: "example.org", Version: "v1", Resource: "widgets", Kind: "Widget", Operation: create, Name: "w", ClusterScoped: true, ScopeUnknown: true})
+		assert.Equal(t, Indeterminate, got.Verdict)
+		assert.Equal(t, []Reason{ReasonIncompleteRequest}, got.Reasons)
+	})
+	t.Run("the core Namespace has a known scope", func(t *testing.T) {
+		idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{Rules: []admissionregistrationv1.RuleWithOperations{
+			scoped(rule([]string{""}, []string{"v1"}, []string{"namespaces"}, admissionregistrationv1.OperationAll), admissionregistrationv1.ClusterScope)}, MatchPolicy: exact()})
+		got := verdict(t, idx, Request{Version: "v1", Resource: "namespaces", Kind: "Namespace", Operation: create, Name: "new", ScopeUnknown: true})
+		assert.Equal(t, Matched, got.Verdict)
+	})
+}
+
+func (r Request) with(mod func(*Request)) Request {
+	if mod != nil {
+		mod(&r)
+	}
+	return r
+}
+
+// A missing part of the request does not override a rule exclusion that holds
+// whatever that part is.
+func TestIncompleteRequestKeepsDefiniteRuleExclusions(t *testing.T) {
+	noVersion := func(r *Request) { r.Version = "" }
+	tests := []struct {
+		name   string
+		rules  []admissionregistrationv1.RuleWithOperations
+		mod    func(*Request)
+		want   Verdict
+		reason Reason
+	}{
+		{"DELETE-only rule", []admissionregistrationv1.RuleWithOperations{podRule(deleteO)}, noVersion, NotMatched, ReasonRulesDoNotMatch},
+		{"no rules", nil, noVersion, NotMatched, ReasonRulesDoNotMatch},
+		{"CREATE rule restricted to v1", []admissionregistrationv1.RuleWithOperations{podRule(create)}, noVersion, Indeterminate, ReasonIncompleteRequest},
+		{"CREATE rule for any version", []admissionregistrationv1.RuleWithOperations{rule([]string{""}, []string{"*"}, []string{"pods"}, create)}, noVersion, Indeterminate, ReasonIncompleteRequest},
+		{"other group, version missing", []admissionregistrationv1.RuleWithOperations{rule([]string{"apps"}, []string{"v1"}, []string{"pods"}, create)}, noVersion, NotMatched, ReasonRulesDoNotMatch},
+		{"other resource, version missing", []admissionregistrationv1.RuleWithOperations{rule([]string{""}, []string{"v1"}, []string{"secrets"}, create)}, noVersion, NotMatched, ReasonRulesDoNotMatch},
+		{"DELETE-only rule, resource missing", []admissionregistrationv1.RuleWithOperations{podRule(deleteO)}, func(r *Request) { r.Resource = "" }, NotMatched, ReasonRulesDoNotMatch},
+		{"other subresource, resource missing", []admissionregistrationv1.RuleWithOperations{podRule(create)}, func(r *Request) { r.Resource, r.Subresource = "", "exec" }, NotMatched, ReasonRulesDoNotMatch},
+		{"no rules, operation missing", nil, func(r *Request) { r.Operation = "" }, NotMatched, ReasonRulesDoNotMatch},
+		{"any rule, operation missing", []admissionregistrationv1.RuleWithOperations{podRule(deleteO)}, func(r *Request) { r.Operation = "" }, Indeterminate, ReasonIncompleteRequest},
+		{"contradictory scope, DELETE-only rule", []admissionregistrationv1.RuleWithOperations{podRule(deleteO)}, func(r *Request) { r.ClusterScoped = true }, NotMatched, ReasonRulesDoNotMatch},
+		{"contradictory scope, matching rule", []admissionregistrationv1.RuleWithOperations{podRule(create)}, func(r *Request) { r.ClusterScoped = true }, Indeterminate, ReasonIncompleteRequest},
+	}
+	for _, policy := range []*admissionregistrationv1.MatchPolicyType{exact(), equivalent()} {
+		for _, tt := range tests {
+			want, reason := tt.want, tt.reason
+			if *policy == admissionregistrationv1.Equivalent {
+				// Equivalent also relaxes group, version and resource, but never
+				// the operation or the subresource.
+				if tt.name == "other group, version missing" || tt.name == "other resource, version missing" {
+					want, reason = Indeterminate, ReasonIncompleteRequest
+				}
+			}
+			t.Run(string(*policy)+"/"+tt.name, func(t *testing.T) {
+				idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{Rules: tt.rules, MatchPolicy: policy})
+				got := verdict(t, idx, podRequest(tt.mod))
+				assert.Equal(t, want, got.Verdict)
+				assert.Equal(t, []Reason{reason}, got.Reasons)
+			})
+		}
+	}
+	t.Run("a rule value this package does not know cannot be ruled out", func(t *testing.T) {
+		idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{
+			Rules: []admissionregistrationv1.RuleWithOperations{rule([]string{""}, []string{"v1"}, []string{"pods"}, "PATCH")}, MatchPolicy: exact()})
+		assert.Equal(t, Indeterminate, verdict(t, idx, podRequest(noVersion)).Verdict)
+	})
 }
