@@ -16,7 +16,7 @@ deny contains msga if {
 	binds_unprivileged_namespace(role, rolebinding)
 
 	rule := role.rules[p]
-	unrestricted_rule(rule)
+	names_a_pod(rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -53,7 +53,7 @@ deny contains msga if {
 	binds_unprivileged_namespace(role, rolebinding)
 
 	rule := role.rules[p]
-	unrestricted_rule(rule)
+	names_a_pod(rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -98,6 +98,24 @@ allows_exec_create(rule) if {
 # scoped and skip a subject that in fact holds unrestricted access.
 unrestricted_rule(rule) if {
 	count(resource_names(rule)) == 0
+}
+
+# Both blocks above act on a pod that already exists, so the request carries
+# that pod's name: an update or patch names the pod it rewrites, and an exec is
+# a subresource request, which carries the name of its parent pod. A narrowed
+# entry therefore still authorizes the attack, and in an unprivileged namespace
+# every pod carries a service account token, so reaching one named pod is
+# already the full harm - there is nothing here that needs an arbitrary target.
+# resourceNames is matched literally, with no wildcard expansion, so "*" only
+# names a pod called "*", which no pod can be, and "" names no object at all.
+# An entry narrowed to those two alone reaches no pod. This is the same call
+# steal-privileged-pods-v1 makes for update/patch on pods and
+# weak-namespace-token-access-v1 makes for a create on a subresource.
+names_a_pod(rule) if unrestricted_rule(rule)
+
+names_a_pod(rule) if {
+	some name in resource_names(rule)
+	not name in {"", "*"}
 }
 
 # Only RoleBindings outside the privileged namespaces are in scope here. A

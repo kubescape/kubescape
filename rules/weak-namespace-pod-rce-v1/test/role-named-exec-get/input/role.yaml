@@ -1,0 +1,10 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dev-named-pod-exec-get
+  namespace: dev
+rules:
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["get"]
+  resourceNames: ["app-0"]
