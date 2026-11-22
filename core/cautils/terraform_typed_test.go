@@ -1572,3 +1572,380 @@ resource "kubernetes_priority_class_v1" "pc_v1" {
 	assert.Equal(t, map[string]interface{}{"name": "critical-priority"}, pcV1["metadata"])
 	assert.Equal(t, json.Number("2000000"), pcV1["value"])
 }
+
+func TestExtractTypedResources_AdmissionStorageIngressInfrastructure(t *testing.T) {
+	src := `
+resource "kubernetes_mutating_webhook_configuration" "mwc" {
+  metadata {
+    name = "mutating-webhook"
+  }
+  webhook {
+    name = "mutating.example.com"
+    client_config {
+      service {
+        name      = "webhook-service"
+        namespace = "default"
+        path      = "/mutate"
+        port      = 443
+      }
+      ca_bundle = "LS0tLS1CRUdJTi..."
+    }
+    rule {
+      api_groups   = [""]
+      api_versions = ["v1"]
+      operations   = ["CREATE", "UPDATE"]
+      resources    = ["pods"]
+      scope        = "Namespaced"
+    }
+    admission_review_versions = ["v1", "v1beta1"]
+    side_effects              = "None"
+    timeout_seconds           = 10
+  }
+}
+
+resource "kubernetes_validating_webhook_configuration_v1" "vwc" {
+  metadata {
+    name = "validating-webhook"
+  }
+  webhook {
+    name = "validating.example.com"
+    client_config {
+      url = "https://example.com/validate"
+    }
+    rule {
+      api_groups   = ["apps"]
+      api_versions = ["v1"]
+      operations   = ["CREATE"]
+      resources    = ["deployments"]
+    }
+    match_condition {
+      name       = "exclude-kube-system"
+      expression = "request.namespace != 'kube-system'"
+    }
+    failure_policy = "Fail"
+    side_effects   = "None"
+  }
+}
+
+resource "kubernetes_storage_class" "sc" {
+  metadata {
+    name = "fast-sc"
+  }
+  storage_provisioner = "kubernetes.io/no-provisioner"
+  reclaim_policy      = "Retain"
+  volume_binding_mode = "WaitForFirstConsumer"
+  mount_options       = ["debug"]
+  parameters = {
+    type = "gp3"
+  }
+  allowed_topologies {
+    match_label_expressions {
+      key    = "topology.kubernetes.io/zone"
+      values = ["us-east-1a", "us-east-1b"]
+    }
+  }
+}
+
+resource "kubernetes_storage_class_v1" "sc_v1" {
+  metadata {
+    name = "nfs-sc"
+  }
+  storage_provisioner    = "example.com/nfs"
+  allow_volume_expansion = true
+}
+
+resource "kubernetes_ingress_class" "ic" {
+  metadata {
+    name = "nginx-ic"
+  }
+  spec {
+    controller = "k8s.io/ingress-nginx"
+    parameters {
+      api_group = "k8s.example.com"
+      kind      = "IngressParameters"
+      name      = "external-lb"
+    }
+  }
+}
+
+resource "kubernetes_ingress_class_v1" "ic_v1" {
+  metadata {
+    name = "internal-ic"
+  }
+  spec {
+    controller = "example.com/internal"
+  }
+}
+
+resource "kubernetes_certificate_signing_request" "csr" {
+  metadata {
+    name = "test-csr"
+  }
+  spec {
+    request            = "LS0tLS1CRUdJTi..."
+    signer_name        = "kubernetes.io/kube-apiserver-client"
+    usages             = ["client auth"]
+    expiration_seconds = 86400
+  }
+}
+
+resource "kubernetes_certificate_signing_request_v1" "csr_v1" {
+  metadata {
+    name = "test-csr-v1"
+  }
+  spec {
+    request     = "LS0tLS1CRUdJTi..."
+    signer_name = "kubernetes.io/kubelet-serving"
+    usages      = ["server auth"]
+  }
+}
+
+resource "kubernetes_csi_driver" "csi" {
+  metadata {
+    name = "mycsi.example.com"
+  }
+  spec {
+    attach_required        = true
+    pod_info_on_mount      = true
+    volume_lifecycle_modes = ["Persistent"]
+    fs_group_policy        = "File"
+    token_request {
+      audience           = "gcp"
+      expiration_seconds = 3600
+    }
+  }
+}
+
+resource "kubernetes_csi_driver_v1" "csi_v1" {
+  metadata {
+    name = "ebs.csi.aws.com"
+  }
+  spec {
+    attach_required = false
+  }
+}
+
+resource "kubernetes_runtime_class" "rc" {
+  metadata {
+    name = "gvisor"
+  }
+  handler = "runsc"
+  overhead {
+    pod_fixed = {
+      cpu    = "100m"
+      memory = "120Mi"
+    }
+  }
+  scheduling {
+    node_selector = {
+      "kubernetes.io/arch" = "amd64"
+    }
+  }
+}
+
+resource "kubernetes_runtime_class_v1" "rc_v1" {
+  metadata {
+    name = "kata"
+  }
+  handler = "kata-qemu"
+}
+
+resource "kubernetes_endpoints" "ep" {
+  metadata {
+    name = "my-service-ep"
+  }
+  subset {
+    address {
+      ip = "10.0.0.1"
+    }
+    port {
+      name = "http"
+      port = 80
+    }
+  }
+}
+
+resource "kubernetes_endpoints_v1" "ep_v1" {
+  metadata {
+    name      = "custom-ep"
+    namespace = "monitoring"
+  }
+}
+
+resource "kubernetes_endpoint_slice" "eps" {
+  metadata {
+    name = "my-eps"
+  }
+  address_type = "IPv4"
+  endpoint {
+    addresses = ["10.0.0.1"]
+    conditions {
+      ready = true
+    }
+  }
+  port {
+    name     = "http"
+    port     = 80
+    protocol = "TCP"
+  }
+}
+
+resource "kubernetes_endpoint_slice_v1" "eps_v1" {
+  metadata {
+    name      = "custom-eps"
+    namespace = "networking"
+  }
+  address_type = "IPv4"
+}
+`
+
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+	require.Empty(t, errs)
+	require.Len(t, manifests, 16)
+
+	// MutatingWebhookConfiguration: cluster-scoped (NO namespace in metadata)
+	mwc := manifests[0]
+	assert.Equal(t, "admissionregistration.k8s.io/v1", mwc["apiVersion"])
+	assert.Equal(t, "MutatingWebhookConfiguration", mwc["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "mutating-webhook"}, mwc["metadata"])
+	webhooks := mwc["webhooks"].([]interface{})
+	require.Len(t, webhooks, 1)
+	wh0 := webhooks[0].(map[string]interface{})
+	assert.Equal(t, "mutating.example.com", wh0["name"])
+	assert.Equal(t, "LS0tLS1CRUdJTi...", wh0["clientConfig"].(map[string]interface{})["caBundle"])
+	svc := wh0["clientConfig"].(map[string]interface{})["service"].(map[string]interface{})
+	assert.Equal(t, "webhook-service", svc["name"])
+	rules := wh0["rules"].([]interface{})
+	require.Len(t, rules, 1)
+	assert.Equal(t, []interface{}{"CREATE", "UPDATE"}, rules[0].(map[string]interface{})["operations"])
+
+	// ValidatingWebhookConfiguration: cluster-scoped, match_condition -> matchConditions
+	vwc := manifests[1]
+	assert.Equal(t, "admissionregistration.k8s.io/v1", vwc["apiVersion"])
+	assert.Equal(t, "ValidatingWebhookConfiguration", vwc["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "validating-webhook"}, vwc["metadata"])
+	vWh := vwc["webhooks"].([]interface{})[0].(map[string]interface{})
+	assert.Equal(t, "https://example.com/validate", vWh["clientConfig"].(map[string]interface{})["url"])
+	matchConds := vWh["matchConditions"].([]interface{})
+	require.Len(t, matchConds, 1)
+	assert.Equal(t, "exclude-kube-system", matchConds[0].(map[string]interface{})["name"])
+
+	// StorageClass: cluster-scoped, storage_provisioner -> provisioner, allowed_topologies -> allowedTopologies
+	sc := manifests[2]
+	assert.Equal(t, "storage.k8s.io/v1", sc["apiVersion"])
+	assert.Equal(t, "StorageClass", sc["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "fast-sc"}, sc["metadata"])
+	assert.Equal(t, "kubernetes.io/no-provisioner", sc["provisioner"])
+	assert.Equal(t, "Retain", sc["reclaimPolicy"])
+	assert.Equal(t, "WaitForFirstConsumer", sc["volumeBindingMode"])
+	assert.Equal(t, []interface{}{"debug"}, sc["mountOptions"])
+	assert.Equal(t, map[string]interface{}{"type": "gp3"}, sc["parameters"])
+	topologies := sc["allowedTopologies"].([]interface{})
+	require.Len(t, topologies, 1)
+	term := topologies[0].(map[string]interface{})
+	exprs := term["matchLabelExpressions"].([]interface{})
+	require.Len(t, exprs, 1)
+	assert.Equal(t, "topology.kubernetes.io/zone", exprs[0].(map[string]interface{})["key"])
+
+	// StorageClass v1: cluster-scoped
+	scV1 := manifests[3]
+	assert.Equal(t, "storage.k8s.io/v1", scV1["apiVersion"])
+	assert.Equal(t, "StorageClass", scV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "nfs-sc"}, scV1["metadata"])
+	assert.Equal(t, "example.com/nfs", scV1["provisioner"])
+	assert.Equal(t, true, scV1["allowVolumeExpansion"])
+
+	// IngressClass: cluster-scoped
+	ic := manifests[4]
+	assert.Equal(t, "networking.k8s.io/v1", ic["apiVersion"])
+	assert.Equal(t, "IngressClass", ic["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "nginx-ic"}, ic["metadata"])
+	icSpec := ic["spec"].(map[string]interface{})
+	assert.Equal(t, "k8s.io/ingress-nginx", icSpec["controller"])
+	assert.Equal(t, map[string]interface{}{"apiGroup": "k8s.example.com", "kind": "IngressParameters", "name": "external-lb"}, icSpec["parameters"])
+
+	// IngressClass v1: cluster-scoped
+	icV1 := manifests[5]
+	assert.Equal(t, "networking.k8s.io/v1", icV1["apiVersion"])
+	assert.Equal(t, "IngressClass", icV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "internal-ic"}, icV1["metadata"])
+
+	// CertificateSigningRequest: cluster-scoped
+	csr := manifests[6]
+	assert.Equal(t, "certificates.k8s.io/v1", csr["apiVersion"])
+	assert.Equal(t, "CertificateSigningRequest", csr["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "test-csr"}, csr["metadata"])
+	csrSpec := csr["spec"].(map[string]interface{})
+	assert.Equal(t, "kubernetes.io/kube-apiserver-client", csrSpec["signerName"])
+	assert.Equal(t, []interface{}{"client auth"}, csrSpec["usages"])
+
+	// CertificateSigningRequest v1: cluster-scoped
+	csrV1 := manifests[7]
+	assert.Equal(t, "certificates.k8s.io/v1", csrV1["apiVersion"])
+	assert.Equal(t, "CertificateSigningRequest", csrV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "test-csr-v1"}, csrV1["metadata"])
+
+	// CSIDriver: cluster-scoped, token_request -> tokenRequests
+	csi := manifests[8]
+	assert.Equal(t, "storage.k8s.io/v1", csi["apiVersion"])
+	assert.Equal(t, "CSIDriver", csi["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "mycsi.example.com"}, csi["metadata"])
+	csiSpec := csi["spec"].(map[string]interface{})
+	assert.Equal(t, true, csiSpec["attachRequired"])
+	assert.Equal(t, true, csiSpec["podInfoOnMount"])
+	assert.Equal(t, "File", csiSpec["fsGroupPolicy"])
+	tokenRequests := csiSpec["tokenRequests"].([]interface{})
+	require.Len(t, tokenRequests, 1)
+	assert.Equal(t, "gcp", tokenRequests[0].(map[string]interface{})["audience"])
+
+	// CSIDriver v1: cluster-scoped
+	csiV1 := manifests[9]
+	assert.Equal(t, "storage.k8s.io/v1", csiV1["apiVersion"])
+	assert.Equal(t, "CSIDriver", csiV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "ebs.csi.aws.com"}, csiV1["metadata"])
+
+	// RuntimeClass: cluster-scoped
+	rc := manifests[10]
+	assert.Equal(t, "node.k8s.io/v1", rc["apiVersion"])
+	assert.Equal(t, "RuntimeClass", rc["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "gvisor"}, rc["metadata"])
+	assert.Equal(t, "runsc", rc["handler"])
+	overhead := rc["overhead"].(map[string]interface{})
+	assert.Equal(t, map[string]interface{}{"cpu": "100m", "memory": "120Mi"}, overhead["podFixed"])
+
+	// RuntimeClass v1: cluster-scoped
+	rcV1 := manifests[11]
+	assert.Equal(t, "node.k8s.io/v1", rcV1["apiVersion"])
+	assert.Equal(t, "RuntimeClass", rcV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "kata"}, rcV1["metadata"])
+	assert.Equal(t, "kata-qemu", rcV1["handler"])
+
+	// Endpoints: namespaced, defaults to "default" namespace
+	ep := manifests[12]
+	assert.Equal(t, "v1", ep["apiVersion"])
+	assert.Equal(t, "Endpoints", ep["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "my-service-ep", "namespace": "default"}, ep["metadata"])
+	subsets := ep["subsets"].([]interface{})
+	require.Len(t, subsets, 1)
+
+	// Endpoints v1: explicit namespace
+	epV1 := manifests[13]
+	assert.Equal(t, "v1", epV1["apiVersion"])
+	assert.Equal(t, "Endpoints", epV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "custom-ep", "namespace": "monitoring"}, epV1["metadata"])
+
+	// EndpointSlice: namespaced, defaults to "default" namespace
+	eps := manifests[14]
+	assert.Equal(t, "discovery.k8s.io/v1", eps["apiVersion"])
+	assert.Equal(t, "EndpointSlice", eps["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "my-eps", "namespace": "default"}, eps["metadata"])
+	assert.Equal(t, "IPv4", eps["addressType"])
+	endpoints := eps["endpoints"].([]interface{})
+	require.Len(t, endpoints, 1)
+
+	// EndpointSlice v1: explicit namespace
+	epsV1 := manifests[15]
+	assert.Equal(t, "discovery.k8s.io/v1", epsV1["apiVersion"])
+	assert.Equal(t, "EndpointSlice", epsV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "custom-eps", "namespace": "networking"}, epsV1["metadata"])
+}

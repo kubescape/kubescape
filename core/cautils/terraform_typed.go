@@ -72,6 +72,25 @@ var typedResourceGVK = map[string]struct{ apiVersion, kind string }{
 	"kubernetes_horizontal_pod_autoscaler_v2beta2": {"autoscaling/v2beta2", "HorizontalPodAutoscaler"},
 	"kubernetes_priority_class":                    {"scheduling.k8s.io/v1", "PriorityClass"},
 	"kubernetes_priority_class_v1":                 {"scheduling.k8s.io/v1", "PriorityClass"},
+
+	"kubernetes_mutating_webhook_configuration":    {"admissionregistration.k8s.io/v1", "MutatingWebhookConfiguration"},
+	"kubernetes_mutating_webhook_configuration_v1": {"admissionregistration.k8s.io/v1", "MutatingWebhookConfiguration"},
+	"kubernetes_validating_webhook_configuration":    {"admissionregistration.k8s.io/v1", "ValidatingWebhookConfiguration"},
+	"kubernetes_validating_webhook_configuration_v1": {"admissionregistration.k8s.io/v1", "ValidatingWebhookConfiguration"},
+	"kubernetes_storage_class":                      {"storage.k8s.io/v1", "StorageClass"},
+	"kubernetes_storage_class_v1":                   {"storage.k8s.io/v1", "StorageClass"},
+	"kubernetes_ingress_class":                      {"networking.k8s.io/v1", "IngressClass"},
+	"kubernetes_ingress_class_v1":                   {"networking.k8s.io/v1", "IngressClass"},
+	"kubernetes_certificate_signing_request":        {"certificates.k8s.io/v1", "CertificateSigningRequest"},
+	"kubernetes_certificate_signing_request_v1":     {"certificates.k8s.io/v1", "CertificateSigningRequest"},
+	"kubernetes_csi_driver":                         {"storage.k8s.io/v1", "CSIDriver"},
+	"kubernetes_csi_driver_v1":                      {"storage.k8s.io/v1", "CSIDriver"},
+	"kubernetes_runtime_class":                      {"node.k8s.io/v1", "RuntimeClass"},
+	"kubernetes_runtime_class_v1":                   {"node.k8s.io/v1", "RuntimeClass"},
+	"kubernetes_endpoints":                          {"v1", "Endpoints"},
+	"kubernetes_endpoints_v1":                       {"v1", "Endpoints"},
+	"kubernetes_endpoint_slice":                     {"discovery.k8s.io/v1", "EndpointSlice"},
+	"kubernetes_endpoint_slice_v1":                  {"discovery.k8s.io/v1", "EndpointSlice"},
 }
 
 // pluralOverrides maps an HCL block label to the K8s array field name it must
@@ -79,30 +98,41 @@ var typedResourceGVK = map[string]struct{ apiVersion, kind string }{
 // (block "container" -> field "containers"). Anything not listed here just
 // gets its singular name camelCased.
 var pluralOverrides = map[string]string{
-	"container":             "containers",
-	"init_container":        "initContainers",
-	"volume":                "volumes",
-	"volume_mount":          "volumeMounts",
-	"env_from":              "envFrom",
-	"port":                  "ports",
-	"toleration":            "tolerations",
-	"host_alias":            "hostAliases",
-	"host_aliases":          "hostAliases",
-	"rule":                  "rules",
-	"path":                  "paths",
-	"subject":               "subjects",
-	"image_pull_secret":     "imagePullSecrets",
-	"image_pull_secrets":    "imagePullSecrets",
-	"match_expressions":     "matchExpressions",
-	"match_expression":      "matchExpressions",
-	"volume_claim_template": "volumeClaimTemplates",
-	"http_header":           "httpHeaders",
-	"sysctl":                "sysctls",
-	"limit":                 "limits",
-	"metric":                "metrics",
-	"policy":                "policies",
-	"node_selector_term":    "nodeSelectorTerms",
-	"node_selector_terms":   "nodeSelectorTerms",
+	"container":                "containers",
+	"init_container":           "initContainers",
+	"volume":                   "volumes",
+	"volume_mount":             "volumeMounts",
+	"env_from":                 "envFrom",
+	"port":                     "ports",
+	"toleration":               "tolerations",
+	"host_alias":               "hostAliases",
+	"host_aliases":             "hostAliases",
+	"rule":                     "rules",
+	"path":                     "paths",
+	"subject":                  "subjects",
+	"image_pull_secret":        "imagePullSecrets",
+	"image_pull_secrets":       "imagePullSecrets",
+	"match_expressions":        "matchExpressions",
+	"match_expression":         "matchExpressions",
+	"volume_claim_template":    "volumeClaimTemplates",
+	"http_header":              "httpHeaders",
+	"sysctl":                   "sysctls",
+	"limit":                    "limits",
+	"metric":                   "metrics",
+	"policy":                   "policies",
+	"node_selector_term":       "nodeSelectorTerms",
+	"node_selector_terms":      "nodeSelectorTerms",
+	"webhook":                  "webhooks",
+	"match_condition":          "matchConditions",
+	"match_conditions":         "matchConditions",
+	"match_label_expression":   "matchLabelExpressions",
+	"match_label_expressions":  "matchLabelExpressions",
+	"allowed_topology":         "allowedTopologies",
+	"allowed_topologies":       "allowedTopologies",
+	"token_request":            "tokenRequests",
+	"token_requests":           "tokenRequests",
+	"subset":                   "subsets",
+	"endpoint":                 "endpoints",
 }
 
 // repeatableBlocks lists HCL block labels that always encode as a JSON array,
@@ -118,6 +148,12 @@ var repeatableBlocks = map[string]bool{
 	"path": true, "tls": true,
 	"limit": true, "metric": true, "policy": true,
 	"node_selector_term": true, "node_selector_terms": true,
+	"webhook": true,
+	"match_condition": true, "match_conditions": true,
+	"match_label_expression": true, "match_label_expressions": true,
+	"allowed_topology": true, "allowed_topologies": true,
+	"token_request": true, "token_requests": true,
+	"subset": true, "endpoint": true,
 }
 
 // resourceMetaAttributes are Terraform meta-argument attributes valid on any
@@ -180,6 +216,9 @@ func fieldNameFor(blockType string) string {
 func attributeNameFor(name string) string {
 	if name == "data_disk_uri" {
 		return "diskURI"
+	}
+	if name == "storage_provisioner" {
+		return "provisioner"
 	}
 	return snakeToCamel(name)
 }
@@ -606,11 +645,18 @@ func isPodSpecBlockPath(path string) bool {
 // clusterScopedTypedKinds are the typed resource kinds that live in no
 // namespace. The provider gives their metadata no namespace field.
 var clusterScopedTypedKinds = map[string]bool{
-	"Namespace":          true,
-	"ClusterRole":        true,
-	"ClusterRoleBinding": true,
-	"PersistentVolume":   true,
-	"PriorityClass":      true,
+	"Namespace":                      true,
+	"ClusterRole":                    true,
+	"ClusterRoleBinding":             true,
+	"PersistentVolume":               true,
+	"PriorityClass":                  true,
+	"MutatingWebhookConfiguration":   true,
+	"ValidatingWebhookConfiguration": true,
+	"StorageClass":                   true,
+	"IngressClass":                   true,
+	"CertificateSigningRequest":      true,
+	"CSIDriver":                      true,
+	"RuntimeClass":                   true,
 }
 
 // providerNamespaceDefault is the namespace the provider writes into a block
