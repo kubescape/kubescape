@@ -26,7 +26,7 @@ var operatorCommandPollInterval = 2 * time.Second
 
 const (
 	operatorCommandGenerateName = "kubescape-cli-"
-	// defaultOperatorCommandTimeout bounds how long the CLI waits for the operator to finish its commands.
+	// defaultOperatorCommandTimeout bounds each phase of creating commands and waiting for completion.
 	defaultOperatorCommandTimeout = 10 * time.Minute
 )
 
