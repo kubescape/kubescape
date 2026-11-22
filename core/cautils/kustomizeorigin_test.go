@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/kustomize/api/krusty"
+	"sigs.k8s.io/kustomize/kyaml/filesys"
 )
 
 // kustomizeOriginFixture writes a base and an overlay that composes it and
@@ -216,6 +218,7 @@ func TestTakeKustomizeOrigin(t *testing.T) {
 	base := t.TempDir()
 	file := filepath.Join(base, "deploy.yaml")
 	require.NoError(t, os.WriteFile(file, []byte("kind: Deployment\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(filepath.Dir(base), "deploy.yaml"), []byte("kind: Deployment\n"), 0o600))
 	require.NoError(t, os.Mkdir(filepath.Join(base, "dir"), 0o755))
 
 	object := func(annotations map[string]any) map[string]any {
@@ -246,6 +249,7 @@ func TestTakeKustomizeOrigin(t *testing.T) {
 		{"a directory", annotated("path: dir\n"), ""},
 		{"an empty origin", annotated("{}\n"), ""},
 		{"an origin that is not YAML", annotated("path: [unclosed\n"), ""},
+		{"an origin escaping the base directory", annotated("path: ../deploy.yaml\n"), ""},
 		{"no annotation at all", object(nil), ""},
 		{"no metadata at all", map[string]any{}, ""},
 	}
@@ -258,6 +262,49 @@ func TestTakeKustomizeOrigin(t *testing.T) {
 			assert.NotContains(t, annotations, kustomizeOriginAnnotation, "the annotation is removed whatever it said")
 		})
 	}
+
+	t.Run("an origin pointing to a symlink that escapes base directory is rejected", func(t *testing.T) {
+		outsideDir := t.TempDir()
+		outsideFile := filepath.Join(outsideDir, "secret.yaml")
+		require.NoError(t, os.WriteFile(outsideFile, []byte("kind: Secret\n"), 0o600))
+		symlink := filepath.Join(base, "symlink-outside.yaml")
+		require.NoError(t, os.Symlink(outsideFile, symlink))
+
+		obj := annotated("path: symlink-outside.yaml\n")
+		assert.Equal(t, "", takeKustomizeOrigin(obj, base, true))
+	})
+
+	t.Run("wrapper mode accepts file in allowed scanned directory even when outside wrapper base", func(t *testing.T) {
+		wrapperBase := t.TempDir()
+		scannedDir := t.TempDir()
+		scannedFile := filepath.Join(scannedDir, "workload.yaml")
+		require.NoError(t, os.WriteFile(scannedFile, []byte("kind: Deployment\n"), 0o600))
+
+		relPath, err := filepath.Rel(wrapperBase, scannedFile)
+		require.NoError(t, err)
+
+		obj := annotated("path: " + relPath + "\n")
+		assert.Equal(t, scannedFile, takeKustomizeOrigin(obj, wrapperBase, true, scannedDir))
+
+		// But forged path escaping scanned directory is rejected
+		outsideDir := t.TempDir()
+		forgedFile := filepath.Join(outsideDir, "escaped.yaml")
+		require.NoError(t, os.WriteFile(forgedFile, []byte("kind: Deployment\n"), 0o600))
+		forgedRel, err := filepath.Rel(wrapperBase, forgedFile)
+		require.NoError(t, err)
+
+		forgedObj := annotated("path: " + forgedRel + "\n")
+		assert.Equal(t, "", takeKustomizeOrigin(forgedObj, wrapperBase, true, scannedDir))
+
+		// Symlink inside scanned directory pointing outside is rejected
+		symlinkInScanned := filepath.Join(scannedDir, "symlink-escaped.yaml")
+		require.NoError(t, os.Symlink(forgedFile, symlinkInScanned))
+		symlinkRel, err := filepath.Rel(wrapperBase, symlinkInScanned)
+		require.NoError(t, err)
+
+		symlinkObj := annotated("path: " + symlinkRel + "\n")
+		assert.Equal(t, "", takeKustomizeOrigin(symlinkObj, wrapperBase, true, scannedDir))
+	})
 
 	t.Run("other annotations survive and the annotation map is dropped when empty", func(t *testing.T) {
 		obj := annotated("path: deploy.yaml\n", "team")
@@ -300,6 +347,7 @@ func TestOriginModeFollowsTheScannedBuildMetadata(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "d.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: d\n"), 0o600))
 			require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte("resources:\n- d.yaml\n"+tt.buildMetadata), 0o600))
 
 			plan := originModeFor(dir)
@@ -422,4 +470,1076 @@ patches:
 	byName, origins := renderedKustomizeWorkloads(t, root)
 	assert.Equal(t, int64(3), replicasOf(t, byName["Deployment/demo"]), "the patch applies, as it does without Kubescape")
 	assert.Empty(t, origins, "the wrapper rendered something else, so none of its file names is trusted")
+}
+
+func TestKustomizeDoesNotTrustPatchedOriginAnnotation(t *testing.T) {
+	root := t.TempDir()
+	deploymentFile := filepath.Join(root, "deployment.yaml")
+	decoyFile := filepath.Join(root, "service.yaml")
+	require.NoError(t, os.WriteFile(deploymentFile,
+		[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  replicas: 1\n"), 0o600))
+	require.NoError(t, os.WriteFile(decoyFile,
+		[]byte("apiVersion: v1\nkind: Service\nmetadata:\n  name: demo\n"), 0o600))
+
+	relFromTemp, err := filepath.Rel(os.TempDir(), decoyFile)
+	require.NoError(t, err)
+	forgedOriginPath := filepath.ToSlash(filepath.Join("..", relFromTemp))
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, "kustomization.yaml"), []byte(`resources:
+- deployment.yaml
+patches:
+- patch: |-
+    - op: replace
+      path: /metadata/annotations/config.kubernetes.io~1origin
+      value: |
+        path: `+forgedOriginPath+`
+  target:
+    kind: Deployment
+    annotationSelector: config.kubernetes.io/origin
+`), 0o600))
+
+	newKustomizer := func() *krusty.Kustomizer { return krusty.MakeKustomizer(krusty.MakeDefaultOptions()) }
+	rendered, base, ok := renderWithOrigins(newKustomizer, root, nil)
+	require.True(t, ok)
+	wrapped, err := ReadFile(rendered, YAML_FILE_FORMAT)
+	require.NoError(t, err)
+	require.Len(t, wrapped, 1)
+	require.Equal(t, decoyFile, takeKustomizeOrigin(wrapped[0].GetObject(), base, true, root))
+
+	byName, origins := renderedKustomizeWorkloads(t, root)
+	require.Contains(t, byName, "Deployment/demo")
+	assert.NotContains(t, annotationsOf(byName["Deployment/demo"]), kustomizeOriginAnnotation)
+	assert.Empty(t, origins)
+
+	t.Run("originAnnotations requested in buildMetadata", func(t *testing.T) {
+		ownDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(ownDir, "deployment.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(ownDir, "service.yaml"),
+			[]byte("apiVersion: v1\nkind: Service\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(ownDir, "kustomization.yaml"), []byte(`resources:
+- deployment.yaml
+buildMetadata: [originAnnotations]
+patches:
+- patch: |-
+    - op: replace
+      path: /metadata/annotations/config.kubernetes.io~1origin
+      value: |
+        path: service.yaml
+  target:
+    kind: Deployment
+    annotationSelector: config.kubernetes.io/origin
+`), 0o600))
+
+		_, ownOrigins := renderedKustomizeWorkloads(t, ownDir)
+		assert.Empty(t, ownOrigins)
+	})
+
+	t.Run("a patch renames a resource to the name of a deleted one", func(t *testing.T) {
+		renameDir := t.TempDir()
+		for _, name := range []string{"a", "b"} {
+			require.NoError(t, os.WriteFile(filepath.Join(renameDir, name+".yaml"),
+				[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: "+name+"\n"), 0o600))
+		}
+		require.NoError(t, os.WriteFile(filepath.Join(renameDir, "kustomization.yaml"), []byte(`resources:
+- a.yaml
+- b.yaml
+buildMetadata: [originAnnotations]
+patches:
+- patch: |-
+    $patch: delete
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: b
+- patch: |-
+    - op: replace
+      path: /metadata/name
+      value: b
+    - op: replace
+      path: /metadata/annotations/config.kubernetes.io~1origin
+      value: |
+        path: b.yaml
+  target:
+    kind: Deployment
+    name: a
+`), 0o600))
+
+		require.Equal(t, originUnavailable, originModeFor(renameDir).mode)
+		byName, renamedOrigins := renderedKustomizeWorkloads(t, renameDir)
+		require.Contains(t, byName, "Deployment/b")
+		assert.Empty(t, renamedOrigins)
+	})
+
+	t.Run("two-resource swap regression", func(t *testing.T) {
+		swapDir := t.TempDir()
+		for _, name := range []string{"a", "b"} {
+			require.NoError(t, os.WriteFile(filepath.Join(swapDir, name+".yaml"),
+				[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: "+name+"\n  labels:\n    app: "+name+"\n"), 0o600))
+		}
+		require.NoError(t, os.WriteFile(filepath.Join(swapDir, "kustomization.yaml"), []byte(`resources:
+- a.yaml
+- b.yaml
+buildMetadata: [originAnnotations]
+patches:
+- patch: |-
+    - op: replace
+      path: /metadata/name
+      value: b
+    - op: replace
+      path: /metadata/annotations/config.kubernetes.io~1origin
+      value: |
+        path: b.yaml
+  target:
+    kind: Deployment
+    labelSelector: "app=a"
+- patch: |-
+    - op: replace
+      path: /metadata/name
+      value: a
+    - op: replace
+      path: /metadata/annotations/config.kubernetes.io~1origin
+      value: |
+        path: a.yaml
+  target:
+    kind: Deployment
+    labelSelector: "app=b"
+`), 0o600))
+
+		// 1. Verify that raw Kustomize build performs the swap and carries forged origin annotations
+		newKustomizer := func() *krusty.Kustomizer { return krusty.MakeKustomizer(krusty.MakeDefaultOptions()) }
+		rawResMap, err := newKustomizer().Run(filesys.MakeFsOnDisk(), swapDir)
+		require.NoError(t, err)
+		rawYml, err := rawResMap.AsYaml()
+		require.NoError(t, err)
+		rawWls, err := ReadFile(rawYml, YAML_FILE_FORMAT)
+		require.NoError(t, err)
+		require.Len(t, rawWls, 2)
+		byAppLabel := map[string]workloadinterface.IMetadata{}
+		for _, wl := range rawWls {
+			meta, _ := wl.GetObject()["metadata"].(map[string]any)
+			labels, _ := meta["labels"].(map[string]any)
+			appLabel, _ := labels["app"].(string)
+			byAppLabel[appLabel] = wl
+		}
+		require.Contains(t, byAppLabel, "a")
+		require.Contains(t, byAppLabel, "b")
+
+		wlA := byAppLabel["a"]
+		assert.Equal(t, "b", wlA.GetName())
+		metaA, _ := wlA.GetObject()["metadata"].(map[string]any)
+		annosA, _ := metaA["annotations"].(map[string]any)
+		assert.Contains(t, annosA[kustomizeOriginAnnotation], "path: b.yaml")
+
+		wlB := byAppLabel["b"]
+		assert.Equal(t, "a", wlB.GetName())
+		metaB, _ := wlB.GetObject()["metadata"].(map[string]any)
+		annosB, _ := metaB["annotations"].(map[string]any)
+		assert.Contains(t, annosB[kustomizeOriginAnnotation], "path: a.yaml")
+
+		// 2. Verify that Kubescape detects ambiguous transformations, suppresses attribution, and falls back to directory
+		require.Equal(t, originUnavailable, originModeFor(swapDir).mode)
+		kd := NewKustomizeDirectory(swapDir)
+		workloads, errs := kd.GetWorkloads(swapDir)
+		require.Empty(t, errs, "scanning must still succeed")
+		byKindAndName := map[string]workloadinterface.IMetadata{}
+		for _, list := range workloads {
+			for _, wl := range list {
+				byKindAndName[wl.GetKind()+"/"+wl.GetName()] = wl
+			}
+		}
+		require.Contains(t, byKindAndName, "Deployment/a")
+		require.Contains(t, byKindAndName, "Deployment/b")
+
+		origins := kd.OriginFiles()
+		assert.Empty(t, origins, "neither resource must be attributed to the forged file")
+
+		for dirPath, wls := range workloads {
+			assert.Equal(t, lexicalAbsPath(swapDir), dirPath, "workload path stays the directory")
+			for _, wl := range wls {
+				assert.NotEmpty(t, wl.GetName())
+			}
+		}
+	})
+
+	t.Run("originOwn mode rejects forged origin annotation and falls back to directory", func(t *testing.T) {
+		ownDir := t.TempDir()
+		deployFile := filepath.Join(ownDir, "deployment.yaml")
+		serviceFile := filepath.Join(ownDir, "service.yaml")
+		require.NoError(t, os.WriteFile(deployFile,
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(serviceFile,
+			[]byte("apiVersion: v1\nkind: Service\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(ownDir, "kustomization.yaml"), []byte(`resources:
+- deployment.yaml
+buildMetadata: [originAnnotations]
+patches:
+- patch: |-
+    - op: replace
+      path: /metadata/annotations/config.kubernetes.io~1origin
+      value: |
+        path: service.yaml
+  target:
+    kind: Deployment
+`), 0o600))
+
+		require.Equal(t, originUnavailable, originModeFor(ownDir).mode)
+		kd := NewKustomizeDirectory(ownDir)
+		workloads, errs := kd.GetWorkloads(ownDir)
+		require.Empty(t, errs, "scan must succeed even when origin annotations are forged")
+		byKindAndName := map[string]workloadinterface.IMetadata{}
+		for _, list := range workloads {
+			for _, wl := range list {
+				byKindAndName[wl.GetKind()+"/"+wl.GetName()] = wl
+			}
+		}
+		require.Contains(t, byKindAndName, "Deployment/demo")
+
+		origins := kd.OriginFiles()
+		assert.Empty(t, origins, "forged origin must not become file attribution in originOwn mode")
+
+		for dirPath, wls := range workloads {
+			assert.Equal(t, lexicalAbsPath(ownDir), dirPath)
+			for _, wl := range wls {
+				assert.NotEmpty(t, wl.GetName())
+			}
+		}
+	})
+
+	t.Run("user-supplied origin annotation cannot forge file attribution", func(t *testing.T) {
+		for _, mode := range []string{"wrapper", "originOwn"} {
+			t.Run(mode, func(t *testing.T) {
+				dir := t.TempDir()
+				victimFile := filepath.Join(dir, "victim.yaml")
+				attackerFile := filepath.Join(dir, "attacker.yaml")
+				require.NoError(t, os.WriteFile(victimFile, []byte("apiVersion: v1\nkind: Service\nmetadata:\n  name: victim\n"), 0o600))
+				require.NoError(t, os.WriteFile(attackerFile, []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: attacker
+  annotations:
+    config.kubernetes.io/origin: |
+      path: victim.yaml
+spec:
+  replicas: 1
+`), 0o600))
+				kust := `resources:
+- attacker.yaml
+- victim.yaml
+`
+				if mode == "originOwn" {
+					kust += "buildMetadata: [originAnnotations]\n"
+				}
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(kust), 0o600))
+
+				require.Equal(t, originUnavailable, originModeFor(dir).mode)
+				kd := NewKustomizeDirectory(dir)
+				workloads, errs := kd.GetWorkloads(dir)
+				require.Empty(t, errs)
+				byKindAndName := map[string]workloadinterface.IMetadata{}
+				for _, list := range workloads {
+					for _, wl := range list {
+						byKindAndName[wl.GetKind()+"/"+wl.GetName()] = wl
+					}
+				}
+				require.Contains(t, byKindAndName, "Deployment/attacker")
+				require.Contains(t, byKindAndName, "Service/victim")
+				origins := kd.OriginFiles()
+				for _, wls := range workloads {
+					for _, wl := range wls {
+						if wl.GetName() == "attacker" {
+							assert.NotEqual(t, victimFile, origins[wl.GetID()],
+								"user-supplied origin annotation must never forge file attribution")
+						}
+					}
+				}
+				assert.Empty(t, origins, "attribution must be suppressed when input manifests forge origins in "+mode+" mode")
+			})
+		}
+	})
+
+	t.Run("generatorOptions forging origin annotation is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(`generatorOptions:
+  annotations:
+    config.kubernetes.io/origin: "path: forged.yaml\n"
+configMapGenerator:
+- name: generated
+  literals:
+  - key=value
+`), 0o600))
+
+		require.Equal(t, originUnavailable, originModeFor(dir).mode)
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		require.Empty(t, errs)
+		found := false
+		for _, wls := range workloads {
+			for _, wl := range wls {
+				if wl.GetKind() == "ConfigMap" && strings.HasPrefix(wl.GetName(), "generated-") {
+					found = true
+					break
+				}
+			}
+		}
+		require.True(t, found, "expected generated ConfigMap to be present")
+		assert.Empty(t, kd.OriginFiles())
+	})
+
+	t.Run("patch file escaping baseDir is rejected", func(t *testing.T) {
+		root := t.TempDir()
+		base := filepath.Join(root, "app")
+		outside := filepath.Join(root, "outside")
+		require.NoError(t, os.MkdirAll(base, 0o755))
+		require.NoError(t, os.MkdirAll(outside, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(base, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(outside, "patch.yaml"),
+			[]byte(`- op: replace
+  path: /spec/replicas
+  value: 3
+`), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(base, "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+patches:
+- path: ../outside/patch.yaml
+  target:
+    kind: Deployment
+`), 0o600))
+
+		require.Equal(t, originUnavailable, originModeFor(base).mode)
+	})
+
+	t.Run("originOwn mode follows a safe symlinked directory reference", func(t *testing.T) {
+		root := t.TempDir()
+		outside := t.TempDir()
+		outsideBase := filepath.Join(outside, "base")
+		require.NoError(t, os.MkdirAll(outsideBase, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(outsideBase, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(outsideBase, "kustomization.yaml"),
+			[]byte("resources:\n- deploy.yaml\n"), 0o600))
+
+		app := filepath.Join(root, "app")
+		require.NoError(t, os.MkdirAll(app, 0o755))
+		if err := os.Symlink(outsideBase, filepath.Join(app, "symlink-base")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		require.NoError(t, os.WriteFile(filepath.Join(app, "kustomization.yaml"), []byte(`resources:
+- symlink-base
+buildMetadata: [originAnnotations]
+`), 0o600))
+
+		// The symlinked directory is inspected like any other reference; with nothing
+		// ambiguous in the graph the scanned build's own origin annotations are used.
+		assert.Equal(t, originOwn, originModeFor(app).mode)
+		kd := NewKustomizeDirectory(app)
+		workloads, errs := kd.GetWorkloads(app)
+		require.Empty(t, errs, "scan must succeed")
+		require.NotEmpty(t, workloads)
+	})
+
+	t.Run("originOwn mode inspects a forged patch behind a symlinked directory reference", func(t *testing.T) {
+		root := t.TempDir()
+		outside := t.TempDir()
+		outsideBase := filepath.Join(outside, "base")
+		require.NoError(t, os.MkdirAll(outsideBase, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(outsideBase, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(outsideBase, "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+patches:
+- patch: |-
+    - op: replace
+      path: /metadata/annotations/config.kubernetes.io~1origin
+      value: |
+        path: forged.yaml
+  target:
+    kind: Deployment
+`), 0o600))
+
+		app := filepath.Join(root, "app")
+		require.NoError(t, os.MkdirAll(app, 0o755))
+		if err := os.Symlink(outsideBase, filepath.Join(app, "symlink-base")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		require.NoError(t, os.WriteFile(filepath.Join(app, "kustomization.yaml"), []byte(`resources:
+- symlink-base
+buildMetadata: [originAnnotations]
+`), 0o600))
+
+		// The forging patch lives in the referenced base, so only graph inspection
+		// can catch it; it must fail closed to the directory fallback.
+		assert.Equal(t, originUnavailable, originModeFor(app).mode)
+	})
+
+	t.Run("patch loaded from file with metadata modification is suppressed", func(t *testing.T) {
+		patchDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(patchDir, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(patchDir, "patch.yaml"),
+			[]byte(`- op: replace
+  path: /metadata/annotations/config.kubernetes.io~1origin
+  value: |
+    path: forged.yaml
+`), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(patchDir, "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+patches:
+- path: patch.yaml
+  target:
+    kind: Deployment
+`), 0o600))
+
+		require.Equal(t, originUnavailable, originModeFor(patchDir).mode)
+		byName, origins := renderedKustomizeWorkloads(t, patchDir)
+		require.Contains(t, byName, "Deployment/demo")
+		assert.Empty(t, origins)
+	})
+
+	t.Run("provably safe patch loaded from file retains attribution", func(t *testing.T) {
+		patchDir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(patchDir, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  replicas: 1\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(patchDir, "patch.yaml"),
+			[]byte(`- op: replace
+  path: /spec/replicas
+  value: 5
+`), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(patchDir, "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+patches:
+- path: patch.yaml
+  target:
+    kind: Deployment
+`), 0o600))
+
+		require.Equal(t, originWrapper, originModeFor(patchDir).mode)
+		byName, origins := renderedKustomizeWorkloads(t, patchDir)
+		require.Contains(t, byName, "Deployment/demo")
+		assert.Equal(t, int64(5), replicasOf(t, byName["Deployment/demo"]))
+		assert.Equal(t, filepath.Join(patchDir, "deploy.yaml"), origins[byName["Deployment/demo"].GetID()])
+	})
+
+	t.Run("ambiguous patch in referenced base suppresses attribution", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "base"), 0o755))
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "overlay"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "base", "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "base", "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+patches:
+- patch: |-
+    - op: replace
+      path: /metadata/name
+      value: renamed
+  target:
+    kind: Deployment
+`), 0o600))
+		overlay := filepath.Join(root, "overlay")
+		require.NoError(t, os.WriteFile(filepath.Join(overlay, "kustomization.yaml"), []byte(`resources:
+- ../base
+`), 0o600))
+
+		require.Equal(t, originUnavailable, originModeFor(overlay).mode)
+		byName, origins := renderedKustomizeWorkloads(t, overlay)
+		require.Contains(t, byName, "Deployment/renamed")
+		assert.Empty(t, origins)
+	})
+
+	t.Run("ambiguous patch in referenced component suppresses attribution", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "comp"), 0o755))
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "app"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "app", "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "comp", "kustomization.yaml"), []byte(`apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+- patch: |-
+    - op: replace
+      path: /metadata/annotations/config.kubernetes.io~1origin
+      value: |
+        path: forged.yaml
+  target:
+    kind: Deployment
+`), 0o600))
+		app := filepath.Join(root, "app")
+		require.NoError(t, os.WriteFile(filepath.Join(app, "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+components:
+- ../comp
+`), 0o600))
+
+		require.Equal(t, originUnavailable, originModeFor(app).mode)
+		byName, origins := renderedKustomizeWorkloads(t, app)
+		require.Contains(t, byName, "Deployment/demo")
+		assert.Empty(t, origins)
+	})
+
+	t.Run("commonAnnotations setting origin annotation suppresses attribution", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+commonAnnotations:
+  config.kubernetes.io/origin: "path: forged.yaml\n"
+`), 0o600))
+
+		require.Equal(t, originUnavailable, originModeFor(dir).mode)
+		byName, origins := renderedKustomizeWorkloads(t, dir)
+		require.Contains(t, byName, "Deployment/demo")
+		assert.Empty(t, origins)
+	})
+
+	t.Run("patch replacing whole metadata suppresses attribution", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+patches:
+- patch: |-
+    - op: replace
+      path: /metadata
+      value:
+        name: demo
+        annotations:
+          config.kubernetes.io/origin: "path: forged.yaml\n"
+  target:
+    kind: Deployment
+`), 0o600))
+
+		require.Equal(t, originUnavailable, originModeFor(dir).mode)
+		byName, origins := renderedKustomizeWorkloads(t, dir)
+		require.Contains(t, byName, "Deployment/demo")
+		assert.Empty(t, origins)
+	})
+
+	t.Run("namePrefix preserves exact expected file-to-workload mapping", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "deployment.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(`resources:
+- deployment.yaml
+namePrefix: prod-
+`), 0o600))
+
+		require.Equal(t, originWrapper, originModeFor(dir).mode)
+		byName, origins := renderedKustomizeWorkloads(t, dir)
+		require.Contains(t, byName, "Deployment/prod-demo")
+		workload := byName["Deployment/prod-demo"]
+		assert.Equal(t, filepath.Join(dir, "deployment.yaml"), origins[workload.GetID()],
+			"normal namePrefix transformation retains safe file attribution")
+	})
+
+	t.Run("valid referenced base in supported layout preserves exact attribution", func(t *testing.T) {
+		root := t.TempDir()
+		base := filepath.Join(root, "base")
+		overlay := filepath.Join(root, "overlay")
+		require.NoError(t, os.MkdirAll(base, 0o755))
+		require.NoError(t, os.MkdirAll(overlay, 0o755))
+		baseDeploy := filepath.Join(base, "deploy.yaml")
+		require.NoError(t, os.WriteFile(baseDeploy,
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(base, "kustomization.yaml"),
+			[]byte("resources:\n- deploy.yaml\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(overlay, "kustomization.yaml"),
+			[]byte("resources:\n- ../base\n"), 0o600))
+
+		require.Equal(t, originWrapper, originModeFor(overlay).mode)
+		byName, origins := renderedKustomizeWorkloads(t, overlay)
+		require.Contains(t, byName, "Deployment/demo")
+		assert.Equal(t, baseDeploy, origins[byName["Deployment/demo"].GetID()],
+			"valid referenced base preserves exact file attribution")
+	})
+
+	t.Run("directory reference outside the scanned directory is attributed to its real file", func(t *testing.T) {
+		root := t.TempDir()
+		shared := filepath.Join(root, "shared")
+		app := filepath.Join(root, "app")
+		require.NoError(t, os.MkdirAll(shared, 0o755))
+		require.NoError(t, os.MkdirAll(app, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(shared, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(shared, "kustomization.yaml"),
+			[]byte("resources:\n- deploy.yaml\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(app, "kustomization.yaml"),
+			[]byte("resources:\n- ../shared\n"), 0o600))
+
+		require.Equal(t, originWrapper, originModeFor(app).mode)
+		byName, origins := renderedKustomizeWorkloads(t, app)
+		require.Contains(t, byName, "Deployment/demo")
+		assert.Equal(t, filepath.Join(shared, "deploy.yaml"), origins[byName["Deployment/demo"].GetID()])
+	})
+
+	t.Run("missing directory reference fails closed", func(t *testing.T) {
+		app := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(app, "kustomization.yaml"),
+			[]byte("resources:\n- ../does-not-exist\n"), 0o600))
+		assert.Equal(t, originUnavailable, originModeFor(app).mode)
+	})
+
+	t.Run("symlinked directory reference outside the scanned directory is safe", func(t *testing.T) {
+		root := t.TempDir()
+		shared := filepath.Join(root, "shared")
+		app := filepath.Join(root, "app")
+		require.NoError(t, os.MkdirAll(shared, 0o755))
+		require.NoError(t, os.MkdirAll(app, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(shared, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(shared, "kustomization.yaml"),
+			[]byte("resources:\n- deploy.yaml\n"), 0o600))
+
+		symlinkBase := filepath.Join(app, "symlink-base")
+		if err := os.Symlink(shared, symlinkBase); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		require.NoError(t, os.WriteFile(filepath.Join(app, "kustomization.yaml"),
+			[]byte("resources:\n- symlink-base\n"), 0o600))
+
+		require.Equal(t, originWrapper, originModeFor(app).mode)
+	})
+
+	t.Run("two-resource swap in wrapper mode suppresses attribution", func(t *testing.T) {
+		swapDir := t.TempDir()
+		for _, name := range []string{"a", "b"} {
+			require.NoError(t, os.WriteFile(filepath.Join(swapDir, name+".yaml"),
+				[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: "+name+"\n  labels:\n    app: "+name+"\n"), 0o600))
+		}
+		require.NoError(t, os.WriteFile(filepath.Join(swapDir, "kustomization.yaml"), []byte(`resources:
+- a.yaml
+- b.yaml
+patches:
+- patch: |-
+    - op: replace
+      path: /metadata/name
+      value: b
+    - op: replace
+      path: /metadata/annotations/config.kubernetes.io~1origin
+      value: |
+        path: b.yaml
+  target:
+    kind: Deployment
+    labelSelector: "app=a"
+    annotationSelector: "config.kubernetes.io/origin"
+- patch: |-
+    - op: replace
+      path: /metadata/name
+      value: a
+    - op: replace
+      path: /metadata/annotations/config.kubernetes.io~1origin
+      value: |
+        path: a.yaml
+  target:
+    kind: Deployment
+    labelSelector: "app=b"
+    annotationSelector: "config.kubernetes.io/origin"
+`), 0o600))
+
+		// 1. Show that in the raw wrapper build, annotationSelector matches and carries swapped origins
+		newKustomizer := func() *krusty.Kustomizer { return krusty.MakeKustomizer(krusty.MakeDefaultOptions()) }
+		rawWrapperYml, _, ok := renderWithOrigins(newKustomizer, swapDir, nil)
+		require.True(t, ok, "raw wrapper build can render")
+		rawWls, err := ReadFile(rawWrapperYml, YAML_FILE_FORMAT)
+		require.NoError(t, err)
+		require.Len(t, rawWls, 2)
+		byAppLabel := map[string]workloadinterface.IMetadata{}
+		for _, wl := range rawWls {
+			meta, _ := wl.GetObject()["metadata"].(map[string]any)
+			labels, _ := meta["labels"].(map[string]any)
+			appLabel, _ := labels["app"].(string)
+			byAppLabel[appLabel] = wl
+		}
+		require.Contains(t, byAppLabel, "a")
+		require.Contains(t, byAppLabel, "b")
+
+		wlA := byAppLabel["a"]
+		assert.Equal(t, "b", wlA.GetName())
+		metaA, _ := wlA.GetObject()["metadata"].(map[string]any)
+		annosA, _ := metaA["annotations"].(map[string]any)
+		assert.Contains(t, annosA[kustomizeOriginAnnotation], "path: b.yaml",
+			"raw wrapper build output matched annotationSelector and carries swapped origin")
+
+		wlB := byAppLabel["b"]
+		assert.Equal(t, "a", wlB.GetName())
+		metaB, _ := wlB.GetObject()["metadata"].(map[string]any)
+		annosB, _ := metaB["annotations"].(map[string]any)
+		assert.Contains(t, annosB[kustomizeOriginAnnotation], "path: a.yaml",
+			"raw wrapper build output matched annotationSelector and carries swapped origin")
+
+		// 2. Verify Kubescape detects the ambiguous patch, sets originUnavailable, and falls back to directory
+		require.Equal(t, originUnavailable, originModeFor(swapDir).mode)
+		kd := NewKustomizeDirectory(swapDir)
+		workloads, errs := kd.GetWorkloads(swapDir)
+		require.Empty(t, errs, "scanning must still succeed in wrapper mode")
+		byKindAndName := map[string]workloadinterface.IMetadata{}
+		for _, list := range workloads {
+			for _, wl := range list {
+				byKindAndName[wl.GetKind()+"/"+wl.GetName()] = wl
+			}
+		}
+		require.Contains(t, byKindAndName, "Deployment/a")
+		require.Contains(t, byKindAndName, "Deployment/b")
+
+		origins := kd.OriginFiles()
+		assert.Empty(t, origins, "neither resource must receive file attribution in wrapper mode")
+	})
+
+	t.Run("patch modifying metadata without origin annotation suppresses attribution", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+patches:
+- patch: |-
+    - op: add
+      path: /metadata/labels
+      value:
+        env: prod
+  target:
+    kind: Deployment
+`), 0o600))
+
+		require.Equal(t, originUnavailable, originModeFor(dir).mode)
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		require.Empty(t, errs, "scan must succeed when patch modifies metadata")
+		byKindAndName := map[string]workloadinterface.IMetadata{}
+		for _, list := range workloads {
+			for _, wl := range list {
+				byKindAndName[wl.GetKind()+"/"+wl.GetName()] = wl
+			}
+		}
+		require.Contains(t, byKindAndName, "Deployment/demo")
+		assert.Empty(t, kd.OriginFiles(), "modifying metadata isolates the /metadata rule and suppresses file attribution")
+	})
+
+	t.Run("patch file with forged origin in second document suppresses attribution", func(t *testing.T) {
+		for _, mode := range []string{"wrapper", "originOwn"} {
+			t.Run(mode, func(t *testing.T) {
+				patchDir := t.TempDir()
+				require.NoError(t, os.WriteFile(filepath.Join(patchDir, "deploy.yaml"),
+					[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  replicas: 1\n"), 0o600))
+				require.NoError(t, os.WriteFile(filepath.Join(patchDir, "patch.yaml"), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+spec:
+  replicas: 3
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  annotations:
+    config.kubernetes.io/origin: |
+      path: forged.yaml
+`), 0o600))
+				kustContent := `resources:
+- deploy.yaml
+patches:
+- path: patch.yaml
+`
+				if mode == "originOwn" {
+					kustContent += "buildMetadata: [originAnnotations]\n"
+				}
+				require.NoError(t, os.WriteFile(filepath.Join(patchDir, "kustomization.yaml"), []byte(kustContent), 0o600))
+
+				require.Equal(t, originUnavailable, originModeFor(patchDir).mode)
+				kd := NewKustomizeDirectory(patchDir)
+				workloads, errs := kd.GetWorkloads(patchDir)
+				require.Empty(t, errs, "scan must succeed")
+				byKindAndName := map[string]workloadinterface.IMetadata{}
+				for _, list := range workloads {
+					for _, wl := range list {
+						byKindAndName[wl.GetKind()+"/"+wl.GetName()] = wl
+					}
+				}
+				require.Contains(t, byKindAndName, "Deployment/demo")
+				assert.Empty(t, kd.OriginFiles(), "second document forging origin must suppress attribution in "+mode+" mode")
+			})
+		}
+	})
+
+	t.Run("patch with allowNameChange or allowKindChange is rejected", func(t *testing.T) {
+		for _, opt := range []string{"allowNameChange", "allowKindChange"} {
+			t.Run(opt, func(t *testing.T) {
+				dir := t.TempDir()
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "deploy.yaml"),
+					[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  replicas: 1\n"), 0o600))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(fmt.Sprintf(`resources:
+- deploy.yaml
+patches:
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: demo
+    spec:
+      replicas: 2
+  options:
+    %s: true
+`, opt)), 0o600))
+
+				require.Equal(t, originUnavailable, originModeFor(dir).mode)
+				kd := NewKustomizeDirectory(dir)
+				workloads, errs := kd.GetWorkloads(dir)
+				require.Empty(t, errs)
+				byKindAndName := map[string]workloadinterface.IMetadata{}
+				for _, list := range workloads {
+					for _, wl := range list {
+						byKindAndName[wl.GetKind()+"/"+wl.GetName()] = wl
+					}
+				}
+				require.Contains(t, byKindAndName, "Deployment/demo")
+				assert.Empty(t, kd.OriginFiles(), "patches setting "+opt+" must suppress attribution")
+			})
+		}
+	})
+
+	t.Run("manifest with kind List containing origin annotation suppresses attribution", func(t *testing.T) {
+		for _, mode := range []string{"wrapper", "originOwn"} {
+			t.Run(mode, func(t *testing.T) {
+				dir := t.TempDir()
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "list.yaml"), []byte(`apiVersion: v1
+kind: List
+items:
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: demo
+    annotations:
+      config.kubernetes.io/origin: |
+        path: forged.yaml
+  spec:
+    replicas: 1
+`), 0o600))
+				kust := "resources:\n- list.yaml\n"
+				if mode == "originOwn" {
+					kust += "buildMetadata: [originAnnotations]\n"
+				}
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(kust), 0o600))
+
+				require.Equal(t, originUnavailable, originModeFor(dir).mode)
+				kd := NewKustomizeDirectory(dir)
+				workloads, errs := kd.GetWorkloads(dir)
+				require.Empty(t, errs)
+				byKindAndName := map[string]workloadinterface.IMetadata{}
+				for _, list := range workloads {
+					for _, wl := range list {
+						byKindAndName[wl.GetKind()+"/"+wl.GetName()] = wl
+					}
+				}
+				require.Contains(t, byKindAndName, "Deployment/demo")
+				assert.Empty(t, kd.OriginFiles(), "List items containing origin annotation must suppress attribution in "+mode+" mode")
+			})
+		}
+	})
+
+	t.Run("commonAnnotations with empty origin annotation is rejected", func(t *testing.T) {
+		for _, mode := range []string{"wrapper", "originOwn"} {
+			t.Run(mode, func(t *testing.T) {
+				dir := t.TempDir()
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "deploy.yaml"),
+					[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+				kust := `resources:
+- deploy.yaml
+commonAnnotations:
+  config.kubernetes.io/origin: ""
+`
+				if mode == "originOwn" {
+					kust += "buildMetadata: [originAnnotations]\n"
+				}
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(kust), 0o600))
+
+				require.Equal(t, originUnavailable, originModeFor(dir).mode)
+				kd := NewKustomizeDirectory(dir)
+				workloads, errs := kd.GetWorkloads(dir)
+				require.Empty(t, errs)
+				byKindAndName := map[string]workloadinterface.IMetadata{}
+				for _, list := range workloads {
+					for _, wl := range list {
+						byKindAndName[wl.GetKind()+"/"+wl.GetName()] = wl
+					}
+				}
+				require.Contains(t, byKindAndName, "Deployment/demo")
+				assert.Empty(t, kd.OriginFiles(), "presence of origin key with empty value must suppress attribution in "+mode+" mode")
+			})
+		}
+	})
+
+	t.Run("overlays/prod referencing ../../base preserves exact attribution", func(t *testing.T) {
+		root := t.TempDir()
+
+		baseDir := filepath.Join(root, "base")
+		prodDir := filepath.Join(root, "overlays", "prod")
+		require.NoError(t, os.MkdirAll(baseDir, 0o755))
+		require.NoError(t, os.MkdirAll(prodDir, 0o755))
+
+		baseDeploy := filepath.Join(baseDir, "deploy.yaml")
+		require.NoError(t, os.WriteFile(baseDeploy, []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prod-app
+spec:
+  replicas: 2
+`), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(baseDir, "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+`), 0o600))
+
+		require.NoError(t, os.WriteFile(filepath.Join(prodDir, "kustomization.yaml"), []byte(`resources:
+- ../../base
+namePrefix: prod-
+`), 0o600))
+
+		require.Equal(t, originWrapper, originModeFor(prodDir).mode)
+
+		kd := NewKustomizeDirectory(prodDir)
+		workloads, errs := kd.GetWorkloads(prodDir)
+		require.Empty(t, errs)
+		byKindAndName := map[string]workloadinterface.IMetadata{}
+		for _, list := range workloads {
+			for _, wl := range list {
+				byKindAndName[wl.GetKind()+"/"+wl.GetName()] = wl
+			}
+		}
+		require.Contains(t, byKindAndName, "Deployment/prod-prod-app")
+		origins := kd.OriginFiles()
+		assert.Equal(t, baseDeploy, origins[byKindAndName["Deployment/prod-prod-app"].GetID()],
+			"resource from ../../base must be attributed to exact source file")
+	})
+
+	t.Run("manifest with an escaped origin annotation key is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "deploy.yaml"), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  annotations:
+    "config.kubernetes.io\/origin": "path: forged.yaml"
+`), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"),
+			[]byte("resources:\n- deploy.yaml\n"), 0o600))
+		assert.Equal(t, originUnavailable, originModeFor(dir).mode)
+	})
+
+	t.Run("JSON patch with case-colliding keys yields originUnavailable", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+patches:
+- patch: '[{"op":"replace","path":"/metadata/name","Path":"/spec/replicas","value":"x"}]'
+  target:
+    kind: Deployment
+`), 0o600))
+		assert.Equal(t, originUnavailable, originModeFor(dir).mode)
+	})
+
+	t.Run("inline patchesJson6902 replacing /spec/replicas yields originWrapper", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  replicas: 1\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+patchesJson6902:
+- target:
+    kind: Deployment
+    name: demo
+  patch: |-
+    - op: replace
+      path: /spec/replicas
+      value: 3
+`), 0o600))
+		assert.Equal(t, originWrapper, originModeFor(dir).mode)
+		byName, origins := renderedKustomizeWorkloads(t, dir)
+		require.Contains(t, byName, "Deployment/demo")
+		assert.Equal(t, int64(3), replicasOf(t, byName["Deployment/demo"]))
+		assert.Equal(t, filepath.Join(dir, "deploy.yaml"), origins[byName["Deployment/demo"].GetID()])
+	})
+
+	t.Run("patchesStrategicMerge entry replicas.json containing a spec-only strategic-merge patch yields originWrapper", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "replicas.json"),
+			[]byte(`{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"demo"},"spec":{"replicas":3}}`), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+patchesStrategicMerge:
+- replicas.json
+`), 0o600))
+		assert.Equal(t, originWrapper, originModeFor(dir).mode)
+	})
+
+	t.Run("kustomization.yaml symlinked to config/settings.yaml with deploy.yaml next to symlink yields originWrapper", func(t *testing.T) {
+		root := t.TempDir()
+		configDir := filepath.Join(root, "config")
+		require.NoError(t, os.MkdirAll(configDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "deploy.yaml"),
+			[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(configDir, "settings.yaml"), []byte(`resources:
+- deploy.yaml
+`), 0o600))
+		if err := os.Symlink(filepath.Join(configDir, "settings.yaml"), filepath.Join(root, "kustomization.yaml")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		assert.Equal(t, originWrapper, originModeFor(root).mode)
+	})
+}
+
+func TestKustomizeAmbiguousBuildsStillScanSuccessfullyAndFallbackToDirectory(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "deploy.yaml"),
+		[]byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "kustomization.yaml"), []byte(`resources:
+- deploy.yaml
+patches:
+- patch: |-
+    - op: replace
+      path: /metadata/annotations/config.kubernetes.io~1origin
+      value: |
+        path: forged.yaml
+  target:
+    kind: Deployment
+`), 0o600))
+
+	kd := NewKustomizeDirectory(root)
+	workloads, errs := kd.GetWorkloads(root)
+	require.Empty(t, errs, "ambiguous builds must still render and scan successfully")
+	require.Len(t, workloads, 1)
+	assert.Empty(t, kd.OriginFiles(), "origins are empty so file attribution falls back to the directory")
+
+	byKindAndName := map[string]workloadinterface.IMetadata{}
+	for dirPath, list := range workloads {
+		assert.Equal(t, lexicalAbsPath(root), dirPath, "workload path stays the directory")
+		for _, wl := range list {
+			byKindAndName[wl.GetKind()+"/"+wl.GetName()] = wl
+		}
+	}
+	assert.Contains(t, byKindAndName, "Deployment/demo")
+}
+
+func TestIsRemoteReference(t *testing.T) {
+	tests := []struct {
+		ref  string
+		want bool
+	}{
+		{"github.com:org/repo//base", true},
+		{"gh:org/repo", true},
+		{"git@github.com:org/repo.git", true},
+		{"https://x/y", true},
+		{"../base", false},
+		{"./overlays/prod", false},
+		{"base", false},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, isRemoteReference(tt.ref), "ref: %s", tt.ref)
+	}
 }
