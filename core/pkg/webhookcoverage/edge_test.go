@@ -112,11 +112,12 @@ func TestMutatingWebhooksFollowTheSameRules(t *testing.T) {
 	}
 }
 
-// The apiserver stamps kubernetes.io/metadata.name onto a new Namespace after
-// mutating admission, so only mutating webhooks are held back.
+// Whether a Namespace being created or updated carries the automatic
+// kubernetes.io/metadata.name label is not verified, so a selector on it is
+// indeterminate unless the caller supplies the label.
 func TestNamespaceCreateAndTheAutomaticNameLabel(t *testing.T) {
 	byName := &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "new"}}
-	rules := []admissionregistrationv1.RuleWithOperations{rule([]string{""}, []string{"v1"}, []string{"namespaces"}, admissionregistrationv1.OperationAll)}
+	rules := []admissionregistrationv1.RuleWithOperations{rule([]string{""}, []string{"v1"}, []string{"namespaces", "namespaces/status"}, admissionregistrationv1.OperationAll)}
 	nsReq := func(op admissionregistrationv1.OperationType, labels map[string]string) func(*Request) {
 		return func(r *Request) {
 			r.Resource, r.Kind, r.Name, r.Namespace, r.Operation = "namespaces", "Namespace", "new", "", op
@@ -125,31 +126,56 @@ func TestNamespaceCreateAndTheAutomaticNameLabel(t *testing.T) {
 			r.NamespaceLabelsKnown = false
 		}
 	}
-
-	t.Run("validating create sees the label", func(t *testing.T) {
-		idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{Rules: rules, NamespaceSelector: byName, MatchPolicy: exact()})
-		assert.Equal(t, Matched, verdict(t, idx, podRequest(nsReq(create, nil))).Verdict)
-	})
-	t.Run("mutating create may not", func(t *testing.T) {
-		idx := mutatingIndex(admissionregistrationv1.MutatingWebhook{Rules: rules, NamespaceSelector: byName, MatchPolicy: exact()})
-		got := verdict(t, idx, podRequest(nsReq(create, nil)))
-		assert.Equal(t, Indeterminate, got.Verdict)
-		assert.Equal(t, []Reason{ReasonNamespaceLabelsUnknown}, got.Reasons)
-	})
-	t.Run("mutating create with the label supplied", func(t *testing.T) {
-		idx := mutatingIndex(admissionregistrationv1.MutatingWebhook{Rules: rules, NamespaceSelector: byName, MatchPolicy: exact()})
-		got := verdict(t, idx, podRequest(nsReq(create, map[string]string{"kubernetes.io/metadata.name": "new"})))
-		assert.Equal(t, Matched, got.Verdict)
-	})
-	t.Run("mutating update has the stored label", func(t *testing.T) {
-		idx := mutatingIndex(admissionregistrationv1.MutatingWebhook{Rules: rules, NamespaceSelector: byName, MatchPolicy: exact()})
-		assert.Equal(t, Matched, verdict(t, idx, podRequest(nsReq(update, nil))).Verdict)
-	})
-	t.Run("mutating create with another selector key is unaffected", func(t *testing.T) {
-		idx := mutatingIndex(admissionregistrationv1.MutatingWebhook{
-			Rules: rules, NamespaceSelector: selector("env", metav1.LabelSelectorOpIn, "prod"), MatchPolicy: exact(),
+	hooks := map[string]*Index{
+		"validating": validatingIndex(admissionregistrationv1.ValidatingWebhook{Rules: rules, NamespaceSelector: byName, MatchPolicy: exact()}),
+		"mutating":   mutatingIndex(admissionregistrationv1.MutatingWebhook{Rules: rules, NamespaceSelector: byName, MatchPolicy: exact()}),
+	}
+	for kind, idx := range hooks {
+		t.Run(kind+" create without the label is indeterminate", func(t *testing.T) {
+			got := verdict(t, idx, podRequest(nsReq(create, nil)))
+			assert.Equal(t, Indeterminate, got.Verdict)
+			assert.Equal(t, []Reason{ReasonNamespaceLabelsUnknown}, got.Reasons)
 		})
-		assert.Equal(t, Matched, verdict(t, idx, podRequest(nsReq(create, map[string]string{"env": "prod"}))).Verdict)
+		t.Run(kind+" create with the label supplied is authoritative", func(t *testing.T) {
+			got := verdict(t, idx, podRequest(nsReq(create, map[string]string{"kubernetes.io/metadata.name": "new"})))
+			assert.Equal(t, Matched, got.Verdict)
+		})
+		t.Run(kind+" update without the label is indeterminate, whatever the old object says", func(t *testing.T) {
+			// nsReq gives the old object the label; only the new object counts.
+			got := verdict(t, idx, podRequest(nsReq(update, nil)))
+			assert.Equal(t, Indeterminate, got.Verdict)
+			assert.Equal(t, []Reason{ReasonNamespaceLabelsUnknown}, got.Reasons)
+		})
+		t.Run(kind+" update with the label supplied is authoritative", func(t *testing.T) {
+			got := verdict(t, idx, podRequest(nsReq(update, map[string]string{"kubernetes.io/metadata.name": "new"})))
+			assert.Equal(t, Matched, got.Verdict)
+		})
+		t.Run(kind+" update of a subresource uses the stored labels", func(t *testing.T) {
+			got := verdict(t, idx, podRequest(func(r *Request) {
+				nsReq(update, nil)(r)
+				r.Subresource, r.NamespaceLabelsKnown = "status", false
+			}))
+			assert.Equal(t, Matched, got.Verdict, "only the stored namespace is read for a subresource, and its name label is inferred")
+		})
+		t.Run(kind+" delete uses the stored labels", func(t *testing.T) {
+			got := verdict(t, idx, podRequest(func(r *Request) {
+				nsReq(deleteO, nil)(r)
+				r.NamespaceLabelsKnown = false
+			}))
+			assert.Equal(t, Matched, got.Verdict)
+		})
+	}
+	t.Run("a definite rule rejection still wins", func(t *testing.T) {
+		got := verdict(t, hooks["validating"], podRequest(func(r *Request) { nsReq(create, nil)(r); r.Resource = "secrets" }))
+		assert.Equal(t, NotMatched, got.Verdict)
+	})
+	t.Run("another selector key is unaffected", func(t *testing.T) {
+		for _, idx := range []*Index{
+			validatingIndex(admissionregistrationv1.ValidatingWebhook{Rules: rules, NamespaceSelector: selector("env", metav1.LabelSelectorOpIn, "prod"), MatchPolicy: exact()}),
+			mutatingIndex(admissionregistrationv1.MutatingWebhook{Rules: rules, NamespaceSelector: selector("env", metav1.LabelSelectorOpIn, "prod"), MatchPolicy: exact()}),
+		} {
+			assert.Equal(t, Matched, verdict(t, idx, podRequest(nsReq(create, map[string]string{"env": "prod"}))).Verdict)
+		}
 	})
 }
 
@@ -236,9 +262,22 @@ func TestZeroValueConfigurationsDoNotPanic(t *testing.T) {
 		assert.Equal(t, []Reason{ReasonRulesDoNotMatch}, got.Reasons)
 	}
 	assert.NotPanics(t, func() { idx.Matches(Request{}) })
+	assert.Empty(t, (&Index{}).Matches(podRequest(nil)))
 	var nilIdx *Index
-	assert.NotPanics(t, func() { _ = (&Index{}).Matches(Request{}) })
-	_ = nilIdx
+	assert.NotPanics(t, func() { assert.Nil(t, nilIdx.Matches(podRequest(nil))) })
+}
+
+func TestUnknownMatchPolicyIsNeverTreatedAsExact(t *testing.T) {
+	odd := admissionregistrationv1.MatchPolicyType("Fuzzy")
+	apps := rule([]string{"apps"}, []string{"v1"}, []string{"deployments"}, create)
+	idx, errs := validatingIndexErrs(admissionregistrationv1.ValidatingWebhook{
+		Rules: []admissionregistrationv1.RuleWithOperations{apps}, MatchPolicy: &odd,
+	})
+	require.Len(t, errs, 1)
+	assert.ErrorContains(t, errs[0], `unknown matchPolicy "Fuzzy"`)
+	got := verdict(t, idx, podRequest(nil))
+	assert.Equal(t, Indeterminate, got.Verdict)
+	assert.Equal(t, []Reason{ReasonEquivalentResources}, got.Reasons)
 }
 
 func TestIndexDoesNotAliasItsInputs(t *testing.T) {
@@ -268,4 +307,57 @@ func TestMatchesIsSafeForConcurrentUse(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// Equivalent matchPolicy must not rely on equivalent resources keeping their
+// plural name: only the operation and the subresource survive the lookup.
+func TestEquivalentKeepsOnlyOperationAndSubresource(t *testing.T) {
+	pods := rule([]string{""}, []string{"v1"}, []string{"pods"}, create)
+	exec := rule([]string{""}, []string{"v1"}, []string{"pods/exec"}, connect)
+	tests := []struct {
+		name   string
+		rule   admissionregistrationv1.RuleWithOperations
+		policy *admissionregistrationv1.MatchPolicyType
+		mod    func(*Request)
+		want   Verdict
+	}{
+		{"a different resource name stays ambiguous", pods, nil, func(r *Request) { r.Resource = "secrets" }, Indeterminate},
+		{"a different group stays ambiguous", pods, nil, func(r *Request) { r.Group = "apps" }, Indeterminate},
+		{"a different scope stays ambiguous", scoped(pods, admissionregistrationv1.ClusterScope), nil, nil, Indeterminate},
+		{"another operation is definite", pods, nil, func(r *Request) { r.Operation = update }, NotMatched},
+		{"a bare resource does not cover a subresource", pods, nil, func(r *Request) { r.Resource, r.Subresource = "secrets", "status" }, NotMatched},
+		{"another subresource is definite", exec, nil, func(r *Request) {
+			r.Operation, r.Resource, r.Subresource = connect, "services", "proxy"
+		}, NotMatched},
+		{"the same subresource of another resource is ambiguous", exec, nil, func(r *Request) {
+			r.Operation, r.Resource, r.Subresource = connect, "services", "exec"
+		}, Indeterminate},
+		{"Exact never consults equivalents", pods, exact(), func(r *Request) { r.Resource = "secrets" }, NotMatched},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			idx := validatingIndex(admissionregistrationv1.ValidatingWebhook{
+				Rules: []admissionregistrationv1.RuleWithOperations{tt.rule}, MatchPolicy: tt.policy,
+			})
+			got := verdict(t, idx, podRequest(tt.mod))
+			assert.Equal(t, tt.want, got.Verdict, "reasons: %v", got.Reasons)
+		})
+	}
+}
+
+func TestRelaxForEquivalenceLeavesItsInputAlone(t *testing.T) {
+	r := rule([]string{"apps"}, []string{"v1"}, []string{"deployments", "deployments/scale"}, create)
+	s := admissionregistrationv1.NamespacedScope
+	r.Scope = &s
+	got := relaxForEquivalence(r)
+
+	assert.Equal(t, []string{"*"}, got.APIGroups)
+	assert.Equal(t, []string{"*"}, got.APIVersions)
+	assert.Equal(t, []string{"*", "*/scale"}, got.Resources)
+	assert.Nil(t, got.Scope)
+	assert.Equal(t, r.Operations, got.Operations)
+
+	assert.Equal(t, []string{"apps"}, r.APIGroups)
+	assert.Equal(t, []string{"deployments", "deployments/scale"}, r.Resources)
+	assert.Equal(t, &s, r.Scope)
 }

@@ -2,6 +2,7 @@ package webhookcoverage
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/kubescape/kubescape/v4/core/pkg/namespaceselector"
 
@@ -180,14 +181,13 @@ func (w *webhook) rules(req *request) filter {
 	}
 	var reasons []Reason
 	if w.equivalent {
-		// Equivalent matchPolicy also tries the request's equivalent
-		// group/versions, which only the apiserver's registry knows. Retry each
-		// rule with group and version relaxed: a hit means the only thing
-		// standing between the rule and the request is that equivalence. The
-		// copy keeps the compiled rule untouched.
+		// Equivalent matchPolicy also tries the resources the apiserver's
+		// equivalent-resource registry lists for the request, which this
+		// package cannot see. Retry each rule with everything that registry
+		// can change relaxed (see relaxForEquivalence): a hit means the only
+		// thing standing between the rule and the request is that equivalence.
 		for _, r := range w.ruleSet {
-			r.APIGroups, r.APIVersions = []string{"*"}, []string{"*"}
-			if (&rules.Matcher{Rule: r, Attr: req.attr}).Matches() {
+			if (&rules.Matcher{Rule: relaxForEquivalence(r), Attr: req.attr}).Matches() {
 				reasons = append(reasons, ReasonEquivalentResources)
 				break
 			}
@@ -202,6 +202,32 @@ func (w *webhook) rules(req *request) filter {
 		return unknown(reasons...)
 	}
 	return reject(ReasonRulesDoNotMatch)
+}
+
+// relaxForEquivalence returns a copy of r that matches every resource the
+// apiserver could consider equivalent to a request, and only those. With
+// matchPolicy Equivalent the apiserver re-runs the rules against each
+// equivalent resource of the request, keeping the operation and the
+// subresource, so those two stay as written.
+//
+// Group, version and resource name are all relaxed. The apiserver's registry
+// groups resources by storage location (the etcd prefix, via
+// NewEquivalentResourceRegistryWithIdentity), and a kube-apiserver can
+// cohabit resources of different groups with AddCohabitatingResources, which
+// does not require them to share a plural name. The scope is relaxed too: the
+// predicate reads the resource when it applies it, so an equivalent resource
+// could change the outcome. The input is left untouched.
+func relaxForEquivalence(r admissionregistrationv1.RuleWithOperations) admissionregistrationv1.RuleWithOperations {
+	resources := make([]string, 0, len(r.Resources))
+	for _, res := range r.Resources {
+		if _, sub, found := strings.Cut(res, "/"); found {
+			resources = append(resources, "*/"+sub)
+		} else {
+			resources = append(resources, "*")
+		}
+	}
+	r.APIGroups, r.APIVersions, r.Resources, r.Scope = []string{"*"}, []string{"*"}, resources, nil
+	return r
 }
 
 func (w *webhook) namespace(req *request) filter {
@@ -228,14 +254,30 @@ func (w *webhook) namespace(req *request) filter {
 		(req.Operation == admissionregistrationv1.Create || req.Operation == admissionregistrationv1.Update):
 		// The apiserver reads the labels of the Namespace being written from
 		// the request object, not from storage.
-		if w.kind == MutatingWebhook && req.Operation == admissionregistrationv1.Create && w.selectsNameLabel() &&
-			req.ObjectLabels[corev1.LabelMetadataName] == "" {
-			// The apiserver stamps kubernetes.io/metadata.name onto a new
-			// Namespace when it stores it, which happens after mutating
-			// admission. A mutating webhook may therefore not see the label
-			// the selector asks for. This ordering is taken from the apiserver
-			// handler and the namespace registry; k8s.io/kubernetes is not a
-			// dependency, so it is not covered by this package's parity tests.
+		if w.selectsNameLabel() && req.ObjectLabels[corev1.LabelMetadataName] == "" {
+			// UNVERIFIED PREMISE, so this stays indeterminate for CREATE and
+			// UPDATE, and for validating and mutating webhooks alike.
+			//
+			// Verified in k8s.io/apiserver v0.37.2:
+			//   - the namespace matcher reads only the new object's labels
+			//     (predicates/namespace/matcher.go, GetNamespaceLabels);
+			//   - a create runs mutating admission (endpoints/handlers/create.go)
+			//     before the store's BeforeCreate/PrepareForCreate and runs
+			//     validating admission after them (registry/generic/registry/
+			//     store.go, registry/rest/create.go);
+			//   - an update runs mutating admission as a transformer inside
+			//     UpdatedObject (endpoints/handlers/update.go), before the
+			//     store's BeforeUpdate/PrepareForUpdate, and validating
+			//     admission after them (registry/generic/registry/store.go);
+			//   - nothing in k8s.io/apiserver mentions kubernetes.io/metadata.name.
+			//
+			// NOT verified: that the object the matcher sees carries the
+			// label. For a create, that depends on the Namespace registry in
+			// k8s.io/kubernetes adding it; for an update, on the request body
+			// or patch keeping it and on that registry restoring it. That code
+			// is not a dependency and was not checked. A caller who knows the
+			// label is present sets it in ObjectLabels, which is then taken as
+			// authoritative.
 			return unknown(ReasonNamespaceLabelsUnknown)
 		}
 		matched, determinable = namespaceselector.Matches(w.namespaceSelector, req.Name, req.ObjectLabels, req.ObjectLabelsKnown)

@@ -33,7 +33,10 @@ const (
 	// ReasonExemptResource: the apiserver never sends webhook and admission
 	// policy configuration objects to API-defined webhooks.
 	ReasonExemptResource Reason = "ExemptResource"
-	// ReasonRulesDoNotMatch: no rule of the webhook covers the request.
+	// ReasonRulesDoNotMatch: no rule of the webhook covers the request. Under
+	// matchPolicy Equivalent this also means no rule could cover it through an
+	// equivalent resource, which is only established when every rule differs
+	// from the request in operation or subresource.
 	ReasonRulesDoNotMatch Reason = "RulesDoNotMatch"
 	// ReasonNamespaceSelectorExcludes: the namespaceSelector rejects the
 	// request's namespace.
@@ -48,8 +51,10 @@ const (
 	// ReasonMatchConditions: the webhook has matchConditions, CEL that needs
 	// request context.
 	ReasonMatchConditions Reason = "MatchConditions"
-	// ReasonEquivalentResources: matchPolicy Equivalent could match this
-	// request through an equivalent group/version this package cannot resolve.
+	// ReasonEquivalentResources: matchPolicy Equivalent (the default) could
+	// route this request to the webhook through an equivalent resource, which
+	// only the apiserver's registry knows. No rule matches the request itself,
+	// but one agrees with it on operation and subresource.
 	ReasonEquivalentResources Reason = "EquivalentResources"
 	// ReasonNamespaceLabelsUnknown: the namespaceSelector needs namespace labels
 	// that were not supplied, or that the apiserver has not finalised yet.
@@ -171,7 +176,8 @@ type Index struct {
 //
 // A malformed selector or a rule with an unrecognised operation or scope does
 // not drop the webhook: it stays in the index, is reported in errs, and
-// answers Indeterminate whenever that part would have to be evaluated.
+// answers Indeterminate whenever that part would have to be evaluated. An
+// unrecognised matchPolicy is reported and treated as Equivalent.
 func NewIndex(validating []admissionregistrationv1.ValidatingWebhookConfiguration, mutating []admissionregistrationv1.MutatingWebhookConfiguration) (idx *Index, errs []error) {
 	idx = &Index{}
 	for i := range validating {
@@ -199,8 +205,11 @@ func (idx *Index) add(configKind, configuration, name string, kind WebhookType, 
 		configuration: configuration,
 		name:          name,
 		kind:          kind,
-		// The API server defaults an unset matchPolicy to Equivalent.
-		equivalent:         policy == nil || *policy == admissionregistrationv1.Equivalent,
+		// The API server defaults an unset matchPolicy to Equivalent. Any
+		// value other than Exact is treated as possibly Equivalent: v0.37.2
+		// handles an unknown value like Exact, but a newer API may give it
+		// a meaning, and guessing Exact could produce a false NotMatched.
+		equivalent:         policy == nil || *policy != admissionregistrationv1.Exact,
 		hasMatchConditions: hasMatchConditions,
 	}
 	prefix := fmt.Sprintf("%s %s: webhook %q", configKind, configuration, name)
@@ -211,6 +220,9 @@ func (idx *Index) add(configKind, configuration, name string, kind WebhookType, 
 			errs = append(errs, fmt.Errorf("%s: rule %d: %w", prefix, i, err))
 		}
 		w.ruleSet = append(w.ruleSet, rule)
+	}
+	if policy != nil && *policy != admissionregistrationv1.Exact && *policy != admissionregistrationv1.Equivalent {
+		errs = append(errs, fmt.Errorf("%s: unknown matchPolicy %q, treated as Equivalent", prefix, *policy))
 	}
 	var err error
 	if w.namespaceSelector, err = compileSelector(namespaceSelector); err != nil {
@@ -261,9 +273,16 @@ func compileSelector(s *metav1.LabelSelector) (labels.Selector, error) {
 // first and then mutating ones, each in the order supplied to NewIndex. It
 // returns one Result per webhook.
 //
+// With the default matchPolicy Equivalent, results are Indeterminate more
+// often than with the real API server, whose equivalent-resource registry is
+// not available here; see the package documentation.
+//
 // A request without an operation, version or resource makes every result
 // Indeterminate with ReasonIncompleteRequest.
 func (idx *Index) Matches(req Request) []Result {
+	if idx == nil {
+		return nil
+	}
 	out := make([]Result, 0, len(idx.webhooks))
 	r, ok := newRequest(req)
 	for _, w := range idx.webhooks {
