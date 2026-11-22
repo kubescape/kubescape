@@ -42,6 +42,44 @@ func TestInitLoggerLevel_KSLoggerPrecedence(t *testing.T) {
 		assert.Equal(t, "debug", rootInfo.Logger)
 	})
 
+	t.Run("KS_LOGGER trims surrounding whitespace", func(t *testing.T) {
+		prevLogger := rootInfo.Logger
+		prevLoggerName := rootInfo.LoggerName
+		t.Cleanup(func() {
+			rootInfo.Logger = prevLogger
+			rootInfo.LoggerName = prevLoggerName
+		})
+
+		t.Setenv("KS_LOGGER", "  debug \n")
+		cmd := testCmdWithLoggerFlag(t)
+		assert.NoError(t, cmd.ParseFlags([]string{}))
+		rootInfo.LoggerName = zaplogger.LoggerName
+
+		initLogger()
+		assert.NoError(t, initLoggerLevel(cmd))
+
+		assert.Equal(t, "debug", rootInfo.Logger)
+	})
+
+	t.Run("KS_LOGGER whitespace only falls back to default info", func(t *testing.T) {
+		prevLogger := rootInfo.Logger
+		prevLoggerName := rootInfo.LoggerName
+		t.Cleanup(func() {
+			rootInfo.Logger = prevLogger
+			rootInfo.LoggerName = prevLoggerName
+		})
+
+		t.Setenv("KS_LOGGER", "   ")
+		cmd := testCmdWithLoggerFlag(t)
+		assert.NoError(t, cmd.ParseFlags([]string{}))
+		rootInfo.LoggerName = zaplogger.LoggerName
+
+		initLogger()
+		assert.NoError(t, initLoggerLevel(cmd))
+
+		assert.Equal(t, helpers.InfoLevel.String(), rootInfo.Logger)
+	})
+
 	t.Run("explicit non-default logger level wins over KS_LOGGER", func(t *testing.T) {
 		prevLogger := rootInfo.Logger
 		prevLoggerName := rootInfo.LoggerName
@@ -169,6 +207,40 @@ func TestInitCacheDir_KSCacheDirPrecedence(t *testing.T) {
 		assert.Equal(t, "/tmp/ks-env-cache", getter.DefaultLocalStore)
 	})
 
+	t.Run("KS_CACHE_DIR trims surrounding whitespace", func(t *testing.T) {
+		prevStore := getter.DefaultLocalStore
+		prevCacheDir := rootInfo.CacheDir
+		t.Cleanup(func() {
+			getter.DefaultLocalStore = prevStore
+			rootInfo.CacheDir = prevCacheDir
+		})
+
+		t.Setenv("KS_CACHE_DIR", "  /tmp/ks-env-cache \t")
+		cmd := testCmdWithCacheDirFlag(t)
+		assert.NoError(t, cmd.ParseFlags([]string{}))
+
+		initCacheDir(cmd)
+
+		assert.Equal(t, "/tmp/ks-env-cache", getter.DefaultLocalStore)
+	})
+
+	t.Run("KS_CACHE_DIR whitespace only retains default store", func(t *testing.T) {
+		prevStore := getter.DefaultLocalStore
+		prevCacheDir := rootInfo.CacheDir
+		t.Cleanup(func() {
+			getter.DefaultLocalStore = prevStore
+			rootInfo.CacheDir = prevCacheDir
+		})
+
+		t.Setenv("KS_CACHE_DIR", "   ")
+		cmd := testCmdWithCacheDirFlag(t)
+		assert.NoError(t, cmd.ParseFlags([]string{}))
+
+		initCacheDir(cmd)
+
+		assert.Equal(t, prevStore, getter.DefaultLocalStore)
+	})
+
 	t.Run("explicit --cache-dir wins over KS_CACHE_DIR even when value equals default", func(t *testing.T) {
 		prevStore := getter.DefaultLocalStore
 		prevCacheDir := rootInfo.CacheDir
@@ -274,6 +346,37 @@ func TestInitLogger_KSLoggerNameEnv(t *testing.T) {
 		initLogger()
 
 		assert.Equal(t, "custom-logger", rootInfo.LoggerName)
+	})
+
+	t.Run("env with whitespace is trimmed", func(t *testing.T) {
+		prevLoggerName := rootInfo.LoggerName
+		t.Cleanup(func() {
+			rootInfo.LoggerName = prevLoggerName
+		})
+
+		rootInfo.LoggerName = ""
+		t.Setenv("KS_LOGGER_NAME", "  custom-logger \t")
+
+		initLogger()
+
+		assert.Equal(t, "custom-logger", rootInfo.LoggerName)
+	})
+
+	t.Run("whitespace-only env falls back to terminal detection", func(t *testing.T) {
+		prevLoggerName := rootInfo.LoggerName
+		prevIsTerminal := isTerminal
+		t.Cleanup(func() {
+			rootInfo.LoggerName = prevLoggerName
+			isTerminal = prevIsTerminal
+		})
+
+		rootInfo.LoggerName = ""
+		t.Setenv("KS_LOGGER_NAME", "   ")
+		isTerminal = func(uintptr) bool { return false }
+
+		initLogger()
+
+		assert.Equal(t, zaplogger.LoggerName, rootInfo.LoggerName)
 	})
 
 	t.Run("existing logger name wins over env", func(t *testing.T) {
