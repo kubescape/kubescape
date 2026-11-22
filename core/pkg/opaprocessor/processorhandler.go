@@ -2373,6 +2373,23 @@ type skippedCELResource struct {
 	err error
 }
 
+// ruleTextIsRego reports whether rule text is Rego rather than a policy
+// document: its first statement is a package clause. A control downloaded from
+// regolibrary and marked ruleLanguage CEL still carries its Rego in the rule
+// text, so that text selects the bundled policy for the control, as an empty
+// rule does, instead of being parsed as an inline ValidatingAdmissionPolicy.
+func ruleTextIsRego(text string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		return len(fields) > 1 && fields[0] == "package"
+	}
+	return false
+}
+
 // runCELOnK8s evaluates a CEL-based PolicyRule against k8s objects by loading
 // the control's ValidatingAdmissionPolicy from the embedded bundle and running
 // its validations. controlID is threaded down from processControl (not read off
@@ -2403,7 +2420,7 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 	}
 
 	var vap *cel.VAP
-	if rule.Rule != "" {
+	if rule.Rule != "" && !ruleTextIsRego(rule.Rule) {
 		vap, err = cel.ParseVAP([]byte(rule.Rule))
 	} else {
 		vap, err = cel.LoadVAP(controlID)
