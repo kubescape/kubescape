@@ -1849,6 +1849,8 @@ func TestRelativeToRoot(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, "shared", "pod.tpl"), []byte("kind: Pod\n"), 0o600))
 	require.NoError(t, os.Symlink(filepath.Join("..", "shared", "pod.tpl"), filepath.Join(root, "k8s", "linked.yaml")))
 	require.NoError(t, os.Symlink("shared", filepath.Join(root, "aliased")))
+	// a repository-local link back to the root itself
+	require.NoError(t, os.Symlink(".", filepath.Join(root, "reenter")))
 
 	tests := []struct {
 		name string
@@ -1862,6 +1864,7 @@ func TestRelativeToRoot(t *testing.T) {
 		{name: "path outside the root is unchanged", path: outside, want: mustRel(t, root, outside)},
 		{name: "file symlink under a linked root keeps its own name", path: filepath.Join(linkedRoot, "k8s", "linked.yaml"), want: filepath.Join("k8s", "linked.yaml")},
 		{name: "directory symlink under a linked root keeps its own name", path: filepath.Join(linkedRoot, "aliased", "pod.tpl"), want: filepath.Join("aliased", "pod.tpl")},
+		{name: "link back to the root under a linked root keeps its own name", path: filepath.Join(linkedRoot, "reenter", "k8s", "pod.yaml"), want: filepath.Join("reenter", "k8s", "pod.yaml")},
 		// Helm names a template of a packaged dependency (charts/dep-1.0.0.tgz)
 		// <chart>/charts/dep/templates/..., a directory that is not on disk
 		{name: "missing file under a linked root", path: filepath.Join(linkedRoot, "chart", "charts", "dep", "templates", "deployment.yaml"), want: filepath.Join("chart", "charts", "dep", "templates", "deployment.yaml")},
