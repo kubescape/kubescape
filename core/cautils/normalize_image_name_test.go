@@ -33,6 +33,18 @@ func Test_normalize_name(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "Normalize image with surrounding whitespace",
+			img:     "   nginx:latest \t\n",
+			want:    "docker.io/library/nginx:latest",
+			wantErr: false,
+		},
+		{
+			name:    "Normalize registry image with leading and trailing spaces",
+			img:     "  quay.io/coreos/etcd:v3.5  ",
+			want:    "quay.io/coreos/etcd:v3.5",
+			wantErr: false,
+		},
+		{
 			name:    "Invalid image name",
 			img:     "https://docker.io/library/nginx",
 			want:    "",
