@@ -667,3 +667,37 @@ func TestPolicies_Set_NilSafety(t *testing.T) {
 	assert.Contains(t, emptyPolicies.Controls, "C-0001")
 	assert.Contains(t, emptyPolicies.Frameworks, "test-framework")
 }
+
+func TestShouldSkipRuleWithWarned_NilWarnedMap(t *testing.T) {
+	ruleInvalidUntil := reporthandling.PolicyRule{
+		Name: "rule-invalid-until",
+		Attributes: map[string]any{
+			"useUntilKubescapeVersion": "invalid-semver",
+		},
+	}
+	ruleInvalidFrom := reporthandling.PolicyRule{
+		Name: "rule-invalid-from",
+		Attributes: map[string]any{
+			"useFromKubescapeVersion": "invalid-semver",
+		},
+	}
+	ruleNonStringUntil := reporthandling.PolicyRule{
+		Name: "rule-nonstring-until",
+		Attributes: map[string]any{
+			"useUntilKubescapeVersion": 123,
+		},
+	}
+	ruleNonStringFrom := reporthandling.PolicyRule{
+		Name: "rule-nonstring-from",
+		Attributes: map[string]any{
+			"useFromKubescapeVersion": true,
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		assert.True(t, ShouldSkipRuleWithWarned(reporthandling.Control{}, ruleInvalidUntil, reporthandling.ScopeCluster, nil))
+		assert.False(t, ShouldSkipRuleWithWarned(reporthandling.Control{}, ruleInvalidFrom, reporthandling.ScopeCluster, nil))
+		assert.True(t, ShouldSkipRuleWithWarned(reporthandling.Control{}, ruleNonStringUntil, reporthandling.ScopeCluster, nil))
+		assert.True(t, ShouldSkipRuleWithWarned(reporthandling.Control{}, ruleNonStringFrom, reporthandling.ScopeCluster, nil))
+	})
+}
