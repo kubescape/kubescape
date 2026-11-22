@@ -736,3 +736,63 @@ func TestPrettyPrinter_printTitle_NilSafety(t *testing.T) {
 		})
 	})
 }
+
+func TestPrettyPrinter_NilReceiverSafety(t *testing.T) {
+	var pp *PrettyPrinter
+
+	assert.NotPanics(t, func() {
+		pp.PrintNextSteps()
+	})
+
+	assert.NotPanics(t, func() {
+		err := pp.PrintImageScan(nil)
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := pp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := pp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		pp.SetKubeconfig("test-config")
+		pp.SetAnonymized(true)
+		pp.SetMainPrinter()
+		pp.Score(100)
+	})
+}
+
+func TestPrettyPrinter_UninitializedMainPrinter_PrintNextSteps(t *testing.T) {
+	pp := NewPrettyPrinter(false, "v2", false, cautils.ControlViewType, cautils.ScanTypeCluster, nil, "", false, false)
+	pp.mainPrinter = nil
+
+	assert.NotPanics(t, func() {
+		pp.PrintNextSteps()
+	})
+
+	assert.NotPanics(t, func() {
+		err := pp.PrintImageScan(nil)
+		assert.NoError(t, err)
+	})
+}
+
+func TestPrettyPrinter_NewPrettyPrinter_InitializesMainPrinter(t *testing.T) {
+	pp := NewPrettyPrinter(false, "v2", false, cautils.ControlViewType, cautils.ScanTypeCluster, nil, "", false, false)
+	assert.NotNil(t, pp.mainPrinter)
+	assert.NotPanics(t, func() {
+		pp.PrintNextSteps()
+	})
+}
+
+func TestPrettyPrinter_PrintNextSteps_NilWriter(t *testing.T) {
+	pp := NewPrettyPrinter(false, "v2", false, cautils.ControlViewType, cautils.ScanTypeCluster, nil, "", false, false)
+	pp.writer = nil
+	assert.NotPanics(t, func() {
+		pp.PrintNextSteps()
+	})
+}

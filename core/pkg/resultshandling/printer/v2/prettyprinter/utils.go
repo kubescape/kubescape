@@ -300,6 +300,9 @@ func printImagesCommands(writer *os.File, summary imageprinter.ImageScanSummary)
 }
 
 func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
+	if writer == nil {
+		return
+	}
 	txt := "What now?"
 	cautils.SectionHeadingDisplay(writer, txt)
 
@@ -312,6 +315,9 @@ func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
 }
 
 func printComplianceScore(writer io.Writer, frameworks []reportsummary.IFrameworkSummary) {
+	if writer == nil {
+		return
+	}
 	txt := "Compliance Score"
 	cautils.SectionHeadingDisplay(writer, txt)
 	cautils.SimpleDisplay(writer, "The compliance score is calculated by multiplying control failures by the number of failures against supported compliance frameworks. Remediate controls, or configure your cluster baseline with exceptions, to improve this score.\n\n")

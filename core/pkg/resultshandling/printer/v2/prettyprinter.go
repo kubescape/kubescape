@@ -60,13 +60,16 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, v
 		showEvidence:    showEvidence,
 		showSecrets:     showSecrets,
 	}
-
+	prettyPrinter.SetMainPrinter()
 	return prettyPrinter
 }
 
 // SetKubeconfig records the kubeconfig file the scan was given, so a command
 // printed for a live cluster reads the same cluster from the same file.
 func (pp *PrettyPrinter) SetKubeconfig(path string) {
+	if pp == nil {
+		return
+	}
 	pp.kubeconfig = path
 }
 
@@ -74,10 +77,16 @@ func (pp *PrettyPrinter) SetKubeconfig(path string) {
 // --encrypt, so resource names, namespaces and the context name in it are
 // pseudonyms and cannot be put in a kubectl command.
 func (pp *PrettyPrinter) SetAnonymized(anonymized bool) {
+	if pp == nil {
+		return
+	}
 	pp.anonymized = anonymized
 }
 
 func (pp *PrettyPrinter) SetMainPrinter() {
+	if pp == nil {
+		return
+	}
 	switch pp.scanType {
 	case cautils.ScanTypeCluster:
 		pp.mainPrinter = prettyprinter.NewClusterPrinter(pp.writer, pp.verboseMode)
@@ -93,17 +102,39 @@ func (pp *PrettyPrinter) SetMainPrinter() {
 }
 
 func (pp *PrettyPrinter) PrintNextSteps() {
-	pp.mainPrinter.PrintNextSteps()
+	if pp == nil {
+		return
+	}
+	if pp.mainPrinter == nil {
+		pp.SetMainPrinter()
+	}
+	if pp.mainPrinter != nil {
+		pp.mainPrinter.PrintNextSteps()
+	}
 }
 
 func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) error {
-	pp.mainPrinter.PrintImageScanning(buildImageScanSummary(imageScanData))
+	if pp == nil {
+		return fmt.Errorf("failed to print image scan: printer is nil")
+	}
+	if pp.mainPrinter == nil {
+		pp.SetMainPrinter()
+	}
+	if pp.mainPrinter != nil {
+		pp.mainPrinter.PrintImageScanning(buildImageScanSummary(imageScanData))
+	}
 	return nil
 }
 
 func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if pp == nil {
+		return fmt.Errorf("failed to write pretty results: printer is nil")
+	}
 	if err := printer.PrepareOutput(pp.writer); err != nil {
 		return err
+	}
+	if pp.mainPrinter == nil {
+		pp.SetMainPrinter()
 	}
 	hasReport := opaSessionObj != nil && opaSessionObj.Report != nil
 	hasImages := len(imageScanData) > 0
@@ -515,7 +546,7 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 
 // CloseWriter closes the pretty-printer output writer, returning any error from flushing or closing.
 func (p *PrettyPrinter) CloseWriter() error {
-	if p.writer != nil && p.writer != os.Stdout {
+	if p != nil && p.writer != nil && p.writer != os.Stdout {
 		return printer.CloseOutput(p.writer)
 	}
 	return nil

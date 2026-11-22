@@ -30,6 +30,9 @@ func NewClusterPrinter(writer *os.File, verboseMode bool) *ClusterPrinter {
 var _ MainPrinter = &ClusterPrinter{}
 
 func (cp *ClusterPrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary) {
+	if cp == nil || cp.writer == nil || summary == nil {
+		return
+	}
 	if cp.verboseMode {
 		cp.imageTablePrinter.PrintImageScanningTable(cp.writer, *summary)
 		cautils.SimpleDisplay(cp.writer, "\n")
@@ -41,7 +44,9 @@ func (cp *ClusterPrinter) PrintImageScanning(summary *imageprinter.ImageScanSumm
 }
 
 func (cp *ClusterPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, topWorkloadsByScore []reporthandling.IResource) {
-
+	if cp == nil || cp.writer == nil || summaryDetails == nil {
+		return
+	}
 	cp.categoriesTablePrinter.PrintCategoriesTables(cp.writer, summaryDetails, sortedControlIDs)
 
 	if len(topWorkloadsByScore) > 0 {
@@ -52,6 +57,9 @@ func (cp *ClusterPrinter) PrintConfigurationsScanning(summaryDetails *reportsumm
 }
 
 func (cp *ClusterPrinter) PrintNextSteps() {
+	if cp == nil || cp.writer == nil {
+		return
+	}
 	printNextSteps(cp.writer, cp.getNextSteps(), true)
 }
 

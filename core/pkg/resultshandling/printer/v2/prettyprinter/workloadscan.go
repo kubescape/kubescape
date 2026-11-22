@@ -29,6 +29,9 @@ func NewWorkloadPrinter(writer *os.File, verboseMode bool) *WorkloadPrinter {
 var _ MainPrinter = &WorkloadPrinter{}
 
 func (wp *WorkloadPrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary) {
+	if wp == nil || wp.writer == nil || summary == nil {
+		return
+	}
 	if wp.verboseMode {
 		wp.imageTablePrinter.PrintImageScanningTable(wp.writer, *summary)
 		cautils.SimpleDisplay(wp.writer, "\n")
@@ -40,6 +43,9 @@ func (wp *WorkloadPrinter) PrintImageScanning(summary *imageprinter.ImageScanSum
 }
 
 func (wp *WorkloadPrinter) PrintNextSteps() {
+	if wp == nil || wp.writer == nil {
+		return
+	}
 	printNextSteps(wp.writer, wp.getNextSteps(), true)
 }
 
@@ -52,6 +58,9 @@ func (wp *WorkloadPrinter) getNextSteps() []string {
 }
 
 func (wp *WorkloadPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, topWorkloadsByScore []reporthandling.IResource) {
+	if wp == nil || wp.writer == nil || summaryDetails == nil {
+		return
+	}
 	wp.categoriesTablePrinter.PrintCategoriesTables(wp.writer, summaryDetails, sortedControlIDs)
 
 }
