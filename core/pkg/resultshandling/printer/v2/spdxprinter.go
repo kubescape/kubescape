@@ -29,6 +29,9 @@ func NewSPDXPrinter() *SPDXPrinter {
 }
 
 func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if sp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.SPDXFormat, outputFile, spdxOutputFile)
 	if explicitOutput {
 		var err error
@@ -42,6 +45,9 @@ func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
 func (sp *SPDXPrinter) Score(score float32) {}
 
 func (sp *SPDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if sp == nil {
+		return fmt.Errorf("failed to write spdx-json results: printer is nil")
+	}
 	if err := printer.PrepareOutput(sp.writer); err != nil {
 		return err
 	}
@@ -104,7 +110,7 @@ func (sp *SPDXPrinter) PrintNextSteps() {}
 
 // CloseWriter closes the SPDX output writer, returning any error from flushing or closing.
 func (sp *SPDXPrinter) CloseWriter() error {
-	if sp.writer != nil && sp.writer != os.Stdout {
+	if sp != nil && sp.writer != nil && sp.writer != os.Stdout {
 		return printer.CloseOutput(sp.writer)
 	}
 	return nil

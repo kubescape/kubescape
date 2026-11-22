@@ -170,3 +170,29 @@ func TestActionPrint_CycloneDX_NilWriterReturnsError(t *testing.T) {
 		assert.Contains(t, err.Error(), "output writer is nil")
 	})
 }
+
+func TestCycloneDX_NilReceiverSafety(t *testing.T) {
+	var cp *CycloneDXPrinter
+
+	assert.NotPanics(t, func() {
+		err := cp.ActionPrint(context.Background(), nil, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := cp.SetWriter(context.Background(), "test")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := cp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		cp.Score(0)
+		cp.PrintNextSteps()
+	})
+}
