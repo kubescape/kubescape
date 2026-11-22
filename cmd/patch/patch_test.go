@@ -53,6 +53,12 @@ func TestGetPatchCmdWithNonExistentImage(t *testing.T) {
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }
 
+func Test_validateImagePatchInfo_NilPatchInfo(t *testing.T) {
+	err := validateImagePatchInfo(nil)
+	assert.Error(t, err)
+	assert.Equal(t, "nil patch info", err.Error())
+}
+
 func Test_validateImagePatchInfo_EmptyImage(t *testing.T) {
 	patchInfo := &metav1.PatchInfo{}
 	err := validateImagePatchInfo(patchInfo)
