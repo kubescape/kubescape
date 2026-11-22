@@ -680,20 +680,33 @@ func lexicalAbsPath(path string) string {
 // symlinks, while path keeps the form the scan was given. When the scan reached
 // the repository through a symlink (on macOS, anything under /tmp or /var), the
 // two differ in their leading components and the plain relation climbs out of
-// the root. Only then is path's own target tried, so a repository-local symlink
-// keeps the path the caller selected, as lexicalAbsPath requires. If neither
-// form lands inside root, the plain relation is returned as before.
+// the root. Only then is the ancestor of path that is the root's own directory
+// looked for, and path is taken relative to it. Only that prefix is resolved:
+// every name below it, a repository-local symlink included, stays the one the
+// caller selected, as lexicalAbsPath requires, and path itself need not exist
+// (a template inside a packaged Helm dependency does not). If no ancestor is
+// the root, the plain relation is returned as before.
 func RelativeToRoot(root, path string) (string, error) {
 	rel, err := filepath.Rel(root, path)
 	if err == nil && !escapesRoot(rel) {
 		return rel, nil
 	}
-	if resolved, evalErr := filepath.EvalSymlinks(path); evalErr == nil {
-		if resolvedRel, relErr := filepath.Rel(root, resolved); relErr == nil && !escapesRoot(resolvedRel) {
-			return resolvedRel, nil
-		}
+	rootInfo, statErr := os.Stat(root)
+	if statErr != nil {
+		return rel, err
 	}
-	return rel, err
+	for ancestor := filepath.Clean(path); ; {
+		if info, statErr := os.Stat(ancestor); statErr == nil && os.SameFile(rootInfo, info) {
+			if ancestorRel, relErr := filepath.Rel(ancestor, path); relErr == nil {
+				return ancestorRel, nil
+			}
+		}
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			return rel, err
+		}
+		ancestor = parent
+	}
 }
 
 // escapesRoot reports whether a filepath.Rel result leaves the directory it was

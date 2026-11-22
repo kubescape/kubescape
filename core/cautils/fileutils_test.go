@@ -1843,6 +1843,12 @@ func TestRelativeToRoot(t *testing.T) {
 	require.NoError(t, os.Symlink(manifest, inRepoLink))
 	outside := filepath.Join(t.TempDir(), "outside.yaml")
 	require.NoError(t, os.WriteFile(outside, []byte("kind: Pod\n"), 0o600))
+	// a symlink to a differently named file, and a directory symlink, both
+	// reached through the linked root: only the root's link may be resolved
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "shared"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "shared", "pod.tpl"), []byte("kind: Pod\n"), 0o600))
+	require.NoError(t, os.Symlink(filepath.Join("..", "shared", "pod.tpl"), filepath.Join(root, "k8s", "linked.yaml")))
+	require.NoError(t, os.Symlink("shared", filepath.Join(root, "aliased")))
 
 	tests := []struct {
 		name string
@@ -1854,6 +1860,11 @@ func TestRelativeToRoot(t *testing.T) {
 		// the plain relation stays inside the root, so the link keeps the name the caller selected
 		{name: "repository-local symlink keeps its own path", path: inRepoLink, want: filepath.Join("k8s", "alias.yaml")},
 		{name: "path outside the root is unchanged", path: outside, want: mustRel(t, root, outside)},
+		{name: "file symlink under a linked root keeps its own name", path: filepath.Join(linkedRoot, "k8s", "linked.yaml"), want: filepath.Join("k8s", "linked.yaml")},
+		{name: "directory symlink under a linked root keeps its own name", path: filepath.Join(linkedRoot, "aliased", "pod.tpl"), want: filepath.Join("aliased", "pod.tpl")},
+		// Helm names a template of a packaged dependency (charts/dep-1.0.0.tgz)
+		// <chart>/charts/dep/templates/..., a directory that is not on disk
+		{name: "missing file under a linked root", path: filepath.Join(linkedRoot, "chart", "charts", "dep", "templates", "deployment.yaml"), want: filepath.Join("chart", "charts", "dep", "templates", "deployment.yaml")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
