@@ -70,6 +70,9 @@ func (cp *GitLabCodeQualityPrinter) Score(float32) {}
 func (cp *GitLabCodeQualityPrinter) PrintNextSteps() {}
 
 func (cp *GitLabCodeQualityPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if cp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.GitLabCodeQualityFormat, outputFile, gitLabCodeQualityOutputFile)
 	if explicitOutput {
 		var err error
@@ -81,6 +84,9 @@ func (cp *GitLabCodeQualityPrinter) SetWriter(ctx context.Context, outputFile st
 }
 
 func (cp *GitLabCodeQualityPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if cp == nil {
+		return fmt.Errorf("failed to write gitlab-codequality results: printer is nil")
+	}
 	if err := printer.PrepareOutput(cp.writer); err != nil {
 		return err
 	}
@@ -269,7 +275,7 @@ func codeQualitySeverity(scoreFactor float32) string {
 }
 
 func (cp *GitLabCodeQualityPrinter) CloseWriter() error {
-	if cp.writer != nil && cp.writer != os.Stdout {
+	if cp != nil && cp.writer != nil && cp.writer != os.Stdout {
 		return printer.CloseOutput(cp.writer)
 	}
 	return nil

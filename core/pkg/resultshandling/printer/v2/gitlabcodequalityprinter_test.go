@@ -351,3 +351,27 @@ func TestGitLabCodeQualityActionPrint_NilWriterReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "output writer is nil")
 }
+
+func TestGitLabCodeQuality_NilReceiverSafety(t *testing.T) {
+	var cp *GitLabCodeQualityPrinter
+
+	assert.NotPanics(t, func() {
+		err := cp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := cp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := cp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		cp.Score(100)
+		cp.PrintNextSteps()
+	})
+}
