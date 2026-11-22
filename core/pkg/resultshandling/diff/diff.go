@@ -134,6 +134,9 @@ func CompareReports(basePath, headPath string, options Options) (ReportKind, *Ch
 	}
 
 	if baseKind == VulnerabilityReport || headKind == VulnerabilityReport {
+		if err := validateVulnerabilityGranularity(options.Granularity); err != nil {
+			return VulnerabilityReport, nil, nil, err
+		}
 		cs, err := ComputeVulnerabilities(basePath, headPath)
 		if err != nil {
 			return VulnerabilityReport, nil, nil, err
@@ -159,6 +162,9 @@ func CompareReportsFromJSON(baseJSON, headJSON []byte, options Options) (ReportK
 	}
 
 	if baseKind == VulnerabilityReport || headKind == VulnerabilityReport {
+		if err := validateVulnerabilityGranularity(options.Granularity); err != nil {
+			return VulnerabilityReport, nil, nil, err
+		}
 		cs, err := ComputeVulnerabilitiesFromJSON(baseJSON, headJSON)
 		if err != nil {
 			return VulnerabilityReport, nil, nil, err
@@ -171,6 +177,17 @@ func CompareReportsFromJSON(baseJSON, headJSON []byte, options Options) (ReportK
 		return PostureReport, nil, nil, err
 	}
 	return PostureReport, cs, nil, nil
+}
+
+func validateVulnerabilityGranularity(value Granularity) error {
+	granularity, err := normalizeGranularity(value)
+	if err != nil {
+		return err
+	}
+	if granularity == GranularityControl {
+		return fmt.Errorf("granularity %q applies only to posture reports: image vulnerability reports are compared by vulnerability, package and package type", granularity)
+	}
+	return nil
 }
 
 func normalizeGranularity(value Granularity) (Granularity, error) {

@@ -499,3 +499,21 @@ func TestGetDiffCmd_OutputValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestGetDiffCmd_FailOnNewNamesVulnerabilitiesForImageReports(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "base.json")
+	require.NoError(t, os.WriteFile(base, []byte(`{"matches":[],"source":{"target":{"userInput":"app:1.0"}}}`), 0o600))
+
+	diffCmd := GetDiffCmd(&stubKubescape{newFailures: 2})
+	diffCmd.SilenceErrors = true
+	diffCmd.SetArgs([]string{base, filepath.Join(dir, "head.json"), "--fail-on-new", "--severity-threshold", "high"})
+
+	err := diffCmd.Execute()
+	assert.EqualError(t, err, `found 2 new vulnerability(ies) at or above severity threshold "high"`)
+
+	diffCmd = GetDiffCmd(&stubKubescape{newFailures: 1})
+	diffCmd.SilenceErrors = true
+	diffCmd.SetArgs([]string{filepath.Join(dir, "missing.json"), base, "--fail-on-new"})
+	assert.EqualError(t, diffCmd.Execute(), `found 1 new vulnerability(ies) at or above severity threshold "all"`, "an image head report is enough to name vulnerabilities")
+}

@@ -135,3 +135,34 @@ func TestCompareReportsFromJSONMatchesPathDispatcher(t *testing.T) {
 	_, _, _, err := CompareReportsFromJSON(read(postureBase), read(imageBase), Options{})
 	assert.ErrorIs(t, err, ErrMixedReportKinds)
 }
+
+func TestCompareReportsRejectsControlGranularityForImageReports(t *testing.T) {
+	base := writeJSONReport(t, imageDocument("app:1", testMatch{"CVE-1", "High", "openssl", "3.0", "apk", nil}))
+	head := writeJSONReport(t, imageDocument("app:2", testMatch{"CVE-2", "Low", "curl", "8.0", "apk", nil}))
+	read := func(path string) []byte {
+		t.Helper()
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		return data
+	}
+
+	for _, granularity := range []Granularity{GranularityControl, " Control "} {
+		_, _, cs, err := CompareReports(base, head, Options{Granularity: granularity})
+		assert.ErrorContains(t, err, `granularity "control" applies only to posture reports`)
+		assert.Nil(t, cs)
+
+		_, _, cs, err = CompareReportsFromJSON(read(base), read(head), Options{Granularity: granularity})
+		assert.ErrorContains(t, err, `granularity "control" applies only to posture reports`)
+		assert.Nil(t, cs)
+	}
+
+	for _, granularity := range []Granularity{"", GranularityEvidence} {
+		kind, _, cs, err := CompareReports(base, head, Options{Granularity: granularity})
+		require.NoError(t, err)
+		assert.Equal(t, VulnerabilityReport, kind)
+		assert.NotNil(t, cs)
+	}
+
+	_, _, _, err := CompareReports(base, head, Options{Granularity: "rule"})
+	assert.ErrorContains(t, err, "invalid diff granularity")
+}

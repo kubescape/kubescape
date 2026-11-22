@@ -123,21 +123,30 @@ Image scan reports ("scan image --format json") are compared by vulnerability in
 			}
 
 			if diffInfo.FailOnNew && newFailures > 0 {
-				return fmt.Errorf("found %d new or incomparable failure(s) at or above severity threshold %q",
-					newFailures, severityLabel(diffInfo.SeverityThreshold))
+				findings := "new or incomparable failure(s)"
+				if isVulnerabilityDiff(diffInfo.BaseFile, diffInfo.HeadFile) {
+					findings = "new vulnerability(ies)"
+				}
+				return fmt.Errorf("found %d %s at or above severity threshold %q",
+					newFailures, findings, severityLabel(diffInfo.SeverityThreshold))
 			}
 
 			return nil
 		},
 	}
 
-	diffCmd.Flags().BoolVar(&diffInfo.FailOnNew, "fail-on-new", false, "Exit with code 1 when new or incomparable failures are found (combine with --severity-threshold to limit the gate)")
+	diffCmd.Flags().BoolVar(&diffInfo.FailOnNew, "fail-on-new", false, "Exit with code 1 when new or incomparable failures, or new vulnerabilities for image reports, are found (combine with --severity-threshold to limit the gate)")
 	diffCmd.Flags().StringVar(&diffInfo.SeverityThreshold, "severity-threshold", "", "Only count new and incomparable failures at or above this severity when using --fail-on-new (low, medium, high, critical)")
 	diffCmd.Flags().StringVarP(&diffInfo.Format, "format", "f", "pretty-printer", fmt.Sprintf(`Output format: "%s"`, strings.Join(diffFormats(), `", "`)))
 	diffCmd.Flags().StringVarP(&diffInfo.Output, "output", "o", "", "Output file; defaults to stdout")
-	diffCmd.Flags().StringVar(&diffInfo.Granularity, "granularity", string(resultsdiff.GranularityEvidence), `Comparison unit: "evidence" or "control"`)
+	diffCmd.Flags().StringVar(&diffInfo.Granularity, "granularity", string(resultsdiff.GranularityEvidence), `Comparison unit for posture reports: "evidence" or "control"`)
 
 	return diffCmd
+}
+
+func isVulnerabilityDiff(base, head string) bool {
+	return resultsdiff.ReportKindOf(base) == resultsdiff.VulnerabilityReport ||
+		resultsdiff.ReportKindOf(head) == resultsdiff.VulnerabilityReport
 }
 
 func severityLabel(s string) string {
