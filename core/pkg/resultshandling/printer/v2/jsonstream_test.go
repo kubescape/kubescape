@@ -22,12 +22,18 @@ func (w *shortWriter) Write(p []byte) (int, error) {
 	return w.max, nil
 }
 
-type failingWriter struct {
-	err error
+type recordingWriter struct {
+	err   error
+	calls int
+	buf   bytes.Buffer
 }
 
-func (w *failingWriter) Write(p []byte) (int, error) {
-	return 0, w.err
+func (w *recordingWriter) Write(p []byte) (int, error) {
+	w.calls++
+	if w.calls == 1 {
+		return 0, w.err
+	}
+	return w.buf.Write(p)
 }
 
 func TestJSONStream_FramingAndFields(t *testing.T) {
@@ -112,12 +118,14 @@ func TestJSONStream_ShortWriteReturnsError(t *testing.T) {
 
 func TestJSONStream_StickyErrorSuppressesFurtherWrites(t *testing.T) {
 	wantErr := errors.New("underlying write error")
-	w := &failingWriter{err: wantErr}
+	w := &recordingWriter{err: wantErr}
 	s := newJSONStream(w)
 
 	// Trigger initial error
 	s.raw("start")
 	require.ErrorIs(t, s.err, wantErr)
+	require.Equal(t, 1, w.calls)
+	initialOutput := w.buf.String()
 
 	// All subsequent operations should be no-ops and preserve the original error
 	n, err := s.Write([]byte("more"))
@@ -131,6 +139,8 @@ func TestJSONStream_StickyErrorSuppressesFurtherWrites(t *testing.T) {
 	s.field(&first, "field", "val")
 
 	assert.ErrorIs(t, s.err, wantErr)
+	assert.Equal(t, 1, w.calls, "underlying writer should be called exactly once")
+	assert.Equal(t, initialOutput, w.buf.String(), "underlying writer output should remain unchanged after failure")
 }
 
 func TestJSONStream_ValueEncodingFailureSetsStickyError(t *testing.T) {
