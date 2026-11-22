@@ -29,6 +29,7 @@ func createSuggestFixTools(ksServer *KubescapeMcpserver) {
 	suggestFixTool := mcp.NewTool(
 		"suggest_fix",
 		mcp.WithDescription("Preview fixes for security findings as a unified git-compatible diff and structured plan without modifying files. Operates in dry-run mode from either local IaC (path) or an existing posture report JSON (report_path). Returns a unified diff, file-by-file changes, items classification, and unfixed controls. Control IDs are optional; if omitted, fixes are suggested for all failing controls."),
+		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithString("path",
 			mcp.Description("Absolute or relative path to the local YAML file or directory to scan and suggest fixes for (e.g., /path/to/manifest.yaml). Exactly one of path or report_path is required."),
 		),

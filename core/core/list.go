@@ -600,11 +600,11 @@ func controlsConfigEntries(ctx context.Context, configGetter getter.IControlsInp
 	return buildControlsConfigEntries(values, frameworks), nil
 }
 
-// buildControlsConfigEntries indexes every configurable input declared by a
+// BuildControlsConfigEntries indexes every configurable input declared by a
 // control against the resolved values. Inputs a control declares but the
 // configuration does not set are still listed, with no values, since an unset
 // input is what makes a configurable control fall back to its rule default.
-func buildControlsConfigEntries(values map[string][]string, frameworks []reporthandling.Framework) []metav1.ControlConfigEntry {
+func BuildControlsConfigEntries(values map[string][]string, frameworks []reporthandling.Framework) []metav1.ControlConfigEntry {
 	titles := map[string]string{}
 	descriptions := map[string]string{}
 	controls := map[string]map[string]struct{}{}
@@ -644,7 +644,9 @@ func buildControlsConfigEntries(values map[string][]string, frameworks []reporth
 			names = append(names, name)
 		}
 	}
-	sort.Strings(names)
+	sort.Slice(names, func(i, j int) bool {
+		return natural.Less(names[i], names[j])
+	})
 
 	entries := make([]metav1.ControlConfigEntry, 0, len(names))
 	for _, name := range names {
@@ -657,6 +659,10 @@ func buildControlsConfigEntries(values map[string][]string, frameworks []reporth
 		})
 	}
 	return entries
+}
+
+func buildControlsConfigEntries(values map[string][]string, frameworks []reporthandling.Framework) []metav1.ControlConfigEntry {
+	return BuildControlsConfigEntries(values, frameworks)
 }
 
 // configInputKey returns the controls-config key a declared input reads. The

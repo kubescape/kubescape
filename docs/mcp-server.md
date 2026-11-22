@@ -394,7 +394,12 @@ List configuration scan results per resource: the failed controls, most severe f
 
 #### `list_frameworks`
 
-List the names of the frameworks available for scanning (for example `NSA`, `MITRE`, `cis-v1.12.0`).
+List the names of the frameworks available for scanning in natural numerical order (for example `NSA`, `MITRE`, `cis-v1.2.0`, `cis-v1.12.0`).
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `search` | string | No | Optional case-insensitive substring to filter framework names (e.g. `cis`) |
 
 #### `list_controls`
 
@@ -419,6 +424,38 @@ List the security controls with their IDs, names and the frameworks they belong 
     {"id": "C-0005", "name": "API server insecure port is enabled", "frameworks": ["ArmoBest", "NSA", "AllControls", "ClusterScan", "security"]}
   ]
 }
+```
+
+#### `list_controls_config`
+
+List configurable control parameters, their resolved values (from cluster CRDs or policy defaults), descriptions, and the security controls that consume them. Useful for discovering which settings govern a failed control (e.g. `C-0016`) or inspecting active configuration values.
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `control_id` | string | No | Optional control ID (e.g. `C-0016`) to only list configuration inputs read by that control |
+| `search` | string | No | Optional case-insensitive keyword to filter configuration entries by name, title, description, or control ID |
+
+**Response Fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Configuration key name (as used in controls-config files and CRDs) |
+| `title` | string | Human-readable label declared by the controls |
+| `description` | string | Description of the configurable parameter and its effect |
+| `values` | array of strings | Current resolved values for the parameter |
+| `controls` | array of strings | Control IDs that evaluate this configuration parameter |
+
+**Example Response** (`control_id: "C-0016"`):
+```json
+[
+  {
+    "name": "imageRepositoryAllowList",
+    "title": "Allowed image repositories",
+    "description": "Repositories images may come from.",
+    "values": ["docker.io", "quay.io"],
+    "controls": ["C-0016", "C-0048"]
+  }
+]
 ```
 
 #### `explain_control`

@@ -101,7 +101,7 @@ func TestPolicyToolsReturnBoundedErrorBeforeReadiness(t *testing.T) {
 	ks.startPolicyLoad(load)
 
 	start := time.Now()
-	_, err := ks.ListFrameworks(context.Background())
+	_, err := ks.ListFrameworks(context.Background(), "")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errPolicyNotReady)
 	assert.Less(t, time.Since(start), 5*time.Second, "wait must be bounded")
@@ -133,7 +133,7 @@ func TestPolicyToolsSucceedAfterReadiness(t *testing.T) {
 	}
 	res := make(chan result, 1)
 	go func() {
-		out, err := ks.ListFrameworks(context.Background())
+		out, err := ks.ListFrameworks(context.Background(), "")
 		res <- result{out, err}
 	}()
 	close(release)
@@ -147,7 +147,7 @@ func TestPolicyToolsSucceedAfterReadiness(t *testing.T) {
 	}
 
 	// And calls made afterwards do not wait or reload.
-	out, err := ks.ListFrameworks(context.Background())
+	out, err := ks.ListFrameworks(context.Background(), "")
 	require.NoError(t, err)
 	assert.JSONEq(t, `["mitre","nsa"]`, string(out))
 	assert.EqualValues(t, 1, calls.Load(), "policy store must be initialized exactly once")

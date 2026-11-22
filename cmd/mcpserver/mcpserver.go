@@ -1092,9 +1092,27 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		return mcp.NewToolResultText(string(v.([]byte))), nil
 	case "list_frameworks":
-		result, err := ksServer.ListFrameworks(ctx)
+		search, toolErr := mcpStringArg(arguments, "search")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		result, err := ksServer.ListFrameworks(ctx, search)
 		if err != nil {
 			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list frameworks: %v", err), nil), nil
+		}
+		return mcp.NewToolResultText(string(result)), nil
+	case "list_controls_config":
+		controlID, toolErr := mcpStringArg(arguments, "control_id")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		search, toolErr := mcpStringArg(arguments, "search")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		result, err := ksServer.ListControlsConfig(ctx, search, controlID)
+		if err != nil {
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list controls config: %v", err), nil), nil
 		}
 		return mcp.NewToolResultText(string(result)), nil
 	case "list_controls":
@@ -1375,10 +1393,14 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 		"list_frameworks",
 		mcp.WithDescription("List the names of all security frameworks available for scanning (e.g. nsa, mitre, cis-v1.23-t1.0.1). Use a returned name as the framework_name argument to run_framework_security_scan."),
 		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithString("search",
+			mcp.Description("Optional substring to filter framework names case-insensitively (e.g. \"cis\")"),
+		),
 	)
 	listControlsTool := mcp.NewTool(
 		"list_controls",
 		mcp.WithDescription("List the available security controls with their IDs, names, and the frameworks they belong to. Returns total, returned, truncated, and controls; pass framework or search to filter and use next_offset to request the next page. Use a returned ID as a control_ids value in scan_controls."),
+		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithString("framework",
 			mcp.Description("Only return the controls of this framework, e.g. \"NSA\" (optional, case-insensitive; see list_frameworks)"),
 		),
@@ -1391,7 +1413,17 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 		mcp.WithNumber("offset",
 			mcp.Description("Number of controls to skip; pass the previous response's next_offset to get the next page (optional, default 0)"),
 		),
+	)
+	listControlsConfigTool := mcp.NewTool(
+		"list_controls_config",
+		mcp.WithDescription("List configurable control parameters, their resolved values, descriptions, and the security controls that consume them. Pass control_id to inspect parameters affecting a specific control, or search to filter by keyword."),
 		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithString("control_id",
+			mcp.Description("Optional control ID (e.g. \"C-0016\") to only list configuration inputs read by that control"),
+		),
+		mcp.WithString("search",
+			mcp.Description("Optional keyword to filter configuration entries by name, title, description, or control ID case-insensitively"),
+		),
 	)
 	listAdmissionPoliciesTool := mcp.NewTool(
 		"list_admission_policies",
@@ -1419,6 +1451,7 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 	)
 	ksServer.s.AddTool(listFrameworksTool, ksServer.toolHandler(listFrameworksTool.Name))
 	ksServer.s.AddTool(listControlsTool, ksServer.toolHandler(listControlsTool.Name))
+	ksServer.s.AddTool(listControlsConfigTool, ksServer.toolHandler(listControlsConfigTool.Name))
 	ksServer.s.AddTool(validateScanSelectionTool, ksServer.toolHandler(validateScanSelectionTool.Name))
 	ksServer.s.AddTool(listAdmissionPoliciesTool, ksServer.toolHandler(listAdmissionPoliciesTool.Name))
 	ksServer.s.AddTool(createAdmissionPolicyBindingTool, ksServer.toolHandler(createAdmissionPolicyBindingTool.Name))
