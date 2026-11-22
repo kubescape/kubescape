@@ -933,3 +933,57 @@ func TestWriteConfigurationJSON_NilReportReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "no data provided for JSON output")
 }
+
+func TestActionPrint_Json_NilWriterReturnsError(t *testing.T) {
+	jp := NewJsonPrinter()
+
+	// Posture scan path with nil writer returns error without panicking
+	require.NotPanics(t, func() {
+		err := jp.ActionPrint(context.Background(), cautils.NewOPASessionObjMock(), nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	// Single image scan fallback path with nil writer returns error without panicking
+	require.NotPanics(t, func() {
+		err := jp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{buildSeverityExceptionImageScanData()})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	// Multi-image scan path with nil writer returns error without panicking
+	require.NotPanics(t, func() {
+		err := jp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{
+			buildSeverityExceptionImageScanData(),
+			buildSeverityExceptionImageScanData(),
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestPrintConfigurationsScanning_NilWriterReturnsError(t *testing.T) {
+	jp := NewJsonPrinter()
+	require.NotPanics(t, func() {
+		err := printConfigurationsScanning(cautils.NewOPASessionObjMock(), nil, jp)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestPrintImageScanning_NilWriterReturnsError(t *testing.T) {
+	jp := NewJsonPrinter()
+	require.NotPanics(t, func() {
+		err := printImageScanning([]cautils.ImageScanData{buildSeverityExceptionImageScanData()}, jp)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestWriteConfigurationJSON_NilWriterReturnsError(t *testing.T) {
+	require.NotPanics(t, func() {
+		err := writeConfigurationJSON(nil, cautils.NewOPASessionObjMock(), nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
