@@ -47,6 +47,9 @@ func NewExceptionsPrinter() *ExceptionsPrinter {
 }
 
 func (ep *ExceptionsPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if ep == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.ExceptionsFormat, outputFile, exceptionsOutputFile)
 	if explicitOutput {
 		var err error
@@ -62,6 +65,9 @@ func (ep *ExceptionsPrinter) Score(float32) {}
 func (ep *ExceptionsPrinter) PrintNextSteps() {}
 
 func (ep *ExceptionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if ep == nil {
+		return fmt.Errorf("failed to write exceptions: printer is nil")
+	}
 	if ep.writer == nil {
 		return fmt.Errorf("failed to write exceptions: output writer is nil")
 	}
@@ -141,7 +147,7 @@ func buildExceptionPolicies(ctx context.Context, opaSessionObj *cautils.OPASessi
 // CloseWriter closes the exceptions output writer, returning any error from
 // flushing or closing.
 func (ep *ExceptionsPrinter) CloseWriter() error {
-	if ep.writer != nil && ep.writer != os.Stdout {
+	if ep != nil && ep.writer != nil && ep.writer != os.Stdout {
 		return printer.CloseOutput(ep.writer)
 	}
 	return nil
