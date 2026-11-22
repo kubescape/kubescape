@@ -106,6 +106,9 @@ func normalizeSemVer(v string) string {
 // In local build (BuildNumber = ""):
 // returns true only if rule doesn't have the "until" attribute
 func isRuleKubescapeVersionCompatible(ruleName string, attributes map[string]any, version string, warned map[string]struct{}) bool {
+	if warned == nil {
+		warned = make(map[string]struct{})
+	}
 	normalizedVersion := normalizeSemVer(version)
 
 	if from, ok := attributes["useFromKubescapeVersion"]; ok && from != nil {
