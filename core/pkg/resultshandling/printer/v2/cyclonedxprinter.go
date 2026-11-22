@@ -29,6 +29,9 @@ func NewCycloneDXPrinter() *CycloneDXPrinter {
 }
 
 func (cp *CycloneDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if cp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.CycloneDXFormat, outputFile, cyclonedxOutputFile)
 	if explicitOutput {
 		var err error
@@ -42,6 +45,9 @@ func (cp *CycloneDXPrinter) SetWriter(ctx context.Context, outputFile string) er
 func (cp *CycloneDXPrinter) Score(score float32) {}
 
 func (cp *CycloneDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if cp == nil {
+		return fmt.Errorf("failed to write cyclonedx-json results: printer is nil")
+	}
 	if err := printer.PrepareOutput(cp.writer); err != nil {
 		return err
 	}
@@ -104,7 +110,7 @@ func (cp *CycloneDXPrinter) PrintNextSteps() {}
 
 // CloseWriter closes the CycloneDX output writer, returning any error from flushing or closing.
 func (cp *CycloneDXPrinter) CloseWriter() error {
-	if cp.writer != nil && cp.writer != os.Stdout {
+	if cp != nil && cp.writer != nil && cp.writer != os.Stdout {
 		return printer.CloseOutput(cp.writer)
 	}
 	return nil
