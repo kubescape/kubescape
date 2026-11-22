@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+trap 'printf "\033[0m"' EXIT
+
 BASE_DIR="${HOME}/.kubescape"
 KUBESCAPE_EXEC=kubescape
 
