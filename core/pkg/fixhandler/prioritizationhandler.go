@@ -228,7 +228,10 @@ func DetectProfileDrift(manifest []byte, profile *storagev1beta1.ContainerProfil
 			expr := FixPathToValidYamlExpression(baseContextPath+".capabilities.drop", dropsValue, documentIndexInYaml)
 			fixes = append(fixes, FixSuggestion{YamlExpression: expr})
 		}
-	} else {
+	} else if !existingDrops["ALL"] {
+		// A container that already drops ALL has nothing left to drop:
+		// naming SYS_ADMIN/NET_ADMIN next to it would report drift on a
+		// hardened workload and rewrite its drop list for no effect.
 		exercised := make(map[string]bool)
 		for _, cap := range profile.Spec.Capabilities {
 			exercised[cap] = true
