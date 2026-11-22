@@ -111,7 +111,10 @@ func TestKustomizeOriginsWhenTheTemporaryDirectoryIsASymlink(t *testing.T) {
 	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("symlinks are unavailable: %v", err)
 	}
+	// os.TempDir reads TMPDIR on Unix and TMP, then TEMP, on Windows.
 	t.Setenv("TMPDIR", link)
+	t.Setenv("TMP", link)
+	t.Setenv("TEMP", link)
 	require.Equal(t, link, os.TempDir(), "the wrapper must be created under the link")
 
 	byName, origins := renderedKustomizeWorkloads(t, overlay)
