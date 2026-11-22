@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -494,6 +495,29 @@ func TestDiff_ImageReportsCompareVulnerabilities(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, string(content), `"ruleId": "CVE-NEW-HIGH"`)
 		assert.NotContains(t, string(content), "CVE-NEW-LOW")
+	})
+
+	t.Run("writes a summary that matches the exit count", func(t *testing.T) {
+		output := filepath.Join(t.TempDir(), "summary.json")
+		count, err := ks.Diff(&metav1.DiffInfo{BaseFile: base, HeadFile: head, Format: "summary-json", Output: output, SeverityThreshold: "high"})
+		require.NoError(t, err)
+		assert.Equal(t, 1, count)
+		content, err := os.ReadFile(output)
+		require.NoError(t, err)
+		var summary diff.VulnerabilitySummary
+		require.NoError(t, json.Unmarshal(content, &summary))
+		assert.Equal(t, count, summary.Regressions)
+		assert.Equal(t, 1, summary.FixableRegressions)
+		assert.Equal(t, diff.VulnerabilityBuckets{New: 1, Resolved: 1}, summary.Total)
+	})
+
+	t.Run("writes a csv summary", func(t *testing.T) {
+		output := filepath.Join(t.TempDir(), "summary.csv")
+		_, err := ks.Diff(&metav1.DiffInfo{BaseFile: base, HeadFile: head, Format: "summary-csv", Output: output})
+		require.NoError(t, err)
+		content, err := os.ReadFile(output)
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "regressions,all,new,,,,2")
 	})
 
 	t.Run("rejects a format the vulnerability diff cannot write", func(t *testing.T) {

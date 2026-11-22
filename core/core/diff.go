@@ -118,9 +118,15 @@ func writeVulnerabilityDiff(diffInfo *metav1.DiffInfo, cs *diff.VulnerabilityCha
 		write = func(w io.Writer) error { return diff.PrintVulnerabilityJUnit(w, cs, diffInfo.SeverityThreshold) }
 	case printer.SARIFFormat:
 		write = func(w io.Writer) error { return diff.PrintVulnerabilitySARIF(w, cs, diffInfo.SeverityThreshold) }
+	case diff.SummaryJSONFormat:
+		write = func(w io.Writer) error { return diff.PrintVulnerabilitySummaryJSON(w, cs, diffInfo.SeverityThreshold) }
+	case diff.SummaryYAMLFormat:
+		write = func(w io.Writer) error { return diff.PrintVulnerabilitySummaryYAML(w, cs, diffInfo.SeverityThreshold) }
+	case diff.SummaryCSVFormat:
+		write = func(w io.Writer) error { return diff.PrintVulnerabilitySummaryCSV(w, cs, diffInfo.SeverityThreshold) }
 	default:
 		return 0, fmt.Errorf("format %q is not supported for image vulnerability reports, supported formats: %s",
-			diffInfo.Format, strings.Join([]string{printer.PrettyFormat, printer.JsonFormat, printer.YamlFormat, printer.MarkdownFormat, printer.JunitResultFormat, printer.SARIFFormat}, ", "))
+			diffInfo.Format, strings.Join([]string{printer.PrettyFormat, printer.JsonFormat, printer.YamlFormat, printer.MarkdownFormat, printer.JunitResultFormat, printer.SARIFFormat, diff.SummaryJSONFormat, diff.SummaryYAMLFormat, diff.SummaryCSVFormat}, ", "))
 	}
 
 	var w io.Writer = os.Stdout
