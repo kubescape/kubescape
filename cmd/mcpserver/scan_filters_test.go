@@ -199,6 +199,22 @@ func TestParseScanFilterArgs_ExcludeControls(t *testing.T) {
 		assert.Equal(t, []string{"C-0012", "C-0017"}, filters.excludeControls)
 	})
 
+	// Clients send null (or an empty value) for an optional argument they are
+	// not setting; the filter stays off, as for the other optional filters.
+	for name, value := range map[string]any{"null": nil, "empty string": "", "blank string": "  ", "empty array": []any{}} {
+		t.Run(name+" leaves the filter off", func(t *testing.T) {
+			filters, errResult := parseScanFilterArgs(map[string]any{"exclude_controls": value}, "")
+			require.Nil(t, errResult)
+			assert.Empty(t, filters.excludeControls)
+		})
+	}
+
+	t.Run("only separators", func(t *testing.T) {
+		_, errResult := parseScanFilterArgs(map[string]any{"exclude_controls": " , "}, "")
+		require.NotNil(t, errResult)
+		assert.Contains(t, toolResultText(t, errResult), "exclude_controls")
+	})
+
 	t.Run("invalid type", func(t *testing.T) {
 		args := map[string]any{"exclude_controls": 12345}
 		_, errResult := parseScanFilterArgs(args, "")
