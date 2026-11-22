@@ -301,3 +301,38 @@ func TestGitLabContainerScanningPrinter_RequiresImages(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "requires scanned images")
 }
+
+func TestGitLabContainerScanningActionPrint_NilWriterReturnsError(t *testing.T) {
+	ctx := context.Background()
+	cp := NewGitLabContainerScanningPrinter()
+	require.Nil(t, cp.writer)
+
+	imageData := []cautils.ImageScanData{{Image: "alpine:latest"}}
+	err := cp.ActionPrint(ctx, nil, imageData)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "output writer is nil")
+}
+
+func TestGitLabContainerScanning_NilReceiverSafety(t *testing.T) {
+	var cp *GitLabContainerScanningPrinter
+
+	assert.NotPanics(t, func() {
+		err := cp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := cp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := cp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		cp.Score(100)
+		cp.PrintNextSteps()
+	})
+}
