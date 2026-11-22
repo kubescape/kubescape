@@ -71,6 +71,9 @@ func (gp *GitHubActionsPrinter) PrintNextSteps() {}
 // — and honors an explicit --output path for users who want to cat the file in
 // a later step.
 func (gp *GitHubActionsPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if gp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.GitHubActionsFormat, outputFile, githubActionsOutputFile)
 	if explicitOutput {
 		var err error
@@ -85,6 +88,9 @@ func (gp *GitHubActionsPrinter) SetWriter(ctx context.Context, outputFile string
 // configuration scans are supported: image findings have no manifest location
 // to anchor an annotation to.
 func (gp *GitHubActionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if gp == nil {
+		return fmt.Errorf("failed to write github-actions results: printer is nil")
+	}
 	if err := printer.PrepareOutput(gp.writer); err != nil {
 		return err
 	}
@@ -93,6 +99,9 @@ func (gp *GitHubActionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *
 	}
 	if len(imageScanData) > 0 {
 		return fmt.Errorf("github-actions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
+	}
+	if gp.writer == nil {
+		return fmt.Errorf("failed to write github-actions results: output writer is nil")
 	}
 
 	annotations, belowThreshold := gp.collectAnnotations(ctx, opaSessionObj)
@@ -606,7 +615,7 @@ func escapeAnnotationProperty(s string) string {
 // CloseWriter closes the annotations output writer, returning any error from
 // flushing or closing.
 func (gp *GitHubActionsPrinter) CloseWriter() error {
-	if gp.writer != nil && gp.writer != os.Stdout {
+	if gp != nil && gp.writer != nil && gp.writer != os.Stdout {
 		return printer.CloseOutput(gp.writer)
 	}
 	return nil

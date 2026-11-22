@@ -740,11 +740,17 @@ func TestGitHubActionsPrinter_StepSummaryPrePopulatedWithinSafetyMargin(t *testi
 }
 
 func TestGitHubActionsActionPrintNilReport(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "gha-*.txt")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	gp := NewGitHubActionsPrinter()
+	gp.writer = tmpFile
 	session := &cautils.OPASessionObj{Report: nil}
 	assert.NotPanics(t, func() {
 		err := gp.ActionPrint(context.Background(), session, nil)
 		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "only supported for configuration scanning")
 	})
 }
 
@@ -1016,4 +1022,40 @@ func TestGitHubActionsPrinter_FilePathWithControls_EmitsWithoutLocation(t *testi
 	assert.Contains(t, output, "::error title=C-0057 Privileged container::")
 	assert.NotContains(t, output, "file=deployevil.yaml")
 	assert.NotContains(t, output, "file=deploy\x01evil.yaml")
+}
+
+func TestGitHubActionsActionPrint_NilWriterReturnsError(t *testing.T) {
+	ctx := context.Background()
+	gp := NewGitHubActionsPrinter()
+	require.Nil(t, gp.writer)
+
+	// Posture scan data with nil writer returns descriptive error and does not panic
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	err := gp.ActionPrint(ctx, session, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "output writer is nil")
+}
+
+func TestGitHubActions_NilReceiverSafety(t *testing.T) {
+	var gp *GitHubActionsPrinter
+
+	assert.NotPanics(t, func() {
+		err := gp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := gp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := gp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		gp.Score(100)
+		gp.PrintNextSteps()
+	})
 }
