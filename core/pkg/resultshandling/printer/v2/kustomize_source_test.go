@@ -502,3 +502,212 @@ spec:
 	assert.Contains(t, out, "spec.replicas (current: 3)")
 	assert.NotContains(t, out, "(line ", "unparseable template YAML must degrade gracefully without line")
 }
+
+func TestResourceTable_KustomizeLeadingCommentDocumentResolvesCorrectLine(t *testing.T) {
+	baseManifest := `# Leading comment document
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  namespace: default
+spec:
+  template:
+    spec:
+      hostNetwork: true
+      containers:
+      - name: app
+        image: nginx:1
+`
+	renderedObj := map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "demo",
+			"namespace": "default",
+		},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"hostNetwork": true,
+					"containers": []any{
+						map[string]any{"name": "app", "image": "nginx:1"},
+					},
+				},
+			},
+		},
+	}
+
+	paths := []armotypes.PosturePaths{
+		{DeletePath: "spec.template.spec.hostNetwork"},
+	}
+
+	session := kustomizeTestSession(t, baseManifest, renderedObj, paths)
+	out := renderResourceTable(t, session, true)
+
+	assert.Contains(t, out, "spec.template.spec.hostNetwork (current: true) (line 11)")
+}
+
+func TestResourceTable_KustomizeRemovedFieldByOverlayOmitsLine(t *testing.T) {
+	// Base manifest has securityContext.privileged: true
+	baseManifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: nginx:1
+        securityContext:
+          privileged: true
+`
+	// Overlay removed privileged, leaving securityContext: {}
+	renderedObj := map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "demo",
+			"namespace": "default",
+		},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name":            "app",
+							"image":           "nginx:1",
+							"securityContext": map[string]any{},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	paths := []armotypes.PosturePaths{
+		{DeletePath: "spec.template.spec.containers[0].securityContext.privileged"},
+	}
+
+	session := kustomizeTestSession(t, baseManifest, renderedObj, paths)
+	out := renderResourceTable(t, session, true)
+
+	assert.Contains(t, out, "spec.template.spec.containers[0].securityContext.privileged")
+	assert.NotContains(t, out, "(line ", "field removed by overlay must not fall back to ancestor and report line")
+}
+
+func TestResourceTable_KustomizeReorderedContainersWithEqualLeavesOmitsLine(t *testing.T) {
+	baseManifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: nginx:1
+        imagePullPolicy: Always
+      - name: sidecar
+        image: log-agent:1
+        imagePullPolicy: Always
+`
+	// Overlay reordered containers: [sidecar, app]
+	renderedObj := map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "demo",
+			"namespace": "default",
+		},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name":            "sidecar",
+							"image":           "log-agent:1",
+							"imagePullPolicy": "Always",
+						},
+						map[string]any{
+							"name":            "app",
+							"image":           "nginx:1",
+							"imagePullPolicy": "Always",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Finding is on containers[0].imagePullPolicy (which is sidecar in rendered, but app in base)
+	paths := []armotypes.PosturePaths{
+		{ReviewPath: "spec.template.spec.containers[0].imagePullPolicy"},
+	}
+
+	session := kustomizeTestSession(t, baseManifest, renderedObj, paths)
+	out := renderResourceTable(t, session, true)
+
+	assert.Contains(t, out, "spec.template.spec.containers[0].imagePullPolicy (current: Always) (sidecar)")
+	assert.NotContains(t, out, "(line ", "reordered container must not attribute the other container's line")
+}
+
+func TestResourceTable_KustomizeCRDSchemaMapNameNoPanic(t *testing.T) {
+	baseManifest := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: crontabs.stable.example.com
+spec:
+  group: stable.example.com
+  names:
+    kind: CronTab
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        properties:
+          name:
+            type: string
+`
+	renderedObj := map[string]any{
+		"apiVersion": "apiextensions.k8s.io/v1",
+		"kind":       "CustomResourceDefinition",
+		"metadata": map[string]any{
+			"name": "crontabs.stable.example.com",
+		},
+		"spec": map[string]any{
+			"group": "stable.example.com",
+			"names": map[string]any{
+				"kind": "CronTab",
+			},
+			"versions": []any{
+				map[string]any{
+					"name": "v1",
+					"schema": map[string]any{
+						"openAPIV3Schema": map[string]any{
+							"properties": map[string]any{
+								"name": map[string]any{
+									"type": "string",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	paths := []armotypes.PosturePaths{
+		{ReviewPath: "spec.versions[0].schema.openAPIV3Schema.properties.name.type"},
+	}
+
+	session := kustomizeTestSession(t, baseManifest, renderedObj, paths)
+	// Must not panic when evaluating rawMap["name"] where "name" holds a map schema
+	assert.NotPanics(t, func() {
+		out := renderResourceTable(t, session, true)
+		assert.Contains(t, out, "spec.versions[0].schema.openAPIV3Schema.properties.name.type")
+	})
+}

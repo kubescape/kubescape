@@ -211,6 +211,16 @@ func (l *PathLocationResolver) ResolveLocation(path string, nodeIndex int) (Loca
 	if nodeIndex < 0 || nodeIndex >= len(l.yamlNodes) {
 		return Location{}, fmt.Errorf("node index [%d] out of range [%d]", nodeIndex, len(l.yamlNodes))
 	}
+	return l.ResolveDocumentLocation(path, nodeIndex)
+}
+
+// ResolveDocumentLocation resolves path in the document at docIndex (its position
+// in yamlNodes, as returned by FindDocumentIndex) directly, without remapping through
+// workloadDocuments.
+func (l *PathLocationResolver) ResolveDocumentLocation(path string, docIndex int) (Location, error) {
+	if docIndex < 0 || docIndex >= len(l.yamlNodes) {
+		return Location{}, fmt.Errorf("document index [%d] out of range [%d]", docIndex, len(l.yamlNodes))
+	}
 
 	// A malformed path is rejected before any walking up. Walking up exists for
 	// a well-formed path whose field is absent; applied to a path that could
@@ -229,7 +239,7 @@ func (l *PathLocationResolver) ResolveLocation(path string, nodeIndex int) (Loca
 	for len(segments) > 0 {
 		yamlExpression := segmentsToYamlExpression(segments)
 
-		candidateNodes, err := l.yqlibEvaluator.EvaluateNodes(yamlExpression, l.yamlNodes[nodeIndex])
+		candidateNodes, err := l.yqlibEvaluator.EvaluateNodes(yamlExpression, l.yamlNodes[docIndex])
 		if err != nil {
 			return Location{}, fmt.Errorf("failed to evaluate yaml expression %q: %w", yamlExpression, err)
 		}
@@ -343,4 +353,3 @@ func (l *PathLocationResolver) RawDocument(docIndex int) (map[string]any, error)
 	}
 	return doc, nil
 }
-

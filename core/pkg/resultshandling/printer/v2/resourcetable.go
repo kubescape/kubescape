@@ -257,12 +257,42 @@ func (prettyPrinter *PrettyPrinter) pathLineResolver(opaSessionObj *cautils.OPAS
 		if !isFieldUncomposed(rawObj, renderedObj, path) {
 			return 0, false
 		}
-		location, err := resolver.ResolveLocation(path, docIndex)
+		location, err := resolver.ResolveDocumentLocation(path, docIndex)
 		if err != nil || location.Line == 0 {
 			return 0, false
 		}
 		return location.Line, true
 	}
+}
+
+// indexedEntitiesMatch verifies that for every indexed segment in the path (e.g. containers[0]),
+// if the element in renderedObj has a "name" key (identifying the entity like a container or volume),
+// the corresponding element in rawObj has an identical "name". This prevents attributing line
+// numbers when list entries have been reordered by an overlay or composer.
+func indexedEntitiesMatch(rawObj, renderedObj map[string]any, segments []pathparse.Segment) bool {
+	for i, seg := range segments {
+		if seg.Index >= 0 {
+			prefix := segments[:i+1]
+			rElem, rOk := getPathValue(renderedObj, prefix)
+			rawElem, rawOk := getPathValue(rawObj, prefix)
+			if !rOk || !rawOk {
+				return false
+			}
+			rMap, rIsMap := rElem.(map[string]any)
+			rawMap, rawIsMap := rawElem.(map[string]any)
+			if rIsMap && rawIsMap {
+				rName, hasRName := rMap["name"]
+				rawName, hasRawName := rawMap["name"]
+				if hasRName != hasRawName {
+					return false
+				}
+				if hasRName && !reflect.DeepEqual(rName, rawName) {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }
 
 // isFieldUncomposed reports whether path in renderedObj comes straight from rawObj
@@ -278,15 +308,33 @@ func isFieldUncomposed(rawObj, renderedObj map[string]any, path string) bool {
 	}
 
 	renderedVal, renderedFound := getPathValue(renderedObj, segments)
+	rawVal, rawFound := getPathValue(rawObj, segments)
+
 	if renderedFound {
-		rawVal, rawFound := getPathValue(rawObj, segments)
 		if !rawFound {
+			return false
+		}
+		if !indexedEntitiesMatch(rawObj, renderedObj, segments) {
 			return false
 		}
 		return valuesMatch(rawVal, renderedVal)
 	}
 
-	// For an absent fix path, the target field itself does not exist in renderedObj.
+	// If renderedFound is false:
+	// A field removed by an overlay or composer while its parent stays (e.g.
+	// securityContext: {}) was present in rawObj, so falling back to an ancestor
+	// would falsely report the line of the removed field.
+	if rawFound {
+		return false
+	}
+
+	// For an absent fix path, the target field itself does not exist in renderedObj
+	// nor in rawObj (e.g. an omitted securityContext setting).
+	// Verify that any indexed entities along the path match in identity.
+	if !indexedEntitiesMatch(rawObj, renderedObj, segments) {
+		return false
+	}
+
 	// Find the longest ancestor prefix that exists in renderedObj.
 	// If the path contains an indexed segment (e.g. containers[0]), that indexed
 	// entity must exist in renderedObj.
@@ -309,12 +357,18 @@ func isFieldUncomposed(rawObj, renderedObj map[string]any, path string) bool {
 			if !rawOk {
 				return false
 			}
-			// If ancestor is a container or object with a name, check name match
+			// If ancestor is an object with a name, check name match safely without panic
 			if rMap, ok := renderedAncestor.(map[string]any); ok {
-				if rName, ok := rMap["name"]; ok {
-					if rawMap, ok := rawAncestor.(map[string]any); ok {
-						return rawMap["name"] == rName
+				if rawMap, rawOk := rawAncestor.(map[string]any); rawOk {
+					rName, hasRName := rMap["name"]
+					rawName, hasRawName := rawMap["name"]
+					if hasRName != hasRawName {
+						return false
 					}
+					if hasRName && !reflect.DeepEqual(rawName, rName) {
+						return false
+					}
+				} else {
 					return false
 				}
 			}
