@@ -512,7 +512,8 @@ func TestMapInfoToPrintInfoFromIface_HandlesNilElements(t *testing.T) {
 	first := skippedControlWithInfo("C-0002", "alpha", "control type is manual-review")
 	second := skippedControlWithInfo("C-0001", "delta", "configurations are empty")
 
-	sliceWithNils := []reportsummary.IControlSummary{nil, &first, nil, &second, nil}
+	var nilControl *reportsummary.ControlSummary
+	sliceWithNils := []reportsummary.IControlSummary{nil, &second, nilControl, &first, nil}
 
 	want := []InfoStars{
 		{Stars: "*", Info: "control type is manual-review"},
@@ -537,6 +538,7 @@ func TestMapInfoToPrintInfo_IgnoresNonSkippedAndEmptyInfo(t *testing.T) {
 }
 
 func TestFrameworksScoresToString(t *testing.T) {
+	var nilFramework *reportsummary.FrameworkSummary
 	tests := []struct {
 		name       string
 		frameworks []reportsummary.IFrameworkSummary
@@ -555,7 +557,7 @@ func TestFrameworksScoresToString(t *testing.T) {
 		{
 			name: "single valid framework with nil entry",
 			frameworks: []reportsummary.IFrameworkSummary{
-				nil,
+				nilFramework,
 				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: 85.0},
 			},
 			expected: "Framework scanned: nsa\n",
@@ -563,7 +565,7 @@ func TestFrameworksScoresToString(t *testing.T) {
 		{
 			name: "multiple frameworks with nil entries",
 			frameworks: []reportsummary.IFrameworkSummary{
-				nil,
+				nilFramework,
 				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: 85.0},
 				nil,
 				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: 100.0},
@@ -575,7 +577,7 @@ func TestFrameworksScoresToString(t *testing.T) {
 			name: "multiple frameworks all nil",
 			frameworks: []reportsummary.IFrameworkSummary{
 				nil,
-				nil,
+				nilFramework,
 			},
 			expected: "",
 		},
