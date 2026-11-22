@@ -25,7 +25,7 @@ var isTerminal = isatty.IsTerminal
 
 func initLogger() {
 	if rootInfo.LoggerName == "" {
-		if l := os.Getenv("KS_LOGGER_NAME"); l != "" {
+		if l := strings.TrimSpace(os.Getenv("KS_LOGGER_NAME")); l != "" {
 			rootInfo.LoggerName = l
 		} else {
 			if isTerminal(os.Stdout.Fd()) {
@@ -67,7 +67,7 @@ func initLoggerLevel(cmd *cobra.Command) error {
 		}
 	}
 	if !loggerExplicit && rootInfo.Logger == helpers.InfoLevel.String() {
-		if l := os.Getenv("KS_LOGGER"); l != "" {
+		if l := strings.TrimSpace(os.Getenv("KS_LOGGER")); l != "" {
 			rootInfo.Logger = l
 		}
 	}
@@ -92,7 +92,7 @@ func initCacheDir(cmd *cobra.Command) {
 		}
 	}
 	if !cacheDirExplicit {
-		if cacheDir := os.Getenv("KS_CACHE_DIR"); cacheDir != "" {
+		if cacheDir := strings.TrimSpace(os.Getenv("KS_CACHE_DIR")); cacheDir != "" {
 			getter.DefaultLocalStore = cacheDir
 			logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
 		}
