@@ -31,6 +31,9 @@ func NewRepoPrinter(writer *os.File, inputPatterns []string, verboseMode bool) *
 var _ MainPrinter = &RepoPrinter{}
 
 func (rp *RepoPrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary) {
+	if rp == nil || rp.writer == nil || summary == nil {
+		return
+	}
 	if rp.verboseMode {
 		rp.imageTablePrinter.PrintImageScanningTable(rp.writer, *summary)
 		cautils.SimpleDisplay(rp.writer, "\n")
@@ -43,6 +46,9 @@ func (rp *RepoPrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary
 }
 
 func (rp *RepoPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, topWorkloadsByScore []reporthandling.IResource) {
+	if rp == nil || rp.writer == nil || summaryDetails == nil {
+		return
+	}
 	rp.categoriesTablePrinter.PrintCategoriesTables(rp.writer, summaryDetails, sortedControlIDs)
 
 	if len(topWorkloadsByScore) > 0 {
@@ -52,6 +58,9 @@ func (rp *RepoPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary
 }
 
 func (rp *RepoPrinter) PrintNextSteps() {
+	if rp == nil || rp.writer == nil {
+		return
+	}
 	printNextSteps(rp.writer, rp.getNextSteps(), true)
 }
 
