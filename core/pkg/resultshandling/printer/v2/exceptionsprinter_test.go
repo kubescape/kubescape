@@ -651,3 +651,29 @@ func TestBuildExceptionPolicies_PreservesRawControlIDWhitespace(t *testing.T) {
 	require.Len(t, policies[1].PosturePolicies, 1)
 	assert.Equal(t, "custom-foo", policies[1].PosturePolicies[0].ControlID)
 }
+
+func TestExceptionsPrinter_NilReceiverSafety(t *testing.T) {
+	var ep *ExceptionsPrinter
+
+	assert.NotPanics(t, func() {
+		err := ep.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := ep.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := ep.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		ep.Score(100)
+		ep.PrintNextSteps()
+	})
+}
