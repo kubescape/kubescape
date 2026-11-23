@@ -704,7 +704,7 @@ func validateBaselineFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo) error
 	// Each encrypted scan uses its own data key, so no finding in the new report
 	// can be matched to the baseline and every one would be reported incomparable.
 	if scanInfo.EncryptionEnabled {
-		return fmt.Errorf("--baseline is not supported with --encrypt: each encrypted scan uses its own key, so its findings cannot be matched against the baseline; use --hide instead")
+		return fmt.Errorf("--baseline is not supported with --encrypt: each encrypted scan uses its own key, so its findings cannot be matched against the baseline; use --hide for both the baseline and the new scan instead")
 	}
 
 	if strings.TrimSpace(scanInfo.BaselineSeverityThreshold) != "" {
