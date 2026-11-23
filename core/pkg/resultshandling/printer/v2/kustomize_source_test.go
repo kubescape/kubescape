@@ -549,7 +549,6 @@ spec:
 }
 
 func TestResourceTable_KustomizeRemovedFieldByOverlayOmitsLine(t *testing.T) {
-	// Base manifest has securityContext.privileged: true
 	baseManifest := `apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -563,8 +562,9 @@ spec:
         image: nginx:1
         securityContext:
           privileged: true
+          capabilities: {}
 `
-	// Overlay removed privileged, leaving securityContext: {}
+	// The overlay removed privileged and capabilities, leaving securityContext: {}.
 	renderedObj := map[string]any{
 		"apiVersion": "apps/v1",
 		"kind":       "Deployment",
@@ -589,13 +589,16 @@ spec:
 
 	paths := []armotypes.PosturePaths{
 		{DeletePath: "spec.template.spec.containers[0].securityContext.privileged"},
+		{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.capabilities.drop", Value: "ALL"}},
 	}
 
 	session := kustomizeTestSession(t, baseManifest, renderedObj, paths)
 	out := renderResourceTable(t, session, true)
 
 	assert.Contains(t, out, "spec.template.spec.containers[0].securityContext.privileged")
-	assert.NotContains(t, out, "(line ", "field removed by overlay must not fall back to ancestor and report line")
+	assert.Contains(t, out, "spec.template.spec.containers[0].securityContext.capabilities.drop=ALL")
+	assert.Contains(t, out, "@ base/deployment.yaml")
+	assert.NotContains(t, out, "(line ", "an overlay removed the field or its nearest source ancestor")
 }
 
 func TestResourceTable_KustomizeReorderedContainersWithEqualLeavesOmitsLine(t *testing.T) {
