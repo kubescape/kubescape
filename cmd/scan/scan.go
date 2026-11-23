@@ -444,7 +444,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ReferenceCluster, "reference-cluster", "", "With --fleet-report, the kube context whose findings the other clusters are read against, so the combined report shows what that cluster found on every control they disagree on. Must be one of --kube-contexts. Without it the report simply says where the clusters disagree.")
 
-	scanCmd.PersistentFlags().StringVar(&scanInfo.Baseline, "baseline", "", "Path to a saved JSON scan report to diff the fresh scan against.")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.Baseline, "baseline", "", "Path to a saved JSON scan report to diff the fresh scan against. Not supported with --encrypt.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.BaselineFailOnNew, "baseline-fail-on-new", false, "With --baseline, exit with code 1 when new failures are found versus the baseline.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineSeverityThreshold, "baseline-severity-threshold", "", "With --baseline, only count new failures at or above this severity when using --baseline-fail-on-new.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineGranularity, "baseline-granularity", "evidence", "With --baseline, comparison unit: evidence or control.")
@@ -699,6 +699,12 @@ func validateBaselineFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo) error
 			return fmt.Errorf("--baseline-granularity requires --baseline")
 		}
 		return nil
+	}
+
+	// Each encrypted scan uses its own data key, so no finding in the new report
+	// can be matched to the baseline and every one would be reported incomparable.
+	if scanInfo.EncryptionEnabled {
+		return fmt.Errorf("--baseline is not supported with --encrypt: each encrypted scan uses its own key, so its findings cannot be matched against the baseline; use --hide instead")
 	}
 
 	if strings.TrimSpace(scanInfo.BaselineSeverityThreshold) != "" {

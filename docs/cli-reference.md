@@ -51,7 +51,7 @@ kubescape scan [target] [flags]
 | `--exceptions <path>` | Path to exceptions file | - |
 | `--honor-inline-exceptions` | Honor `kubescape.io/skip-*` annotations as inline exception policies | on for local manifest files, off for live-cluster scans |
 | `--audit-exceptions` | Include exception usage details in supported scan outputs | `false` |
-| `--baseline <path>` | Path to a saved JSON scan report to diff the fresh scan against | - |
+| `--baseline <path>` | Path to a saved JSON scan report to diff the fresh scan against. Not supported with `--encrypt` | - |
 | `--baseline-fail-on-new` | With `--baseline`, exit with code `1` when new or incomparable failures are found compared with the baseline. A failure is incomparable when a change in scan scope or coverage means it cannot be classified safely | `false` |
 | `--baseline-granularity <unit>` | With `--baseline`, the comparison unit: `evidence` or `control` | `evidence` |
 | `--baseline-severity-threshold <sev>` | With `--baseline` and `--baseline-fail-on-new`, count only new or incomparable failures at or above this severity | - |

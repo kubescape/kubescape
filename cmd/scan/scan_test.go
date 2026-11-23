@@ -544,6 +544,8 @@ func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
 		{name: "rejects whitespace-only baseline flag", args: []string{"--baseline=   "}, wantError: "--baseline cannot be empty"},
 		{name: "rejects invalid baseline granularity", args: []string{"--baseline=base.json", "--baseline-granularity=invalid"}, wantError: "invalid diff granularity"},
 		{name: "rejects invalid baseline severity threshold", args: []string{"--baseline=base.json", "--baseline-severity-threshold=invalid"}, wantError: "unknown severity"},
+		{name: "rejects baseline with encrypt", args: []string{"--baseline=base.json", "--encrypt"}, wantError: "--baseline is not supported with --encrypt"},
+		{name: "rejects baseline with encrypt and fail-on-new", args: []string{"--baseline=base.json", "--baseline-fail-on-new", "--encrypt"}, wantError: "--baseline is not supported with --encrypt"},
 		{name: "accepts include namespaces alone", args: []string{"--include-namespaces=a,b"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts exclude namespaces alone", args: []string{"--exclude-namespaces=b"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts defaults", wantCalls: 1, wantError: "scan reached"},
@@ -556,6 +558,7 @@ func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
 		{name: "accepts baseline with fail-on-new", args: []string{"--baseline=base.json", "--baseline-fail-on-new"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts baseline with severity threshold", args: []string{"--baseline=base.json", "--baseline-severity-threshold=high"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts baseline with granularity", args: []string{"--baseline=base.json", "--baseline-granularity=control"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts baseline with hide", args: []string{"--baseline=base.json", "--baseline-fail-on-new", "--hide"}, wantCalls: 1, wantError: "scan reached"},
 	}
 
 	for _, tt := range tests {
@@ -627,6 +630,11 @@ func TestGetScanCommand_BaselineFlagValidation(t *testing.T) {
 				name:      "scan workload rejects baseline-granularity without baseline",
 				args:      []string{"workload", "Deployment/nginx", "--baseline-granularity=control"},
 				wantError: "--baseline-granularity requires --baseline",
+			},
+			{
+				name:      "scan control rejects baseline with encrypt",
+				args:      []string{"control", "C-0057", "--baseline=base.json", "--encrypt"},
+				wantError: "--baseline is not supported with --encrypt",
 			},
 		}
 
