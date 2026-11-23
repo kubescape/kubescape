@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,7 +16,6 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	gitv5 "github.com/go-git/go-git/v5"
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v4/internal/testutils"
@@ -26,7 +26,6 @@ import (
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/op/go-logging.v1"
 )
 
 type indentationTestCase struct {
@@ -36,9 +35,7 @@ type indentationTestCase struct {
 }
 
 func NewFixHandlerMock() (*FixHandler, error) {
-	backendLoggerLeveled := logging.AddModuleLevel(logging.NewLogBackend(logger.L().GetWriter(), "", 0))
-	backendLoggerLeveled.SetLevel(logging.ERROR, "")
-	yqlib.GetLogger().SetBackend(backendLoggerLeveled)
+	yqlib.GetLogger().SetLevel(slog.LevelError)
 
 	return &FixHandler{
 		fixInfo:       &metav1.FixInfo{},

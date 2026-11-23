@@ -38,7 +38,7 @@ func readDocuments(ctx context.Context, reader io.Reader, decoder yqlib.Decoder)
 			return nil, fmt.Errorf("error decoding yaml file, %w", errorReading)
 		}
 
-		candidateNode.Document = currentIndex
+		candidateNode.SetDocument(currentIndex)
 		candidateNode.EvaluateTogether = true
 
 		inputList.PushBack(candidateNode)

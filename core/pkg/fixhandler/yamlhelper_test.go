@@ -17,7 +17,7 @@ func TestReadDocuments(t *testing.T) {
 		index := uint(0)
 		for e := docs.Front(); e != nil; e = e.Next() {
 			node := e.Value.(*yqlib.CandidateNode)
-			require.Equal(t, index, node.Document)
+			require.Equal(t, index, node.GetDocument())
 			require.True(t, node.EvaluateTogether)
 			index++
 		}
