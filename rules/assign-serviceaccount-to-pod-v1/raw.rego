@@ -130,19 +130,30 @@ apply_patch_paths(role, rule, i) := [] if {
 
 # The create and the patch have to reach one common pod name: create on "a" and
 # patch on "b" cannot create either pod. An unrestricted patch reaches whatever
-# name the create admits. Names are literal, as RBAC has no wildcard form for
-# resourceNames. "" is the name a plain create is authorized with, not a pod
-# apply could create, and "*" cannot be a pod's name, which has to be a DNS
-# subdomain, so neither counts as the common name.
+# valid pod name the create admits. Names are literal, as RBAC has no wildcard
+# form for resourceNames. Candidate names must be valid RFC 1123 DNS subdomains
+# (e.g. not wildcard patterns like "debug-*", empty string, or uppercase), as
+# invalid names can never correspond to a pod created via server-side apply.
 names_overlap(create_rule, patch_rule) if {
 	unrestricted_rule(patch_rule)
-	names_any_object(create_rule)
+	some name in create_rule.resourceNames
+	is_valid_pod_name(name)
 }
 
 names_overlap(create_rule, patch_rule) if {
 	some name in create_rule.resourceNames
-	not name in {"", "*"}
+	is_valid_pod_name(name)
 	name in patch_rule.resourceNames
+}
+
+# A valid Kubernetes pod name must conform to RFC 1123 DNS subdomain format:
+# lower-case alphanumeric characters, '-' or '.', up to 253 characters,
+# and must start and end with an alphanumeric character.
+is_valid_pod_name(name) if {
+	is_string(name)
+	count(name) > 0
+	count(name) <= 253
+	regex.match("^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$", name)
 }
 
 # Which write verbs on a pod controller are reachable for this rule entry.
