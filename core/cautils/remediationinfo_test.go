@@ -224,6 +224,9 @@ func TestRemediationInfo_ValidatePayload_Selector(t *testing.T) {
 		{"revert by selector", RemediationInfo{Action: "revert", Control: "C-0016"}, false},
 		{"selector with whitespace name is valid selector", RemediationInfo{Action: "quarantine", Control: "C-0016", Name: "   "}, false},
 		{"selector with whitespace namespace is valid selector", RemediationInfo{Action: "quarantine", Control: "C-0016", Namespace: "   "}, false},
+		{"whitespace control with valid severity", RemediationInfo{Action: "quarantine", Control: "   ", MinSeverity: "High"}, true},
+		{"valid control with whitespace severity", RemediationInfo{Action: "quarantine", Control: "C-0016", MinSeverity: "   "}, true},
+		{"padded control and severity are trimmed", RemediationInfo{Action: "quarantine", Control: " C-0016 ", MinSeverity: " High "}, false},
 		{"bogus severity", RemediationInfo{Action: "quarantine", MinSeverity: "Extreme"}, true},
 		// selector and explicit target describe different target sets
 		{"selector with kind", RemediationInfo{Action: "quarantine", Control: "C-0016", Kind: "Deployment"}, true},

@@ -234,12 +234,15 @@ func (r *RemediationInfo) ValidatePayload(*apis.Commands) error {
 // resolved in-cluster by the operator against the stored scan results, so the
 // CLI validates only what it can know locally.
 func (r *RemediationInfo) validateSelector() error {
-	r.Control = strings.TrimSpace(r.Control)
-	r.MinSeverity = strings.TrimSpace(r.MinSeverity)
-	r.Namespace = strings.TrimSpace(r.Namespace)
+	if r.Control != "" && strings.TrimSpace(r.Control) == "" {
+		return errors.New("remediation selector --control cannot be whitespace-only")
+	}
 	if r.MinSeverity != "" && !isSupportedRemediationSeverity(r.MinSeverity) {
 		return fmt.Errorf("unsupported --min-severity %q (supported: %s)", r.MinSeverity, strings.Join(remediationSeverities, ", "))
 	}
+	r.Control = strings.TrimSpace(r.Control)
+	r.MinSeverity = strings.TrimSpace(r.MinSeverity)
+	r.Namespace = strings.TrimSpace(r.Namespace)
 	// The operator resolves a selector across every namespace and has no
 	// namespace filter yet (resolveSelectorTargets in mainhandler/findings.go
 	// ignores selector.namespace), so honouring --target-namespace here would
