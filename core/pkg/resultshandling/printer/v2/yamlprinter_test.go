@@ -399,3 +399,29 @@ func TestYamlPrinter_ImageScan_NilReportFallback(t *testing.T) {
 	require.NoError(t, yaml.Unmarshal(raw, &doc))
 	assert.Contains(t, doc, "matches")
 }
+
+func TestYamlPrinter_NilReceiverSafety(t *testing.T) {
+	var yp *YamlPrinter
+
+	assert.NotPanics(t, func() {
+		err := yp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := yp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := yp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		yp.Score(100)
+		yp.PrintNextSteps()
+	})
+}
