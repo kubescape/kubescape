@@ -231,20 +231,10 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := ValidateKindFilters(scanInfo); err != nil {
 		return err
 	}
-	for _, selection := range []struct {
-		name string
-		flag string
-		val  string
-	}{
-		{"include-namespaces", "--include-namespaces", scanInfo.IncludeNamespaces},
-		{"exclude-namespaces", "--exclude-namespaces", scanInfo.ExcludedNamespaces},
-	} {
-		if commandFlagChanged(cmd, selection.name) && strings.TrimSpace(selection.val) == "" {
-			return fmt.Errorf("%s value %q contains no valid namespace names", selection.flag, selection.val)
+	if scanInfo.ScanType != cautils.ScanTypeWorkload && scanInfo.ScanType != cautils.ScanTypeImage {
+		if err := ValidateNamespaceFiltersWithCommand(cmd, scanInfo); err != nil {
+			return err
 		}
-	}
-	if err := ValidateNamespaceFilters(scanInfo); err != nil {
-		return err
 	}
 	if err := ValidateExcludePaths(scanInfo); err != nil {
 		return err
@@ -406,14 +396,23 @@ func validateKindList(flag, value string) error {
 // ValidateNamespaceFilters returns an error when --include-namespaces or --exclude-namespaces
 // contain only whitespace or separator tokens, which would silently result in invalid or empty filtering.
 func ValidateNamespaceFilters(scanInfo *cautils.ScanInfo) error {
-	if err := validateNamespaceList("--include-namespaces", scanInfo.IncludeNamespaces); err != nil {
-		return err
-	}
-	return validateNamespaceList("--exclude-namespaces", scanInfo.ExcludedNamespaces)
+	return ValidateNamespaceFiltersWithCommand(nil, scanInfo)
 }
 
-func validateNamespaceList(flag, value string) error {
+// ValidateNamespaceFiltersWithCommand validates namespace filter flags, rejecting empty or whitespace-only
+// values when explicitly set via command flags or scanInfo.
+func ValidateNamespaceFiltersWithCommand(cmd *cobra.Command, scanInfo *cautils.ScanInfo) error {
+	if err := validateNamespaceList(cmd, "include-namespaces", "--include-namespaces", scanInfo.IncludeNamespaces); err != nil {
+		return err
+	}
+	return validateNamespaceList(cmd, "exclude-namespaces", "--exclude-namespaces", scanInfo.ExcludedNamespaces)
+}
+
+func validateNamespaceList(cmd *cobra.Command, flagName, flag, value string) error {
 	if value == "" {
+		if commandFlagChanged(cmd, flagName) {
+			return fmt.Errorf("%s value %q contains no valid namespace names", flag, value)
+		}
 		return nil
 	}
 	for _, ns := range strings.Split(value, ",") {
