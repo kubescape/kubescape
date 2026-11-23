@@ -113,6 +113,31 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 	_ = rootCmd.PersistentFlags().MarkHidden("logger-name") // #nosec G104 -- flag is defined on this command; MarkHidden only errors for an unknown flag
 
 	rootCmd.PersistentFlags().StringVarP(&rootInfo.Logger, "logger", "l", helpers.InfoLevel.String(), fmt.Sprintf("Logger level. Supported: %s [$KS_LOGGER]", strings.Join(helpers.SupportedLevels(), "/")))
+
+	if err := rootCmd.RegisterFlagCompletionFunc(
+		"logger",
+		func(
+			cmd *cobra.Command,
+			args []string,
+			toComplete string,
+		) ([]string, cobra.ShellCompDirective) {
+			var matches []string
+
+			for _, level := range helpers.SupportedLevels() {
+				if strings.HasPrefix(
+					strings.ToLower(level),
+					strings.ToLower(toComplete),
+				) {
+					matches = append(matches, level)
+				}
+			}
+
+			return matches, cobra.ShellCompDirectiveNoFileComp
+		},
+	); err != nil {
+		panic(err)
+	}
+
 	rootCmd.PersistentFlags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "Cache directory [$KS_CACHE_DIR]")
 
 	rootCmd.PersistentFlags().StringVarP(&rootInfo.KubeContext, "kube-context", "", "", "Kube context. Default will use the current-context")
