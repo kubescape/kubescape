@@ -76,7 +76,7 @@ func TestEgressExposure_IPBlockIsExternalCIDR(t *testing.T) {
 
 func TestEgressExposure_FullyExcludedIPBlockIsRestricted(t *testing.T) {
 	block := networkingv1.NetworkPolicyPeer{IPBlock: &networkingv1.IPBlock{
-		CIDR:  "10.0.0.0/24",
+		CIDR:   "10.0.0.0/24",
 		Except: []string{"10.0.0.0/25", "10.0.0.128/25"},
 	}}
 	p := policy("ns", "excluded-range", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
