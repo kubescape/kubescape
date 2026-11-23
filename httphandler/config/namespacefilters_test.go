@@ -46,6 +46,47 @@ func TestReadNamespaceFilters(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("rejects directory", func(t *testing.T) {
+		dir := t.TempDir()
+		_, err := readNamespaceFilters(dir)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrNamespaceFiltersNotRegular)
+	})
+
+	t.Run("rejects non-existent file", func(t *testing.T) {
+		_, err := readNamespaceFilters(filepath.Join(t.TempDir(), "missing.json"))
+		require.Error(t, err)
+		require.True(t, os.IsNotExist(err))
+	})
+
+	t.Run("rejects empty path", func(t *testing.T) {
+		_, err := readNamespaceFilters("")
+		require.Error(t, err)
+		require.True(t, os.IsNotExist(err))
+	})
+
+	t.Run("resolves path without lexical clean collapsing symlinks", func(t *testing.T) {
+		cfgDir := t.TempDir()
+		otherParent := t.TempDir()
+		otherSub := filepath.Join(otherParent, "sub")
+		require.NoError(t, os.Mkdir(otherSub, 0o755))
+
+		targetFile := filepath.Join(otherParent, "filters.json")
+		require.NoError(t, os.WriteFile(targetFile, []byte(`{"includeNamespaces":["symlink-ok"],"excludeNamespaces":[]}`), 0o600))
+
+		link := filepath.Join(cfgDir, "link")
+		if err := os.Symlink(otherSub, link); err != nil {
+			t.Skipf("symbolic links are unavailable: %v", err)
+		}
+
+		// Avoid filepath.Join here since it calls filepath.Clean
+		sep := string(filepath.Separator)
+		path := cfgDir + sep + "link" + sep + ".." + sep + "filters.json"
+		got, err := readNamespaceFilters(path)
+		require.NoError(t, err)
+		require.Equal(t, NamespaceFilters{Include: "symlink-ok"}, got)
+	})
 }
 
 func preserveNamespaceFilters(t *testing.T) {
