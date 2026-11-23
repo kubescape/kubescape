@@ -961,6 +961,65 @@ func TestSetResourcesCountersFromCatalog_NilSummaryDetailsSafety(t *testing.T) {
 	assert.Equal(t, "test-pod", m.listResources[0].name)
 }
 
+func TestSetResourcesCountersFromCatalog_DeduplicatesEscapedLabelCollisions(t *testing.T) {
+	resources := map[string]workloadinterface.IMetadata{}
+	wl1 := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "test-pod", "namespace": "default"},
+	})
+	wl2 := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "test-pod\x00", "namespace": "default"},
+	})
+	id1 := "id-1"
+	id2 := "id-2"
+	resources[id1] = wl1
+	resources[id2] = wl2
+
+	results := map[string]resourcesresults.Result{
+		id1: {
+			ResourceID: id1,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0001",
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+						{Name: "rule-1", Status: "passed"},
+					},
+				},
+			},
+		},
+		id2: {
+			ResourceID: id2,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0002",
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+						{Name: "rule-2", Status: "failed"},
+					},
+				},
+			},
+		},
+	}
+
+	catalog := cautils.NewMapResourceCatalog(resources)
+	m := &Metrics{}
+	m.setResourcesCountersFromCatalog(catalog, results, nil, nil)
+
+	require.Len(t, m.listResources, 1)
+	assert.Equal(t, 1, m.listResources[0].controlsCountPassed)
+	assert.Equal(t, 1, m.listResources[0].controlsCountFailed)
+
+	metricsStr := m.String()
+	parser := expfmt.NewTextParser(model.LegacyValidation)
+	families, err := parser.TextToMetricFamilies(strings.NewReader(metricsStr))
+	require.NoError(t, err)
+	failedFamily, ok := families["kubescape_resource_count_controls_failed"]
+	require.True(t, ok)
+	require.Len(t, failedFamily.Metric, 1, "must have exactly 1 series, not duplicate series")
+}
+
 func TestSetImageVulnerabilities_NilSummarySafety(t *testing.T) {
 	m := &Metrics{isImageScan: true}
 	require.NotPanics(t, func() {
