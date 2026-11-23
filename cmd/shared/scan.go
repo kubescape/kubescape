@@ -231,6 +231,18 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := ValidateKindFilters(scanInfo); err != nil {
 		return err
 	}
+	for _, selection := range []struct {
+		name string
+		flag string
+		val  string
+	}{
+		{"include-namespaces", "--include-namespaces", scanInfo.IncludeNamespaces},
+		{"exclude-namespaces", "--exclude-namespaces", scanInfo.ExcludedNamespaces},
+	} {
+		if commandFlagChanged(cmd, selection.name) && strings.TrimSpace(selection.val) == "" {
+			return fmt.Errorf("%s value %q contains no valid namespace names", selection.flag, selection.val)
+		}
+	}
 	if err := ValidateNamespaceFilters(scanInfo); err != nil {
 		return err
 	}

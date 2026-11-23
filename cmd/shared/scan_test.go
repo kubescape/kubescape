@@ -692,6 +692,94 @@ func TestValidateNamespaceFilters(t *testing.T) {
 	}
 }
 
+func TestValidateCommonScanFlags_NamespaceFilters(t *testing.T) {
+	tests := []struct {
+		name        string
+		flagName    string
+		flagVal     string
+		setFlag     bool
+		setInfo     func(*cautils.ScanInfo, string)
+		expectedErr string
+	}{
+		{
+			name:     "omitted include-namespaces is valid",
+			flagName: "include-namespaces",
+			setFlag:  false,
+			setInfo:  func(s *cautils.ScanInfo, v string) { s.IncludeNamespaces = v },
+		},
+		{
+			name:     "omitted exclude-namespaces is valid",
+			flagName: "exclude-namespaces",
+			setFlag:  false,
+			setInfo:  func(s *cautils.ScanInfo, v string) { s.ExcludedNamespaces = v },
+		},
+		{
+			name:        "explicit empty include-namespaces is rejected",
+			flagName:    "include-namespaces",
+			flagVal:     "",
+			setFlag:     true,
+			setInfo:     func(s *cautils.ScanInfo, v string) { s.IncludeNamespaces = v },
+			expectedErr: `--include-namespaces value "" contains no valid namespace names`,
+		},
+		{
+			name:        "explicit whitespace include-namespaces is rejected",
+			flagName:    "include-namespaces",
+			flagVal:     "   ",
+			setFlag:     true,
+			setInfo:     func(s *cautils.ScanInfo, v string) { s.IncludeNamespaces = v },
+			expectedErr: `--include-namespaces value "   " contains no valid namespace names`,
+		},
+		{
+			name:        "explicit empty exclude-namespaces is rejected",
+			flagName:    "exclude-namespaces",
+			flagVal:     "",
+			setFlag:     true,
+			setInfo:     func(s *cautils.ScanInfo, v string) { s.ExcludedNamespaces = v },
+			expectedErr: `--exclude-namespaces value "" contains no valid namespace names`,
+		},
+		{
+			name:        "explicit whitespace exclude-namespaces is rejected",
+			flagName:    "exclude-namespaces",
+			flagVal:     "   ",
+			setFlag:     true,
+			setInfo:     func(s *cautils.ScanInfo, v string) { s.ExcludedNamespaces = v },
+			expectedErr: `--exclude-namespaces value "   " contains no valid namespace names`,
+		},
+		{
+			name:     "valid include-namespaces passes",
+			flagName: "include-namespaces",
+			flagVal:  "default",
+			setFlag:  true,
+			setInfo:  func(s *cautils.ScanInfo, v string) { s.IncludeNamespaces = v },
+		},
+		{
+			name:     "valid exclude-namespaces passes",
+			flagName: "exclude-namespaces",
+			flagVal:  "kube-system",
+			setFlag:  true,
+			setInfo:  func(s *cautils.ScanInfo, v string) { s.ExcludedNamespaces = v },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := &cautils.ScanInfo{Format: "json"}
+			tt.setInfo(info, tt.flagVal)
+			cmd := &cobra.Command{}
+			cmd.Flags().String(tt.flagName, "", "")
+			if tt.setFlag {
+				require.NoError(t, cmd.Flags().Set(tt.flagName, tt.flagVal))
+			}
+			err := ValidateCommonScanFlags(cmd, info, ScanFormats)
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.EqualError(t, err, tt.expectedErr)
+			}
+		})
+	}
+}
+
 func TestValidateExcludePaths(t *testing.T) {
 	tests := []struct {
 		name         string
