@@ -546,14 +546,19 @@ func BuildPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKin
 }
 
 // AppendPolicyIdentifiers appends the given string identifiers to the existing
-// list, adding any new ones that are not already present.
+// list, trimming surrounding whitespace, skipping empty identifiers, and adding
+// any new ones that are not already present.
 func AppendPolicyIdentifiers(existing []PolicyIdentifier, policies []string, kind apisv1.NotificationPolicyKind) []PolicyIdentifier {
 	result := append([]PolicyIdentifier(nil), existing...)
 	for _, policy := range policies {
-		if !containsIdentifier(result, policy) {
+		trimmed := strings.TrimSpace(policy)
+		if trimmed == "" {
+			continue
+		}
+		if !containsIdentifier(result, trimmed) {
 			result = append(result, PolicyIdentifier{
 				Kind:       kind,
-				Identifier: policy,
+				Identifier: trimmed,
 			})
 		}
 	}
@@ -561,14 +566,16 @@ func AppendPolicyIdentifiers(existing []PolicyIdentifier, policies []string, kin
 }
 
 // containsIdentifier reports whether the named identifier is already present.
-// The comparison is case-insensitive because a cache round-trip changes the casing:
-// the downloader lists regolibrary's lower case "nsa" and writes a file whose name
-// field is "NSA", so LoadPolicy.ListFrameworks reads back a name that no longer matches
-// the lower case getter.NativeFrameworks entry. Matching exactly would leave both in the
+// The comparison is case-insensitive and ignores surrounding whitespace because
+// a cache round-trip changes the casing (the downloader lists regolibrary's lower
+// case "nsa" and writes a file whose name field is "NSA", so LoadPolicy.ListFrameworks
+// reads back a name that no longer matches the lower case getter.NativeFrameworks entry)
+// or user input flags may carry padding. Matching exactly would leave both in the
 // list and make downloadScanPolicies fetch and evaluate the same framework twice.
 func containsIdentifier(identifiers []PolicyIdentifier, name string) bool {
+	trimmedName := strings.TrimSpace(name)
 	for _, policy := range identifiers {
-		if strings.EqualFold(policy.Identifier, name) {
+		if strings.EqualFold(strings.TrimSpace(policy.Identifier), trimmedName) {
 			return true
 		}
 	}
