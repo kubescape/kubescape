@@ -85,6 +85,89 @@ func Test_validateImagePatchInfo_Image(t *testing.T) {
 	assert.Nil(t, err)
 }
 
+func Test_validateImagePatchInfo_OutputModeNormalization(t *testing.T) {
+	tests := []struct {
+		name        string
+		mode        string
+		path        string
+		wantMode    string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:     "docker uppercase and padded",
+			mode:     "  Docker  ",
+			wantMode: "docker",
+		},
+		{
+			name:     "oci uppercase",
+			mode:     "OCI",
+			path:     "/tmp/out.tar",
+			wantMode: "oci",
+		},
+		{
+			name:     "local mixed case and padded",
+			mode:     " Local ",
+			path:     "/tmp/out",
+			wantMode: "local",
+		},
+		{
+			name:     "image uppercase",
+			mode:     "IMAGE",
+			wantMode: "image",
+		},
+		{
+			name:        "unsupported mode",
+			mode:        "containerd",
+			wantErr:     true,
+			errContains: `invalid output mode "containerd"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			patchInfo := &metav1.PatchInfo{
+				Image:      "nginx:1.23",
+				OutputMode: tt.mode,
+				OutputPath: tt.path,
+			}
+			err := validateImagePatchInfo(patchInfo)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantMode, patchInfo.OutputMode)
+		})
+	}
+}
+
+func Test_validateImagePatchInfo_PushWithNormalizedOutputMode(t *testing.T) {
+	t.Run("push with padded uppercase docker mode succeeds", func(t *testing.T) {
+		patchInfo := &metav1.PatchInfo{
+			Image:      "nginx:1.23",
+			Push:       true,
+			OutputMode: "  Docker  ",
+		}
+		err := validateImagePatchInfo(patchInfo)
+		require.NoError(t, err)
+		assert.Equal(t, "image", patchInfo.OutputMode)
+	})
+
+	t.Run("push with padded incompatible oci mode fails with normalized mode", func(t *testing.T) {
+		patchInfo := &metav1.PatchInfo{
+			Image:      "nginx:1.23",
+			Push:       true,
+			OutputMode: "  OCI  ",
+			OutputPath: "/tmp/out.tar",
+		}
+		err := validateImagePatchInfo(patchInfo)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `--push and --output-mode "oci" are mutually exclusive`)
+	})
+}
+
 // TestPatchCmd_FormatFlagValidation verifies --format accepts every format supported for image
 // scans (shared.ImageScanFormats) and rejects formats that are not (e.g. github-actions, which
 // annotates posture findings that patch's image-only results never populate), plus the empty-value case.
