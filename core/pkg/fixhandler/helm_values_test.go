@@ -135,3 +135,21 @@ func TestPrintHelmSuggestions_UncorrelatedCandidatesPreserved(t *testing.T) {
 	assert.False(t, strings.Contains(output, "- .Values.securityContext.readOnlyRootFilesystem\n\tEdit"),
 		"already correlated keys should not be duplicated in candidate list")
 }
+
+// A fix under any of a pod spec's container lists is container-scoped: it is
+// matched to the container-level key, never to a pod-level one, even when both
+// share the trailing segments.
+func TestCorrelateFixPathsWithValues_ContainerListsAvoidPodLevelKeys(t *testing.T) {
+	candidates := []string{"pod.securityContext.runAsNonRoot", "securityContext.runAsNonRoot"}
+	for _, list := range []string{"containers", "initContainers", "ephemeralContainers"} {
+		t.Run(list, func(t *testing.T) {
+			fixPaths := []armotypes.FixPath{{
+				Path:  "spec.template.spec." + list + "[0].securityContext.runAsNonRoot",
+				Value: "true",
+			}}
+			correlated := CorrelateFixPathsWithValues(fixPaths, candidates)
+			require.Len(t, correlated, 1)
+			assert.Equal(t, "securityContext.runAsNonRoot", correlated[0].ValuesPath)
+		})
+	}
+}

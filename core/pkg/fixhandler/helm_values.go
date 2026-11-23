@@ -35,6 +35,18 @@ func stripBracketIndices(path string) string {
 	return sb.String()
 }
 
+// isContainerListSegment reports whether a path segment is one of a pod spec's
+// container lists: containers, initContainers or ephemeralContainers. A fix
+// under any of them is container-scoped, so it must not be matched to a
+// pod-level .Values key.
+func isContainerListSegment(seg string) bool {
+	switch strings.ToLower(seg) {
+	case "containers", "initcontainers", "ephemeralcontainers":
+		return true
+	}
+	return false
+}
+
 // cleanValuesPath removes leading ".Values." or "." from candidate values path.
 func cleanValuesPath(vp string) string {
 	vpClean := strings.TrimPrefix(strings.TrimSpace(vp), ".Values.")
@@ -69,7 +81,7 @@ func CorrelateFixPathsWithValues(fixPaths []armotypes.FixPath, candidateValuesPa
 
 		isContainerFix := false
 		for _, p := range parts {
-			if strings.EqualFold(p, "containers") || strings.EqualFold(p, "initcontainers") {
+			if isContainerListSegment(p) {
 				isContainerFix = true
 				break
 			}
