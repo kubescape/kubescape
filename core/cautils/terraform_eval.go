@@ -162,7 +162,7 @@ func evaluateCoalesce(args []cty.Value) (cty.Value, error) {
 		if targetType == cty.NilType {
 			return cty.NilVal, fmt.Errorf("all arguments must have the same type")
 		}
-		if targetType != selectedVal.Type() {
+		if !targetType.Equals(selectedVal.Type()) {
 			if terraformValueSize(selectedVal, maxTerraformFunctionSize) > maxTerraformFunctionSize {
 				return cty.NilVal, fmt.Errorf("coalesce: argument exceeds the size limit of %d bytes", maxTerraformFunctionSize)
 			}

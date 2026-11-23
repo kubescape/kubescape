@@ -174,7 +174,7 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 	}
 	locals, localExpressions := resolveLocals(files, varDefaults)
 	evalCtx := newTerraformEvalContext(varDefaults, locals)
-	references := terraformReferenceChecker{localExpressions: localExpressions, moduleCtx: evalCtx}
+	references := terraformReferenceChecker{localExpressions: localExpressions, moduleCtx: evalCtx, declaredVariables: declared}
 
 	workloads := map[string][]workloadinterface.IMetadata{}
 	for i, file := range files {
