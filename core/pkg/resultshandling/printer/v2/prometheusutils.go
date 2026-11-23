@@ -247,6 +247,7 @@ func (miv *mImageVulnerability) prefix() string {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 func escapePrometheusLabelValue(value string) string {
+	value = strings.ReplaceAll(value, "\x00", "")
 	value = strings.ReplaceAll(value, "\r\n", "\n")
 	value = strings.ReplaceAll(value, "\r", "\n")
 	return strings.NewReplacer(
@@ -536,7 +537,13 @@ func (m *Metrics) setResourcesCountersFromCatalog(
 		mrc.name = r.GetName()
 		mrc.path = BestSourcePath(sources[resourceID])
 
-		key := seriesKey{mrc.apiVersion, mrc.kind, mrc.namespace, mrc.name, mrc.path}
+		key := seriesKey{
+			escapePrometheusLabelValue(mrc.apiVersion),
+			escapePrometheusLabelValue(mrc.kind),
+			escapePrometheusLabelValue(mrc.namespace),
+			escapePrometheusLabelValue(mrc.name),
+			escapePrometheusLabelValue(mrc.path),
+		}
 		i, seen := seriesIndex[key]
 		if !seen {
 			i = len(controlStatuses)

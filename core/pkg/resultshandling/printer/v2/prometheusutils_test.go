@@ -720,6 +720,16 @@ func TestEscapePrometheusLabelValue(t *testing.T) {
 			input:    "name=\"evil\"\r\nkubescape_score 100",
 			expected: `name=\"evil\"\nkubescape_score 100`,
 		},
+		{
+			name:     "strips null bytes",
+			input:    "foo\x00bar",
+			expected: "foobar",
+		},
+		{
+			name:     "strips null bytes with crlf and quotes",
+			input:    "foo\x00\r\nbar\"test\"",
+			expected: `foo\nbar\"test\"`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -727,6 +737,7 @@ func TestEscapePrometheusLabelValue(t *testing.T) {
 			got := escapePrometheusLabelValue(tt.input)
 			assert.Equal(t, tt.expected, got)
 			assert.NotContains(t, got, "\r", "output must never contain raw carriage returns")
+			assert.NotContains(t, got, "\x00", "output must never contain raw null bytes")
 		})
 	}
 }
@@ -759,6 +770,40 @@ func TestPrometheusMetrics_CarriageReturnNeutralization(t *testing.T) {
 	assert.Contains(t, output, `name="my-pod\nfake-line"`)
 	assert.Contains(t, output, `path="manifests/pod\n.yaml"`)
 	assert.Contains(t, output, `image="my-image:latest\nmalicious"`)
+}
+
+func TestPrometheusMetrics_NullByteSanitization(t *testing.T) {
+	m := &Metrics{
+		listResources: []mResources{
+			{
+				apiVersion: "v1",
+				kind:       "Pod",
+				namespace:  "default\x00injected",
+				name:       "my-pod\x00extra",
+				path:       "manifests/pod\x00.yaml",
+				withPath:   true,
+			},
+		},
+		listImages: []mImageVulnerability{
+			{
+				image:    "my-image:latest\x00extra",
+				platform: "linux/amd64",
+				severity: "High",
+				cveCount: 1,
+			},
+		},
+	}
+
+	output := m.String()
+	assert.NotContains(t, output, "\x00", "prometheus metrics output must not contain raw null bytes")
+	assert.Contains(t, output, `namespace="defaultinjected"`)
+	assert.Contains(t, output, `name="my-podextra"`)
+	assert.Contains(t, output, `path="manifests/pod.yaml"`)
+	assert.Contains(t, output, `image="my-image:latestextra"`)
+
+	parser := expfmt.NewTextParser(model.LegacyValidation)
+	_, err := parser.TextToMetricFamilies(strings.NewReader(output))
+	require.NoError(t, err, "Prometheus text parser must successfully parse sanitized metrics")
 }
 
 type mockCounters struct {
@@ -914,6 +959,65 @@ func TestSetResourcesCountersFromCatalog_NilSummaryDetailsSafety(t *testing.T) {
 	})
 	require.Len(t, m.listResources, 1)
 	assert.Equal(t, "test-pod", m.listResources[0].name)
+}
+
+func TestSetResourcesCountersFromCatalog_DeduplicatesEscapedLabelCollisions(t *testing.T) {
+	resources := map[string]workloadinterface.IMetadata{}
+	wl1 := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "test-pod", "namespace": "default"},
+	})
+	wl2 := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "test-pod\x00", "namespace": "default"},
+	})
+	id1 := "id-1"
+	id2 := "id-2"
+	resources[id1] = wl1
+	resources[id2] = wl2
+
+	results := map[string]resourcesresults.Result{
+		id1: {
+			ResourceID: id1,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0001",
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+						{Name: "rule-1", Status: "passed"},
+					},
+				},
+			},
+		},
+		id2: {
+			ResourceID: id2,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0002",
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+						{Name: "rule-2", Status: "failed"},
+					},
+				},
+			},
+		},
+	}
+
+	catalog := cautils.NewMapResourceCatalog(resources)
+	m := &Metrics{}
+	m.setResourcesCountersFromCatalog(catalog, results, nil, nil)
+
+	require.Len(t, m.listResources, 1)
+	assert.Equal(t, 1, m.listResources[0].controlsCountPassed)
+	assert.Equal(t, 1, m.listResources[0].controlsCountFailed)
+
+	metricsStr := m.String()
+	parser := expfmt.NewTextParser(model.LegacyValidation)
+	families, err := parser.TextToMetricFamilies(strings.NewReader(metricsStr))
+	require.NoError(t, err)
+	failedFamily, ok := families["kubescape_resource_count_controls_failed"]
+	require.True(t, ok)
+	require.Len(t, failedFamily.Metric, 1, "must have exactly 1 series, not duplicate series")
 }
 
 func TestSetImageVulnerabilities_NilSummarySafety(t *testing.T) {
