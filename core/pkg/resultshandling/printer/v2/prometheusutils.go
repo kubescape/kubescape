@@ -448,15 +448,28 @@ func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetai
 	// GetScore() returns the risk score; the metric is the compliance score.
 	m.rs.complianceScore = cautils.ComplianceScoreToInt(summaryDetails.ComplianceScore)
 
+	seenFrameworks := make(map[string]int, len(summaryDetails.ListFrameworks()))
 	for _, fw := range summaryDetails.ListFrameworks() {
 		if fw == nil {
 			continue
 		}
+		fwName := strings.TrimSpace(fw.GetName())
+		if fwName == "" {
+			continue
+		}
+		escapedName := escapePrometheusLabelValue(fwName)
+		if idx, seen := seenFrameworks[escapedName]; seen {
+			if cautils.ComplianceScoreToInt(fw.GetComplianceScore()) > m.listFrameworks[idx].complianceScore {
+				m.listFrameworks[idx].complianceScore = cautils.ComplianceScoreToInt(fw.GetComplianceScore())
+			}
+			continue
+		}
 		mfrs := mFrameworkComplianceScore{
-			frameworkName:   fw.GetName(),
+			frameworkName:   fwName,
 			complianceScore: cautils.ComplianceScoreToInt(fw.GetComplianceScore()),
 		}
 		mfrs.set(fw.NumberOfResources(), fw.NumberOfControls())
+		seenFrameworks[escapedName] = len(m.listFrameworks)
 		m.listFrameworks = append(m.listFrameworks, mfrs)
 	}
 	// Sort frameworks by name to ensure consistent metric ordering across runs.

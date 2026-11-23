@@ -674,6 +674,45 @@ func TestSetComplianceScores_NilSummaryDetails(t *testing.T) {
 	assert.Empty(t, m.listControls)
 }
 
+func TestSetComplianceScores_FrameworkNameWhitespaceAndDeduplication(t *testing.T) {
+	summaryDetails := &reportsummary.SummaryDetails{
+		Frameworks: []reportsummary.FrameworkSummary{
+			{
+				Name:            "  nsa  ",
+				ComplianceScore: 80,
+			},
+			{
+				Name:            "nsa",
+				ComplianceScore: 85,
+			},
+			{
+				Name:            "   ",
+				ComplianceScore: 50,
+			},
+			{
+				Name:            "mitre ",
+				ComplianceScore: 90,
+			},
+		},
+	}
+
+	m := &Metrics{}
+	m.setComplianceScores(summaryDetails)
+	output := m.String()
+
+	// Should trim whitespace and deduplicate identical framework names
+	assert.Len(t, m.listFrameworks, 2)
+	assert.Equal(t, "mitre", m.listFrameworks[0].frameworkName)
+	assert.Equal(t, "nsa", m.listFrameworks[1].frameworkName)
+	assert.Equal(t, 85, m.listFrameworks[1].complianceScore)
+
+	// Series should not be duplicated
+	assert.Equal(t, 1, strings.Count(output, `kubescape_framework_complianceScore{name="nsa"}`))
+	assert.Equal(t, 1, strings.Count(output, `kubescape_framework_complianceScore{name="mitre"}`))
+	assert.NotContains(t, output, `name="  nsa  "`)
+	assert.NotContains(t, output, `name="   "`)
+}
+
 func TestEscapePrometheusLabelValue(t *testing.T) {
 	tests := []struct {
 		name     string
