@@ -760,6 +760,12 @@ func TestPrettyPrinter_NilReceiverSafety(t *testing.T) {
 	})
 
 	assert.NotPanics(t, func() {
+		err := pp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
 		pp.SetKubeconfig("test-config")
 		pp.SetAnonymized(true)
 		pp.SetMainPrinter()
