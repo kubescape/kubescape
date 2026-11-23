@@ -1472,18 +1472,77 @@ func TestWriteImageScanCompanion_NilWriterDoesNotPanic(t *testing.T) {
 }
 
 func TestActionPrint_Csv_NilSummaryControlsDoesNotPanic(t *testing.T) {
-	tmpCsv, err := os.CreateTemp("", "csv-nil-summary-controls-*.csv")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = os.Remove(tmpCsv.Name()) })
-
-	session := cautils.NewOPASessionObjMock()
-	session.Report.SummaryDetails.Controls = nil
-
-	cp := NewCsvPrinter(false)
-	cp.writer = tmpCsv
-	require.NotPanics(t, func() {
-		err := cp.ActionPrint(context.Background(), session, nil)
+	t.Run("empty report does not panic", func(t *testing.T) {
+		tmpCsv, err := os.CreateTemp("", "csv-nil-summary-controls-empty-*.csv")
 		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Remove(tmpCsv.Name()) })
+
+		session := cautils.NewOPASessionObjMock()
+		session.Report.SummaryDetails.Controls = nil
+
+		cp := NewCsvPrinter(false)
+		cp.writer = tmpCsv
+		require.NotPanics(t, func() {
+			err := cp.ActionPrint(context.Background(), session, nil)
+			require.NoError(t, err)
+		})
+		require.NoError(t, cp.CloseWriter())
 	})
-	require.NoError(t, cp.CloseWriter())
+
+	t.Run("exercises resource-row and skipped-control-row fallbacks", func(t *testing.T) {
+		tmpCsv, err := os.CreateTemp("", "csv-nil-summary-controls-rows-*.csv")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Remove(tmpCsv.Name()) })
+
+		session := csvSessionFixture()
+		session.Report.SummaryDetails.Controls = nil
+		session.Report.SummaryDetails.Frameworks = []reportsummary.FrameworkSummary{
+			{
+				Name: "nsa",
+				Controls: reportsummary.ControlSummaries{
+					"C-0099": reportsummary.ControlSummary{
+						ControlID:   "C-0099",
+						Name:        "",
+						ScoreFactor: 0,
+						StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusSkipped, InnerInfo: "cluster not reachable"},
+					},
+				},
+			},
+		}
+
+		cp := NewCsvPrinter(false)
+		cp.writer = tmpCsv
+		require.NotPanics(t, func() {
+			err := cp.ActionPrint(context.Background(), session, nil)
+			require.NoError(t, err)
+		})
+		require.NoError(t, cp.CloseWriter())
+
+		f, err := os.Open(tmpCsv.Name())
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = f.Close() })
+
+		records, err := csv.NewReader(f).ReadAll()
+		require.NoError(t, err)
+		require.Greater(t, len(records), 1)
+
+		var foundResourceRow, foundSkippedRow bool
+		for _, row := range records[1:] {
+			require.Len(t, row, 13)
+			if row[1] == testControlID1 && row[4] == "demo" {
+				foundResourceRow = true
+				assert.Equal(t, "failed", row[3], "status should be failed")
+				assert.Equal(t, "", row[10], "remediation fallback should be empty string when controls are nil")
+			}
+			if row[1] == "C-0099" && row[4] == "N/A" {
+				foundSkippedRow = true
+				assert.Equal(t, "C-0099", row[0], "control name fallback should be control ID")
+				assert.Equal(t, "Unknown", row[2], "severity fallback should be Unknown")
+				assert.Equal(t, "skipped", row[3], "status should be skipped")
+				assert.Equal(t, "cluster not reachable", row[10], "skip reason should be preserved")
+			}
+		}
+		assert.True(t, foundResourceRow, "expected resource row for demo with nil summary controls")
+		assert.True(t, foundSkippedRow, "expected skipped control row with nil summary controls")
+	})
 }
