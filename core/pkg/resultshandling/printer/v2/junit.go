@@ -103,6 +103,9 @@ func NewJunitPrinter(verbose bool) *JunitPrinter {
 }
 
 func (jp *JunitPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if jp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.JunitResultFormat, outputFile, junitOutputFile)
 	if explicitOutput {
 		var err error
@@ -114,6 +117,9 @@ func (jp *JunitPrinter) SetWriter(ctx context.Context, outputFile string) error 
 }
 
 func (jp *JunitPrinter) Score(score float32) {
+	if jp == nil {
+		return
+	}
 	// Handle invalid scores
 	if score > 100 {
 		score = 100
@@ -129,6 +135,9 @@ func (jp *JunitPrinter) PrintNextSteps() {
 }
 
 func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if jp == nil {
+		return fmt.Errorf("failed to write junit results: printer is nil")
+	}
 	if jp.writer == nil {
 		return fmt.Errorf("failed to write junit results: output writer is nil")
 	}
@@ -702,7 +711,7 @@ func getControlIDFromCase(tc JUnitTestCase) string {
 
 // CloseWriter closes the JUnit output writer, returning any error from flushing or closing.
 func (p *JunitPrinter) CloseWriter() error {
-	if p.writer != nil && p.writer != os.Stdout {
+	if p != nil && p.writer != nil && p.writer != os.Stdout {
 		return printer.CloseOutput(p.writer)
 	}
 	return nil
