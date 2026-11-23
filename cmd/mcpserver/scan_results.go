@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -60,7 +61,11 @@ func (s *scanResultStore) firstPage(owner string, doc scanResultDocument, size i
 	if len(limitOpt) > 0 && limitOpt[0] > 0 {
 		limit = limitOpt[0]
 	}
-	if len(doc.Resources) <= limit {
+	total := len(doc.Resources)
+	if doc.TotalFailed > total {
+		total = doc.TotalFailed
+	}
+	if total <= limit {
 		return json.Marshal(doc)
 	}
 	if owner == "" || size > scanResultsMaxBytes {
@@ -113,10 +118,14 @@ func (s *scanResultStore) page(owner, id string, offset, limit int, now time.Tim
 
 func marshalScanPage(doc scanResultDocument, offset, limit int) ([]byte, error) {
 	total := len(doc.Resources)
-	if offset > total {
-		offset = total
+	if doc.TotalFailed > total {
+		total = doc.TotalFailed
 	}
-	count := min(limit, total-offset)
+	available := len(doc.Resources)
+	if offset > available {
+		offset = available
+	}
+	count := min(limit, available-offset)
 	end := offset + count
 	doc.Resources = doc.Resources[offset:end]
 	doc.ReturnedFailed = count
@@ -142,30 +151,137 @@ func (s *scanResultStore) removeLocked(id string) {
 	delete(s.entries, id)
 }
 
+type discardJSON struct{}
+
+func (d *discardJSON) UnmarshalJSON([]byte) error {
+	return nil
+}
+
+func extractFirstResources(data []byte, limit int) ([]json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return nil, fmt.Errorf("expected '{', got %v", tok)
+	}
+
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, ok := tok.(string)
+		if !ok {
+			return nil, fmt.Errorf("expected string key, got %v", tok)
+		}
+		if key == "failed_resources" {
+			tok, err := dec.Token()
+			if err != nil {
+				return nil, err
+			}
+			if d, ok := tok.(json.Delim); !ok || d != '[' {
+				return nil, fmt.Errorf("expected '[', got %v", tok)
+			}
+			resources := make([]json.RawMessage, 0)
+			for dec.More() {
+				if limit < 0 || len(resources) < limit {
+					var raw json.RawMessage
+					if err := dec.Decode(&raw); err != nil {
+						return nil, err
+					}
+					resources = append(resources, raw)
+				} else {
+					return resources, nil
+				}
+			}
+			return resources, nil
+		}
+		var discard json.RawMessage
+		if err := dec.Decode(&discard); err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
+}
+
+func decodeOversizedScanDocument(data []byte, limit int) (scanResultDocument, error) {
+	var discard struct {
+		scanResponse
+		FailedResources *discardJSON `json:"failed_resources,omitempty"`
+	}
+	if err := json.Unmarshal(data, &discard); err != nil {
+		return scanResultDocument{}, fmt.Errorf("decode scan results: %w", err)
+	}
+	resources, err := extractFirstResources(data, limit)
+	if err != nil {
+		return scanResultDocument{}, fmt.Errorf("decode scan results: %w", err)
+	}
+	return scanResultDocument{
+		scanResponse: discard.scanResponse,
+		Resources:    resources,
+	}, nil
+}
+
+type sharedScanPayload struct {
+	data []byte
+	doc  *scanResultDocument
+	size int
+}
+
 // doResultScan retains ownership only after shared execution has returned to
 // each caller. A shared scan must never inherit its first caller's session.
 func (ksServer *KubescapeMcpserver) doResultScan(ctx context.Context, key string, run func(context.Context) (interface{}, error), limitOpt ...int) (interface{}, error) {
 	v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
-		return run(context.WithValue(scanCtx, fullScanResultsKey{}, true))
+		res, err := run(context.WithValue(scanCtx, fullScanResultsKey{}, true))
+		if err != nil {
+			return nil, err
+		}
+		data, ok := res.([]byte)
+		if !ok {
+			return nil, errors.New("unexpected scan result type")
+		}
+
+		size := len(data)
+		// Check retention limit before decoding the full document. If the payload
+		// exceeds the retention bound, avoid decoding all resources and decode only
+		// the first page.
+		if size > scanResultsMaxBytes {
+			doc, err := decodeOversizedScanDocument(data, maxFailedResources)
+			if err != nil {
+				return nil, err
+			}
+			if doc.Resources == nil {
+				return &sharedScanPayload{data: data}, nil
+			}
+			return &sharedScanPayload{doc: &doc, data: data, size: size}, nil
+		}
+
+		// Decode once per shared scan so concurrent callers share the parsed immutable document.
+		var doc scanResultDocument
+		if err := json.Unmarshal(data, &doc); err != nil {
+			return nil, fmt.Errorf("decode scan results: %w", err)
+		}
+		if doc.Resources == nil {
+			return &sharedScanPayload{data: data}, nil
+		}
+		if doc.TotalFailed != len(doc.Resources) {
+			return nil, errors.New("scan returned incomplete results before pagination")
+		}
+		return &sharedScanPayload{doc: &doc, data: data, size: size}, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	data, ok := v.([]byte)
+	payload, ok := v.(*sharedScanPayload)
 	if !ok {
 		return nil, errors.New("unexpected scan result type")
 	}
-	var doc scanResultDocument
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("decode scan results: %w", err)
+	if payload.doc == nil {
+		return payload.data, nil
 	}
-	if doc.Resources == nil {
-		return data, nil
-	}
-	if doc.TotalFailed != len(doc.Resources) {
-		return nil, errors.New("scan returned incomplete results before pagination")
-	}
-	return ksServer.scanResults.firstPage(scanResultOwner(ctx), doc, len(data), time.Now(), limitOpt...)
+	return ksServer.scanResults.firstPage(scanResultOwner(ctx), *payload.doc, payload.size, time.Now(), limitOpt...)
 }
 
 func createScanResultsTool(ksServer *KubescapeMcpserver) {
