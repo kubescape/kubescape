@@ -9,6 +9,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -167,7 +168,14 @@ func writeMarkdownFindings(ew *errWriter, title string, changes []ControlChange)
 func markdownEscape(value string) string {
 	value = strings.ReplaceAll(value, "\\", "\\\\")
 	value = strings.ReplaceAll(value, "|", "\\|")
+	value = strings.ReplaceAll(value, "`", "'")
 	value = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(value)
+	value = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && r != '\t' {
+			return -1
+		}
+		return r
+	}, value)
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "-"
