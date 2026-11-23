@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zclconf/go-cty/cty"
@@ -112,6 +113,7 @@ func TestTerraformDirectoryEmptyDynamicBlock(t *testing.T) {
 		`local[var.selection]`, `try([], local.unresolved)`,
 		`local.options.safe`, `local.options_alias.safe`,
 		`local.options[var.field]`,
+		`concat(local.options.safe, local.options_alias.other)`,
 		`try({ contexts = [] }, var.missing).contexts`,
 		`try([], var.missing)[*]`,
 		`try(local.tuple[99], [])`, `local.for_options[0]`,
@@ -131,7 +133,7 @@ variable "field" { default = "safe" }
 locals {
   contexts = []
   unresolved = try(var.missing, [])
-  options = { safe = [], unrelated = try(var.missing, []) }
+  options = { safe = [], other = [], unrelated = try(var.missing, []) }
   options_alias = local.options
   tuple = [[], try(var.missing, [])]
   for_options = [for choose in [false, true] : choose ? try(var.missing, []) : []]
@@ -157,6 +159,74 @@ resource "kubernetes_pod_v1" "demo" {
 	}
 }
 
+func TestTerraformDirectoryDynamicLookupSelections(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		expression string
+		wantErrors bool
+	}{
+		{"direct field", `local.options.safe`, false},
+		{"selected field", `lookup(local.options, "safe", [])`, false},
+		{"local alias", `lookup(local.alias, "safe", [])`, false},
+		{"unused default", `lookup({safe = []}, "safe", try(var.unresolved, []))`, false},
+		{"unused unavailable default", `lookup({safe = []}, "safe", try(fileset(".", "*.tf"), []))`, false},
+		{"unused expanded default", `lookup({safe = []}, "safe", [try(var.unresolved, [])]...)`, false},
+		{"expanded arguments", `lookup([{safe = []}, "safe", try(var.unresolved, [])]...)`, false},
+		{"missing key", `lookup(local.options, "absent", [])`, false},
+		{"selected nested field", `lookup({settings = local.options}, "settings", {}).safe`, false},
+		{"selected default field", `lookup({}, "absent", local.options).safe`, false},
+		{"selected comprehension", `lookup({for name in ["safe", "other"] : name => (name == "safe" ? [] : try(var.unresolved, []))}, "safe", [])`, false},
+		{"omitted unused default", `lookup(local.options, "safe")`, false},
+		{"caught missing key", `try(lookup({safe = []}, "absent"), [])`, false},
+		{"caught missing key with unrelated input", `try(lookup(local.options, "absent"), [])`, false},
+		{"known map default", `lookup(tomap({safe = []}), "safe", [])`, false},
+		{"caught invalid source", `try(lookup("not a map", "safe", []), [])`, false},
+		{"unresolved key", `lookup({safe = []}, try(var.field, "safe"), [])`, true},
+		{"unresolved source", `lookup(try(var.source, {safe = []}), "safe", [])`, true},
+		{"unresolved selected value", `lookup(local.options, "unrelated", [])`, true},
+		{"unresolved required default", `lookup({}, "absent", try(var.unresolved, []))`, true},
+		{"unresolved argument diagnostic", `try(lookup({safe = [true]}, "safe", var.unresolved), [])`, true},
+		{"unresolved expanded default", `lookup({}, "absent", [local.options]...).unrelated`, true},
+		{"unresolved object key", `lookup({(try(var.field, "safe")) = []}, "absent", [])`, true},
+		{"unresolved object key before missing lookup", `try(lookup({(try(var.field, "safe")) = [true]}, "absent"), [])`, true},
+		{"unresolved lookup key before missing lookup", `try(lookup({safe = [true]}, try(var.field, "absent")), [])`, true},
+		{"unresolved later comprehension key", `lookup({for name in ["safe", "other"] : (name == "safe" ? "safe" : try(var.field, "other")) => []}, "safe", [])`, true},
+		{"unresolved map default validation", `lookup(tomap({safe = []}), "safe", try(var.unresolved, []))`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeTerraformFiles(t, dir, map[string]string{"main.tf": fmt.Sprintf(`
+variable "unresolved" { type = list(bool) }
+variable "field" { type = string }
+variable "source" { type = map(list(bool)) }
+locals {
+  options = { safe = [], unrelated = try(var.unresolved, []) }
+  alias = local.options
+}
+resource "kubernetes_pod_v1" "demo" {
+  metadata { name = "lookup-review" }
+  spec {
+    container {
+      name = "app"
+      image = "nginx"
+      dynamic "security_context" {
+        for_each = %s
+        content { privileged = true }
+      }
+    }
+  }
+}`, tc.expression)})
+			obj, errs := terraformObject(t, dir)
+			if tc.wantErrors {
+				require.NotEmpty(t, errs, "lookup must preserve dependencies needed to select or validate its result")
+			} else {
+				require.Empty(t, errs, "lookup must ignore values outside the selected result")
+				assert.NotContains(t, terraformFirstContainer(t, obj), "securityContext")
+			}
+		})
+	}
+}
+
 func TestTerraformDirectoryKnownDynamicCollections(t *testing.T) {
 	for _, collection := range []string{
 		`{ ctx = 1 }`, `{ (try("ctx", var.missing)) = 1 }`,
@@ -164,6 +234,13 @@ func TestTerraformDirectoryKnownDynamicCollections(t *testing.T) {
 		`[for item in [1] : item if true ? true : can(var.missing)]`,
 		`try([1], var.missing)[*]`,
 		`[ [1] ][*][try(0, var.missing)]`,
+		`[for item in [{}] : try(item.enabled, true)]`,
+		`[for var in [{}] : try(var.enabled, true)]`,
+		`[for local in [{}] : try(local.enabled, true)]`,
+		`[for item in [{}] : can(item.enabled) ? false : true]`,
+		`lookup({contexts = [1]}, "contexts", [])`,
+		`lookup({}, "absent", [1])`,
+		`lookup({"1" = [1]}, 1, [])`,
 	} {
 		t.Run(collection, func(t *testing.T) {
 			dir := t.TempDir()
@@ -343,6 +420,34 @@ func TestTerraformDirectoryDynamicFailedComprehensions(t *testing.T) {
 			"resolved filter", `variable "include" { default = true }`,
 			`try(([for item in [0, 1] : [true] if (item == 0 ? true : var.include)])[0], [])`, false,
 		},
+		{
+			"late unresolved noncolliding key", `variable "key" { type = string }`,
+			`{for item in [0, 1] : (item == 0 ? "selected" : try(var.key, "other")) => [true]}.selected`, true,
+		},
+		{
+			"late unresolved grouped key", `variable "key" { type = string }`,
+			`{for item in [0, 1] : (item == 0 ? "selected" : try(var.key, "other")) => [true]...}.selected[0]`, true,
+		},
+		{
+			"late unresolved successful filter", `variable "include" { type = bool }`,
+			`([for item in [0, 1] : [true] if (item == 0 ? true : try(var.include, true))])[0]`, true,
+		},
+		{
+			"unused unresolved value", "",
+			`{for item in [0, 1] : (item == 0 ? "selected" : "other") => (item == 0 ? [true] : try(var.missing, []))}.selected`, false,
+		},
+		{
+			"unresolved key after invalid filter", `variable "key" { type = string }`,
+			`try({for item in [0, 1, 2] : (item == 2 ? try(var.key, "other") : "selected") => [true] if (item == 1 ? null : true)}.selected, [])`, true,
+		},
+		{
+			"invalid key skips unused value", "",
+			`try({for item in [0, 1] : (item == 0 ? "selected" : null) => (item == 0 ? [true] : try(var.missing, []))}.selected, [true])`, false,
+		},
+		{
+			"failed source retains diagnostics", "",
+			`try({for item in [0, 1] : "selected" => (item == 0 ? [true] : try(var.missing, [true]))}.selected, [])`, true,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -409,6 +514,195 @@ resource "kubernetes_pod_v1" "demo" {
 				require.Empty(t, errs, "iterator bindings must shadow module locals")
 			}
 		})
+	}
+}
+
+func TestTerraformDirectoryDynamicTemplateLoops(t *testing.T) {
+	for _, tc := range []struct {
+		expression string
+		wantErrors bool
+		wantName   string
+	}{
+		{`"app-%{ for item in [1] }${try(unavailable(), "fallback")}%{ endfor }"`, true, ""},
+		{`"app-%{ for item in [] }${try(unavailable(), "fallback")}%{ endfor }"`, false, "app-"},
+		{`"app-%{ for item in [1] }${try("known", unavailable())}%{ endfor }"`, false, "app-known"},
+		{`"app-%{ for item in [{}] }${try(item.name, "fallback")}%{ endfor }"`, false, "app-fallback"},
+	} {
+		t.Run(tc.expression, func(t *testing.T) {
+			dir := t.TempDir()
+			writeTerraformFiles(t, dir, map[string]string{"main.tf": fmt.Sprintf(`
+resource "kubernetes_pod_v1" "demo" {
+  spec {
+    dynamic "container" {
+      for_each = [1]
+      content {
+        name = %s
+        image = "nginx"
+      }
+    }
+  }
+}`, tc.expression)})
+			obj, errs := terraformObject(t, dir)
+			if tc.wantErrors {
+				require.NotEmpty(t, errs)
+			} else {
+				require.Empty(t, errs)
+				assert.Equal(t, tc.wantName, terraformFirstContainer(t, obj)["name"])
+			}
+		})
+	}
+}
+
+func TestTerraformDynamicSplatEvaluationIsLinear(t *testing.T) {
+	for _, filter := range []string{"", " if included(item)"} {
+		t.Run(filter, func(t *testing.T) {
+			const count = 64
+			body := parseTypedHCL(t, fmt.Sprintf(`value = [for item in source() : { enabled = counted(item) }%s][*].enabled`, filter))
+			items := make([]cty.Value, count)
+			for i := range items {
+				items[i] = cty.NumberIntVal(int64(i))
+			}
+			sourceCalls, valueCalls, filterCalls := 0, 0, 0
+			ctx := &hcl.EvalContext{Functions: map[string]function.Function{
+				"source": function.New(&function.Spec{
+					Type: function.StaticReturnType(cty.TupleVal(items).Type()),
+					Impl: func([]cty.Value, cty.Type) (cty.Value, error) {
+						sourceCalls++
+						return cty.TupleVal(items), nil
+					},
+				}),
+			}}
+			for name, calls := range map[string]*int{"counted": &valueCalls, "included": &filterCalls} {
+				ctx.Functions[name] = function.New(&function.Spec{
+					Params: []function.Parameter{{Name: "item", Type: cty.Number}},
+					Type:   function.StaticReturnType(cty.Bool),
+					Impl: func([]cty.Value, cty.Type) (cty.Value, error) {
+						(*calls)++
+						return cty.True, nil
+					},
+				})
+			}
+			assert.False(t, hasUnresolvableVariables(body.Attributes["value"].Expr, ctx))
+			assert.LessOrEqual(t, sourceCalls, 8, "the source must not be evaluated per selected element")
+			assert.LessOrEqual(t, valueCalls, 8*count, "the comprehension must not be rebuilt per selected element")
+			assert.LessOrEqual(t, filterCalls, 8*count, "filters must not be rechecked per selected element")
+			t.Logf("items=%d source=%d values=%d filters=%d", count, sourceCalls, valueCalls, filterCalls)
+		})
+	}
+}
+
+type terraformCountingExpression struct {
+	hclsyntax.Expression
+	visits *int
+}
+
+func (e *terraformCountingExpression) Variables() []hcl.Traversal {
+	(*e.visits)++
+	return e.Expression.Variables()
+}
+
+func TestTerraformDynamicSplatReferenceChecksAreLinear(t *testing.T) {
+	const count = 64
+	items := make([]cty.Value, count)
+	for i := range items {
+		items[i] = cty.True
+	}
+	for _, source := range []string{
+		`[for item in var.items : item]`,
+		`tolist([for item in var.items : item])`,
+		`concat([for item in var.items : item], [])`,
+		`flatten([[for item in var.items : item]])`,
+		`try(tolist([for item in var.items : item]), [])`,
+	} {
+		for _, useLocal := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/local=%t", source, useLocal), func(t *testing.T) {
+				sourceBody := parseTypedHCL(t, "value = "+source)
+				sourceExpr := sourceBody.Attributes["value"].Expr
+				visits := 0
+				hclsyntax.VisitAll(sourceExpr, func(node hclsyntax.Node) hcl.Diagnostics {
+					if loop, ok := node.(*hclsyntax.ForExpr); ok {
+						loop.ValExpr = &terraformCountingExpression{Expression: loop.ValExpr, visits: &visits}
+					}
+					return nil
+				})
+				ctx := newTerraformEvalContext(map[string]cty.Value{"items": cty.TupleVal(items)}, nil)
+				checker := terraformReferenceChecker{moduleCtx: ctx}
+				var expr hcl.Expression
+				if useLocal {
+					value, diags := sourceExpr.Value(ctx)
+					require.False(t, diags.HasErrors(), diags.Error())
+					ctx.Variables["local"] = cty.ObjectVal(map[string]cty.Value{"source": value})
+					checker.localExpressions = map[string]hcl.Expression{"source": sourceExpr}
+					expr = parseTypedHCL(t, `value = local.source[*]`).Attributes["value"].Expr
+				} else {
+					// Keep the instrumented source in the actual splat expression.
+					splat := parseTypedHCL(t, `value = [][*]`).Attributes["value"].Expr.(*hclsyntax.SplatExpr)
+					splat.Source = sourceExpr
+					expr = splat
+				}
+				require.False(t, checker.hasUnresolvableVariables(expr, ctx))
+				assert.LessOrEqual(t, visits, 2*count, "wrappers and local aliases must not recheck the entire source per output")
+				t.Logf("items=%d reference checks=%d", count, visits)
+			})
+		}
+	}
+}
+
+func TestTerraformDynamicNestedSplatReferenceChecksAreLinear(t *testing.T) {
+	var previous float64
+	for _, count := range []int{128, 256} {
+		body := parseTypedHCL(t, `value = (var.items[*])[*]`)
+		items := make([]cty.Value, count)
+		for i := range items {
+			items[i] = cty.True
+		}
+		ctx := newTerraformEvalContext(map[string]cty.Value{"items": cty.TupleVal(items)}, nil)
+		allocs := testing.AllocsPerRun(1, func() {
+			require.False(t, hasUnresolvableVariables(body.Attributes["value"].Expr, ctx))
+		})
+		if previous != 0 {
+			assert.Less(t, allocs, 3*previous, "doubling a nested splat must not quadruple allocation work")
+		}
+		t.Logf("items=%d allocations=%.0f", count, allocs)
+		previous = allocs
+	}
+}
+
+func TestTerraformDirectoryDynamicLocalCycles(t *testing.T) {
+	dir := t.TempDir()
+	writeTerraformFiles(t, dir, map[string]string{"main.tf": `
+locals { options = try(local["options"].next, { next = [] }) }
+resource "kubernetes_pod_v1" "demo" {
+  spec {
+    container {
+      name = "app"
+      image = "nginx"
+      dynamic "security_context" {
+        for_each = local.options.next
+        content { privileged = true }
+      }
+    }
+  }
+}`})
+	_, errs := terraformObject(t, dir)
+	require.NotEmpty(t, errs, "a computed self-reference must return a loading error")
+}
+
+func TestTerraformDynamicReferenceEvaluationScopes(t *testing.T) {
+	body := parseTypedHCL(t, `value = [for item in [try(var.enabled, true)] : item][*]`)
+	checker := terraformReferenceChecker{}
+	for _, tc := range []struct {
+		vars       map[string]cty.Value
+		unresolved bool
+	}{
+		{map[string]cty.Value{"enabled": cty.True}, false},
+		{map[string]cty.Value{}, true},
+	} {
+		ctx := newTerraformEvalContext(tc.vars, nil)
+		assert.Equal(t, tc.unresolved, checker.hasUnresolvableVariables(body.Attributes["value"].Expr, ctx))
+		assert.Nil(t, checker.evaluations, "evaluated values must not be retained between checks")
+		assert.Nil(t, checker.referenceResults, "completed reference checks must not be retained between checks")
+		assert.Nil(t, checker.forItems, "comprehension bindings must not be retained between checks")
 	}
 }
 

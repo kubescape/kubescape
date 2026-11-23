@@ -736,14 +736,105 @@ type terraformReferenceChecker struct {
 	localExpressions map[string]hcl.Expression
 	moduleCtx        *hcl.EvalContext
 	activeLocals     map[string]bool
+	activeLocalPath  string
 	localResults     map[string]bool
+	evaluations      map[terraformExpressionContext]terraformEvaluation
+	referenceResults map[terraformReferenceContext]bool
+	forItems         map[terraformReferenceContext][]terraformForItem
+}
+
+type terraformExpressionContext struct {
+	expr hcl.Expression
+	ctx  *hcl.EvalContext
+}
+
+type terraformReferenceContext struct {
+	terraformExpressionContext
+	activeLocals string
+}
+
+type terraformEvaluation struct {
+	value    cty.Value
+	diags    hcl.Diagnostics
+	elements []cty.Value
+}
+
+type terraformForItem struct {
+	key cty.Value
+	ctx *hcl.EvalContext
+}
+
+func (c *terraformReferenceChecker) expressionValue(expr hcl.Expression, ctx *hcl.EvalContext) (cty.Value, hcl.Diagnostics) {
+	key := terraformExpressionContext{expr, ctx}
+	if result, exists := c.evaluations[key]; exists {
+		return result.value, result.diags
+	}
+	value, diags := expr.Value(ctx)
+	c.evaluations[key] = terraformEvaluation{value: value, diags: diags}
+	return value, diags
+}
+
+func (c *terraformReferenceChecker) forExpressionItems(loop *hclsyntax.ForExpr, evalCtx *hcl.EvalContext) ([]terraformForItem, bool) {
+	cacheKey := terraformReferenceContext{terraformExpressionContext{loop, evalCtx}, c.activeLocalPath}
+	if items, exists := c.forItems[cacheKey]; exists {
+		return items, false
+	}
+	if c.hasUnresolvableVariables(loop.CollExpr, evalCtx) {
+		return nil, true
+	}
+	collection, diags := c.expressionValue(loop.CollExpr, evalCtx)
+	if diags.HasErrors() || collection.IsNull() || !collection.IsKnown() || !collection.CanIterateElements() {
+		return nil, false
+	}
+	var items []terraformForItem
+	for it := collection.ElementIterator(); it.Next(); {
+		key, value := it.Element()
+		childCtx := evalCtx.NewChild()
+		childCtx.Variables = map[string]cty.Value{loop.ValVar: value}
+		if loop.KeyVar != "" {
+			childCtx.Variables[loop.KeyVar] = key
+		}
+		if loop.CondExpr != nil {
+			if c.hasUnresolvableVariables(loop.CondExpr, childCtx) {
+				return nil, true
+			}
+			include, diags := c.expressionValue(loop.CondExpr, childCtx)
+			if diags.HasErrors() || include.IsNull() || !include.IsKnown() {
+				continue
+			}
+			include, err := convert.Convert(include, cty.Bool)
+			if err != nil {
+				continue
+			}
+			if !include.True() {
+				continue
+			}
+		}
+		if loop.KeyExpr != nil {
+			if c.hasUnresolvableVariables(loop.KeyExpr, childCtx) {
+				return nil, true
+			}
+			keyValue, keyDiags := c.expressionValue(loop.KeyExpr, childCtx)
+			if keyDiags.HasErrors() || keyValue.IsNull() {
+				continue
+			}
+			var err error
+			key, err = convert.Convert(keyValue, cty.String)
+			if err != nil {
+				continue
+			}
+		}
+		items = append(items, terraformForItem{key, childCtx})
+	}
+	c.forItems[cacheKey] = items
+	return items, false
 }
 
 func (c *terraformReferenceChecker) hasUnresolvableVariables(expr hcl.Expression, evalCtx *hcl.EvalContext) bool {
 	return c.hasUnresolvableSelection(expr, evalCtx, nil)
 }
 
-func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression, evalCtx *hcl.EvalContext, selection hcl.Traversal) bool {
+func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression, evalCtx *hcl.EvalContext, selection hcl.Traversal) (unresolved bool) {
 	expr = unwrapParentheses(expr)
 	if expr == nil {
 		return false
@@ -752,12 +843,31 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 		return len(expr.Variables()) > 0
 	}
 
-	val, diags := expr.Value(evalCtx)
+	if c.evaluations == nil {
+		// Retain observations only for this check, including repeated splat selections.
+		c.evaluations = map[terraformExpressionContext]terraformEvaluation{}
+		c.referenceResults = map[terraformReferenceContext]bool{}
+		c.forItems = map[terraformReferenceContext][]terraformForItem{}
+		defer func() {
+			c.evaluations = nil
+			c.referenceResults = nil
+			c.forItems = nil
+		}()
+	}
+	val, diags := c.expressionValue(expr, evalCtx)
 	if diags.HasErrors() {
 		// A failed construction can hide unresolved expressions after the selected result.
 		selection = nil
 	} else if !val.IsKnown() {
 		return true
+	}
+	if len(selection) == 0 {
+		// Active locals affect cycle detection even when the evaluated value is unchanged.
+		key := terraformReferenceContext{terraformExpressionContext{expr, evalCtx}, c.activeLocalPath}
+		if result, checked := c.referenceResults[key]; checked {
+			return result
+		}
+		defer func() { c.referenceResults[key] = unresolved }()
 	}
 	if call, ok := expr.(*hclsyntax.FunctionCallExpr); ok && !terraformFunctionAvailable(call.Name, evalCtx) {
 		return true
@@ -775,7 +885,7 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 	}
 
 	if splat, ok := expr.(*hclsyntax.SplatExpr); ok {
-		collection, diags := splat.Source.Value(evalCtx)
+		collection, diags := c.expressionValue(splat.Source, evalCtx)
 		if diags.HasErrors() || collection.IsNull() || !collection.IsKnown() {
 			return c.hasUnresolvableVariables(splat.Source, evalCtx)
 		}
@@ -801,12 +911,22 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 			}
 			selectedIndex = index
 		}
-		resultIndex := int64(0)
-		for it := collection.ElementIterator(); it.Next(); resultIndex++ {
-			key, value := it.Element()
-			if selectedIndex >= 0 && resultIndex != selectedIndex {
-				continue
+		sourceKey := terraformExpressionContext{splat.Source, evalCtx}
+		observed := c.evaluations[sourceKey]
+		if observed.elements == nil {
+			observed.elements = collection.AsValueSlice()
+			c.evaluations[sourceKey] = observed
+		}
+		elements := observed.elements
+		start := 0
+		if selectedIndex >= 0 {
+			if selectedIndex >= int64(len(elements)) {
+				return c.hasUnresolvableSelection(splat.Source, evalCtx, selection)
 			}
+			start = int(selectedIndex)
+			elements = elements[start : start+1]
+		}
+		for i, value := range elements {
 			tail := selection
 			if selectedIndex >= 0 {
 				tail = selection[1:]
@@ -814,7 +934,7 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 			if selectedPath && !ty.IsSetType() {
 				sourceSelection := append(append(hcl.Traversal{}, postfix...), tail...)
 				if !autoUpgrade {
-					sourceSelection = append(hcl.Traversal{hcl.TraverseIndex{Key: key}}, sourceSelection...)
+					sourceSelection = append(hcl.Traversal{hcl.TraverseIndex{Key: cty.NumberIntVal(int64(start + i))}}, sourceSelection...)
 				}
 				if c.hasUnresolvableSelection(splat.Source, evalCtx, sourceSelection) {
 					return true
@@ -823,32 +943,22 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 			if c.hasUnresolvableSelection(terraformSplatItemExpression(splat.Each, splat.Item, value), evalCtx, tail) {
 				return true
 			}
-			if selectedIndex >= 0 {
-				return false
-			}
-		}
-		if selectedIndex >= 0 {
-			return c.hasUnresolvableSelection(splat.Source, evalCtx, selection)
 		}
 		return false
 	}
 
 	if loop, ok := expr.(*hclsyntax.ForExpr); ok {
-		if c.hasUnresolvableVariables(loop.CollExpr, evalCtx) {
+		items, unresolved := c.forExpressionItems(loop, evalCtx)
+		if unresolved {
 			return true
 		}
-		collection, diags := loop.CollExpr.Value(evalCtx)
-		if diags.HasErrors() || collection.IsNull() || !collection.IsKnown() || !collection.CanIterateElements() {
-			return false
-		}
-		selectedIndex := int64(-1)
 		selectedKey := cty.NilVal
 		if len(selection) > 0 && loop.KeyExpr == nil {
 			indexValue, valid := terraformSequenceIndex(selection[0])
-			if !valid {
+			if !valid || indexValue >= int64(len(items)) {
 				return false
 			}
-			selectedIndex = indexValue
+			return c.hasUnresolvableSelection(loop.ValExpr, items[indexValue].ctx, selection[1:])
 		} else if len(selection) > 0 {
 			key, valid := terraformObjectSelectionKey(selection[0])
 			if !valid {
@@ -857,46 +967,10 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 			selectedKey = key
 		}
 		resultIndex := int64(0)
-		for it := collection.ElementIterator(); it.Next(); {
-			key, value := it.Element()
-			childCtx := evalCtx.NewChild()
-			childCtx.Variables = map[string]cty.Value{loop.ValVar: value}
-			if loop.KeyVar != "" {
-				childCtx.Variables[loop.KeyVar] = key
-			}
-			if loop.CondExpr != nil {
-				if c.hasUnresolvableVariables(loop.CondExpr, childCtx) {
-					return true
-				}
-				include, diags := loop.CondExpr.Value(childCtx)
-				if diags.HasErrors() || include.IsNull() || !include.IsKnown() {
-					return false
-				}
-				include, err := convert.Convert(include, cty.Bool)
-				if err != nil {
-					return false
-				}
-				if !include.True() {
-					continue
-				}
-			}
-			if selectedIndex >= 0 {
-				if resultIndex == selectedIndex {
-					return c.hasUnresolvableSelection(loop.ValExpr, childCtx, selection[1:])
-				}
-				resultIndex++
-				continue
-			}
+		for _, item := range items {
+			childCtx := item.ctx
 			if selectedKey != cty.NilVal {
-				if c.hasUnresolvableVariables(loop.KeyExpr, childCtx) {
-					return true
-				}
-				key, diags := loop.KeyExpr.Value(childCtx)
-				if diags.HasErrors() {
-					return false
-				}
-				key, err := convert.Convert(key, cty.String)
-				if err != nil || !key.RawEquals(selectedKey) {
+				if item.key == cty.NilVal || !item.key.RawEquals(selectedKey) {
 					continue
 				}
 				if !loop.Group {
@@ -918,7 +992,7 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 				}
 				continue
 			}
-			if c.hasUnresolvableVariables(loop.KeyExpr, childCtx) || c.hasUnresolvableVariables(loop.ValExpr, childCtx) {
+			if c.hasUnresolvableVariables(loop.ValExpr, childCtx) {
 				return true
 			}
 		}
@@ -929,7 +1003,7 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 		hadUnresolvableArg := false
 		for _, rawArg := range call.Args {
 			arg := unwrapParentheses(rawArg)
-			val, diags := arg.Value(evalCtx)
+			val, diags := c.expressionValue(arg, evalCtx)
 			if diags.HasErrors() || !val.IsKnown() {
 				if c.hasUnresolvableVariables(arg, evalCtx) {
 					hadUnresolvableArg = true
@@ -950,7 +1024,7 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 	if call, ok := expr.(*hclsyntax.FunctionCallExpr); ok && call.Name == "coalesce" {
 		for _, rawArg := range call.Args {
 			arg := unwrapParentheses(rawArg)
-			val, diags := arg.Value(evalCtx)
+			val, diags := c.expressionValue(arg, evalCtx)
 			if diags.HasErrors() {
 				return c.hasUnresolvableVariables(arg, evalCtx)
 			}
@@ -976,6 +1050,52 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 		return c.hasUnresolvableVariables(arg, evalCtx)
 	}
 
+	if call, ok := expr.(*hclsyntax.FunctionCallExpr); ok && call.Name == "lookup" {
+		args := call.Args
+		if call.ExpandFinal {
+			args = nil
+			if len(call.Args) > 0 {
+				last := len(call.Args) - 1
+				if expanded, ok := unwrapParentheses(call.Args[last]).(*hclsyntax.TupleConsExpr); ok {
+					args = append(append([]hclsyntax.Expression{}, call.Args[:last]...), expanded.Exprs...)
+				}
+			}
+		}
+		if len(args) == 2 || (len(args) == 3 && !diags.HasErrors()) {
+			if c.hasUnresolvableVariables(args[1], evalCtx) {
+				return true
+			}
+			mapping, mapDiags := c.expressionValue(args[0], evalCtx)
+			key, keyDiags := c.expressionValue(args[1], evalCtx)
+			if !mapDiags.HasErrors() && !keyDiags.HasErrors() && mapping.IsKnown() && !mapping.IsNull() && (mapping.Type().IsObjectType() || mapping.Type().IsMapType()) {
+				key, err := convert.Convert(key, cty.String)
+				if err == nil && key.IsKnown() && !key.IsNull() {
+					found := mapping.Type().IsObjectType() && mapping.Type().HasAttribute(key.AsString())
+					if mapping.Type().IsMapType() {
+						found = mapping.HasIndex(key).True()
+					}
+					path := hcl.Traversal{hcl.TraverseIndex{Key: key}}
+					if found {
+						path = append(path, selection...)
+					}
+					if c.hasUnresolvableSelection(args[0], evalCtx, path) {
+						return true
+					}
+					if len(args) == 3 {
+						if !found {
+							return c.hasUnresolvableSelection(args[2], evalCtx, selection)
+						}
+						// Maps validate the default's conversion even when their key exists.
+						if mapping.Type().IsMapType() {
+							return c.hasUnresolvableVariables(args[2], evalCtx)
+						}
+					}
+					return false
+				}
+			}
+		}
+	}
+
 	if call, ok := expr.(*hclsyntax.FunctionCallExpr); ok {
 		for _, rawArg := range call.Args {
 			if c.hasUnresolvableVariables(rawArg, evalCtx) {
@@ -990,7 +1110,7 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 		if c.hasUnresolvableVariables(condExpr, evalCtx) {
 			return true
 		}
-		val, diags := condExpr.Value(evalCtx)
+		val, diags := c.expressionValue(condExpr, evalCtx)
 		if diags.HasErrors() || !val.IsKnown() || val.IsNull() {
 			return true
 		}
@@ -1002,6 +1122,10 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 			return c.hasUnresolvableSelection(cond.TrueResult, evalCtx, selection)
 		}
 		return c.hasUnresolvableSelection(cond.FalseResult, evalCtx, selection)
+	}
+
+	if join, ok := expr.(*hclsyntax.TemplateJoinExpr); ok {
+		return c.hasUnresolvableVariables(join.Tuple, evalCtx)
 	}
 
 	if tmpl, ok := expr.(*hclsyntax.TemplateExpr); ok {
@@ -1045,7 +1169,7 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 						if c.hasUnresolvableVariables(item.KeyExpr, evalCtx) {
 							return true
 						}
-						itemKey, diags := item.KeyExpr.Value(evalCtx)
+						itemKey, diags := c.expressionValue(item.KeyExpr, evalCtx)
 						if !diags.HasErrors() {
 							itemKey, err = convert.Convert(itemKey, cty.String)
 							if err == nil && itemKey.RawEquals(key) {
@@ -1077,7 +1201,7 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 		if c.hasUnresolvableVariables(idx.Key, evalCtx) {
 			return true
 		}
-		key, diags := idx.Key.Value(evalCtx)
+		key, diags := c.expressionValue(idx.Key, evalCtx)
 		if diags.HasErrors() || key.IsNull() || !key.IsKnown() {
 			return c.hasUnresolvableVariables(idx.Collection, evalCtx)
 		}
@@ -1096,8 +1220,14 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 		// attribute missing from a known value is an evaluation error, which
 		// try() catches as Terraform does, not an unresolvable reference.
 		reference := append(append(hcl.Traversal{}, traversal...), selection...)
-		if len(reference) > 2 {
-			reference = reference[:2]
+		depth := 1
+		root := traversal.RootName()
+		scope := terraformVariableScope(root, evalCtx)
+		if (root == "var" || root == "local") && (scope == c.moduleCtx || (c.moduleCtx == nil && scope != nil && scope.Parent() == nil)) {
+			depth = 2
+		}
+		if len(reference) > depth {
+			reference = reference[:depth]
 		}
 		if _, diags := reference.TraverseAbs(evalCtx); diags.HasErrors() {
 			return true
@@ -1129,13 +1259,7 @@ func (c *terraformReferenceChecker) localReferenceUnresolved(traversal hcl.Trave
 	}
 	// Iterators named local shadow the module's locals; source expressions always
 	// resolve in the module context, without any iterator bindings.
-	scope := evalCtx
-	for scope != nil {
-		if _, bound := scope.Variables["local"]; bound {
-			break
-		}
-		scope = scope.Parent()
-	}
+	scope := terraformVariableScope("local", evalCtx)
 	if scope != c.moduleCtx {
 		return false
 	}
@@ -1160,6 +1284,9 @@ func (c *terraformReferenceChecker) localReferenceUnresolved(traversal hcl.Trave
 }
 
 func (c *terraformReferenceChecker) localUnresolved(name string, selection hcl.Traversal) bool {
+	if c.activeLocals[name] {
+		return true
+	}
 	var cacheKey strings.Builder
 	fmt.Fprintf(&cacheKey, "%q", name)
 	for _, step := range selection {
@@ -1187,9 +1314,6 @@ func (c *terraformReferenceChecker) localUnresolved(name string, selection hcl.T
 	if result, checked := c.localResults[key]; checked {
 		return result
 	}
-	if c.activeLocals[key] {
-		return true
-	}
 	expr, exists := c.localExpressions[name]
 	if !exists {
 		return false
@@ -1198,11 +1322,24 @@ func (c *terraformReferenceChecker) localUnresolved(name string, selection hcl.T
 		c.activeLocals = map[string]bool{}
 		c.localResults = map[string]bool{}
 	}
-	c.activeLocals[key] = true
+	c.activeLocals[name] = true
+	previousPath := c.activeLocalPath
+	c.activeLocalPath += fmt.Sprintf("%q/", name)
 	result := c.hasUnresolvableSelection(expr, c.moduleCtx, selection)
-	delete(c.activeLocals, key)
+	c.activeLocalPath = previousPath
+	delete(c.activeLocals, name)
 	c.localResults[key] = result
 	return result
+}
+
+func terraformVariableScope(name string, ctx *hcl.EvalContext) *hcl.EvalContext {
+	for ctx != nil {
+		if _, bound := ctx.Variables[name]; bound {
+			return ctx
+		}
+		ctx = ctx.Parent()
+	}
+	return nil
 }
 
 func terraformFunctionAvailable(name string, ctx *hcl.EvalContext) bool {
