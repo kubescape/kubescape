@@ -226,6 +226,18 @@ func TestFlagValidationDownload_NoError(t *testing.T) {
 	assert.Equal(t, nil, flagValidationDownload(&downloadInfo))
 }
 
+func TestFlagValidationDownload_TrimsWhitespace(t *testing.T) {
+	downloadInfo := v1.DownloadInfo{
+		Path:      "  /tmp/policies ",
+		AccountID: "  24e0b04a-8db6-48eb-a912-7815cf15b222 \t",
+		AccessKey: "  my-secret-access-key  ",
+	}
+	require.NoError(t, flagValidationDownload(&downloadInfo))
+	assert.Equal(t, "  /tmp/policies ", downloadInfo.Path, "output path must be preserved verbatim")
+	assert.Equal(t, "24e0b04a-8db6-48eb-a912-7815cf15b222", downloadInfo.AccountID)
+	assert.Equal(t, "my-secret-access-key", downloadInfo.AccessKey)
+}
+
 func TestFlagValidationDownload_Error(t *testing.T) {
 	tests := []struct {
 		downloadInfo v1.DownloadInfo
