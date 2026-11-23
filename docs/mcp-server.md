@@ -538,7 +538,7 @@ Scan local Infrastructure-as-Code (Helm charts, Kustomize directories, YAML mani
 | `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
 | `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"Deployment,DaemonSet"`) |
 | `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. `"Job,CronJob"`) |
-| `exclude_controls` | string or array of strings | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
+| `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
 
 #### `scan_local_iac_controls`
 
@@ -554,12 +554,12 @@ Scan local Infrastructure-as-Code files against specific control IDs rather than
 | `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
 | `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"Deployment,DaemonSet"`) |
 | `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. `"Job,CronJob"`) |
-| `exclude_controls` | string or array of strings | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
+| `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
 
 ### Live Scanning Tools
 
 The live scanning tools run on-demand scans against the cluster or local files.
-All live scan tools support optional filtering parameters (`min_severity`, `max_severity`, `include_kinds`, `exclude_kinds`, `label_selector`, `exclude_namespaces`, `exclude_controls`).
+All live scan tools support optional filtering parameters (`min_severity`, `max_severity`, `include_kinds`, `exclude_kinds`, `label_selector`, `exclude_namespaces`, `exclude_controls`). Omitting `exclude_controls` or passing `null` leaves all controls eligible for the scan.
 Returned `failed_resources` are prioritized by severity rank descending (`Critical` > `High` > `Medium` > `Low`, with alphabetical resource ID as tie-breaker) before being capped at 100 entries.
 
 #### `run_framework_security_scan`
@@ -578,7 +578,7 @@ Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the 
 | `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. `"Job,CronJob"`) |
 | `label_selector` | string | No | Kubernetes label selector to filter collected resources (optional, e.g. `"app=web,env!=dev"`) |
 | `exclude_namespaces` | string | No | Comma-separated namespaces to exclude from scan (optional; mutually exclusive with `namespace`) |
-| `exclude_controls` | string or array of strings | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
+| `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
 
 **Example Response:**
 ```json
@@ -611,7 +611,7 @@ Run an on-demand, live security scan restricted to a given set of controls by co
 | `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. `"Job,CronJob"`) |
 | `label_selector` | string | No | Kubernetes label selector to filter collected resources (optional, e.g. `"app=web,env!=dev"`) |
 | `exclude_namespaces` | string | No | Comma-separated namespaces to exclude from scan (optional; mutually exclusive with `namespace`) |
-| `exclude_controls` | string or array of strings | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
+| `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
 
 #### `run_rbac_security_scan`
 
@@ -628,7 +628,7 @@ Run an on-demand, live RBAC security scan (evaluating RBAC-related controls) and
 | `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive) |
 | `label_selector` | string | No | Kubernetes label selector to filter collected resources (optional) |
 | `exclude_namespaces` | string | No | Comma-separated namespaces to exclude from scan (optional; mutually exclusive with `namespace`) |
-| `exclude_controls` | string or array of strings | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
+| `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
 
 **Example Response:**
 ```json
@@ -658,7 +658,7 @@ Run an on-demand, live Network security scan (evaluating network-related control
 | `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive) |
 | `label_selector` | string | No | Kubernetes label selector to filter collected resources (optional) |
 | `exclude_namespaces` | string | No | Comma-separated namespaces to exclude from scan (optional; mutually exclusive with `namespace`) |
-| `exclude_controls` | string or array of strings | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
+| `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
 
 **Example Response:**
 ```json
@@ -694,7 +694,7 @@ A workload that is owned by another resource — a Pod belonging to a ReplicaSet
 | `framework` | string | No | Framework to scan against (optional, defaults to the full workload control set) |
 | `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
 | `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
-| `exclude_controls` | string or array of strings | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
+| `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
 
 **Example Response:**
 ```json
