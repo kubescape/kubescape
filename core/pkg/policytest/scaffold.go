@@ -118,14 +118,22 @@ func Scaffold(ctx context.Context, dir string, opts ScaffoldOptions) ([]string, 
 		return nil, fmt.Errorf("rule name %q must be lowercase alphanumeric characters or '-', and start and end with an alphanumeric character", name)
 	}
 
-	kind := opts.Kind
+	kind := strings.TrimSpace(opts.Kind)
 	if kind == "" {
 		kind = "Deployment"
 	}
-	template, ok := workloadKinds[kind]
-	if !ok {
-		return nil, fmt.Errorf("unsupported kind %q, supported: %s", kind, strings.Join(SupportedKinds(), ", "))
+	canonicalKind := ""
+	for k := range workloadKinds {
+		if strings.EqualFold(kind, k) {
+			canonicalKind = k
+			break
+		}
 	}
+	if canonicalKind == "" {
+		return nil, fmt.Errorf("unsupported kind %q, supported: %s", opts.Kind, strings.Join(SupportedKinds(), ", "))
+	}
+	kind = canonicalKind
+	template := workloadKinds[kind]
 
 	if !opts.Force && ruledir.Is(dir) {
 		return nil, fmt.Errorf("%q already holds a rule, use --force to overwrite", dir)
