@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1528,8 +1529,6 @@ patches:
 }
 
 func TestManifestHasOriginAnnotation_BoundedRead(t *testing.T) {
-	t.Parallel()
-
 	tmpDir := t.TempDir()
 
 	t.Run("directory path is rejected safely by bounded reader", func(t *testing.T) {
@@ -1543,11 +1542,15 @@ func TestManifestHasOriginAnnotation_BoundedRead(t *testing.T) {
 		assert.True(t, manifestHasOriginAnnotation(missing))
 	})
 
-	t.Run("regular file without origin annotation returns false", func(t *testing.T) {
-		t.Parallel()
+	t.Run("size limit for manifest without origin annotation", func(t *testing.T) {
 		path := filepath.Join(tmpDir, "plain.yaml")
-		require.NoError(t, os.WriteFile(path, []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: plain\n"), 0o600))
+		content := []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: plain\n")
+		require.NoError(t, os.WriteFile(path, content, 0o600))
+
+		t.Setenv(MaxFileSizeEnvVar, strconv.Itoa(len(content)))
 		assert.False(t, manifestHasOriginAnnotation(path))
+		t.Setenv(MaxFileSizeEnvVar, strconv.Itoa(len(content)-1))
+		assert.True(t, manifestHasOriginAnnotation(path))
 	})
 
 	t.Run("regular file with origin annotation returns true", func(t *testing.T) {
@@ -1560,8 +1563,6 @@ func TestManifestHasOriginAnnotation_BoundedRead(t *testing.T) {
 }
 
 func TestIsPatchProvablySafe_BoundedRead(t *testing.T) {
-	t.Parallel()
-
 	tmpDir := t.TempDir()
 
 	t.Run("patch file pointing to directory returns false", func(t *testing.T) {
@@ -1573,14 +1574,16 @@ func TestIsPatchProvablySafe_BoundedRead(t *testing.T) {
 		assert.False(t, isPatchProvablySafe(tmpDir, patch))
 	})
 
-	t.Run("valid regular patch file succeeds", func(t *testing.T) {
-		t.Parallel()
+	t.Run("size limit for valid patch file", func(t *testing.T) {
 		patchPath := filepath.Join(tmpDir, "patch.yaml")
 		patchContent := "- op: replace\n  path: /spec/replicas\n  value: 3\n"
 		require.NoError(t, os.WriteFile(patchPath, []byte(patchContent), 0o600))
 
 		patch := types.Patch{Path: "patch.yaml"}
+		t.Setenv(MaxFileSizeEnvVar, strconv.Itoa(len(patchContent)))
 		assert.True(t, isPatchProvablySafe(tmpDir, patch))
+		t.Setenv(MaxFileSizeEnvVar, strconv.Itoa(len(patchContent)-1))
+		assert.False(t, isPatchProvablySafe(tmpDir, patch))
 	})
 }
 
