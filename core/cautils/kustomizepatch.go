@@ -469,7 +469,7 @@ func matchYamlHeader(yamlObj map[string]any, resource workloadinterface.IMetadat
 		if n, ok := meta["name"].(string); ok && n != "" && name != "" && n != name {
 			return false
 		}
-		if ns, ok := meta["namespace"].(string); ok && ns != "" && resource.GetNamespace() != "" && ns != resource.GetNamespace() {
+		if ns, ok := meta["namespace"].(string); ok && strings.TrimSpace(ns) != "" && resource.GetNamespace() != "" && strings.TrimSpace(ns) != resource.GetNamespace() {
 			return false
 		}
 	}

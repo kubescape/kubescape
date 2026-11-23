@@ -80,3 +80,26 @@ func TestApplyChanges_RejectsStaleResourceTargets(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyChanges_FixesPaddedNamespace(t *testing.T) {
+	const manifest = "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: web, namespace: \" prod \"}\nspec:\n  replicas: 1\n"
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := writeManifest(t, dir, "deploy.yaml", manifest)
+	loaded, _, err := cautils.LoadResourcesFromFiles(ctx, path, dir, nil)
+	require.NoError(t, err)
+	require.Len(t, loaded[path], 1)
+
+	resource := reporthandling.NewResource(loaded[path][0].GetObject())
+	resource.Source = &reporthandling.Source{Path: dir, RelativePath: "deploy.yaml", FileType: reporthandling.SourceTypeYaml}
+	results := []resourcesresults.Result{{
+		ResourceID:         resource.GetID(),
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{failedControl("C-1", "replicas", failedRuleWithFix("spec.replicas", "2"))},
+	}}
+	h := newHandlerForResources(dir, results, []reporthandling.Resource{*resource}, true)
+
+	count, errs := h.ApplyChanges(ctx, h.PrepareResourcesToFix(ctx))
+	require.Empty(t, errs)
+	require.Equal(t, 1, count)
+	require.Contains(t, fileContentOf(t, path), "replicas: 2")
+}

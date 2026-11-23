@@ -606,3 +606,15 @@ func TestTraceKustomizePatch_InvalidDocument(t *testing.T) {
 	src := reporthandling.Source{Path: dir, FileType: reporthandling.SourceTypeKustomizeDirectory, KustomizeDirectoryName: dir}
 	require.Empty(t, TraceKustomizePatch(newMockKustomizeWorkload("Deployment", "demo"), []string{"spec.replicas"}, src))
 }
+
+func TestMatchYamlHeader_PaddedPatchNamespace(t *testing.T) {
+	resource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "apps/v1", "kind": "Deployment",
+		"metadata": map[string]any{"name": "web", "namespace": "prod"},
+	})
+	header := func(ns string) map[string]any {
+		return map[string]any{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": map[string]any{"name": "web", "namespace": ns}}
+	}
+	assert.True(t, matchYamlHeader(header(" prod "), resource, "web"))
+	assert.False(t, matchYamlHeader(header("staging"), resource, "web"))
+}

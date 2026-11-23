@@ -1909,3 +1909,35 @@ func mustRel(t *testing.T, base, target string) string {
 	require.NoError(t, err)
 	return rel
 }
+
+func TestReadFile_TrimsPaddedNamespace(t *testing.T) {
+	yamlDoc := []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-padded
+  namespace: " prod "
+---
+apiVersion: v1
+kind: List
+items:
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: cm
+    namespace: "  prod"
+`)
+	jsonDoc := []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cm","namespace":"prod\t"}}`)
+
+	yamlObjs, err := ReadFile(yamlDoc, YAML_FILE_FORMAT)
+	require.NoError(t, err)
+	jsonObjs, err := ReadFile(jsonDoc, JSON_FILE_FORMAT)
+	require.NoError(t, err)
+
+	all := append(yamlObjs, jsonObjs...)
+	require.Len(t, all, 3)
+	for _, obj := range all {
+		assert.Equal(t, "prod", obj.GetNamespace())
+		assert.NotContains(t, obj.GetID(), " ")
+	}
+	assert.Equal(t, "apps/v1/prod/Deployment/web-padded", all[0].GetID())
+}
