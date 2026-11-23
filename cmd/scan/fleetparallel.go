@@ -168,7 +168,14 @@ func runFleetChild(ctx context.Context, kubeContext string, scanInfo *cautils.Sc
 	}
 	cluster, readErr := readChildCluster(resultPath, kubeContext)
 	if readErr != nil {
-		return failedOutcome(kubeContext, fmt.Errorf("the scan wrote no result (%v): %s", runErr, lastLines(logPath, 3)), time.Since(started))
+		tail := lastLines(logPath, 3)
+		if tail != "" {
+			tail = ": " + tail
+		}
+		if runErr != nil {
+			return failedOutcome(kubeContext, fmt.Errorf("the scan failed (%v) and result could not be read: %w%s", runErr, readErr, tail), time.Since(started))
+		}
+		return failedOutcome(kubeContext, fmt.Errorf("the scan wrote no readable result: %w%s", readErr, tail), time.Since(started))
 	}
 	outcome := fleetOutcome{cluster: cluster, scanned: cluster.Scanned(), attempts: cluster.Attempts}
 	// Only a fleet report or a child result reads the cluster's report, so without one it is not kept until every child is done.

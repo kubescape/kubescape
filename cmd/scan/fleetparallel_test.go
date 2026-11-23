@@ -292,3 +292,40 @@ func TestChildFailure_DirectoryRejected(t *testing.T) {
 	dir := t.TempDir()
 	assert.Equal(t, "the scan failed", childFailure(dir, "alpha"))
 }
+
+func TestRunFleetChild_ResultReadFailureWrapsReadError(t *testing.T) {
+	origFleetChildCommand := fleetChildCommand
+	t.Cleanup(func() { fleetChildCommand = origFleetChildCommand })
+
+	t.Run("child exits 0 but result file exceeds size limit wraps ErrFleetFileTooLarge", func(t *testing.T) {
+		t.Setenv(cautils.MaxFileSizeEnvVar, "10")
+		dir := t.TempDir()
+		base := filepath.Join(dir, "child")
+
+		fleetChildCommand = func(ctx context.Context, args []string) (*exec.Cmd, error) {
+			require.NoError(t, os.WriteFile(base+".json", []byte(`{"clusters":[{"context":"test-ctx"}]}`), 0o600))
+			return exec.Command("true"), nil
+		}
+
+		scanInfo := &cautils.ScanInfo{}
+		outcome := runFleetChild(context.Background(), "test-ctx", scanInfo, nil, base)
+		require.Error(t, outcome.err)
+		assert.True(t, errors.Is(outcome.err, ErrFleetFileTooLarge), "expected ErrFleetFileTooLarge, got: %v", outcome.err)
+		assert.NotContains(t, outcome.err.Error(), "(<nil>)")
+	})
+
+	t.Run("child exits non-zero and result file missing includes exit error and wraps read error", func(t *testing.T) {
+		dir := t.TempDir()
+		base := filepath.Join(dir, "child")
+
+		fleetChildCommand = func(ctx context.Context, args []string) (*exec.Cmd, error) {
+			return exec.Command("false"), nil
+		}
+
+		scanInfo := &cautils.ScanInfo{}
+		outcome := runFleetChild(context.Background(), "test-ctx", scanInfo, nil, base)
+		require.Error(t, outcome.err)
+		assert.Contains(t, outcome.err.Error(), "the scan failed")
+		assert.Contains(t, outcome.err.Error(), "result could not be read")
+	})
+}
