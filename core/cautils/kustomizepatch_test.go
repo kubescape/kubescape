@@ -442,6 +442,9 @@ func TestTraceKustomizePatch_RenderedOverlay(t *testing.T) {
 		name, config, patch, want string
 		replicas                  int64
 	}{
+		{"trailing JSON document", modern, changeMetadata + "---\n" + replace, "", 1},
+		{"target matches only after rename", affixes + "patches:\n- path: legacy.yaml\n  target: {kind: Deployment, name: renamed}\n- path: modern.yaml\n  target: {kind: Deployment, name: demo}\n", "- {op: replace, path: /metadata/name, value: renamed}\n", "", 1},
+		{"target matches only after namespace transform", affixes + "namespace: new\npatches:\n- path: modern.yaml\n  target: {kind: Deployment, name: demo, namespace: new}\n", replace, "", 1},
 		{"mixed patch families", modern + legacy, replace, "legacy.yaml", 3},
 		{"prefixed target", affixes + modern, replace, "modern.yaml", 2},
 		{"prefixed merge identity", affixes + "patchesStrategicMerge: [modern.yaml]\n", "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: demo}\nspec: {replicas: 2}\n", "modern.yaml", 2},

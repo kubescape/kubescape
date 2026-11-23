@@ -78,7 +78,9 @@ func TraceKustomizePatch(resource workloadinterface.IMetadata, paths []string, s
 	if len(kustomization.Replacements) != 0 || len(kustomization.Transformers) != 0 {
 		return ""
 	}
+	legacyLabels := len(kustomization.CommonLabels) != 0 //nolint:staticcheck // Legacy commonLabels still changes patch selection metadata.
 	metadataKnown := true
+	identityKnown := true
 	originalName := resource.GetName()
 	if kustomization.NamePrefix != "" || kustomization.NameSuffix != "" {
 		switch {
@@ -97,7 +99,7 @@ func TraceKustomizePatch(resource workloadinterface.IMetadata, paths []string, s
 	}
 	for i := len(allPatches) - 1; i >= 0; i-- {
 		patch := allPatches[i]
-		if i == beforeTransformers-1 && (len(kustomization.Labels) != 0 || len(kustomization.CommonLabels) != 0 || len(kustomization.CommonAnnotations) != 0 || len(kustomization.BuildMetadata) != 0) {
+		if i == beforeTransformers-1 && (len(kustomization.Labels) != 0 || legacyLabels || len(kustomization.CommonAnnotations) != 0 || len(kustomization.BuildMetadata) != 0) {
 			metadataKnown = false
 		}
 		data := []byte(patch.Patch)
@@ -120,7 +122,16 @@ func TraceKustomizePatch(resource workloadinterface.IMetadata, paths []string, s
 		}
 		matched := false
 		for _, doc := range docs {
-			if !isPatchDocumentProvablySafe(doc) {
+			if len(docs) > 1 {
+				// Kustomize reads JSON operations from the first document only.
+				// Only strategic-merge mappings can be traced across documents.
+				var mapping map[string]any
+				if err := yaml.Unmarshal(doc, &mapping); err != nil || mapping == nil {
+					return ""
+				}
+			}
+			if !isPatchDocumentProvablySafe(doc) || (patch.Options != nil && (patch.Options.AllowNameChange || patch.Options.AllowKindChange)) {
+				identityKnown = false
 				metadataKnown = false
 			}
 			match, err := patchMatchesPaths(doc, patch.Target, resource, originalName, cleanPaths)
@@ -134,7 +145,14 @@ func TraceKustomizePatch(resource workloadinterface.IMetadata, paths []string, s
 		}
 		selection := resource
 		target := patch.Target
-		if target != nil && (target.LabelSelector != "" || target.AnnotationSelector != "") && !metadataKnown {
+		if target == nil && !identityKnown {
+			return ""
+		}
+		if target != nil && target.Namespace != "" && i < beforeTransformers && kustomization.Namespace != "" {
+			// The rendered namespace may differ from the one used for selection.
+			return ""
+		}
+		if target != nil && (!identityKnown || (!metadataKnown && (target.LabelSelector != "" || target.AnnotationSelector != ""))) {
 			// A direct resource is exactly the input to the first overlay patch.
 			// For intermediate or composed resources we cannot reconstruct the
 			// selection metadata reliably from either end of the build.
