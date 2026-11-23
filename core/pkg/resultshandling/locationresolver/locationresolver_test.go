@@ -315,3 +315,123 @@ func newWorkloadResolverFor(t *testing.T, manifest string) *PathLocationResolver
 	require.NoError(t, err)
 	return resolver
 }
+
+func TestFindDocumentIndexAndRawDocument(t *testing.T) {
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  namespace: prod
+spec:
+  replicas: 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo
+  namespace: prod
+spec:
+  ports:
+  - port: 80
+`
+	path := filepath.Join(t.TempDir(), "multi.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(manifest), 0o600))
+
+	resolver, err := NewPathLocationResolver(path)
+	require.NoError(t, err)
+	assert.Equal(t, 2, resolver.DocumentCount())
+
+	// Exact match on Deployment demo
+	idx, ok := resolver.FindDocumentIndex("Deployment", "demo", "prod")
+	assert.True(t, ok)
+	assert.Equal(t, 0, idx)
+
+	// Exact match on Service demo
+	idx, ok = resolver.FindDocumentIndex("Service", "demo", "prod")
+	assert.True(t, ok)
+	assert.Equal(t, 1, idx)
+
+	// Non-matching kind
+	_, ok = resolver.FindDocumentIndex("ConfigMap", "demo", "prod")
+	assert.False(t, ok)
+
+	// Non-matching name
+	_, ok = resolver.FindDocumentIndex("Deployment", "other", "prod")
+	assert.False(t, ok)
+
+	// RawDocument on valid doc
+	raw, err := resolver.RawDocument(0)
+	require.NoError(t, err)
+	assert.Equal(t, "Deployment", raw["kind"])
+	spec, ok := raw["spec"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, 1, spec["replicas"])
+
+	// RawDocument out of range
+	_, err = resolver.RawDocument(5)
+	assert.Error(t, err)
+}
+
+func TestResolveDocumentLocation_LeadingCommentDocument(t *testing.T) {
+	for name, manifest := range map[string]string{
+		"leading non-workload document": `values: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  namespace: prod
+spec:
+  replicas: 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo
+  namespace: prod
+spec:
+  ports:
+  - port: 80
+`,
+		"preceding comment document between workloads": `apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: prod
+---
+# comment-only document
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  namespace: prod
+spec:
+  replicas: 1
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "manifest.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(manifest), 0o600))
+
+			resolver, err := NewPathLocationResolver(path, IndexedByWorkload(cautils.WorkloadDocuments))
+			require.NoError(t, err)
+
+			idx, ok := resolver.FindDocumentIndex("Deployment", "demo", "prod")
+			require.True(t, ok)
+			// Target is at document index 1 in the first case, and 2 in the second case.
+			// Because a document without a workload precedes it, document index != workload index.
+			require.Greater(t, idx, 0)
+
+			// ResolveDocumentLocation resolves directly by docIndex without remapping through workloadDocuments
+			loc, err := resolver.ResolveDocumentLocation("spec.replicas", idx)
+			require.NoError(t, err)
+			assert.Positive(t, loc.Line)
+
+			// ResolveLocation called with docIndex would misattribute or fail because docIndex != workload index.
+			// ResolveDocumentLocation must resolve the exact line of spec.replicas.
+			lines := strings.Split(manifest, "\n")
+			assert.Equal(t, "  replicas: 1", lines[loc.Line-1])
+		})
+	}
+}

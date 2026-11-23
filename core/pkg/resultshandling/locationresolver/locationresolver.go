@@ -211,6 +211,16 @@ func (l *PathLocationResolver) ResolveLocation(path string, nodeIndex int) (Loca
 	if nodeIndex < 0 || nodeIndex >= len(l.yamlNodes) {
 		return Location{}, fmt.Errorf("node index [%d] out of range [%d]", nodeIndex, len(l.yamlNodes))
 	}
+	return l.ResolveDocumentLocation(path, nodeIndex)
+}
+
+// ResolveDocumentLocation resolves path in the document at docIndex (its position
+// in yamlNodes, as returned by FindDocumentIndex) directly, without remapping through
+// workloadDocuments.
+func (l *PathLocationResolver) ResolveDocumentLocation(path string, docIndex int) (Location, error) {
+	if docIndex < 0 || docIndex >= len(l.yamlNodes) {
+		return Location{}, fmt.Errorf("document index [%d] out of range [%d]", docIndex, len(l.yamlNodes))
+	}
 
 	// A malformed path is rejected before any walking up. Walking up exists for
 	// a well-formed path whose field is absent; applied to a path that could
@@ -229,7 +239,7 @@ func (l *PathLocationResolver) ResolveLocation(path string, nodeIndex int) (Loca
 	for len(segments) > 0 {
 		yamlExpression := segmentsToYamlExpression(segments)
 
-		candidateNodes, err := l.yqlibEvaluator.EvaluateNodes(yamlExpression, l.yamlNodes[nodeIndex])
+		candidateNodes, err := l.yqlibEvaluator.EvaluateNodes(yamlExpression, l.yamlNodes[docIndex])
 		if err != nil {
 			return Location{}, fmt.Errorf("failed to evaluate yaml expression %q: %w", yamlExpression, err)
 		}
@@ -292,4 +302,54 @@ func FixPathToValidYamlExpression(fixPath string) string {
 		return ""
 	}
 	return segmentsToYamlExpression(segments)
+}
+
+// DocumentCount returns the number of YAML documents in the resolved file.
+func (l *PathLocationResolver) DocumentCount() int {
+	return len(l.yamlNodes)
+}
+
+// FindDocumentIndex returns the index of the document matching the given kind,
+// name, and optional namespace. It returns ok=true only when exactly one document
+// in the manifest matches. If zero or multiple documents match, it returns false.
+func (l *PathLocationResolver) FindDocumentIndex(kind, name, namespace string) (int, bool) {
+	if len(l.yamlNodes) == 0 || kind == "" || name == "" {
+		return 0, false
+	}
+	matched := -1
+	count := 0
+	for i, node := range l.yamlNodes {
+		var doc struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name      string `yaml:"name"`
+				Namespace string `yaml:"namespace"`
+			} `yaml:"metadata"`
+		}
+		if err := node.Decode(&doc); err != nil {
+			continue
+		}
+		if doc.Kind == kind && doc.Metadata.Name == name {
+			if namespace == "" || doc.Metadata.Namespace == "" || doc.Metadata.Namespace == namespace {
+				matched = i
+				count++
+			}
+		}
+	}
+	if count == 1 {
+		return matched, true
+	}
+	return 0, false
+}
+
+// RawDocument decodes and returns the document at docIndex as a map.
+func (l *PathLocationResolver) RawDocument(docIndex int) (map[string]any, error) {
+	if docIndex < 0 || docIndex >= len(l.yamlNodes) {
+		return nil, fmt.Errorf("document index [%d] out of range [%d]", docIndex, len(l.yamlNodes))
+	}
+	var doc map[string]any
+	if err := l.yamlNodes[docIndex].Decode(&doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
 }
