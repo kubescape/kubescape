@@ -2,9 +2,12 @@ package scan
 
 import (
 	"testing"
+	"time"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	contractv1alpha1 "github.com/kubescape/kubescape/v4/core/pkg/scancontract/v1alpha1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -237,4 +240,203 @@ func TestOmitUnenforcedComplianceGate(t *testing.T) {
 		}
 		assert.False(t, omitUnenforcedComplianceGate(metadata))
 	})
+}
+
+func TestOrdinaryCLIOverrides(t *testing.T) {
+	strPtr := func(s string) *string { return &s }
+	boolPtr := func(b bool) *bool { return &b }
+	strList := func(items ...string) *contractv1alpha1.StringList {
+		l := contractv1alpha1.StringList(items)
+		return &l
+	}
+	strSlicePtr := func(items ...string) *[]string {
+		return &items
+	}
+
+	fullContract := contractv1alpha1.Contract{
+		Policy: &contractv1alpha1.Policy{
+			ControlsVersion: strPtr("v1.0.0"),
+		},
+		Scope: &contractv1alpha1.Scope{
+			IncludeNamespaces: strList("kube-system"),
+			ExcludeNamespaces: strList("default"),
+		},
+		Evaluation: &contractv1alpha1.Evaluation{
+			ScanTimeout:    &contractv1alpha1.Duration{Duration: 5 * time.Minute},
+			ControlTimeout: &contractv1alpha1.Duration{Duration: 30 * time.Second},
+		},
+		Output: &contractv1alpha1.Output{
+			Formats:          strList("json"),
+			OmitRawResources: boolPtr(false),
+		},
+	}
+
+	fullScanInfo := &cautils.ScanInfo{
+		ControlsVersion:    "v2.0.0",
+		IncludeNamespaces:  "prod,staging",
+		ExcludedNamespaces: "kube-system,test",
+		ScanTimeout:        10 * time.Minute,
+		ControlTimeout:     1 * time.Minute,
+		Format:             "json,pdf",
+		OmitRawResources:   true,
+	}
+
+	newCmdWithFlags := func(changedFlags map[string]string) *cobra.Command {
+		cmd := &cobra.Command{Use: "scan"}
+		cmd.Flags().String("controls-version", "", "")
+		cmd.Flags().String("include-namespaces", "", "")
+		cmd.Flags().String("exclude-namespaces", "", "")
+		cmd.Flags().Duration("scan-timeout", 0, "")
+		cmd.Flags().Duration("control-timeout", 0, "")
+		cmd.Flags().String("format", "", "")
+		cmd.Flags().Bool("omit-raw-resources", false, "")
+		cmd.Flags().String("other-flag", "", "")
+
+		for k, v := range changedFlags {
+			if err := cmd.Flags().Set(k, v); err != nil {
+				t.Fatalf("failed to set flag %q: %v", k, err)
+			}
+		}
+		return cmd
+	}
+
+	allFlags := map[string]string{
+		"controls-version":   "v2.0.0",
+		"include-namespaces": "prod,staging",
+		"exclude-namespaces": "kube-system,test",
+		"scan-timeout":       "10m",
+		"control-timeout":    "1m",
+		"format":             "json,pdf",
+		"omit-raw-resources": "true",
+	}
+
+	tests := []struct {
+		name     string
+		cmd      *cobra.Command
+		contract contractv1alpha1.Contract
+		scanInfo *cautils.ScanInfo
+		want     *reporthandlingv2.ScanContractCLIOverrides
+	}{
+		{
+			name:     "flags changed on command and present in contract are recorded",
+			cmd:      newCmdWithFlags(allFlags),
+			contract: fullContract,
+			scanInfo: fullScanInfo,
+			want: &reporthandlingv2.ScanContractCLIOverrides{
+				Policy: &reporthandlingv2.ScanContractPolicyOverrides{
+					ControlsVersion: strPtr("v2.0.0"),
+				},
+				Scope: &reporthandlingv2.ScanContractScopeOverrides{
+					IncludeNamespaces: strSlicePtr("prod", "staging"),
+					ExcludeNamespaces: strSlicePtr("kube-system", "test"),
+				},
+				Evaluation: &reporthandlingv2.ScanContractEvaluationOverrides{
+					ScanTimeout:    strPtr("10m0s"),
+					ControlTimeout: strPtr("1m0s"),
+				},
+				Output: &reporthandlingv2.ScanContractOutputOverrides{
+					Formats:          strSlicePtr("json", "pdf"),
+					OmitRawResources: boolPtr(true),
+				},
+			},
+		},
+		{
+			name:     "flags changed but absent from contract are not recorded",
+			cmd:      newCmdWithFlags(allFlags),
+			contract: contractv1alpha1.Contract{},
+			scanInfo: fullScanInfo,
+			want:     nil,
+		},
+		{
+			name: "flags changed but section present with nil target field in contract is not recorded",
+			cmd:  newCmdWithFlags(allFlags),
+			contract: contractv1alpha1.Contract{
+				Policy:     &contractv1alpha1.Policy{},
+				Scope:      &contractv1alpha1.Scope{},
+				Evaluation: &contractv1alpha1.Evaluation{},
+				Output:     &contractv1alpha1.Output{},
+			},
+			scanInfo: fullScanInfo,
+			want:     nil,
+		},
+		{
+			name:     "flags present in contract but not changed on CLI are not recorded",
+			cmd:      newCmdWithFlags(nil),
+			contract: fullContract,
+			scanInfo: fullScanInfo,
+			want:     nil,
+		},
+		{
+			name:     "nil command returns nil",
+			cmd:      nil,
+			contract: fullContract,
+			scanInfo: fullScanInfo,
+			want:     nil,
+		},
+		{
+			name: "unrelated flag changed on CLI is not recorded",
+			cmd: newCmdWithFlags(map[string]string{
+				"other-flag": "some-value",
+			}),
+			contract: fullContract,
+			scanInfo: fullScanInfo,
+			want:     nil,
+		},
+		{
+			name: "selective overrides only records flags present in contract and changed on CLI",
+			cmd: newCmdWithFlags(map[string]string{
+				"controls-version": "v2.0.0",
+				"format":           "json,pdf",
+				"other-flag":       "custom",
+			}),
+			contract: contractv1alpha1.Contract{
+				Policy: &contractv1alpha1.Policy{
+					ControlsVersion: strPtr("v1.0.0"),
+				},
+				Scope: &contractv1alpha1.Scope{
+					IncludeNamespaces: strList("kube-system"),
+				},
+				Output: &contractv1alpha1.Output{
+					Formats: strList("yaml"),
+				},
+			},
+			scanInfo: fullScanInfo,
+			want: &reporthandlingv2.ScanContractCLIOverrides{
+				Policy: &reporthandlingv2.ScanContractPolicyOverrides{
+					ControlsVersion: strPtr("v2.0.0"),
+				},
+				Output: &reporthandlingv2.ScanContractOutputOverrides{
+					Formats: strSlicePtr("json", "pdf"),
+				},
+			},
+		},
+		{
+			name: "partial field overrides within sections",
+			cmd: newCmdWithFlags(map[string]string{
+				"include-namespaces": "prod,staging",
+				"control-timeout":    "1m",
+				"omit-raw-resources": "true",
+			}),
+			contract: fullContract,
+			scanInfo: fullScanInfo,
+			want: &reporthandlingv2.ScanContractCLIOverrides{
+				Scope: &reporthandlingv2.ScanContractScopeOverrides{
+					IncludeNamespaces: strSlicePtr("prod", "staging"),
+				},
+				Evaluation: &reporthandlingv2.ScanContractEvaluationOverrides{
+					ControlTimeout: strPtr("1m0s"),
+				},
+				Output: &reporthandlingv2.ScanContractOutputOverrides{
+					OmitRawResources: boolPtr(true),
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ordinaryCLIOverrides(tt.cmd, tt.contract, tt.scanInfo)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
