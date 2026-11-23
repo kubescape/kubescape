@@ -158,16 +158,25 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 		if err := ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
 			return err
 		}
+		scanInfo.FailThresholdSeverity = strings.ToLower(strings.TrimSpace(scanInfo.FailThresholdSeverity))
+	} else if commandFlagChanged(cmd, "severity-threshold") {
+		return ErrUnknownSeverity
 	}
 	if scanInfo.MinSeverity != "" {
 		if err := ValidateSeverity(scanInfo.MinSeverity); err != nil {
 			return err
 		}
+		scanInfo.MinSeverity = strings.ToLower(strings.TrimSpace(scanInfo.MinSeverity))
+	} else if commandFlagChanged(cmd, "min-severity") {
+		return ErrUnknownSeverity
 	}
 	if scanInfo.MaxSeverity != "" {
 		if err := ValidateSeverity(scanInfo.MaxSeverity); err != nil {
 			return err
 		}
+		scanInfo.MaxSeverity = strings.ToLower(strings.TrimSpace(scanInfo.MaxSeverity))
+	} else if commandFlagChanged(cmd, "max-severity") {
+		return ErrUnknownSeverity
 	}
 	if scanInfo.MinSeverity != "" && scanInfo.MaxSeverity != "" {
 		if err := ValidateSeverityRange(scanInfo.MinSeverity, scanInfo.MaxSeverity); err != nil {
