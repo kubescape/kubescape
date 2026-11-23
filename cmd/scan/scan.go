@@ -488,7 +488,7 @@ func validateCombinedImageScanFlags(scanInfo *cautils.ScanInfo) error {
 		Username:  scanInfo.RegistryUsername,
 		Password:  scanInfo.RegistryPassword,
 		Token:     scanInfo.RegistryToken,
-	})
+	}.Trimmed())
 }
 
 func applyRegistryCredentialsFromEnv(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {

@@ -24,6 +24,15 @@ type ImageCredentials struct {
 	Token     string
 }
 
+func (c ImageCredentials) Trimmed() ImageCredentials {
+	return ImageCredentials{
+		Authority: strings.TrimSpace(c.Authority),
+		Username:  strings.TrimSpace(c.Username),
+		Password:  strings.TrimSpace(c.Password),
+		Token:     strings.TrimSpace(c.Token),
+	}
+}
+
 // ValidateImageScanInfo validates the ScanInfo struct for image scanning commands
 func ValidateImageScanInfo(scanInfo *cautils.ScanInfo) error {
 	severity := scanInfo.FailThresholdSeverity

@@ -213,7 +213,7 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 				Username:  scanInfo.RegistryUsername,
 				Password:  scanInfo.RegistryPassword,
 				Token:     scanInfo.RegistryToken,
-			}
+			}.Trimmed()
 			if err := shared.ValidateImageCredentials(credentials); err != nil {
 				return err
 			}

@@ -368,6 +368,22 @@ func TestValidateRegistryCredentials_WhitespaceHandling(t *testing.T) {
 	}
 }
 
+func TestImageCredentials_Trimmed(t *testing.T) {
+	creds := ImageCredentials{
+		Authority: "  registry.example.com  ",
+		Username:  "  user  ",
+		Password:  "  pass  ",
+		Token:     "  token  ",
+	}
+	trimmed := creds.Trimmed()
+	assert.Equal(t, ImageCredentials{
+		Authority: "registry.example.com",
+		Username:  "user",
+		Password:  "pass",
+		Token:     "token",
+	}, trimmed)
+}
+
 // TestValidateImageScanAnonymization guards a silent data leak: --hide and
 // --encrypt are registered on the parent scan command, so `scan image`
 // inherits them, but the anonymizer only ever runs over a posture session.

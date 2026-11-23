@@ -1807,6 +1807,19 @@ func TestRegistryCredentialsFromScanInfo(t *testing.T) {
 		Token:     "token",
 	}, creds)
 	assert.Equal(t, imagescan.RegistryCredentials{}, registryCredentialsFromScanInfo(nil))
+
+	scanInfoWhitespace := &cautils.ScanInfo{
+		RegistryAuthority: "  registry.example.com  ",
+		RegistryUsername:  "  user  ",
+		RegistryPassword:  "  pass  ",
+		RegistryToken:     "  token  ",
+	}
+	assert.Equal(t, imagescan.RegistryCredentials{
+		Authority: "registry.example.com",
+		Username:  "user",
+		Password:  "pass",
+		Token:     "token",
+	}, registryCredentialsFromScanInfo(scanInfoWhitespace))
 }
 
 func TestScanSingleImageForwardsRegistryCredentials(t *testing.T) {
