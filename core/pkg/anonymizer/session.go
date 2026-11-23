@@ -813,7 +813,12 @@ func transformNamespaceSummaries(summaries cautils.NamespaceSummaries, transform
 		if summaries[i].Namespace == cautils.ClusterScopedNamespace {
 			continue
 		}
-		namespace, err := transformValue(transformer, "ns", summaries[i].Namespace)
+		trimmed := strings.TrimSpace(summaries[i].Namespace)
+		if trimmed == "" {
+			summaries[i].Namespace = cautils.ClusterScopedNamespace
+			continue
+		}
+		namespace, err := transformValue(transformer, "ns", trimmed)
 		if err != nil {
 			return err
 		}
@@ -1089,13 +1094,18 @@ func transformResourceMetadata(
 		resource.SetName(name)
 	}
 
-	if namespace := resource.GetNamespace(); namespace != "" {
-		namespace, err = transformValue(transformer, "ns", namespace)
-		if err != nil {
-			return err
-		}
+	if rawNamespace := resource.GetNamespace(); rawNamespace != "" {
+		trimmedNamespace := strings.TrimSpace(rawNamespace)
+		if trimmedNamespace == "" {
+			resource.SetNamespace("")
+		} else {
+			namespace, err := transformValue(transformer, "ns", trimmedNamespace)
+			if err != nil {
+				return err
+			}
 
-		resource.SetNamespace(namespace)
+			resource.SetNamespace(namespace)
+		}
 	}
 
 	return nil
