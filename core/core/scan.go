@@ -911,6 +911,11 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 	if scanInfo == nil {
 		return nil, errors.New("uninitialized scan parameters")
 	}
+	if scanInfo.ScanImages {
+		if err := registryCredentialsFromScanInfo(scanInfo).ValidateWorkloadAuthority(); err != nil {
+			return nil, err
+		}
+	}
 
 	var (
 		interfaces             componentInterfaces

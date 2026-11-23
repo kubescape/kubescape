@@ -12,7 +12,7 @@ var (
 	ErrRegistryUsernamePassword = errors.New("registry username and password must be provided together")
 	ErrRegistryAuthConflict     = errors.New("registry token cannot be used together with registry username/password")
 	ErrRegistryAuthorityNoAuth  = errors.New("registry authority requires registry credentials")
-	ErrRegistryAuthorityMissing = errors.New("registry credentials for --scan-images require registry authority")
+	ErrRegistryAuthorityMissing = imagescan.ErrRegistryAuthorityMissing
 
 	ErrImageScanAnonymization = errors.New("--hide and --encrypt are not supported for image scans: an image report is the Anchore scan document and its SBOM, whose package identity and relationships are keyed by content-derived IDs that anonymization cannot rewrite. To get anonymized image findings, run a posture scan with --scan-images, where image references are anonymized and no SBOM is emitted")
 )
@@ -82,10 +82,7 @@ func ValidateWorkloadImageCredentials(credentials ImageCredentials) error {
 	if err := ValidateImageCredentials(credentials); err != nil {
 		return err
 	}
-	if strings.TrimSpace(credentials.Authority) == "" && hasRegistryAuthenticator(credentials.Username, credentials.Password, credentials.Token) {
-		return ErrRegistryAuthorityMissing
-	}
-	return nil
+	return imagescan.RegistryCredentials(credentials).ValidateWorkloadAuthority()
 }
 
 func ValidateRegistryCredentials(username, password, token, authority string) error {
@@ -112,11 +109,4 @@ func ValidateRegistryCredentials(username, password, token, authority string) er
 	}
 
 	return nil
-}
-
-func hasRegistryAuthenticator(username, password, token string) bool {
-	username = strings.TrimSpace(username)
-	password = strings.TrimSpace(password)
-	token = strings.TrimSpace(token)
-	return token != "" || (username != "" && password != "")
 }
