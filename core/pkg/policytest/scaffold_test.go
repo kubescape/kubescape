@@ -154,6 +154,35 @@ func TestScaffold_RejectsUnsupportedKind(t *testing.T) {
 	assert.NoDirExists(t, dir, "nothing should be written when the kind is rejected")
 }
 
+func TestScaffold_AcceptsNormalizedKind(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantKind string
+	}{
+		{name: "lowercase deployment", input: "deployment", wantKind: "Deployment"},
+		{name: "padded lowercase pod", input: "  pod  ", wantKind: "Pod"},
+		{name: "uppercase statefulset", input: "STATEFULSET", wantKind: "StatefulSet"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := scaffoldRule(t, "check-"+strings.ToLower(tt.wantKind), ScaffoldOptions{Kind: tt.input})
+			content, err := os.ReadFile(filepath.Join(dir, ruledir.MetadataFileName))
+			require.NoError(t, err)
+
+			var metadata struct {
+				Match []struct {
+					Resources []string `json:"resources"`
+				} `json:"match"`
+			}
+			require.NoError(t, json.Unmarshal(content, &metadata))
+			require.NotEmpty(t, metadata.Match)
+			assert.Contains(t, metadata.Match[0].Resources, tt.wantKind)
+		})
+	}
+}
+
 func TestScaffold_RefusesExistingRuleWithoutForce(t *testing.T) {
 	dir := scaffoldRule(t, "already-here", ScaffoldOptions{})
 
