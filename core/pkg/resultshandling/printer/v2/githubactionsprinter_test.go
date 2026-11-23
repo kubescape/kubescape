@@ -1036,6 +1036,65 @@ func TestGitHubActionsActionPrint_NilWriterReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "output writer is nil")
 }
 
+func TestGitHubActionsActionPrint_MissingReportValidationPrecedence(t *testing.T) {
+	ctx := context.Background()
+	gp := NewGitHubActionsPrinter()
+	require.Nil(t, gp.writer)
+
+	// Nil session returns input-validation error; verifies input error takes precedence over writer error
+	err := gp.ActionPrint(ctx, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "only supported for configuration scanning")
+	assert.NotContains(t, err.Error(), "output writer is nil")
+
+	// Nil report in session returns input-validation error; verifies input error takes precedence over writer error
+	sessionWithNilReport := &cautils.OPASessionObj{Report: nil}
+	err = gp.ActionPrint(ctx, sessionWithNilReport, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "only supported for configuration scanning")
+	assert.NotContains(t, err.Error(), "output writer is nil")
+
+	// Empty image data when no valid report is provided returns input-validation error
+	err = gp.ActionPrint(ctx, nil, []cautils.ImageScanData{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "only supported for configuration scanning")
+
+	err = gp.ActionPrint(ctx, sessionWithNilReport, []cautils.ImageScanData{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "only supported for configuration scanning")
+}
+
+func TestGitHubActionsActionPrint_PreservesOutputFileOnInvalidInput(t *testing.T) {
+	tempDir := t.TempDir()
+	filePath := filepath.Join(tempDir, "existing_output.txt")
+	const originalContent = "KNOWN_EXISTING_CONTENT_MUST_NOT_BE_TRUNCATED"
+	require.NoError(t, os.WriteFile(filePath, []byte(originalContent), 0o600))
+
+	gp := NewGitHubActionsPrinter()
+	require.NoError(t, gp.SetWriter(context.Background(), filePath))
+	t.Cleanup(func() { _ = gp.CloseWriter() })
+
+	// ActionPrint with nil report must return input-validation error
+	sessionWithNilReport := &cautils.OPASessionObj{Report: nil}
+	err := gp.ActionPrint(context.Background(), sessionWithNilReport, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "only supported for configuration scanning")
+
+	// File content must remain completely unchanged
+	contents, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	assert.Equal(t, originalContent, string(contents), "output file must not be truncated when input validation fails")
+
+	// Also verify with nil session
+	err = gp.ActionPrint(context.Background(), nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "only supported for configuration scanning")
+
+	contents, err = os.ReadFile(filePath)
+	require.NoError(t, err)
+	assert.Equal(t, originalContent, string(contents), "output file must not be truncated when session is nil")
+}
+
 func TestGitHubActions_NilReceiverSafety(t *testing.T) {
 	var gp *GitHubActionsPrinter
 

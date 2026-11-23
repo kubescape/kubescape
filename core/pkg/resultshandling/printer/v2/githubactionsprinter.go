@@ -91,9 +91,6 @@ func (gp *GitHubActionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *
 	if gp == nil {
 		return fmt.Errorf("failed to write github-actions results: printer is nil")
 	}
-	if err := printer.PrepareOutput(gp.writer); err != nil {
-		return err
-	}
 	if opaSessionObj == nil || opaSessionObj.Report == nil {
 		return fmt.Errorf("github-actions output is only supported for configuration scanning: image findings have no manifest location to annotate")
 	}
@@ -102,6 +99,9 @@ func (gp *GitHubActionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *
 	}
 	if gp.writer == nil {
 		return fmt.Errorf("failed to write github-actions results: output writer is nil")
+	}
+	if err := printer.PrepareOutput(gp.writer); err != nil {
+		return err
 	}
 
 	annotations, belowThreshold := gp.collectAnnotations(ctx, opaSessionObj)
