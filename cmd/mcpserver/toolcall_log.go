@@ -45,19 +45,20 @@ const (
 // knownToolErrorCodes bounds the error_code value to the codes mcperror.go
 // defines, so an arbitrary string from a tool can never reach a log line.
 var knownToolErrorCodes = map[ErrorCode]struct{}{
-	ErrCodeMalformedIdentifier: {},
-	ErrCodeResourceNotFound:    {},
-	ErrCodeAmbiguousResource:   {},
-	ErrCodeRBACDenied:          {},
-	ErrCodeInvalidArgument:     {},
-	ErrCodeScanFailed:          {},
-	ErrCodeK8sClientError:      {},
-	ErrCodeMarshalError:        {},
-	ErrCodeTimeout:             {},
-	ErrCodeResourceHasParent:   {},
-	ErrCodeNotWorkload:         {},
-	ErrCodeSecretScanDenied:    {},
-	ErrCodeUnsupportedResource: {},
+	ErrCodeMalformedIdentifier:    {},
+	ErrCodeResourceNotFound:       {},
+	ErrCodeAmbiguousResource:      {},
+	ErrCodeRBACDenied:             {},
+	ErrCodeInvalidArgument:        {},
+	ErrCodeScanFailed:             {},
+	ErrCodeK8sClientError:         {},
+	ErrCodeMarshalError:           {},
+	ErrCodeTimeout:                {},
+	ErrCodeResourceHasParent:      {},
+	ErrCodeNotWorkload:            {},
+	ErrCodeSecretScanDenied:       {},
+	ErrCodeUnsupportedResource:    {},
+	ErrCodeScanResultsUnavailable: {},
 }
 
 // toolCallRecord is the metadata recorded for one tools/call. It deliberately

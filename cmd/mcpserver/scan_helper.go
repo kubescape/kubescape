@@ -45,6 +45,10 @@ type scanResponse struct {
 	FailedResources      []interface{}       `json:"failed_resources"`
 	Warning              string              `json:"warning,omitempty"`
 	TargetResource       *TargetResourceInfo `json:"target_resource,omitempty"`
+	ScanID               string              `json:"scan_id,omitempty"`
+	NextOffset           *int                `json:"next_offset,omitempty"`
+	ExpiresAt            *time.Time          `json:"expires_at,omitempty"`
+	PaginationWarning    string              `json:"pagination_warning,omitempty"`
 }
 
 // scanRequest carries the parameters shared by every MCP scan entry point.
@@ -225,7 +229,11 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, req scanRequest)
 		}
 	}
 
-	response := buildScanResponse(summary, scanData.ResourcesResult, complianceScore, frameworkName, degraded, notEvaluated, totalControls)
+	limit := maxFailedResources
+	if full, _ := ctx.Value(fullScanResultsKey{}).(bool); full {
+		limit = len(scanData.ResourcesResult)
+	}
+	response := buildScanResponseWithLimit(summary, scanData.ResourcesResult, complianceScore, frameworkName, degraded, notEvaluated, totalControls, limit)
 	if req.namespaceDefaulted && req.scanObject != nil {
 		response.Warning = "Workload namespace was omitted and defaulted to 'default'. If your workload is in another namespace, specify 'namespace' explicitly or pass '*' to search cluster-wide."
 		response.TargetResource = &TargetResourceInfo{
@@ -316,6 +324,10 @@ func resourceMaxSeverityRank(summary *reportsummary.SummaryDetails, result *reso
 }
 
 func buildScanResponse(summary *reportsummary.SummaryDetails, results map[string]resourcesresults.Result, complianceScore *float32, frameworkName string, degraded bool, notEvaluated int, totalControls int) scanResponse {
+	return buildScanResponseWithLimit(summary, results, complianceScore, frameworkName, degraded, notEvaluated, totalControls, maxFailedResources)
+}
+
+func buildScanResponseWithLimit(summary *reportsummary.SummaryDetails, results map[string]resourcesresults.Result, complianceScore *float32, frameworkName string, degraded bool, notEvaluated int, totalControls, limit int) scanResponse {
 	type rankedResource struct {
 		key  string
 		rank int
@@ -339,8 +351,8 @@ func buildScanResponse(summary *reportsummary.SummaryDetails, results map[string
 
 	totalFailed := len(failed)
 	returnedCount := totalFailed
-	if returnedCount > maxFailedResources {
-		returnedCount = maxFailedResources
+	if returnedCount > limit {
+		returnedCount = limit
 	}
 
 	failedResources := make([]interface{}, 0, returnedCount)
@@ -356,7 +368,7 @@ func buildScanResponse(summary *reportsummary.SummaryDetails, results map[string
 		TotalControls:        totalControls,
 		TotalFailed:          totalFailed,
 		ReturnedFailed:       len(failedResources),
-		Truncated:            totalFailed > maxFailedResources,
+		Truncated:            totalFailed > limit,
 		FailedResources:      failedResources,
 	}
 }

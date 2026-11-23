@@ -10,7 +10,8 @@ import (
 type ErrorCode string
 
 const (
-	ErrCodeMalformedIdentifier ErrorCode = "MALFORMED_IDENTIFIER"
+	ErrCodeScanResultsUnavailable ErrorCode = "SCAN_RESULTS_UNAVAILABLE"
+	ErrCodeMalformedIdentifier    ErrorCode = "MALFORMED_IDENTIFIER"
 	// ErrCodeResourceNotFound indicates the requested target resource could not be found
 	// in the cluster. This applies both during single-resource scan resolution
 	// (via classifyScanError) and admission policy impact lookup (when the target object
