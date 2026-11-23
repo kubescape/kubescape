@@ -77,10 +77,18 @@ func CreateOperatorCommands(ctx context.Context, dyn dynamic.Interface, ns strin
 // WaitForOperatorCommands polls the named OperatorCommands until all report status.completed. A command
 // reporting status.error fails the wait immediately.
 func WaitForOperatorCommands(ctx context.Context, dyn dynamic.Interface, ns string, names []string, timeout time.Duration) error {
+	_, err := WaitForOperatorCommandsWithPayloads(ctx, dyn, ns, names, timeout)
+	return err
+}
+
+// WaitForOperatorCommandsWithPayloads polls the named OperatorCommands until all report status.completed,
+// returning a map of command name to completed status payload (decoded string).
+func WaitForOperatorCommandsWithPayloads(ctx context.Context, dyn dynamic.Interface, ns string, names []string, timeout time.Duration) (map[string]string, error) {
 	started := map[string]bool{}
 	// unread holds, for a command whose last read failed with a transient error,
 	// that error: the wait cannot say what happened to it.
 	unread := map[string]error{}
+	payloads := make(map[string]string, len(names))
 	pending := make(map[string]struct{}, len(names))
 	for _, n := range names {
 		pending[n] = struct{}{}
@@ -114,15 +122,23 @@ func WaitForOperatorCommands(ctx context.Context, dyn dynamic.Interface, ns stri
 			}
 			if done, _, _ := unstructured.NestedBool(obj.Object, "status", "completed"); done {
 				delete(pending, name)
+				if payloadStr, found, _ := unstructured.NestedString(obj.Object, "status", "payload"); found && payloadStr != "" {
+					decoded, err := base64.StdEncoding.DecodeString(payloadStr)
+					if err == nil {
+						payloads[name] = string(decoded)
+					} else {
+						payloads[name] = payloadStr
+					}
+				}
 			}
 		}
 		return len(pending) == 0, nil
 	})
 	if err == nil {
-		return nil
+		return payloads, nil
 	}
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
 	if wait.Interrupted(err) {
 		var stillPending, startedNames []string
@@ -145,15 +161,15 @@ func WaitForOperatorCommands(ctx context.Context, dyn dynamic.Interface, ns stri
 			msg = fmt.Sprintf("%s; last error reading %s", msg, strings.Join(unreadErrs, "; "))
 		}
 		if len(startedNames) > 0 {
-			return fmt.Errorf("%s; started: %s", msg, strings.Join(startedNames, ", "))
+			return nil, fmt.Errorf("%s; started: %s", msg, strings.Join(startedNames, ", "))
 		}
 		if len(unreadErrs) > 0 {
 			// Their status could not be read, so whether they started is not known.
-			return errors.New(msg)
+			return nil, errors.New(msg)
 		}
-		return fmt.Errorf("%s; none of them started: the operator may be down or too old to execute OperatorAPI commands; check the operator pod in namespace %s", msg, ns)
+		return nil, fmt.Errorf("%s; none of them started: the operator may be down or too old to execute OperatorAPI commands; check the operator pod in namespace %s", msg, ns)
 	}
-	return err
+	return nil, err
 }
 
 // operatorCommandLabel renders "<CommandName> (<object name>)", reading the command name from spec.body.
