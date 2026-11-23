@@ -230,6 +230,9 @@ func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
 }
 
 func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if pp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	if outputFile == os.Stdout.Name() {
 		pp.writer = printer.GetWriter(ctx, "")
 		pp.SetMainPrinter()
