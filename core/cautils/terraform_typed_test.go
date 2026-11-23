@@ -2064,3 +2064,188 @@ resource "kubernetes_endpoint_slice_v1" "eps_v1" {
 	require.Len(t, epsV1Ports, 1)
 	assert.Equal(t, json.Number("443"), epsV1Ports[0].(map[string]interface{})["port"])
 }
+
+func TestExtractTypedResourcesUnversionedHPAAPIVersion(t *testing.T) {
+	tests := []struct {
+		name       string
+		spec       string
+		apiVersion string
+	}{
+		{
+			name: "no metric or behavior stays on autoscaling/v1",
+			spec: `
+    max_replicas                      = 10
+    target_cpu_utilization_percentage = 80`,
+			apiVersion: "autoscaling/v1",
+		},
+		{
+			name: "metric block uses autoscaling/v2beta2",
+			spec: `
+    max_replicas = 10
+    metric {
+      type = "Resource"
+      resource {
+        name = "cpu"
+        target {
+          type                = "Utilization"
+          average_utilization = 60
+        }
+      }
+    }`,
+			apiVersion: "autoscaling/v2beta2",
+		},
+		{
+			name: "behavior block alone uses autoscaling/v2beta2",
+			spec: `
+    max_replicas = 10
+    behavior {
+      scale_down {
+        stabilization_window_seconds = 300
+      }
+    }`,
+			apiVersion: "autoscaling/v2beta2",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := `
+resource "kubernetes_horizontal_pod_autoscaler" "hpa" {
+  spec {` + tt.spec + `
+    scale_target_ref {
+      kind = "Deployment"
+      name = "web"
+    }
+  }
+}
+`
+			manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+			require.Empty(t, errs)
+			require.Len(t, manifests, 1)
+			assert.Equal(t, tt.apiVersion, manifests[0]["apiVersion"])
+			assert.Equal(t, "HorizontalPodAutoscaler", manifests[0]["kind"])
+		})
+	}
+}
+
+func TestExtractTypedResourcesRBDAttributeNames(t *testing.T) {
+	src := `
+resource "kubernetes_persistent_volume" "pv_rbd" {
+  spec {
+    capacity = {
+      storage = "10Gi"
+    }
+    access_modes = ["ReadWriteOnce"]
+    persistent_volume_source {
+      rbd {
+        ceph_monitors = ["10.0.0.1:6789"]
+        rbd_image     = "data"
+        rbd_pool      = "kube"
+        rados_user    = "kube-user"
+        fs_type       = "ext4"
+        keyring       = "/etc/ceph/keyring"
+        read_only     = true
+      }
+    }
+  }
+}
+
+resource "kubernetes_pod" "rbd_pod" {
+  spec {
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+    volume {
+      name = "data"
+      rbd {
+        ceph_monitors = ["10.0.0.1:6789"]
+        rbd_image     = "data"
+        rbd_pool      = "kube"
+        rados_user    = "kube-user"
+      }
+    }
+  }
+}
+`
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+	require.Empty(t, errs)
+	require.Len(t, manifests, 2)
+
+	pvRBD := manifests[0]["spec"].(map[string]interface{})["rbd"].(map[string]interface{})
+	assert.Equal(t, map[string]interface{}{
+		"monitors": []interface{}{"10.0.0.1:6789"},
+		"image":    "data",
+		"pool":     "kube",
+		"user":     "kube-user",
+		"fsType":   "ext4",
+		"keyring":  "/etc/ceph/keyring",
+		"readOnly": true,
+	}, pvRBD)
+
+	volumes := manifests[1]["spec"].(map[string]interface{})["volumes"].([]interface{})
+	require.Len(t, volumes, 1)
+	podRBD := volumes[0].(map[string]interface{})["rbd"].(map[string]interface{})
+	assert.Equal(t, map[string]interface{}{
+		"monitors": []interface{}{"10.0.0.1:6789"},
+		"image":    "data",
+		"pool":     "kube",
+		"user":     "kube-user",
+	}, podRBD)
+}
+
+func TestExtractTypedResourcesPersistentVolumeClaimRefNamespace(t *testing.T) {
+	tests := []struct {
+		name      string
+		resource  string
+		claimRef  string
+		namespace string
+	}{
+		{
+			name:      "unset namespace defaults to default",
+			resource:  "kubernetes_persistent_volume",
+			claimRef:  `name = "data-claim"`,
+			namespace: "default",
+		},
+		{
+			name:      "unset namespace defaults to default on the v1 resource",
+			resource:  "kubernetes_persistent_volume_v1",
+			claimRef:  `name = "data-claim"`,
+			namespace: "default",
+		},
+		{
+			name:     "explicit namespace is kept",
+			resource: "kubernetes_persistent_volume",
+			claimRef: `name      = "data-claim"
+        namespace = "apps"`,
+			namespace: "apps",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := `
+resource "` + tt.resource + `" "pv" {
+  spec {
+    capacity = {
+      storage = "10Gi"
+    }
+    access_modes = ["ReadWriteOnce"]
+    claim_ref {
+        ` + tt.claimRef + `
+    }
+    persistent_volume_source {
+      host_path {
+        path = "/data"
+      }
+    }
+  }
+}
+`
+			manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+			require.Empty(t, errs)
+			require.Len(t, manifests, 1)
+			claimRef := manifests[0]["spec"].(map[string]interface{})["claimRef"].(map[string]interface{})
+			assert.Equal(t, "data-claim", claimRef["name"])
+			assert.Equal(t, tt.namespace, claimRef["namespace"])
+		})
+	}
+}
