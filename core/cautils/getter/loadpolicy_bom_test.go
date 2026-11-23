@@ -23,7 +23,7 @@ func withBOM(t *testing.T, name string) (plain, bom string) {
 	require.NoError(t, err)
 
 	bom = filepath.Join(t.TempDir(), name)
-	require.NoError(t, os.WriteFile(bom, append(append([]byte{}, utf8BOM...), contents...), 0o600))
+	require.NoError(t, os.WriteFile(bom, append(append([]byte{}, utf8BOM...), contents...), 0o600)) //nolint:gosec // G703: bom is in the test's own temp dir, under a testdata fixture name
 	return plain, bom
 }
 
