@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/kustomize/api/konfig"
 	"sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/kustomize/kyaml/resid"
 )
@@ -78,6 +80,21 @@ func TraceKustomizePatch(resource workloadinterface.IMetadata, paths []string, s
 	if len(kustomization.Replacements) != 0 || len(kustomization.Transformers) != 0 {
 		return ""
 	}
+	// Patches also select by the name and namespace a nested base or component
+	// gave the resource first, which this directory alone cannot reveal.
+	nestedInput := len(kustomization.Components) != 0
+	inputs := append(slices.Clone(kustomization.Resources), kustomization.Bases...) //nolint:staticcheck // Legacy bases are still nested inputs.
+	for _, entry := range inputs {
+		path, err := pathcontainment.ResolveContainedPath(source.KustomizeDirectoryName, entry)
+		if err != nil {
+			nestedInput = true
+			continue
+		}
+		if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
+			nestedInput = true
+		}
+	}
+	hiddenOrigin := nestedInput
 	legacyLabels := len(kustomization.CommonLabels) != 0 //nolint:staticcheck // Legacy commonLabels still changes patch selection metadata.
 	metadataKnown := true
 	identityKnown := true
@@ -97,30 +114,43 @@ func TraceKustomizePatch(resource workloadinterface.IMetadata, paths []string, s
 			}
 		}
 	}
+	orgName := originalName
+	var org workloadinterface.IMetadata
+	if hiddenOrigin {
+		if org = recordedOrigin(source, resource, originalName); org != nil {
+			// The recorded file gives the first name and the rendered one the
+			// last. A base chain that renames twice keeps a middle name that
+			// only merge patches select, and that case is still not traced.
+			hiddenOrigin = false
+			orgName = org.GetName()
+		}
+	}
+	// The replica transformer runs after every patch and selects by any name
+	// the resource has had. An entry that may name it decides the count.
+	// Names a nested base gave it between its origin and this overlay are
+	// never recorded, so a nested input only rules entries out by count.
+	if slices.ContainsFunc(cleanPaths, func(p string) bool { return pathMatches(p, "spec.replicas") }) {
+		spec, _ := resource.GetObject()["spec"].(map[string]any)
+		names := []string{orgName, originalName, kustomization.NamePrefix + originalName, resource.GetName()}
+		for _, r := range kustomization.Replicas {
+			if fmt.Sprint(spec["replicas"]) != strconv.FormatInt(r.Count, 10) {
+				continue // this entry did not set the rendered count
+			}
+			if nestedInput || slices.Contains(names, r.Name) || patchesMayRename(source.KustomizeDirectoryName, kustFile, allPatches) {
+				return ""
+			}
+		}
+	}
 	for i := len(allPatches) - 1; i >= 0; i-- {
 		patch := allPatches[i]
-		if i == beforeTransformers-1 && (len(kustomization.Labels) != 0 || legacyLabels || len(kustomization.CommonAnnotations) != 0 || len(kustomization.BuildMetadata) != 0) {
+		if i == beforeTransformers-1 && (len(kustomization.Labels) != 0 || legacyLabels || len(kustomization.CommonAnnotations) != 0) {
 			metadataKnown = false
 		}
-		data := []byte(patch.Patch)
-		path := kustFile
-		if patch.Path != "" {
-			path, err = pathcontainment.ResolveContainedPath(source.KustomizeDirectoryName, filepath.FromSlash(patch.Path))
-			if err != nil {
-				return ""
-			}
-			data, err = readKustomizationFile(path)
-			path = filepath.Join(source.KustomizeDirectoryName, filepath.FromSlash(patch.Path))
-			if err != nil {
-				return ""
-			}
-		}
-
-		docs, err := splitYAMLDocuments(data)
+		path, docs, err := patchDocuments(source.KustomizeDirectoryName, kustFile, patch)
 		if err != nil {
 			return ""
 		}
-		matched := false
+		matched, maybe := false, false
 		for _, doc := range docs {
 			if len(docs) > 1 {
 				// Kustomize reads JSON operations from the first document only.
@@ -130,7 +160,7 @@ func TraceKustomizePatch(resource workloadinterface.IMetadata, paths []string, s
 					return ""
 				}
 			}
-			if !isPatchDocumentProvablySafe(doc) || (patch.Options != nil && (patch.Options.AllowNameChange || patch.Options.AllowKindChange)) {
+			if patchMayChangeIdentity(patch, doc) {
 				identityKnown = false
 				metadataKnown = false
 			}
@@ -138,9 +168,21 @@ func TraceKustomizePatch(resource workloadinterface.IMetadata, paths []string, s
 			if err != nil {
 				return ""
 			}
+			if !match && patch.Target == nil && orgName != originalName {
+				// Merge patches select by any name the resource has had.
+				match, _ = patchMatchesPaths(doc, nil, resource, orgName, cleanPaths)
+			}
+			if !match && hiddenOrigin && patch.Target == nil {
+				// It may name an original identity we cannot see.
+				anyName, _ := patchMatchesPaths(doc, nil, resource, "", cleanPaths)
+				maybe = maybe || anyName
+			}
 			matched = matched || match
 		}
 		if !matched {
+			if maybe {
+				return ""
+			}
 			continue
 		}
 		selection := resource
@@ -164,12 +206,133 @@ func TraceKustomizePatch(resource workloadinterface.IMetadata, paths []string, s
 				return ""
 			}
 		}
+		if target != nil && len(kustomization.BuildMetadata) != 0 && selectsBuildMetadata(target) {
+			return ""
+		}
+		if target != nil && target.Namespace != "" && org != nil {
+			// Kustomize also accepts the namespace the resource started with.
+			if sel, err := types.NewSelectorRegex(target); err == nil && sel.MatchNamespace(kustomizeID(org, orgName).EffectiveNamespace()) {
+				original := *target
+				original.Namespace = ""
+				target = &original
+			}
+		}
 		if matchKustomizeTarget(target, selection, originalName) ||
+			(target != nil && orgName != originalName && matchKustomizeTarget(target, selection, orgName)) ||
 			(i >= beforeTransformers && matchKustomizeTarget(target, selection, resource.GetName())) {
 			return formatRelativePatchPath(source.Path, path)
 		}
+		if hiddenOrigin && target != nil {
+			anyIdentity := *target
+			anyIdentity.Name, anyIdentity.Namespace = "", ""
+			if matchKustomizeTarget(&anyIdentity, selection, originalName) {
+				return ""
+			}
+		}
 	}
 	return ""
+}
+
+// patchDocuments loads the YAML documents of a patch and the path to report
+// for it: its own file, or the kustomization that inlines it.
+func patchDocuments(dir, kustFile string, patch types.Patch) (string, [][]byte, error) {
+	data, path := []byte(patch.Patch), kustFile
+	if patch.Path != "" {
+		resolved, err := pathcontainment.ResolveContainedPath(dir, filepath.FromSlash(patch.Path))
+		if err != nil {
+			return "", nil, err
+		}
+		if data, err = readKustomizationFile(resolved); err != nil {
+			return "", nil, err
+		}
+		path = filepath.Join(dir, filepath.FromSlash(patch.Path))
+	}
+	docs, err := splitYAMLDocuments(data)
+	return path, docs, err
+}
+
+// patchMayChangeIdentity reports whether a patch document could rename the
+// resource or change its kind.
+func patchMayChangeIdentity(patch types.Patch, doc []byte) bool {
+	return !isPatchDocumentProvablySafe(doc) || (patch.Options != nil && (patch.Options.AllowNameChange || patch.Options.AllowKindChange))
+}
+
+// patchesMayRename reports whether any patch could give the resource a name
+// that neither end of the build shows. An unreadable patch counts as one.
+func patchesMayRename(dir, kustFile string, patches []types.Patch) bool {
+	for _, patch := range patches {
+		_, docs, err := patchDocuments(dir, kustFile, patch)
+		if err != nil || slices.ContainsFunc(docs, func(doc []byte) bool { return patchMayChangeIdentity(patch, doc) }) {
+			return true
+		}
+	}
+	return false
+}
+
+// recordedOrigin reads the resource as written in its recorded origin file,
+// before any kustomization renamed it. It needs a single plausible document.
+func recordedOrigin(source reporthandling.Source, rendered workloadinterface.IMetadata, name string) workloadinterface.IMetadata {
+	if source.Path == "" || source.RelativePath == "" {
+		return nil
+	}
+	origin, err := pathcontainment.ResolveContainedPath(source.Path, source.RelativePath)
+	if err != nil {
+		return nil
+	}
+	data, err := readKustomizationFile(origin)
+	if err != nil {
+		return nil
+	}
+	docs, err := splitYAMLDocuments(data)
+	if err != nil {
+		return nil
+	}
+	var named, others []workloadinterface.IMetadata
+	for _, doc := range docs {
+		var obj map[string]any
+		if err := yaml.Unmarshal(doc, &obj); err != nil || obj == nil {
+			continue
+		}
+		input := workloadinterface.NewWorkloadObj(obj)
+		if input.GetKind() != rendered.GetKind() || input.GetApiVersion() != rendered.GetApiVersion() {
+			continue
+		}
+		if input.GetName() == name {
+			named = append(named, input)
+		} else {
+			others = append(others, input)
+		}
+	}
+	switch {
+	case len(named) == 1:
+		return named[0]
+	case len(named) == 0 && len(others) == 1:
+		return others[0]
+	}
+	return nil
+}
+
+// kustomizeTransformationsAnnotation is where buildMetadata: [transformerAnnotations]
+// records the transformers that changed a resource.
+const kustomizeTransformationsAnnotation = "alpha.config.kubernetes.io/transformations"
+
+// selectsBuildMetadata reports whether a selector reads metadata that Kustomize
+// writes after the whole build or tracks internally, so the rendered value
+// says nothing about what the patch saw. An unparsable selector counts as one.
+func selectsBuildMetadata(target *types.Selector) bool {
+	reads := func(selector string, keys ...string) bool {
+		if selector == "" {
+			return false
+		}
+		sel, err := labels.Parse(selector)
+		if err != nil {
+			return true
+		}
+		requirements, _ := sel.Requirements()
+		return slices.ContainsFunc(requirements, func(r labels.Requirement) bool { return slices.Contains(keys, r.Key()) })
+	}
+	return reads(target.LabelSelector, konfig.ManagedbyLabelKey) ||
+		reads(target.AnnotationSelector, kustomizeOriginAnnotation, kustomizeTransformationsAnnotation)
 }
 
 // directPatchInput identifies a single input document from the recorded origin
@@ -258,6 +421,12 @@ func getMetadataMap(resource workloadinterface.IMetadata, key string) map[string
 	return res
 }
 
+// kustomizeID is the Kustomize identity of resource under name.
+func kustomizeID(resource workloadinterface.IMetadata, name string) resid.ResId {
+	group, version := resid.ParseGroupVersion(resource.GetApiVersion())
+	return resid.NewResIdWithNamespace(resid.NewGvk(group, version, resource.GetKind()), name, resource.GetNamespace())
+}
+
 func matchKustomizeTarget(target *types.Selector, resource workloadinterface.IMetadata, name string) bool {
 	if target == nil {
 		return true
@@ -266,8 +435,7 @@ func matchKustomizeTarget(target *types.Selector, resource workloadinterface.IMe
 	if err != nil {
 		return false
 	}
-	group, version := resid.ParseGroupVersion(resource.GetApiVersion())
-	id := resid.NewResIdWithNamespace(resid.NewGvk(group, version, resource.GetKind()), name, resource.GetNamespace())
+	id := kustomizeID(resource, name)
 	if !selector.MatchName(name) || !selector.MatchGvk(id.Gvk) || !selector.MatchNamespace(id.EffectiveNamespace()) {
 		return false
 	}
@@ -286,6 +454,8 @@ func matchKustomizeTarget(target *types.Selector, resource workloadinterface.IMe
 	return true
 }
 
+// matchYamlHeader reports whether a merge patch header selects resource under
+// name. An empty name accepts any patch name.
 func matchYamlHeader(yamlObj map[string]any, resource workloadinterface.IMetadata, name string) bool {
 	if k, ok := yamlObj["kind"].(string); ok && k != "" && !strings.EqualFold(k, resource.GetKind()) {
 		return false
@@ -296,7 +466,7 @@ func matchYamlHeader(yamlObj map[string]any, resource workloadinterface.IMetadat
 		}
 	}
 	if meta, ok := yamlObj["metadata"].(map[string]any); ok {
-		if n, ok := meta["name"].(string); ok && n != "" && n != name {
+		if n, ok := meta["name"].(string); ok && n != "" && name != "" && n != name {
 			return false
 		}
 		if ns, ok := meta["namespace"].(string); ok && ns != "" && resource.GetNamespace() != "" && ns != resource.GetNamespace() {
