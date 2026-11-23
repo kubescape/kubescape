@@ -169,6 +169,7 @@ func TestToolResultErrorCode_IsBounded(t *testing.T) {
 		want   string
 	}{
 		{"known code", textResult(`{"code":"RBAC_DENIED","message":"x"}`), string(ErrCodeRBACDenied)},
+		{"scan results unavailable", mcpToolError(ErrCodeScanResultsUnavailable, "scan results are unavailable", nil), "SCAN_RESULTS_UNAVAILABLE"},
 		{"unknown code is not echoed", textResult(`{"code":"leaks-a-namespace-name","message":"x"}`), toolCallErrorUnclassified},
 		{"plain text error", textResult("something failed in namespace prod"), toolCallErrorUnclassified},
 		{"oversized payload is not parsed", textResult(`{"code":"RBAC_DENIED","message":"` + strings.Repeat("a", maxToolErrorPayloadBytes) + `"}`), toolCallErrorUnclassified},

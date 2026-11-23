@@ -68,6 +68,50 @@ kubescape mcpserver --transport sse --port 8080 --workspace /path/to/project
 
 The MCP server exposes the following tools to AI assistants:
 
+### Paging completed scan results
+
+`run_framework_security_scan`, `run_rbac_security_scan`,
+`run_network_security_scan`, `scan_controls`, `scan_workload`,
+`scan_local_iac`, and `scan_local_iac_controls` return at most 100 failed
+resources in their initial response. When more findings exist, the server
+retains the completed result and adds `scan_id`, `next_offset`, and
+`expires_at`. Findings are ordered by highest failed control severity, with resource ID breaking ties.
+
+Call `get_scan_results` in the **same MCP session** to retrieve subsequent
+pages without rescanning:
+
+```json
+{"scan_id": "<scan_id from the initial response>", "offset": 100, "limit": 100}
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scan_id` | string | Yes | Identifier returned by a scan |
+| `offset` | integer | No | Previous response's `next_offset`; default 0 |
+| `limit` | integer | No | Page size from 1 to 100; default 100 |
+
+Every page preserves the original `total_failed`, compliance score, framework,
+coverage metadata, and workload warnings. `returned_failed` counts entries on
+the current page. `truncated` indicates that the page contains only part of the
+complete scan, including on the final page. Follow `next_offset` until it is
+absent; do not use `truncated` to decide whether another page exists. An offset
+equal to `total_failed` returns an empty page; larger offsets are rejected.
+
+Snapshots expire after 10 minutes. Storage is process-local, limited to 16
+snapshots and 32 MiB of serialized scan JSON across sessions; older snapshots
+can be evicted before expiry. Restarting the server also removes snapshots.
+Expired, evicted, unknown, and other-session IDs all return
+`SCAN_RESULTS_UNAVAILABLE`; run the scan again to obtain a new snapshot.
+
+If a result exceeds the retention budget, or a client session is unavailable,
+the initial response still returns the first 100 failed resources and a
+`pagination_warning`, without continuation fields. Narrow the scan scope in
+that case. Scans with at most 100 failures do not create snapshots.
+
+Retention limits bound stored JSON, not peak scan memory or individual resource
+size. Reading a snapshot does not refresh its expiry. Snapshot results describe
+the completed scan and do not reflect later cluster or manifest changes.
+
 ### Vulnerability Tools
 
 #### `list_vulnerability_manifests`
