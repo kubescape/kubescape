@@ -46,6 +46,32 @@ func TestFilterComplianceFrameworks(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "check compliance frameworks with whitespace padding are normalized and matched",
+			summaryDetails: &reportsummary.SummaryDetails{
+				Frameworks: []reportsummary.FrameworkSummary{
+					{
+						Name: "  CIS Kubernetes Benchmark  ",
+					},
+					{
+						Name: "  nsa  ",
+					},
+					{
+						Name: " mitre\t",
+					},
+				},
+			},
+			expectedSummaryDetails: &reportsummary.SummaryDetails{
+				Frameworks: []reportsummary.FrameworkSummary{
+					{
+						Name: "  nsa  ",
+					},
+					{
+						Name: " mitre\t",
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
