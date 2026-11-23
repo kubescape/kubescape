@@ -451,6 +451,11 @@ func TestTraceKustomizePatch_RenderedOverlay(t *testing.T) {
 		{"selector before patch changes metadata", selected, replace + changeMetadata, "modern.yaml", 2},
 		{"ambiguous later writer hides earlier candidate", "patches:\n- path: legacy.yaml\n  target: {kind: Deployment, name: demo}\n- path: modern.yaml\n  target: {kind: Deployment, labelSelector: stage=old}\n", replace + changeMetadata, "", 2},
 		{"selector matches only after transform", "commonLabels: {stage: new}\npatches:\n- path: modern.yaml\n  target: {kind: Deployment, labelSelector: stage=new}\n", replace, "", 1},
+		{"replica transformer overrides patch", affixes + modern + "replicas: [{name: demo, count: 5}]\n", replace, "", 5},
+		{"replica transformer matches rendered name", affixes + modern + "replicas: [{name: prod-demo-west, count: 5}]\n", replace, "", 5},
+		{"legacy selector matches only build metadata label", "buildMetadata: [managedByLabel]\npatchesJson6902:\n- path: legacy.yaml\n  target: {kind: Deployment, name: demo, labelSelector: app.kubernetes.io/managed-by}\n", replace, "", 1},
+		{"legacy selector unaffected by build metadata", "buildMetadata: [managedByLabel]\npatchesJson6902:\n- path: legacy.yaml\n  target: {kind: Deployment, name: demo, labelSelector: stage=old}\n", replace, "legacy.yaml", 3},
+		{"modern selector unaffected by build metadata", "buildMetadata: [managedByLabel]\n" + selected, replace, "modern.yaml", 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -470,6 +475,61 @@ func TestTraceKustomizePatch_RenderedOverlay(t *testing.T) {
 			require.EqualValues(t, tc.replicas, obj["spec"].(map[string]any)["replicas"])
 			src := reporthandling.Source{Path: dir, RelativePath: ".", FileType: reporthandling.SourceTypeKustomizeDirectory, KustomizeDirectoryName: dir}
 			require.Equal(t, tc.want, TraceKustomizePatch(localworkload.NewLocalWorkload(obj), []string{"spec.replicas"}, src))
+		})
+	}
+}
+
+func TestTraceKustomizePatch_RenderedNestedBase(t *testing.T) {
+	const early = "patches:\n- path: early.yaml\n  target: {kind: Deployment, name: base-demo}\n"
+	for _, tc := range []struct {
+		name, base, overlay, want string
+		replicas                  int64
+		origin, inputs            string
+	}{
+		{"later writer selects a base name", "namePrefix: base-\n", "namePrefix: prod-\n" + early + "- path: late.yaml\n  target: {kind: Deployment, name: demo}\n", "", 3, "", "resources"},
+		{"later merge patch selects a base name", "namePrefix: base-\n", "namePrefix: prod-\npatchesStrategicMerge: [early-smp.yaml, late-smp.yaml]\n", "", 3, "", "resources"},
+		// The base name is invisible from the overlay, so an unmatched name stays uncertain.
+		{"later writer with an unrelated name", "namePrefix: base-\n", "namePrefix: prod-\n" + early + "- path: late.yaml\n  target: {kind: Deployment, name: other}\n", "", 2, "", "resources"},
+		{"recorded origin reveals a later writer", "namePrefix: base-\n", "namePrefix: prod-\n" + early + "- path: late.yaml\n  target: {kind: Deployment, name: demo}\n", "late.yaml", 3, "base/deployment.yaml", "resources"},
+		{"recorded origin reveals a later merge patch", "namePrefix: base-\n", "namePrefix: prod-\npatchesStrategicMerge: [early-smp.yaml, late-smp.yaml]\n", "late-smp.yaml", 3, "base/deployment.yaml", "resources"},
+		{"recorded origin rules out an unrelated name", "namePrefix: base-\n", "namePrefix: prod-\n" + early + "- path: late.yaml\n  target: {kind: Deployment, name: other}\n", "early.yaml", 2, "base/deployment.yaml", "resources"},
+		{"recorded origin namespace", "namespace: moved\n", "patches:\n- path: late.yaml\n  target: {kind: Deployment, name: demo, namespace: start}\n", "late.yaml", 3, "base/deployment.yaml", "resources"},
+		{"later writer for another kind", "namePrefix: base-\n", "namePrefix: prod-\n" + early + "- path: late.yaml\n  target: {kind: StatefulSet, name: demo}\n", "early.yaml", 2, "", "resources"},
+		{"single writer through a base prefix", "namePrefix: base-\n", "namePrefix: prod-\n" + early, "early.yaml", 2, "", "resources"},
+		{"single writer through a plain base", "", "patches:\n- path: early.yaml\n  target: {kind: Deployment, name: demo}\n", "early.yaml", 2, "", "resources"},
+		{"legacy bases hide a later writer", "namePrefix: base-\n", "namePrefix: prod-\n" + early + "- path: late.yaml\n  target: {kind: Deployment, name: demo}\n", "", 3, "", "bases"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "base"), 0o700))
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "overlay"), 0o700))
+			for file, contents := range map[string]string{
+				"base/kustomization.yaml":    "resources: [deployment.yaml]\n" + tc.base,
+				"base/deployment.yaml":       "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: demo, namespace: start}\nspec: {replicas: 1}\n",
+				"overlay/kustomization.yaml": tc.inputs + ": [../base]\n" + tc.overlay,
+				"overlay/early.yaml":         "- {op: replace, path: /spec/replicas, value: 2}\n",
+				"overlay/late.yaml":          "- {op: replace, path: /spec/replicas, value: 3}\n",
+				"overlay/early-smp.yaml":     "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: base-demo, namespace: start}\nspec: {replicas: 2}\n",
+				"overlay/late-smp.yaml":      "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: demo, namespace: start}\nspec: {replicas: 3}\n",
+			} {
+				require.NoError(t, os.WriteFile(filepath.Join(root, file), []byte(contents), 0o600))
+			}
+			overlay := filepath.Join(root, "overlay")
+			result, err := krusty.MakeKustomizer(krusty.MakeDefaultOptions()).Run(filesys.MakeFsOnDisk(), overlay)
+			require.NoError(t, err)
+			require.Len(t, result.Resources(), 1)
+			obj, err := result.Resources()[0].Map()
+			require.NoError(t, err)
+			require.EqualValues(t, tc.replicas, obj["spec"].(map[string]any)["replicas"])
+			if tc.origin == "" {
+				tc.origin = "overlay"
+			}
+			src := reporthandling.Source{Path: root, RelativePath: tc.origin, FileType: reporthandling.SourceTypeKustomizeDirectory, KustomizeDirectoryName: overlay}
+			got := TraceKustomizePatch(localworkload.NewLocalWorkload(obj), []string{"spec.replicas"}, src)
+			if tc.want != "" {
+				tc.want = "overlay/" + tc.want
+			}
+			require.Equal(t, tc.want, got)
 		})
 	}
 }
