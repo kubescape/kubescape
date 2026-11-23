@@ -837,6 +837,7 @@ func writeFleetReport(path string, report *fleet.FleetReport) error {
 // with the colliding context names named explicitly is far more useful than
 // discovering it later from a report that doesn't match its own context.
 func perContextOutputPaths(output string, kubeContexts, formats []string) (map[string]string, error) {
+	output = fleetOutputFile(output, formats)
 	paths := make(map[string]string, len(kubeContexts))
 	collisions := make(map[string][]string)   // lowered-destination -> contexts that derived it
 	collisionPaths := make(map[string]string) // lowered-destination -> first original spelling
@@ -883,6 +884,31 @@ func perContextOutputPaths(output string, kubeContexts, formats []string) (map[s
 	}
 
 	return paths, nil
+}
+
+// fleetOutputFile gives an --output that names a directory (a trailing
+// separator, or a last element of "." or "..") the file name a scan of one
+// context writes inside it, as printer.ResolveOutputFile does, so each
+// context's report is named after that file: --output reports/ gives
+// reports/report.<context>.json. Without it the context goes into an empty file
+// name, and every report is a hidden file such as reports/.<context>.json.
+func fleetOutputFile(output string, formats []string) string {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" || trimmed == os.DevNull {
+		return output
+	}
+	format := ""
+	if len(formats) > 0 {
+		format = formats[0]
+	}
+	base := printer.DefaultBaseNameForFormat(format)
+	if os.IsPathSeparator(trimmed[len(trimmed)-1]) {
+		return trimmed + base
+	}
+	if last := filepath.Base(trimmed); last == "." || last == ".." {
+		return trimmed + string(filepath.Separator) + base
+	}
+	return output
 }
 
 // perContextOutputPath derives context's own report path from the
