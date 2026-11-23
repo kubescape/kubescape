@@ -274,6 +274,97 @@ func TestPrintJUnit_ClassnameFallsBackToKubescapeDiffPrefix(t *testing.T) {
 	assert.Equal(t, "kubescape.diff/", decoded.Suites[0].TestCases[0].Classname)
 }
 
+func TestXmlSanitize(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "clean string untouched",
+			input:    "Clean control name - C-0001",
+			expected: "Clean control name - C-0001",
+		},
+		{
+			name:     "valid whitespace preserved",
+			input:    "line1\nline2\r\ttabbed",
+			expected: "line1\nline2\r\ttabbed",
+		},
+		{
+			name:     "illegal C0 controls stripped",
+			input:    "null\x00bell\x07esc\x1btest",
+			expected: "nullbellesctest",
+		},
+		{
+			name:     "noncharacters stripped",
+			input:    "valid\ufffe\uffffchars",
+			expected: "validchars",
+		},
+		{
+			name:     "empty string returns empty",
+			input:    "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, xmlSanitize(tt.input))
+		})
+	}
+}
+
+func TestPrintJUnit_SanitizesIllegalXMLControlCharacters(t *testing.T) {
+	change := ciChange("C-\x00001", "apps/v1/default/Deployment/foo\x07bar", "High")
+	change.ControlName = "Control with \x1b[31mANSI\x1b[0m and \x00null"
+	change.Reason = "failure detail with \x08backspace and \x0cformfeed"
+
+	var output bytes.Buffer
+	require.NoError(t, PrintJUnit(&output, &ChangeSet{New: []ControlChange{change}}, ""))
+
+	// Output must unmarshal cleanly into XML without parsing errors.
+	decoded := decodeJUnit(t, output.Bytes())
+	require.Len(t, decoded.Suites, 1)
+	require.Len(t, decoded.Suites[0].TestCases, 1)
+	tc := decoded.Suites[0].TestCases[0]
+
+	assert.NotContains(t, tc.Classname, "\x00")
+	assert.NotContains(t, tc.Name, "\x1b")
+	assert.NotContains(t, tc.Name, "\x00")
+	assert.NotContains(t, tc.Failure.Message, "\x00")
+	assert.NotContains(t, tc.Failure.Contents, "\x08")
+	assert.NotContains(t, tc.Failure.Contents, "\x0c")
+}
+
+func TestPrintVulnerabilityJUnit_SanitizesIllegalXMLControlCharacters(t *testing.T) {
+	cs := &VulnerabilityChangeSet{
+		New: []VulnerabilityChange{
+			{
+				ID:       "CVE-2026-0001",
+				Package:  "openssl\x00pkg\x1b",
+				Version:  "1.1.1\x07",
+				Severity: "Critical",
+				Type:     "deb",
+				FixedIn:  []string{"1.1.2\x08"},
+			},
+		},
+	}
+
+	var output bytes.Buffer
+	require.NoError(t, PrintVulnerabilityJUnit(&output, cs, ""))
+
+	decoded := decodeJUnit(t, output.Bytes())
+	require.Len(t, decoded.Suites, 1)
+	require.Len(t, decoded.Suites[0].TestCases, 1)
+	tc := decoded.Suites[0].TestCases[0]
+
+	assert.NotContains(t, tc.Classname, "\x00")
+	assert.NotContains(t, tc.Classname, "\x1b")
+	assert.NotContains(t, tc.Name, "\x00")
+	assert.NotContains(t, tc.Name, "\x07")
+	assert.NotContains(t, tc.Failure.Contents, "\x08")
+}
+
 func TestPrintMarkdown_WritesWarningsWithoutFindings(t *testing.T) {
 	var output bytes.Buffer
 	require.NoError(t, PrintMarkdown(&output, &ChangeSet{Warnings: []string{"scope differs"}}, "high"))
