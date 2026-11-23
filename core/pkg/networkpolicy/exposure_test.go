@@ -257,3 +257,55 @@ func TestIngressExposure_FullyExcludedIPBlockDoesNotMaskActiveCIDR(t *testing.T)
 		t.Fatalf("level = %s, want %s", got.Level, ExposureExternalCIDR)
 	}
 }
+
+func TestIngressExposure_ZeroRulePolicyBeforeScopedPolicyDoesNotMaskRule(t *testing.T) {
+	denyAll := policy("ns", "00-deny-all", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}, nil, nil)
+	allowClient := policy("ns", "allow-client", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+		[]networkingv1.NetworkPolicyIngressRule{ingressRule(podSelectorPeer("app", "client"))}, nil)
+
+	// In additive NetworkPolicy semantics, an admitting rule takes precedence over a
+	// zero-rule policy that admits nothing, regardless of index order.
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{denyAll, allowClient}, nil)
+	ep := Endpoint{Namespace: "ns", Name: "app", Labels: map[string]string{"app": "web"}}
+
+	got := idx.IngressExposure(ep)
+	if got.Level != ExposureRestricted {
+		t.Fatalf("Level = %v, want ExposureRestricted", got.Level)
+	}
+	if got.MatchedPolicy != "ns/allow-client" {
+		t.Fatalf("MatchedPolicy = %q, want ns/allow-client: scoped rule must not be masked by zero-rule deny-all policy", got.MatchedPolicy)
+	}
+	if strings.Contains(got.Reason, "admits nothing") {
+		t.Fatalf("Reason = %q, must not claim 'admits nothing' when an admitting rule exists", got.Reason)
+	}
+}
+
+func TestIngressExposure_MultipleFullyExcludedIPBlocksAdmitNoAddresses(t *testing.T) {
+	excluded1 := &networkingv1.IPBlock{CIDR: "10.0.0.0/24", Except: []string{"10.0.0.0/24"}}
+	excluded2 := &networkingv1.IPBlock{CIDR: "192.168.0.0/24", Except: []string{"192.168.0.0/24"}}
+	p := policy("prod", "p", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+		[]networkingv1.NetworkPolicyIngressRule{ingressRule(networkingv1.NetworkPolicyPeer{IPBlock: excluded1}, networkingv1.NetworkPolicyPeer{IPBlock: excluded2})}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{p}, nil)
+	got := idx.IngressExposure(Endpoint{Namespace: "prod"})
+	if got.Level != ExposureRestricted || !strings.Contains(got.Reason, "admit no addresses") {
+		t.Fatalf("got %s %q, want restricted with admit no addresses explanation", got.Level, got.Reason)
+	}
+}
+
+func TestIngressExposure_DeterministicTieBreakBetweenEqualPolicies(t *testing.T) {
+	pB := policy("ns", "b-allow-client", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+		[]networkingv1.NetworkPolicyIngressRule{ingressRule(podSelectorPeer("app", "client-b"))}, nil)
+	pA := policy("ns", "a-allow-client", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+		[]networkingv1.NetworkPolicyIngressRule{ingressRule(podSelectorPeer("app", "client-a"))}, nil)
+
+	// Both policies have equal level and admission; tie-break must be deterministic (a before b)
+	idx1, _ := NewIndex([]*networkingv1.NetworkPolicy{pB, pA}, nil)
+	idx2, _ := NewIndex([]*networkingv1.NetworkPolicy{pA, pB}, nil)
+	ep := Endpoint{Namespace: "ns", Name: "app", Labels: map[string]string{"app": "web"}}
+
+	got1 := idx1.IngressExposure(ep)
+	got2 := idx2.IngressExposure(ep)
+	if got1.MatchedPolicy != "ns/a-allow-client" || got2.MatchedPolicy != "ns/a-allow-client" {
+		t.Fatalf("got1 MatchedPolicy = %q, got2 MatchedPolicy = %q; want ns/a-allow-client for both", got1.MatchedPolicy, got2.MatchedPolicy)
+	}
+}

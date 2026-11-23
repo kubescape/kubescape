@@ -44,12 +44,13 @@ func (idx *Index) EgressExposure(ep Endpoint) Exposure {
 			// An egress-isolating policy with no egress rules denies every
 			// destination. It still needs attribution even though there is
 			// no rule to classify.
-			if !haveBest {
-				best = Exposure{
-					Level:         ExposureRestricted,
-					Reason:        "isolated by a policy with no egress rules; admits no destinations",
-					MatchedPolicy: policyName,
-				}
+			candidate := Exposure{
+				Level:         ExposureRestricted,
+				Reason:        "isolated by a policy with no egress rules; admits no destinations",
+				MatchedPolicy: policyName,
+			}
+			if shouldReplaceExposure(best, haveBest, candidate) {
+				best = candidate
 				haveBest = true
 			}
 			continue
@@ -57,12 +58,13 @@ func (idx *Index) EgressExposure(ep Endpoint) Exposure {
 
 		for _, rule := range cp.policy.Spec.Egress {
 			level, reason := classifyPeers(rule.To)
-			if !haveBest || level > best.Level {
-				best = Exposure{
-					Level:         level,
-					Reason:        reason,
-					MatchedPolicy: policyName,
-				}
+			candidate := Exposure{
+				Level:         level,
+				Reason:        reason,
+				MatchedPolicy: policyName,
+			}
+			if shouldReplaceExposure(best, haveBest, candidate) {
+				best = candidate
 				haveBest = true
 				if best.Level == ExposureOpen {
 					return best
