@@ -1324,3 +1324,35 @@ func TestScanInfo_NilReceiverMethods(t *testing.T) {
 		scanInfo.AddCleanup(func() {})
 	})
 }
+
+func TestAppendPolicyIdentifiers_TrimmingAndDeduplication(t *testing.T) {
+	t.Run("trims surrounding whitespace and deduplicates case-insensitively", func(t *testing.T) {
+		got := BuildPolicyIdentifiers([]string{"  nsa  ", "NSA", "mitre", "  MITRE  ", "C-0001", " c-0001 "}, apisv1.KindFramework)
+		want := []PolicyIdentifier{
+			{Kind: apisv1.KindFramework, Identifier: "nsa"},
+			{Kind: apisv1.KindFramework, Identifier: "mitre"},
+			{Kind: apisv1.KindFramework, Identifier: "C-0001"},
+		}
+		assert.Equal(t, want, got)
+	})
+
+	t.Run("skips empty and whitespace-only identifiers", func(t *testing.T) {
+		got := BuildPolicyIdentifiers([]string{"", "   ", "nsa", "  ", ""}, apisv1.KindFramework)
+		want := []PolicyIdentifier{
+			{Kind: apisv1.KindFramework, Identifier: "nsa"},
+		}
+		assert.Equal(t, want, got)
+	})
+
+	t.Run("appends to existing identifiers without duplicates", func(t *testing.T) {
+		existing := []PolicyIdentifier{
+			{Kind: apisv1.KindFramework, Identifier: "nsa"},
+		}
+		got := AppendPolicyIdentifiers(existing, []string{"  NSA  ", "mitre"}, apisv1.KindFramework)
+		want := []PolicyIdentifier{
+			{Kind: apisv1.KindFramework, Identifier: "nsa"},
+			{Kind: apisv1.KindFramework, Identifier: "mitre"},
+		}
+		assert.Equal(t, want, got)
+	})
+}
