@@ -10,9 +10,16 @@ import (
 	"strings"
 )
 
-const savedJSONFileMode os.FileMode = 0o644
+const (
+	savedJSONFileMode os.FileMode = 0o644
+	// MaxHTTPResponseBodyBytes is the maximum allowed response size for HTTP policy downloads (50 MiB).
+	MaxHTTPResponseBodyBytes int64 = 50 * 1024 * 1024
+)
 
-var renameSavedFile = os.Rename
+var (
+	renameSavedFile             = os.Rename
+	ErrHTTPResponseBodyTooLarge = errors.New("HTTP response body exceeds maximum allowed size")
+)
 
 // GetDefaultPath returns a location under the local dot files for kubescape.
 //
@@ -168,18 +175,25 @@ func httpRespToString(resp *http.Response) (string, error) {
 	if resp == nil || resp.Body == nil {
 		return "", nil
 	}
-	strBuilder := strings.Builder{}
 	defer resp.Body.Close()
+
+	if resp.ContentLength > MaxHTTPResponseBodyBytes {
+		return "", fmt.Errorf("%w: %d bytes (limit is %d)", ErrHTTPResponseBodyTooLarge, resp.ContentLength, MaxHTTPResponseBodyBytes)
+	}
+
+	strBuilder := strings.Builder{}
 	if resp.ContentLength > 0 {
 		strBuilder.Grow(int(resp.ContentLength))
 	}
 
-	_, err := io.Copy(&strBuilder, resp.Body)
+	n, err := io.Copy(&strBuilder, io.LimitReader(resp.Body, MaxHTTPResponseBodyBytes+1))
 	respStr := strBuilder.String()
 	if err != nil {
 		respStrNewLen := min(len(respStr), 1024)
 		return "", fmt.Errorf("http-error: '%s', reason: '%s'", resp.Status, respStr[:respStrNewLen])
-		// return "", fmt.Errorf("HTTP request failed. URL: '%s', Read-ERROR: '%s', HTTP-CODE: '%s', BODY(top): '%s', HTTP-HEADERS: %v, HTTP-BODY-BUFFER-LENGTH: %v", resp.Request.URL.RequestURI(), err, resp.Status, respStr[:respStrNewLen], resp.Header, bytesNum)
+	}
+	if n > MaxHTTPResponseBodyBytes {
+		return "", fmt.Errorf("%w: %d bytes (limit is %d)", ErrHTTPResponseBodyTooLarge, n, MaxHTTPResponseBodyBytes)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		respStrNewLen := min(len(respStr), 1024)
