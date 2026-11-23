@@ -15,9 +15,10 @@ type terraformBlock struct {
 }
 
 type terraformBodyConverter struct {
-	errs      *[]error
-	remaining int
-	exhausted bool
+	errs       *[]error
+	remaining  int
+	exhausted  bool
+	references terraformReferenceChecker
 }
 
 // reserve bounds the combined generated blocks and values, including nested
@@ -86,6 +87,11 @@ func (c *terraformBodyConverter) blocks(body *hclsyntax.Body, evalCtx *hcl.EvalC
 		values, diags := each.Expr.Value(evalCtx)
 		if diags.HasErrors() {
 			*c.errs = append(*c.errs, fmt.Errorf("%s: dynamic %q for_each: %w", path, blockType, diags))
+			continue
+		}
+		// try() can hide unresolved references behind a known fallback collection.
+		if c.references.hasUnresolvableVariables(each.Expr, evalCtx) {
+			*c.errs = append(*c.errs, fmt.Errorf("%s: dynamic %q for_each contains unresolved references", path, blockType))
 			continue
 		}
 		if values.IsNull() || !values.IsWhollyKnown() || !values.CanIterateElements() {

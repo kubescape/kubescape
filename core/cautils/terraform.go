@@ -172,14 +172,16 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 	if len(files) > 0 {
 		errs = append(errs, applyTerraformVarFiles(parser, path, td.workspaceDir, declared, varDefaults)...)
 	}
-	evalCtx := newTerraformEvalContext(varDefaults, resolveLocals(files, varDefaults))
+	locals, localExpressions := resolveLocals(files, varDefaults)
+	evalCtx := newTerraformEvalContext(varDefaults, locals)
+	references := terraformReferenceChecker{localExpressions: localExpressions, moduleCtx: evalCtx}
 
 	workloads := map[string][]workloadinterface.IMetadata{}
 	for i, file := range files {
 		manifests, fileErrs := extractKubernetesManifests(file.Body, evalCtx)
 		errs = append(errs, fileErrs...)
 
-		typedManifests, typedErrs := extractTypedResources(file.Body, evalCtx)
+		typedManifests, typedErrs := extractTypedResources(file.Body, evalCtx, references)
 		errs = append(errs, typedErrs...)
 		manifests = append(manifests, typedManifests...)
 
