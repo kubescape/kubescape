@@ -240,6 +240,26 @@ func newFakeOperator(t *testing.T, failMessage string) *fakeOperator {
 	return &fakeOperator{dyn: dyn}
 }
 
+func newFakeOperatorWithPayload(t *testing.T, payload string) *fakeOperator {
+	t.Helper()
+	gvr := schema.GroupVersionResource{Group: "kubescape.io", Version: "v1alpha1", Resource: "operatorcommands"}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{gvr: "OperatorCommandList"})
+	var counter int64
+	dyn.PrependReactor("create", "operatorcommands", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		obj := action.(clienttesting.CreateAction).GetObject().(*unstructured.Unstructured)
+		obj.SetName(fmt.Sprintf("%s%d", obj.GetGenerateName(), atomic.AddInt64(&counter, 1)))
+		status := map[string]interface{}{
+			"started":   true,
+			"completed": true,
+			"payload":   base64.StdEncoding.EncodeToString([]byte(payload)),
+		}
+		_ = unstructured.SetNestedField(obj.Object, status, "status")
+		return false, nil, nil
+	})
+	return &fakeOperator{dyn: dyn}
+}
+
 // install makes the commands under test talk to this fake operator.
 func (f *fakeOperator) install(t *testing.T) {
 	t.Helper()

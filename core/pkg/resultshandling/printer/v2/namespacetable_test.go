@@ -123,6 +123,21 @@ func TestPrintNamespaceSummaries_Rendering(t *testing.T) {
 				"-1%",
 			},
 		},
+		{
+			name: "empty namespace falls back to cluster-scoped placeholder",
+			summaries: cautils.NamespaceSummaries{
+				{
+					Namespace:            "",
+					ComplianceScore:      100.0,
+					NonCompliantControls: 0,
+					TotalControls:        10,
+					ResourceCount:        2,
+				},
+			},
+			expectedRows: []string{
+				"| <cluster-scoped> | 100% | 0/10 | 2 |",
+			},
+		},
 	}
 
 	for _, tt := range tests {

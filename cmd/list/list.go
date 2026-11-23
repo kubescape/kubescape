@@ -155,6 +155,7 @@ const listSupportedFormatsDisplay = "'pretty-print'/'json'/'yaml'/'csv'"
 
 // Check if the flag entered are valid
 func flagValidationList(listPolicies *v1.ListPolicies) error {
+	listPolicies.AccountID = strings.TrimSpace(listPolicies.AccountID)
 	if err := cautils.ValidateAccountID(listPolicies.AccountID); err != nil {
 		return err
 	}

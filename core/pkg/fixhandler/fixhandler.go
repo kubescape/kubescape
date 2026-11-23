@@ -1259,6 +1259,13 @@ func (h *FixHandler) PrintHelmSuggestions(suggestions []HelmFixSuggestion) {
 	if len(suggestions) == 0 {
 		return
 	}
+	logger.L().Info(h.formatHelmSuggestions(suggestions))
+}
+
+func (h *FixHandler) formatHelmSuggestions(suggestions []HelmFixSuggestion) string {
+	if len(suggestions) == 0 {
+		return ""
+	}
 	var sb strings.Builder
 	sb.WriteString("\nHelm-rendered resources cannot be patched in place. Suggested values.yaml edits:\n\n")
 
@@ -1277,23 +1284,58 @@ func (h *FixHandler) PrintHelmSuggestions(suggestions []HelmFixSuggestion) {
 		if s.TemplateFile != "" {
 			fmt.Fprintf(&sb, "Template: %s\n", s.TemplateFile)
 		}
-		fmt.Fprintf(&sb, "Resource: %s/%s\n", s.Resource.GetKind(), s.Resource.GetName())
+		if s.Resource != nil {
+			fmt.Fprintf(&sb, "Resource: %s/%s\n", s.Resource.GetKind(), s.Resource.GetName())
+		}
 		sb.WriteString("Required changes (rendered-YAML paths):\n")
 		for i, fp := range s.FixPaths {
 			fmt.Fprintf(&sb, "\t%d) %s = %s\n", i+1, fp.Path, fp.Value)
 		}
-		if len(s.ValuesPaths) > 0 {
-			sb.WriteString("Candidate .Values keys referenced by this template:\n")
-			for _, v := range s.ValuesPaths {
-				fmt.Fprintf(&sb, "\t- .Values.%s\n", v)
+		correlated := CorrelateFixPathsWithValues(s.FixPaths, s.ValuesPaths)
+		correlatedFixPaths := make(map[string]bool)
+		correlatedValuesKeys := make(map[string]bool)
+		if len(correlated) > 0 {
+			sb.WriteString("Correlated .Values edits:\n")
+			for _, c := range correlated {
+				correlatedFixPaths[c.FixPath] = true
+				correlatedValuesKeys[c.ValuesPath] = true
+				fmt.Fprintf(&sb, "\t- .Values.%s = %s\n", c.ValuesPath, c.Value)
 			}
-			sb.WriteString("Edit one of these in values.yaml to satisfy the change above.\n")
+			if proposedYAML, err := GenerateProposedValuesYAML(correlated); err == nil && proposedYAML != "" {
+				sb.WriteString("Proposed values.yaml structure:\n")
+				for _, line := range strings.Split(proposedYAML, "\n") {
+					fmt.Fprintf(&sb, "\t%s\n", line)
+				}
+			}
+		}
+
+		if len(s.ValuesPaths) > 0 {
+			hasUncorrelatedFixPaths := len(correlatedFixPaths) < len(s.FixPaths)
+			if hasUncorrelatedFixPaths {
+				var candidatesToShow []string
+				for _, v := range s.ValuesPaths {
+					vClean := cleanValuesPath(v)
+					if !correlatedValuesKeys[vClean] {
+						candidatesToShow = append(candidatesToShow, vClean)
+					}
+				}
+				if len(candidatesToShow) == 0 {
+					for _, v := range s.ValuesPaths {
+						candidatesToShow = append(candidatesToShow, cleanValuesPath(v))
+					}
+				}
+				sb.WriteString("Candidate .Values keys referenced by this template:\n")
+				for _, v := range candidatesToShow {
+					fmt.Fprintf(&sb, "\t- .Values.%s\n", v)
+				}
+				sb.WriteString("Edit one of these in values.yaml to satisfy the change above.\n")
+			}
 		} else {
 			sb.WriteString("(No .Values.* references could be statically traced for this template — edit the template directly.)\n")
 		}
 		sb.WriteString("\n------\n")
 	}
-	logger.L().Info(sb.String())
+	return sb.String()
 }
 
 // UnfixedControls returns the failed (resource, control) tuples discovered during

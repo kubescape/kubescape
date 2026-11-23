@@ -64,7 +64,8 @@ const (
 	// that were not supplied, or that the apiserver has not finalised yet.
 	ReasonNamespaceLabelsUnknown Reason = "NamespaceLabelsUnknown"
 	// ReasonNamespaceUnknown: the request targets a namespaced resource but
-	// names no namespace, so a namespaceSelector cannot be evaluated.
+	// names no namespace, so a namespaceSelector cannot be evaluated unless the
+	// namespace labels were supplied and it does not depend on the name.
 	ReasonNamespaceUnknown Reason = "NamespaceUnknown"
 	// ReasonResourceScopeUnknown: the caller does not know whether the resource
 	// is namespaced (Request.ScopeUnknown), and a rule's scope or a

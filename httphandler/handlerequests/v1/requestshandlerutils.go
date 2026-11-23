@@ -601,14 +601,16 @@ func defaultScanInfo() *cautils.ScanInfo {
 
 func envToBool(env string, defaultValue bool) bool {
 	if d, ok := os.LookupEnv(env); ok {
-		return boolutils.StringToBool(d)
+		return boolutils.StringToBool(strings.TrimSpace(d))
 	}
 	return defaultValue
 }
 
 func envToString(env string, defaultValue string) string {
 	if d, ok := os.LookupEnv(env); ok {
-		return d
+		if trimmed := strings.TrimSpace(d); trimmed != "" {
+			return trimmed
+		}
 	}
 	return defaultValue
 }

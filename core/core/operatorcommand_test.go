@@ -103,6 +103,26 @@ func TestWaitForOperatorCommands_CompletesOnStatus(t *testing.T) {
 	require.NoError(t, WaitForOperatorCommands(context.Background(), dyn, "kubescape", names, 5*time.Second))
 }
 
+func TestWaitForOperatorCommandsWithPayloads_DecodesPayload(t *testing.T) {
+	dyn := newFakeOperatorCommandClient(t)
+	names, err := CreateOperatorCommands(context.Background(), dyn, "kubescape",
+		apis.Commands{Commands: []apis.Command{{CommandName: apis.TypeRunKubescape}}})
+	require.NoError(t, err)
+
+	expectedJSON := `{"action":"patch","target":{"kind":"Deployment","name":"api"},"dryRun":true}`
+	b64Payload := base64.StdEncoding.EncodeToString([]byte(expectedJSON))
+	setOperatorCommandStatus(t, dyn, "kubescape", names[0], map[string]interface{}{
+		"started":   true,
+		"completed": true,
+		"payload":   b64Payload,
+	})
+
+	payloads, err := WaitForOperatorCommandsWithPayloads(context.Background(), dyn, "kubescape", names, 5*time.Second)
+	require.NoError(t, err)
+	require.Len(t, payloads, 1)
+	assert.Equal(t, expectedJSON, payloads[names[0]])
+}
+
 func TestWaitForOperatorCommands_ReportsError(t *testing.T) {
 	dyn := newFakeOperatorCommandClient(t)
 	names, err := CreateOperatorCommands(context.Background(), dyn, "kubescape",

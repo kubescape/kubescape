@@ -1,8 +1,12 @@
 package printer
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -11,6 +15,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -190,7 +195,40 @@ func (prettyPrinter *PrettyPrinter) pathLineResolver(opaSessionObj *cautils.OPAS
 	}
 
 	docIndex, ok := getDocIndex(opaSessionObj, scanned.resourceID)
-	if !ok {
+	if ok {
+		resolver := caches.get(scanned.absPath).locationResolver(scanned.absPath, "evidence")
+		if resolver == nil {
+			return nil
+		}
+
+		return func(path string) (int, bool) {
+			// ResolveLocation is called directly rather than through
+			// resolveFixLocation, which defaults to line 1 when nothing resolves.
+			// A fabricated line is worse than none for an auditor reading this
+			// column, so an unresolved path degrades to today's bare output -
+			// the same choice resolveReviewPathLocations makes for SARIF's
+			// related locations.
+			location, err := resolver.ResolveLocation(path, docIndex)
+			if err != nil || location.Line == 0 {
+				return 0, false
+			}
+			return location.Line, true
+		}
+	}
+
+	// For resources whose path does not carry an explicit document index (such as
+	// Kustomize-rendered resources or Helm templates with actions), check if the
+	// originating manifest file on disk can be resolved and map unambiguously to
+	// the resource. For fields that come straight from that originating file,
+	// resolve their line in that file; for composed or modified fields, keep the
+	// file-only form without inventing a line.
+	resourceSource := opaSessionObj.ResourceSource[scanned.resourceID]
+	if resourceSource.FileType != reporthandling.SourceTypeKustomizeDirectory && resourceSource.FileType != reporthandling.SourceTypeHelmChart {
+		return nil
+	}
+
+	info, err := os.Stat(scanned.absPath)
+	if err != nil || info.IsDir() || !info.Mode().IsRegular() {
 		return nil
 	}
 
@@ -199,19 +237,199 @@ func (prettyPrinter *PrettyPrinter) pathLineResolver(opaSessionObj *cautils.OPAS
 		return nil
 	}
 
+	resource, ok := opaSessionObj.GetResource(scanned.resourceID)
+	if !ok || resource == nil {
+		return nil
+	}
+
+	docIndex, ok = resolver.FindDocumentIndex(resource.GetKind(), resource.GetName(), resource.GetNamespace())
+	if !ok {
+		return nil
+	}
+
+	rawObj, err := resolver.RawDocument(docIndex)
+	if err != nil || rawObj == nil {
+		return nil
+	}
+	renderedObj := resource.GetObject()
+
 	return func(path string) (int, bool) {
-		// ResolveLocation is called directly rather than through
-		// resolveFixLocation, which defaults to line 1 when nothing resolves.
-		// A fabricated line is worse than none for an auditor reading this
-		// column, so an unresolved path degrades to today's bare output -
-		// the same choice resolveReviewPathLocations makes for SARIF's
-		// related locations.
-		location, err := resolver.ResolveLocation(path, docIndex)
+		if !isFieldUncomposed(rawObj, renderedObj, path) {
+			return 0, false
+		}
+		location, err := resolver.ResolveDocumentLocation(path, docIndex)
 		if err != nil || location.Line == 0 {
 			return 0, false
 		}
 		return location.Line, true
 	}
+}
+
+// indexedEntitiesMatch verifies that for every indexed segment in the path (e.g. containers[0]),
+// if the element in renderedObj has a "name" key (identifying the entity like a container or volume),
+// the corresponding element in rawObj has an identical "name". When entries have no usable identity
+// (no name key, or non-string name), they are matched only when their complete entries are equal.
+// This prevents attributing line numbers when list entries have been reordered or modified by an overlay.
+func indexedEntitiesMatch(rawObj, renderedObj map[string]any, segments []pathparse.Segment) bool {
+	for i, seg := range segments {
+		if seg.Index >= 0 {
+			prefix := segments[:i+1]
+			rElem, rOk := getPathValue(renderedObj, prefix)
+			rawElem, rawOk := getPathValue(rawObj, prefix)
+			if !rOk || !rawOk {
+				return false
+			}
+			rMap, rIsMap := rElem.(map[string]any)
+			rawMap, rawIsMap := rawElem.(map[string]any)
+			if rIsMap && rawIsMap {
+				rName, hasRName := rMap["name"]
+				rawName, hasRawName := rawMap["name"]
+				if hasRName != hasRawName {
+					return false
+				}
+				rNameStr, isStr := rName.(string)
+				if hasRName && isStr && rNameStr != "" {
+					if !reflect.DeepEqual(rName, rawName) {
+						return false
+					}
+				} else {
+					if !reflect.DeepEqual(rElem, rawElem) {
+						return false
+					}
+				}
+			} else {
+				if !reflect.DeepEqual(rElem, rawElem) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+// isFieldUncomposed reports whether path in renderedObj comes straight from rawObj
+// without having been added, replaced, or modified by a composer (such as a Kustomize
+// overlay or Helm template action).
+func isFieldUncomposed(rawObj, renderedObj map[string]any, path string) bool {
+	if rawObj == nil || renderedObj == nil {
+		return false
+	}
+	segments, err := pathparse.ParsePath(path)
+	if err != nil || len(segments) == 0 {
+		return false
+	}
+
+	renderedVal, renderedFound := getPathValue(renderedObj, segments)
+	rawVal, rawFound := getPathValue(rawObj, segments)
+
+	if renderedFound {
+		if !rawFound {
+			return false
+		}
+		if !indexedEntitiesMatch(rawObj, renderedObj, segments) {
+			return false
+		}
+		return valuesMatch(rawVal, renderedVal)
+	}
+
+	// If renderedFound is false:
+	// A field removed by an overlay or composer while its parent stays (e.g.
+	// securityContext: {}) was present in rawObj, so falling back to an ancestor
+	// would falsely report the line of the removed field.
+	if rawFound {
+		return false
+	}
+
+	// For an absent fix path, the target field itself does not exist in renderedObj
+	// nor in rawObj (e.g. an omitted securityContext setting).
+	// Verify that any indexed entities along the path match in identity.
+	if !indexedEntitiesMatch(rawObj, renderedObj, segments) {
+		return false
+	}
+
+	// Find the longest ancestor prefix that exists in renderedObj.
+	// If the path contains an indexed segment (e.g. containers[0]), that indexed
+	// entity must exist in renderedObj.
+	lastIndexed := -1
+	for i, seg := range segments {
+		if seg.Index >= 0 {
+			lastIndexed = i
+		}
+	}
+
+	prefix := segments[:len(segments)-1]
+	for len(prefix) > 0 {
+		if len(prefix) <= lastIndexed {
+			// Cannot match an ancestor higher than the indexed entity (e.g. spec cannot stand in for containers[0])
+			break
+		}
+		renderedAncestor, ok := getPathValue(renderedObj, prefix)
+		if ok {
+			rawAncestor, rawOk := getPathValue(rawObj, prefix)
+			if !rawOk {
+				return false
+			}
+			// If ancestor is an object with a name, check name match safely without panic
+			if rMap, ok := renderedAncestor.(map[string]any); ok {
+				if rawMap, rawOk := rawAncestor.(map[string]any); rawOk {
+					rName, hasRName := rMap["name"]
+					rawName, hasRawName := rawMap["name"]
+					if hasRName != hasRawName {
+						return false
+					}
+					if hasRName && !reflect.DeepEqual(rawName, rName) {
+						return false
+					}
+				} else {
+					return false
+				}
+			}
+			return true
+		}
+		prefix = prefix[:len(prefix)-1]
+	}
+	return false
+}
+
+// getPathValue traverses an object following parsed path segments.
+func getPathValue(obj any, segments []pathparse.Segment) (any, bool) {
+	current := obj
+	for _, segment := range segments {
+		m, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		val, ok := m[segment.Key]
+		if !ok {
+			return nil, false
+		}
+		if segment.Index >= 0 {
+			slice, ok := val.([]any)
+			if !ok || segment.Index >= len(slice) {
+				return nil, false
+			}
+			current = slice[segment.Index]
+		} else {
+			current = val
+		}
+	}
+	return current, true
+}
+
+// valuesMatch reports whether two field values match in JSON representation.
+func valuesMatch(a, b any) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	aj, errA := json.Marshal(a)
+	bj, errB := json.Marshal(b)
+	if errA == nil && errB == nil {
+		return bytes.Equal(aj, bj)
+	}
+	return reflect.DeepEqual(a, b)
 }
 
 func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata, showEvidence bool, showSecrets bool, sourcePath string, lineFor func(string) (int, bool), patchFor ...func([]string) string) []table.Row {

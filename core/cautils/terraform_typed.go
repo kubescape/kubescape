@@ -60,7 +60,7 @@ var typedResourceGVK = map[string]struct{ apiVersion, kind string }{
 	"kubernetes_persistent_volume_claim_v1":        {"v1", "PersistentVolumeClaim"},
 	"kubernetes_persistent_volume":                 {"v1", "PersistentVolume"},
 	"kubernetes_persistent_volume_v1":              {"v1", "PersistentVolume"},
-	"kubernetes_pod_disruption_budget":             {"policy/v1", "PodDisruptionBudget"},
+	"kubernetes_pod_disruption_budget":             {"policy/v1beta1", "PodDisruptionBudget"},
 	"kubernetes_pod_disruption_budget_v1":          {"policy/v1", "PodDisruptionBudget"},
 	"kubernetes_resource_quota":                    {"v1", "ResourceQuota"},
 	"kubernetes_resource_quota_v1":                 {"v1", "ResourceQuota"},
@@ -114,6 +114,8 @@ var pluralOverrides = map[string]string{
 	"image_pull_secrets":      "imagePullSecrets",
 	"match_expressions":       "matchExpressions",
 	"match_expression":        "matchExpressions",
+	"match_fields":            "matchFields",
+	"match_field":             "matchFields",
 	"volume_claim_template":   "volumeClaimTemplates",
 	"http_header":             "httpHeaders",
 	"sysctl":                  "sysctls",
@@ -146,7 +148,8 @@ var repeatableBlocks = map[string]bool{
 	"env": true, "env_from": true, "port": true, "ports": true, "toleration": true,
 	"host_alias": true, "host_aliases": true, "rule": true, "subject": true,
 	"image_pull_secret": true, "image_pull_secrets": true,
-	"match_expressions": true, "match_expression": true, "volume_claim_template": true, "http_header": true,
+	"match_expressions": true, "match_expression": true,
+	"match_fields": true, "match_field": true, "volume_claim_template": true, "http_header": true,
 	"sysctl": true, "ingress": true, "egress": true, "from": true, "to": true,
 	"path": true, "tls": true,
 	"limit": true, "metric": true, "policy": true,
@@ -214,12 +217,18 @@ func fieldNameFor(blockType string) string {
 	if v, ok := pluralOverrides[blockType]; ok {
 		return v
 	}
+	if blockType == "ceph_fs" {
+		return "cephfs"
+	}
 	return snakeToCamel(blockType)
 }
 
 func attributeNameFor(name string) string {
-	if name == "data_disk_uri" {
+	switch name {
+	case "data_disk_uri":
 		return "diskURI"
+	case "target_ww_ns":
+		return "targetWWNs"
 	}
 	if name == "storage_provisioner" {
 		return "provisioner"
