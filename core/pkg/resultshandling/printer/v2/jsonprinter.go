@@ -40,6 +40,9 @@ func NewJsonPrinter() *JsonPrinter {
 }
 
 func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if jp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.JsonFormat, outputFile, jsonOutputFile)
 	if explicitOutput {
 		var err error
@@ -62,6 +65,9 @@ func (jp *JsonPrinter) Score(score float32) {
 
 }
 func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if jp == nil {
+		return fmt.Errorf("failed to write json results: printer is nil")
+	}
 	if err := printer.PrepareOutput(jp.writer); err != nil {
 		return err
 	}
@@ -340,7 +346,7 @@ func (jp *JsonPrinter) PrintNextSteps() {
 
 // CloseWriter closes the JSON output writer, returning any error from flushing or closing.
 func (p *JsonPrinter) CloseWriter() error {
-	if p.writer != nil && p.writer != os.Stdout {
+	if p != nil && p.writer != nil && p.writer != os.Stdout {
 		return printer.CloseOutput(p.writer)
 	}
 	return nil
