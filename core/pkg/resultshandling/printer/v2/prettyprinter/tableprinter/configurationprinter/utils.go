@@ -141,18 +141,18 @@ func buildCategoryToControlsMap(mapCategoriesToCtrlSummary map[string][]reportsu
 
 // returns doc link for control
 func getDocsForControl(controlSummary reportsummary.IControlSummary) string {
-	if controlSummary == nil {
+	if controlSummary == nil || strings.TrimSpace(controlSummary.GetID()) == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s/%s", docsPrefix, strings.ToLower(controlSummary.GetID()))
+	return fmt.Sprintf("%s/%s", docsPrefix, strings.ToLower(strings.TrimSpace(controlSummary.GetID())))
 }
 
 // returns run command with verbose for control
 func getRunCommandForControl(controlSummary reportsummary.IControlSummary) string {
-	if controlSummary == nil {
+	if controlSummary == nil || strings.TrimSpace(controlSummary.GetID()) == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s %s -v", scanControlPrefix, controlSummary.GetID())
+	return fmt.Sprintf("%s %s -v", scanControlPrefix, strings.TrimSpace(controlSummary.GetID()))
 }
 
 func sortControlSummaries(controlSummaries []reportsummary.IControlSummary) {
