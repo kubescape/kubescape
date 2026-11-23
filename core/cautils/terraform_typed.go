@@ -236,6 +236,28 @@ func attributeNameFor(name string) string {
 	return snakeToCamel(name)
 }
 
+// rbdAttributeNames are the rbd volume source attributes the provider renames
+// on their way to Kubernetes, where they are monitors, image, pool and user.
+// The provider uses these names for the rbd block of both a pod volume and a
+// PersistentVolume source.
+var rbdAttributeNames = map[string]string{
+	"ceph_monitors": "monitors",
+	"rbd_image":     "image",
+	"rbd_pool":      "pool",
+	"rados_user":    "user",
+}
+
+// attributeKeyFor is attributeNameFor for an attribute of the block at path,
+// for the attributes whose Kubernetes name depends on the block they are in.
+func attributeKeyFor(path, name string) string {
+	if strings.HasSuffix(path, ".rbd") {
+		if key, ok := rbdAttributeNames[name]; ok {
+			return key
+		}
+	}
+	return attributeNameFor(name)
+}
+
 func isDigitOnly(s string) bool {
 	if len(s) == 0 {
 		return false
@@ -339,6 +361,30 @@ func isServiceAccountSecretBlock(path, blockType string) bool {
 	return (strings.HasPrefix(path, "kubernetes_service_account") ||
 		strings.HasPrefix(path, "kubernetes_default_service_account")) &&
 		strings.Count(path, ".") == 1
+}
+
+// isPersistentVolumeClaimRefBlock reports whether path is the claim_ref block
+// of a PersistentVolume spec. The provider defaults its namespace to
+// "default".
+func isPersistentVolumeClaimRefBlock(path string) bool {
+	if !strings.HasSuffix(path, ".spec.claim_ref") {
+		return false
+	}
+	return strings.HasPrefix(path, "kubernetes_persistent_volume.") ||
+		strings.HasPrefix(path, "kubernetes_persistent_volume_v1.")
+}
+
+// usesHPAV2beta2 reports whether the provider creates an unversioned
+// kubernetes_horizontal_pod_autoscaler through autoscaling/v2beta2 rather than
+// autoscaling/v1, which it does when the spec has a metric or behavior block.
+func usesHPAV2beta2(obj map[string]interface{}) bool {
+	spec, _ := obj["spec"].(map[string]interface{})
+	if spec == nil {
+		return false
+	}
+	_, hasMetrics := spec["metrics"]
+	_, hasBehavior := spec["behavior"]
+	return hasMetrics || hasBehavior
 }
 
 func isNestedHPAMetricBlock(path, blockType string) bool {
@@ -445,12 +491,12 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 			// a rule read the field as set.
 			continue
 		}
-		out[attributeNameFor(name)] = value
+		out[attributeKeyFor(path, name)] = value
 	}
 	if isPodSpecBlockPath(path) {
 		applyProviderDefaults(body, evalCtx, out, providerPodSpecDefaults)
 	}
-	if takesProviderNamespaceDefault(path) {
+	if takesProviderNamespaceDefault(path) || isPersistentVolumeClaimRefBlock(path) {
 		applyProviderDefaults(body, evalCtx, out, providerNamespaceDefault)
 	}
 
@@ -598,6 +644,9 @@ func extractTypedResources(body hcl.Body, evalCtx *hcl.EvalContext) ([]map[strin
 
 		obj := hclResourceBodyToMap(block.Body, evalCtx, &errs, block.Labels[0]+"."+block.Labels[1])
 		obj["apiVersion"] = gvk.apiVersion
+		if block.Labels[0] == "kubernetes_horizontal_pod_autoscaler" && usesHPAV2beta2(obj) {
+			obj["apiVersion"] = "autoscaling/v2beta2"
+		}
 		obj["kind"] = gvk.kind
 
 		meta, _ := obj["metadata"].(map[string]interface{})
