@@ -406,9 +406,12 @@ func (w *webhook) namespaceFor(req *request, namespace string, unnamed bool) fil
 	}
 	if unnamed {
 		if req.scopeUnknown {
-			return w.namespaceWithoutName(req)
+			return w.namespaceWithoutName(req, ReasonResourceScopeUnknown)
 		}
-		return unknown(ReasonNamespaceUnknown)
+		if !req.NamespaceLabelsKnown {
+			return unknown(ReasonNamespaceUnknown)
+		}
+		return w.namespaceWithoutName(req, ReasonNamespaceUnknown)
 	}
 	if namespace == "" {
 		return unknown(ReasonNamespaceLabelsUnknown)
@@ -424,21 +427,25 @@ func (w *webhook) namespaceFor(req *request, namespace string, unnamed bool) fil
 	}
 }
 
-// namespaceWithoutName evaluates the namespaceSelector for the namespaced
-// reading of a request of unknown scope, whose namespace is not known. A
-// requirement that does not depend on the name is decided from the supplied
-// namespace labels, and one that definitely fails rejects the reading. The
-// others stay undecided, and what they depend on is the scope.
-func (w *webhook) namespaceWithoutName(req *request) filter {
+// namespaceWithoutName evaluates the namespaceSelector for a namespaced request
+// whose namespace is not named: the namespaced reading of a request of unknown
+// scope, or a namespaced request that names no namespace. A requirement that
+// does not depend on the name is decided from the supplied namespace labels,
+// and one that definitely fails rejects the request. A requirement on the name
+// stays undecided, for the reason given as nameUnknown. Without the namespace
+// labels nothing is decided, and ReasonNamespaceLabelsUnknown is added.
+func (w *webhook) namespaceWithoutName(req *request, nameUnknown Reason) filter {
 	requirements, selectable := w.namespaceSelector.Requirements()
 	if !selectable {
 		return reject(ReasonNamespaceSelectorExcludes)
 	}
+	if !req.NamespaceLabelsKnown {
+		return unknown(nameUnknown, ReasonNamespaceLabelsUnknown)
+	}
 	set := labels.Set(req.NamespaceLabels)
 	unresolved := false
 	for _, r := range requirements {
-		_, present := req.NamespaceLabels[r.Key()]
-		if !req.NamespaceLabelsKnown || (r.Key() == corev1.LabelMetadataName && !present) {
+		if _, present := req.NamespaceLabels[r.Key()]; r.Key() == corev1.LabelMetadataName && !present {
 			unresolved = true
 			continue
 		}
@@ -447,7 +454,7 @@ func (w *webhook) namespaceWithoutName(req *request) filter {
 		}
 	}
 	if unresolved {
-		return unknown(ReasonResourceScopeUnknown)
+		return unknown(nameUnknown)
 	}
 	return pass
 }
@@ -584,7 +591,12 @@ func (w *webhook) matchIncomplete(req Request) Result {
 func (w *webhook) couldMatchIncomplete(req Request) bool {
 	namespace := req.Namespace
 	settled := scopeSettled(req)
-	if settled && req.Namespace == "" && !req.ClusterScoped {
+	switch {
+	case isNamespaceResource(req):
+		// As for a complete request, the apiserver reports the Namespace's own
+		// name as its namespace.
+		namespace = req.Name
+	case settled && req.Namespace == "" && !req.ClusterScoped:
 		// Namespaced, with no namespace supplied.
 		namespace = unknownNamespace
 	}
@@ -623,17 +635,27 @@ func (w *webhook) couldMatchIncomplete(req Request) bool {
 }
 
 // scopeSettled reports whether an incomplete request still decides its own
-// scope: a ClusterScoped request is cluster-scoped, and one with a namespace,
-// or none and not ClusterScoped, is namespaced. It does not when the request
-// contradicts itself or claims an unknown scope, or when it could be the core
-// Namespace once its missing group, version or resource is supplied, since
-// that resource is cluster-scoped whatever its namespace.
+// scope: the core Namespace is cluster-scoped, a ClusterScoped request is
+// cluster-scoped, and one with a namespace, or none and neither ClusterScoped
+// nor ScopeUnknown, is namespaced. As for a complete request, a namespace
+// settles a scope the caller marked unknown. It does not when the request
+// contradicts itself or claims an unknown scope without a namespace, or when
+// it could be the core Namespace once its missing group, version or resource
+// is supplied, since that resource is cluster-scoped whatever its namespace.
 func scopeSettled(req Request) bool {
-	if req.ScopeUnknown || (req.ClusterScoped && req.Namespace != "") {
-		return false
+	if isNamespaceResource(req) {
+		return true
 	}
 	couldBeNamespace := req.Group == "" &&
 		(req.Version == "" || req.Version == namespaceGVR.Version) &&
 		(req.Resource == "" || req.Resource == namespaceGVR.Resource)
-	return !couldBeNamespace
+	if couldBeNamespace || (req.ClusterScoped && req.Namespace != "") {
+		return false
+	}
+	return !req.ScopeUnknown || req.Namespace != ""
+}
+
+// isNamespaceResource reports whether req names the core Namespace resource.
+func isNamespaceResource(req Request) bool {
+	return schema.GroupVersionResource{Group: req.Group, Version: req.Version, Resource: req.Resource} == namespaceGVR
 }
