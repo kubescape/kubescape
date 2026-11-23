@@ -64,7 +64,7 @@ func (l ExposureLevel) String() string {
 	}
 }
 
-// Exposure is the result of classifying one endpoint's ingress exposure.
+// Exposure is the result of classifying one endpoint's network exposure.
 type Exposure struct {
 	Level ExposureLevel
 	// Reason explains what produced Level: which rule shape was found, or
@@ -136,13 +136,12 @@ func (idx *Index) IngressExposure(ep Endpoint) Exposure {
 	return best
 }
 
-// classifyPeers reports the widest exposure level a single ingress rule's
-// From list admits. An empty/nil From list matches every peer, the same
-// "absent means unrestricted" semantics portVerdict/peerListVerdict already
-// apply elsewhere in this package.
+// classifyPeers reports the widest exposure level a NetworkPolicy peer list
+// admits. An empty/nil list matches every peer, the same "absent means
+// unrestricted" semantics used by both ingress and egress rules.
 func classifyPeers(peers []networkingv1.NetworkPolicyPeer) (ExposureLevel, string) {
 	if len(peers) == 0 {
-		return ExposureOpen, "rule has no source restriction; matches every peer"
+		return ExposureOpen, "rule has no peer restriction; matches every peer"
 	}
 
 	best := ExposureRestricted
