@@ -86,6 +86,29 @@ func TestInstallScriptReportsLatestVersionLookupFailure(t *testing.T) {
 	if !strings.HasSuffix(stdout.String(), "\x1b[0m") {
 		t.Errorf("expected installer output to end with terminal reset sequence, got: %q", stdout.String())
 	}
+	if strings.HasSuffix(stderr.String(), "\x1b[0m") {
+		t.Errorf("unexpected terminal reset on redirected stderr: %q", stderr.String())
+	}
+
+	t.Run("stderr attached to terminal", func(t *testing.T) {
+		if runtime.GOOS != "linux" {
+			t.Skip("uses the Linux util-linux script command")
+		}
+		if _, err := exec.LookPath("script"); err != nil {
+			t.Skip("script is required to allocate a pseudo-terminal")
+		}
+		// Redirect stdout inside the pseudo-terminal so only stderr reaches it.
+		terminal := exec.Command("script", "-qec", "exec bash ./install.sh >/dev/null", "/dev/null")
+		terminal.Dir = repoRoot
+		terminal.Env = cmd.Env
+		output, err := terminal.CombinedOutput()
+		if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+			t.Fatalf("expected installer exit code 1, got %v: %q", err, output)
+		}
+		if !bytes.Contains(output, []byte("Failed to fetch latest release version")) || !bytes.HasSuffix(output, []byte("\x1b[0m")) {
+			t.Errorf("expected the lookup error followed by a terminal reset, got %q", output)
+		}
+	})
 }
 
 func replaceEnvValueForInstallTest(env []string, key, value string) []string {

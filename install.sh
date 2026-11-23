@@ -1,7 +1,13 @@
 #!/bin/bash
 set -e
 
-trap 'printf "\033[0m"' EXIT
+reset_colors() {
+    printf '\033[0m'
+    if [ -t 2 ]; then
+        printf '\033[0m' >&2
+    fi
+}
+trap reset_colors EXIT
 
 BASE_DIR="${HOME}/.kubescape"
 KUBESCAPE_EXEC=kubescape

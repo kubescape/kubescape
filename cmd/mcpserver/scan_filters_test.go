@@ -5,9 +5,32 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestExcludeControlsSchema(t *testing.T) {
+	for name, options := range map[string][]mcp.ToolOption{
+		"cluster": scanFilterOptions(), "iac": iacScanFilterOptions(), "workload": workloadScanFilterOptions(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			tool := mcp.NewTool("scan", options...)
+			compiler := jsonschema.NewCompiler()
+			require.NoError(t, compiler.AddResource("filter.json", tool.InputSchema.Properties["exclude_controls"]))
+			schema, err := compiler.Compile("filter.json")
+			require.NoError(t, err)
+			assert.NotContains(t, tool.InputSchema.Required, "exclude_controls")
+			for _, valid := range []any{nil, "C-0012,C-0017", []any{"C-0012"}} {
+				assert.NoError(t, schema.Validate(valid), "exclude_controls=%v", valid)
+			}
+			for _, invalid := range []any{true, []any{nil}} {
+				assert.Error(t, schema.Validate(invalid), "exclude_controls=%v", invalid)
+			}
+		})
+	}
+}
 
 func TestParseScanFilterArgs_Severities(t *testing.T) {
 	tests := []struct {

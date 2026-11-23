@@ -66,6 +66,7 @@ func withOptionalExcludeControlsProperty(desc string) mcp.ToolOption {
 	return func(t *mcp.Tool) {
 		t.InputSchema.Properties["exclude_controls"] = map[string]any{
 			"anyOf": []any{
+				map[string]any{"type": "null"},
 				map[string]any{"type": "string"},
 				map[string]any{
 					"type":  "array",
