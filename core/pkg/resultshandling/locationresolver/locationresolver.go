@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -12,12 +13,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
-	"gopkg.in/op/go-logging.v1"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -85,7 +83,7 @@ func openManifestFile(path string) (*os.File, error) {
 type PathLocationResolver struct {
 	yqlibEvaluator yqlib.Evaluator
 	yamlPath       string
-	yamlNodes      []*yaml.Node
+	yamlNodes      []*yqlib.CandidateNode
 	// workloadDocuments maps the index the scanner gives a workload to its
 	// document in yamlNodes, -1 for one in a List; see IndexedByWorkload.
 	workloadDocuments []int
@@ -152,25 +150,25 @@ func NewPathLocationResolver(yamlPath string, opts ...Option) (*PathLocationReso
 		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrManifestTooLarge, yamlPath, limit)
 	}
 
-	yamlNodes := make([]*yaml.Node, 0)
+	yamlNodes := make([]*yqlib.CandidateNode, 0)
 
-	yamlDecoder := yaml.NewDecoder(bytes.NewReader(data))
+	yamlDecoder := yqlib.NewYamlDecoder(yqlib.ConfiguredYamlPreferences)
+	if err = yamlDecoder.Init(bytes.NewReader(data)); err != nil {
+		return nil, err
+	}
 	for {
-		var yamlNode yaml.Node
-		err = yamlDecoder.Decode(&yamlNode)
+		yamlNode, err := yamlDecoder.Decode()
 		if errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
 			return nil, err
-		} else {
-			yamlNodes = append(yamlNodes, &yamlNode)
 		}
+		yamlNode.EvaluateTogether = true
+		yamlNodes = append(yamlNodes, yamlNode)
 	}
 
 	evaluator := yqlib.NewAllAtOnceEvaluator()
-	backendLoggerLeveled := logging.AddModuleLevel(logging.NewLogBackend(logger.L().GetWriter(), "", 0))
-	backendLoggerLeveled.SetLevel(logging.ERROR, "")
-	yqlib.GetLogger().SetBackend(backendLoggerLeveled)
+	yqlib.GetLogger().SetLevel(slog.LevelError)
 
 	resolver := &PathLocationResolver{
 		yamlPath:       yamlPath,
@@ -245,7 +243,7 @@ func (l *PathLocationResolver) ResolveDocumentLocation(path string, docIndex int
 		}
 
 		if backElement := candidateNodes.Back(); backElement != nil {
-			candidateNode := backElement.Value.(*yqlib.CandidateNode).Node
+			candidateNode := backElement.Value.(*yqlib.CandidateNode)
 			if candidateNode.Line != 0 {
 				return Location{Line: candidateNode.Line, Column: candidateNode.Column}, nil
 			}
@@ -326,7 +324,7 @@ func (l *PathLocationResolver) FindDocumentIndex(kind, name, namespace string) (
 				Namespace string `yaml:"namespace"`
 			} `yaml:"metadata"`
 		}
-		if err := node.Decode(&doc); err != nil {
+		if err := decodeCandidateNode(node, &doc); err != nil {
 			continue
 		}
 		if doc.Kind == kind && doc.Metadata.Name == name {
@@ -348,8 +346,16 @@ func (l *PathLocationResolver) RawDocument(docIndex int) (map[string]any, error)
 		return nil, fmt.Errorf("document index [%d] out of range [%d]", docIndex, len(l.yamlNodes))
 	}
 	var doc map[string]any
-	if err := l.yamlNodes[docIndex].Decode(&doc); err != nil {
+	if err := decodeCandidateNode(l.yamlNodes[docIndex], &doc); err != nil {
 		return nil, err
 	}
 	return doc, nil
+}
+
+func decodeCandidateNode(node *yqlib.CandidateNode, out any) error {
+	yamlNode, err := node.MarshalYAML()
+	if err != nil {
+		return err
+	}
+	return yamlNode.Decode(out)
 }

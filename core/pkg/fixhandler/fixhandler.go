@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -33,7 +34,6 @@ import (
 	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/mattn/go-isatty"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
-	"gopkg.in/op/go-logging.v1"
 	"gopkg.in/yaml.v3"
 )
 
@@ -172,9 +172,7 @@ func NewFixHandlerWithRoot(fixInfo *metav1.FixInfo, root *os.Root) (*FixHandler,
 		}
 	}
 
-	backendLoggerLeveled := logging.AddModuleLevel(logging.NewLogBackend(logger.L().GetWriter(), "", 0))
-	backendLoggerLeveled.SetLevel(logging.ERROR, "")
-	yqlib.GetLogger().SetBackend(backendLoggerLeveled)
+	yqlib.GetLogger().SetLevel(slog.LevelError)
 
 	return &FixHandler{
 		fixInfo:       fixInfo,
