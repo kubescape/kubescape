@@ -152,7 +152,11 @@ func NewPathLocationResolver(yamlPath string, opts ...Option) (*PathLocationReso
 
 	yamlNodes := make([]*yqlib.CandidateNode, 0)
 
-	yamlDecoder := yqlib.NewYamlDecoder(yqlib.ConfiguredYamlPreferences)
+	// Leading-content preprocessing swallows leading "---" markers, which would
+	// renumber the documents relative to the raw file.
+	prefs := yqlib.ConfiguredYamlPreferences
+	prefs.LeadingContentPreProcessing = false
+	yamlDecoder := yqlib.NewYamlDecoder(prefs)
 	if err = yamlDecoder.Init(bytes.NewReader(data)); err != nil {
 		return nil, err
 	}
