@@ -601,3 +601,29 @@ func TestBuildPolicyReports_NilSafety(t *testing.T) {
 		})
 	})
 }
+
+func TestPolicyReport_NilReceiverSafety(t *testing.T) {
+	var pp *PolicyReportPrinter
+
+	assert.NotPanics(t, func() {
+		err := pp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := pp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := pp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		pp.Score(100)
+		pp.PrintNextSteps()
+	})
+}

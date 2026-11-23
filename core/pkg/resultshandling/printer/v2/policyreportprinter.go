@@ -108,6 +108,9 @@ func NewPolicyReportPrinter() *PolicyReportPrinter {
 }
 
 func (pp *PolicyReportPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if pp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.PolicyReportFormat, outputFile, policyReportOutputFile)
 	if explicitOutput {
 		var err error
@@ -125,6 +128,9 @@ func (pp *PolicyReportPrinter) PrintNextSteps() {
 }
 
 func (pp *PolicyReportPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if pp == nil {
+		return fmt.Errorf("failed to write PolicyReport results: printer is nil")
+	}
 	hasPosture := opaSessionObj != nil && opaSessionObj.Report != nil
 	if !hasPosture && len(imageScanData) == 0 {
 		return fmt.Errorf("failed to write results in PolicyReport format: no data provided")
@@ -644,7 +650,7 @@ func mapPolicyReportSeverity(severity string) string {
 
 // CloseWriter closes the PolicyReport output writer, returning any error from flushing or closing.
 func (pp *PolicyReportPrinter) CloseWriter() error {
-	if pp.writer != nil && pp.writer != os.Stdout {
+	if pp != nil && pp.writer != nil && pp.writer != os.Stdout {
 		return printer.CloseOutput(pp.writer)
 	}
 	return nil
