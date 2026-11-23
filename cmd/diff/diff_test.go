@@ -517,3 +517,51 @@ func TestGetDiffCmd_FailOnNewNamesVulnerabilitiesForImageReports(t *testing.T) {
 	diffCmd.SetArgs([]string{filepath.Join(dir, "missing.json"), base, "--fail-on-new"})
 	assert.EqualError(t, diffCmd.Execute(), `found 1 new vulnerability(ies) at or above severity threshold "all"`, "an image head report is enough to name vulnerabilities")
 }
+
+func TestGetDiffCmd_RejectsEncryptedReports(t *testing.T) {
+	tempDir := t.TempDir()
+	validContent := `{"results":[],"summaryDetails":{"controls":{}}}`
+	encContent := `{
+		"results": [{"resourceID": "pod-1", "controls": [{"controlID": "C-0001", "status": {"status": "failed"}}]}],
+		"summaryDetails": {"controls": {"C-0001": {"scoreFactor": 0.5, "severity": "Medium"}}},
+		"metadata": {
+			"encryptionMetadata": {
+				"version": "v1",
+				"dekAlgorithm": "AES256_GCM",
+				"kekAlgorithm": "ARGON2ID_AES256_GCM",
+				"encryptedDEK": "ENC[ARGON2ID_AES256_GCM,salt,nonce,ciphertext]"
+			}
+		}
+	}`
+
+	validPath := filepath.Join(tempDir, "valid.json")
+	encPath := filepath.Join(tempDir, "enc.json")
+	require.NoError(t, os.WriteFile(validPath, []byte(validContent), 0o600))
+	require.NoError(t, os.WriteFile(encPath, []byte(encContent), 0o600))
+
+	ks := core.NewKubescape(context.Background())
+
+	t.Run("encrypted base report is rejected", func(t *testing.T) {
+		cmd := GetDiffCmd(ks)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{encPath, validPath})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot diff encrypted report")
+		assert.Contains(t, err.Error(), "decrypt first with 'kubescape decrypt'")
+	})
+
+	t.Run("encrypted head report is rejected", func(t *testing.T) {
+		cmd := GetDiffCmd(ks)
+		cmd.SilenceErrors = true
+		cmd.SilenceUsage = true
+		cmd.SetArgs([]string{validPath, encPath})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot diff encrypted report")
+		assert.Contains(t, err.Error(), "decrypt first with 'kubescape decrypt'")
+	})
+}

@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -74,10 +75,16 @@ func ComputeWithOptions(basePath, headPath string, options Options) (*ChangeSet,
 
 	base, err := loadReport(basePath)
 	if err != nil {
+		if errors.Is(err, ErrEncryptedReport) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("loading base report: %w", err)
 	}
 	head, err := loadReport(headPath)
 	if err != nil {
+		if errors.Is(err, ErrEncryptedReport) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("loading head report: %w", err)
 	}
 
@@ -101,10 +108,16 @@ func ComputeFromJSON(baseJSON, headJSON []byte, options Options) (*ChangeSet, er
 
 	base, err := parseReport(baseJSON)
 	if err != nil {
+		if errors.Is(err, ErrEncryptedReport) {
+			return nil, fmt.Errorf("cannot diff encrypted base report: decrypt first with 'kubescape decrypt': %w", ErrEncryptedReport)
+		}
 		return nil, fmt.Errorf("loading base report: %w", err)
 	}
 	head, err := parseReport(headJSON)
 	if err != nil {
+		if errors.Is(err, ErrEncryptedReport) {
+			return nil, fmt.Errorf("cannot diff encrypted head report: decrypt first with 'kubescape decrypt': %w", ErrEncryptedReport)
+		}
 		return nil, fmt.Errorf("loading head report: %w", err)
 	}
 
