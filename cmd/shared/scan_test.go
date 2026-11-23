@@ -722,6 +722,74 @@ func TestValidateExcludeControls(t *testing.T) {
 	}
 }
 
+func TestValidateControlFilters(t *testing.T) {
+	tests := []struct {
+		name        string
+		include     string
+		skip        string
+		expectedErr string
+	}{
+		{
+			name:        "empty filters are valid",
+			include:     "",
+			skip:        "",
+			expectedErr: "",
+		},
+		{
+			name:        "valid single and comma-separated controls",
+			include:     "C-0016,C-0017",
+			skip:        "C-0018",
+			expectedErr: "",
+		},
+		{
+			name:        "padded control IDs are valid",
+			include:     " C-0016 , C-0017 ",
+			skip:        " C-0018 ",
+			expectedErr: "",
+		},
+		{
+			name:        "include controls with empty token is rejected",
+			include:     "C-0016,",
+			expectedErr: "--include-controls contains an empty control identifier",
+		},
+		{
+			name:        "include controls with whitespace-only token is rejected",
+			include:     "C-0016,   ,C-0017",
+			expectedErr: "--include-controls contains an empty control identifier",
+		},
+		{
+			name:        "include controls whitespace only is rejected",
+			include:     "   ",
+			expectedErr: "--include-controls contains an empty control identifier",
+		},
+		{
+			name:        "skip controls with empty token is rejected",
+			skip:        "C-0016,",
+			expectedErr: "--skip-controls contains an empty control identifier",
+		},
+		{
+			name:        "skip controls with whitespace-only token is rejected",
+			skip:        "C-0016,   ",
+			expectedErr: "--skip-controls contains an empty control identifier",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateControlFilters(&cautils.ScanInfo{
+				IncludeControls: tt.include,
+				SkipControls:    tt.skip,
+			})
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
 func TestValidateLabelSelector(t *testing.T) {
 	tests := []struct {
 		name          string

@@ -245,6 +245,9 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := ValidateExcludeControls(scanInfo); err != nil {
 		return err
 	}
+	if err := ValidateControlFilters(scanInfo); err != nil {
+		return err
+	}
 	if scanInfo.MaxDBAge < 0 {
 		return fmt.Errorf("invalid --max-db-age %q: must be a positive duration (e.g. 120h) or 0 for the default", scanInfo.MaxDBAge)
 	}
@@ -354,6 +357,27 @@ func ValidateExcludeControls(scanInfo *cautils.ScanInfo) error {
 	for _, control := range scanInfo.ExcludeControls {
 		if strings.TrimSpace(control) == "" {
 			return fmt.Errorf("--exclude-controls contains an empty control identifier")
+		}
+	}
+	return nil
+}
+
+// ValidateControlFilters rejects empty or whitespace-only control identifiers in --include-controls and --skip-controls.
+func ValidateControlFilters(scanInfo *cautils.ScanInfo) error {
+	for _, selection := range []struct {
+		flag  string
+		value string
+	}{
+		{"--include-controls", scanInfo.IncludeControls},
+		{"--skip-controls", scanInfo.SkipControls},
+	} {
+		if selection.value == "" {
+			continue
+		}
+		for _, token := range strings.Split(selection.value, ",") {
+			if strings.TrimSpace(token) == "" {
+				return fmt.Errorf("%s contains an empty control identifier", selection.flag)
+			}
 		}
 	}
 	return nil
