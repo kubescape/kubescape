@@ -655,3 +655,29 @@ func TestSortHTMLControlsBySeverityName_NilDoesNotPanic(t *testing.T) {
 		assert.Nil(t, sorted)
 	})
 }
+
+func TestHtml_NilReceiverSafety(t *testing.T) {
+	var hp *HtmlPrinter
+
+	assert.NotPanics(t, func() {
+		err := hp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := hp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := hp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		hp.Score(100)
+		hp.PrintNextSteps()
+	})
+}

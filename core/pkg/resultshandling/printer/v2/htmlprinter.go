@@ -89,6 +89,9 @@ func NewHtmlPrinter(showSecrets bool) *HtmlPrinter {
 }
 
 func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if hp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.HtmlFormat, outputFile, htmlOutputFile)
 	if !explicitOutput {
 		// Raw HTML markup must never fall back to stdout on a TTY.
@@ -178,6 +181,9 @@ func sortHTMLControlsBySeverityName(controlSummaries map[string]reportsummary.Co
 }
 
 func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if hp == nil {
+		return fmt.Errorf("failed to write HTML results: printer is nil")
+	}
 	if hp.writer == nil {
 		return fmt.Errorf("failed to write HTML results: output writer is nil")
 	}
@@ -302,7 +308,7 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 
 // CloseWriter closes the HTML output writer, returning any error from flushing or closing.
 func (p *HtmlPrinter) CloseWriter() error {
-	if p.writer != nil && p.writer != os.Stdout {
+	if p != nil && p.writer != nil && p.writer != os.Stdout {
 		return printer.CloseOutput(p.writer)
 	}
 	return nil
