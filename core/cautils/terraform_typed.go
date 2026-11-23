@@ -743,6 +743,7 @@ type terraformReferenceChecker struct {
 	dependencyObservers []*terraformReferenceResult
 	evaluations         map[terraformExpressionContext]terraformEvaluation
 	expressionTypes     map[terraformExpressionContext]cty.Type
+	proofVariables      map[hcl.Expression][]hcl.Traversal
 	referenceResults    map[terraformReferenceContext]terraformReferenceResult
 	forItems            map[terraformReferenceContext]terraformForItems
 }
@@ -833,7 +834,7 @@ func (c *terraformReferenceChecker) forExpressionItems(loop *hclsyntax.ForExpr, 
 	if diags.HasErrors() || collection.IsNull() || !collection.IsKnown() || !collection.CanIterateElements() {
 		return nil, false
 	}
-	if loop.CondExpr != nil && collection.LengthInt() == 0 {
+	if loop.CondExpr != nil {
 		childCtx := evalCtx.NewChild()
 		childCtx.Variables = map[string]cty.Value{loop.ValVar: cty.DynamicVal}
 		if loop.KeyVar != "" {
@@ -846,7 +847,7 @@ func (c *terraformReferenceChecker) forExpressionItems(loop *hclsyntax.ForExpr, 
 			failed = err != nil
 		}
 		if failed {
-			// HCL checks empty-loop filters with unknown iterator placeholders.
+			// HCL checks filters with unknown iterator placeholders before iteration.
 			precheck := terraformReferenceChecker{
 				localExpressions: c.localExpressions, moduleCtx: c.moduleCtx,
 				declaredVariables: c.declaredVariables,
@@ -857,6 +858,7 @@ func (c *terraformReferenceChecker) forExpressionItems(loop *hclsyntax.ForExpr, 
 			if precheck.hasUnresolvableVariables(loop.CondExpr, childCtx) {
 				return nil, true
 			}
+			return nil, false
 		}
 	}
 	var items []terraformForItem
@@ -920,11 +922,13 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 		// Retain observations only for this check, including repeated splat selections.
 		c.evaluations = map[terraformExpressionContext]terraformEvaluation{}
 		c.expressionTypes = map[terraformExpressionContext]cty.Type{}
+		c.proofVariables = map[hcl.Expression][]hcl.Traversal{}
 		c.referenceResults = map[terraformReferenceContext]terraformReferenceResult{}
 		c.forItems = map[terraformReferenceContext]terraformForItems{}
 		defer func() {
 			c.evaluations = nil
 			c.expressionTypes = nil
+			c.proofVariables = nil
 			c.referenceResults = nil
 			c.forItems = nil
 		}()
@@ -1122,15 +1126,7 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 				}
 				continue
 			}
-			for _, later := range call.Args[i+1:] {
-				_, laterDiags := c.expressionValue(later, evalCtx)
-				if laterDiags.HasErrors() || !c.hasUnresolvableVariables(later, evalCtx) {
-					continue
-				}
-				// An unused value is harmless when its type cannot widen the selected type.
-				if c.coalesceTypeIndependent(later, evalCtx, val.Type(), map[terraformExpressionContext]bool{}) {
-					continue
-				}
+			if !c.coalesceTypesIndependent(call.Args[i+1:], evalCtx, val.Type()) {
 				return true
 			}
 			return c.hasUnresolvableSelection(arg, evalCtx, selection)
@@ -1218,20 +1214,33 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 	}
 
 	if cond, ok := expr.(*hclsyntax.ConditionalExpr); ok {
+		if c.allowUnknown {
+			left := c.provenExpressionValue(cond.TrueResult, evalCtx)
+			right := c.provenExpressionValue(cond.FalseResult, evalCtx)
+			if left != cty.NilVal && right != cty.NilVal && !left.Type().HasDynamicTypes() && !right.Type().HasDynamicTypes() {
+				if common, _ := convert.UnifyUnsafe([]cty.Type{left.Type(), right.Type()}); common == cty.NilType {
+					return false
+				}
+			}
+		}
 		condExpr := unwrapParentheses(cond.Condition)
 		if c.hasUnresolvableVariables(condExpr, evalCtx) {
 			return true
 		}
 		val, diags := c.expressionValue(condExpr, evalCtx)
-		if diags.HasErrors() || !val.IsKnown() || val.IsNull() {
-			if c.allowUnknown && !diags.HasErrors() && !val.IsKnown() {
+		if diags.HasErrors() || val.IsNull() {
+			return false
+		}
+		if !val.IsKnown() {
+			if c.allowUnknown {
 				return c.hasUnresolvableSelection(cond.TrueResult, evalCtx, selection) || c.hasUnresolvableSelection(cond.FalseResult, evalCtx, selection)
 			}
 			return true
 		}
 		boolVal, err := convert.Convert(val, cty.Bool)
 		if err != nil || !boolVal.IsKnown() || boolVal.IsNull() {
-			return true
+			// A fixed condition error is caught by try without consulting either branch.
+			return false
 		}
 		if boolVal.True() {
 			return c.hasUnresolvableSelection(cond.TrueResult, evalCtx, selection)
@@ -1310,14 +1319,17 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 
 	if binary, ok := expr.(*hclsyntax.BinaryOpExpr); ok {
 		if !diags.HasErrors() && (binary.Op == hclsyntax.OpLogicalOr || binary.Op == hclsyntax.OpLogicalAnd) {
-			for _, operand := range []hclsyntax.Expression{binary.LHS, binary.RHS} {
+			operands := []hclsyntax.Expression{binary.LHS, binary.RHS}
+			for i, operand := range operands {
 				value, operandDiags := c.expressionValue(operand, evalCtx)
 				if operandDiags.HasErrors() {
 					continue
 				}
 				value, err := convert.Convert(value, cty.Bool)
 				if err == nil && value.IsKnown() && !value.IsNull() && value.True() == (binary.Op == hclsyntax.OpLogicalOr) && !c.hasUnresolvableVariables(operand, evalCtx) {
-					return false
+					other := operands[1-i]
+					// HCL converts both operands before applying its logical shortcut.
+					return c.hasUnresolvableVariables(other, evalCtx) && !c.expressionType(other, evalCtx).Equals(cty.Bool)
 				}
 			}
 		}

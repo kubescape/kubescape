@@ -13,7 +13,12 @@ import (
 )
 
 func TestNestedDynamicTerraformFailureRecordsSkippedModule(t *testing.T) {
-	for _, collection := range []string{`var.security_contexts`, `try(var.security_contexts, [])`, `local.contexts`} {
+	for _, collection := range []string{
+		`var.security_contexts`, `try(var.security_contexts, [])`, `local.contexts`,
+		`coalesce(var.numbers, ["2"], try(var.extra, null))[0] == 1 ? [1] : []`,
+		`try([for item in [true] : 1 if var.include || item], [])`,
+		`try((true || try(var.choice, false)) ? [] : [1], [1])`,
+	} {
 		t.Run(collection, func(t *testing.T) {
 			dir := t.TempDir()
 			good := filepath.Join(dir, "modules", "good")
@@ -25,6 +30,13 @@ func TestNestedDynamicTerraformFailureRecordsSkippedModule(t *testing.T) {
 variable "security_contexts" {
   type = list(object({ privileged = bool }))
 }
+variable "numbers" {
+  type = list(number)
+  default = [1]
+}
+variable "extra" { type = set(number) }
+variable "include" { type = bool }
+variable "choice" { type = any }
 locals { contexts = try(var.security_contexts, []) }
 resource "kubernetes_pod_v1" "risky" {
   spec {

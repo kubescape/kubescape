@@ -268,6 +268,26 @@ func TestTerraformDirectoryDynamicControlDependencies(t *testing.T) {
 		{"coalesce null branch type hint", `coalesce(1, (can(var.enabled) ? tostring(null) : 2)) == 1 ? [1] : []`, true, false},
 		{"coalesce equal tuple types", `coalesce([true], [false])`, false, true},
 		{"coalesce converted tuple types", `coalesce([true], ["false"])`, false, true},
+		{"coalesce full argument types", `coalesce(var.numbers, ["2"], try(var.extra, null))[0] == 1 ? [1] : []`, true, false},
+		{"coalesce omitted argument type", `coalesce(var.numbers, try(var.extra, toset([2])), ["2"])[0] == 1 ? [1] : []`, true, false},
+		{"coalesce stable full argument types", `coalesce(var.numbers, ["2"], [can(var.enabled)])[0] == "1" ? [1] : []`, false, true},
+		{"coalesce repeated typed fallbacks", "coalesce(true" + strings.Repeat(", try(var.enabled, false)", 64) + ") ? [1] : []", false, true},
+		{"coalesce full argument types with boolean", `coalesce(var.numbers, ["2"], try(var.enabled, null))[0] == 1 ? [1] : []`, true, false},
+		{"coalesce nullable can branch", `coalesce(var.numbers, ["2"], (can(var.enabled) ? var.null_set : var.known_set))[0] == 1 ? [1] : []`, true, false},
+		{"coalesce nullable condition", `coalesce(var.numbers, ["2"], (try(var.enabled, false) ? var.known_set : var.known_set))[0] == 1 ? [1] : []`, true, false},
+		{"coalesce erroring can branch", `coalesce(var.numbers, ["2"], (can(var.enabled) ? var.numbers[99] : var.known_set))[0] == 1 ? [1] : []`, true, false},
+		{"coalesce erroring Boolean conversion", `coalesce(var.numbers, ["2"], (tobool(can(var.enabled) ? "bad" : "true") ? var.known_set : var.known_set))[0] == 1 ? [1] : []`, true, false},
+		{"coalesce nullable comparison", `coalesce(var.numbers, ["2"], ((can(var.enabled) ? null : 1) > 0 ? var.known_set : var.known_set))[0] == 1 ? [1] : []`, true, false},
+		{"coalesce nullable contains collection", `coalesce(var.numbers, ["2"], (contains(can(var.enabled) ? null : [], true) ? var.known_set : var.known_set))[0] == 1 ? [1] : []`, true, false},
+		{"coalesce independent nullable predicates", `coalesce(var.numbers, ["2"], (can(var.enabled) ? var.known_set : var.null_set), (can(var.include) ? var.null_set : var.known_set))[0] == 1 ? [1] : []`, true, false},
+		{"coalesce nullable shared condition", `coalesce(var.numbers, ["2"], (try(var.enabled, false) ? var.known_set : var.null_set), (try(var.enabled, false) ? var.null_set : var.known_set))[0] == 1 ? [1] : []`, true, false},
+		{"coalesce shared condition erroring arm", `coalesce(var.numbers, ["2"], (can(var.enabled) ? var.known_set : var.null_set), (can(var.enabled) ? var.null_set : var.numbers[99]))[0] == 1 ? [1] : []`, true, false},
+		{"nonempty filter missing input", `try([for item in [true] : 1 if var.include || item], [])`, true, false},
+		{"nonempty filter constant null", `try([for item in [1] : item if null], [1])`, false, true},
+		{"nonempty filter constant invalid type", `try([for item in [1] : item if []], [1])`, false, true},
+		{"nonempty filter fixed conditional error", `try([for item in [1] : item if item ? true : false], [1])`, false, true},
+		{"nonempty filter fixed null condition", `try([for item in [1] : item if null ? true : false], [1])`, false, true},
+		{"filter error type depends on input", `try([for item in [true] : 1 if item ? can(var.known) : length(try(var.untyped, {}))], [])`, true, false},
 		{"empty filter missing input", `try([for item in [] : item if var.include], [1])`, true, false},
 		{"empty filter unresolved null", `try([for item in [] : item if try(var.include, null)], [1])`, true, false},
 		{"empty filter unresolved type", `try([for item in [] : item if try(var.include, [])], [1])`, true, false},
@@ -288,6 +308,9 @@ func TestTerraformDirectoryDynamicControlDependencies(t *testing.T) {
 		{"logical unused unavailable call", `(true || contains(fileset(".", "*.tf"), "x")) ? [1] : []`, false, true},
 		{"logical required input", `(try(var.enabled, true) || false) ? [1] : []`, true, false},
 		{"logical operand conversion", `try((true || try(var.enabled, [true])) ? [1] : [], [])`, true, false},
+		{"logical untyped operand conversion", `try((true || try(var.untyped, false)) ? [] : [1], [1])`, true, false},
+		{"logical right untyped operand conversion", `try((try(var.untyped, false) || true) ? [] : [1], [1])`, true, false},
+		{"logical and untyped operand conversion", `try((false && try(var.untyped, true)) ? [1] : [], [1])`, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -297,6 +320,19 @@ variable "include" { type = bool }
 variable "other" { type = list(bool) }
 variable "untyped" { type = any }
 variable "known" { default = 1 }
+variable "numbers" {
+  type = list(number)
+  default = [1]
+}
+variable "extra" { type = set(number) }
+variable "known_set" {
+  type = set(number)
+  default = [2]
+}
+variable "null_set" {
+  type = set(number)
+  default = null
+}
 locals {
   boolean = try(var.enabled, false)
   alias = local.boolean
@@ -329,6 +365,155 @@ resource "kubernetes_pod_v1" "demo" {
 			}
 		})
 	}
+}
+
+func TestTerraformDirectoryDynamicUnusedCanInputs(t *testing.T) {
+	for _, expression := range []string{
+		`coalesce(var.numbers, ["2"], (can(var.enabled) ? var.extra : var.extra))[0] == 1 ? [1] : []`,
+		`coalesce(var.numbers, ["2"], (!can(var.enabled) ? var.extra : var.extra))[0] == 1 ? [1] : []`,
+		`coalesce(var.numbers, ["2"], ((can(var.enabled) && can(var.enabled)) ? local.alias : local.alias))[0] == 1 ? [1] : []`,
+		`coalesce(var.numbers, ["2"], (!(can(var.enabled) ? false : false) ? var.extra : var.null_set))[0] == 1 ? [1] : []`,
+		`coalesce(var.numbers, ["2"], (((can(var.enabled) ? false : false) && can(var.enabled)) ? var.null_set : var.extra))[0] == 1 ? [1] : []`,
+		`coalesce(var.numbers, ["2"], (tobool(can(var.enabled)) ? var.extra : var.extra2))[0] == 1 ? [1] : []`,
+		`coalesce(var.numbers, ["2"], (contains([true, false], can(var.enabled)) ? var.extra : var.extra2))[0] == 1 ? [1] : []`,
+		`coalesce(var.numbers, ["2"], (contains([can(var.enabled)], true) ? var.extra : var.extra2))[0] == 1 ? [1] : []`,
+		`coalesce(var.numbers, ["2"], (contains([can(var.enabled), "other"], true) ? var.extra : var.extra2))[0] == 1 ? [1] : []`,
+		`coalesce(var.numbers, ["2"], (length([can(var.enabled)]) == 1 ? var.extra : var.extra2))[0] == 1 ? [1] : []`,
+		`coalesce(var.numbers, ["2"], (length({enabled = can(var.enabled)}) == 1 ? var.extra : var.extra2))[0] == 1 ? [1] : []`,
+		`coalesce(var.numbers, ["2"], (tobool(can(var.enabled) ? "true" : "false") ? var.extra : var.extra2))[0] == 1 ? [1] : []`,
+		`coalesce(var.numbers, ["2"], (can(var.enabled) ? var.extra : var.null_set), (can(var.enabled) ? var.null_set : var.extra))[0] == 1 ? [1] : []`,
+		`coalesce(var.numbers, ["2"], (can(var.enabled) ? var.extra : var.null_set), (!can(var.enabled) ? var.extra : var.null_set))[0] == 1 ? [1] : []`,
+		`coalesce(var.numbers, ["2"], ((can(var.enabled) ? 1 : 2) > 0 ? var.extra : var.extra2))[0] == 1 ? [1] : []`,
+		`try([for item in [false] : item if item ? can(var.enabled) : {}], [1])`,
+		`try([for item in [false] : item if item ? tobool(can(var.enabled)) : {}], [1])`,
+		`try([for item in [false] : item if item ? contains([true, false], can(var.enabled)) : {}], [1])`,
+		`try([for item in [false] : item if item ? contains([can(var.enabled)], true) : {}], [1])`,
+		`try([for item in [false] : item if item ? length([can(var.enabled)]) == 1 : {}], [1])`,
+		`try([for item in [false] : item if item ? tobool(can(var.enabled) ? "true" : "false") : {}], [1])`,
+		`try([for item in [false] : item if item ? (can(var.enabled) ? 1 : 2) > 0 : {}], [1])`,
+		`try([for item in [false] : var.unused if item ? can(var.enabled) : {}], [1])`,
+		`try([for item in [false] : item if var.enabled ? can(var.enabled) : {}], [1])`,
+	} {
+		for _, supplied := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/supplied=%t", expression, supplied), func(t *testing.T) {
+				defaultValue := ""
+				if supplied {
+					defaultValue = "default = true"
+				}
+				dir := t.TempDir()
+				writeTerraformFiles(t, dir, map[string]string{"main.tf": fmt.Sprintf(`
+variable "enabled" {
+  type = bool
+  %s
+}
+variable "numbers" {
+  type = list(number)
+  default = [1]
+}
+variable "extra" {
+  type = set(number)
+  default = [2]
+}
+variable "extra2" {
+  type = set(number)
+  default = [3]
+}
+variable "null_set" {
+  type = set(number)
+  default = null
+}
+locals { alias = var.extra }
+resource "kubernetes_pod_v1" "demo" {
+  spec {
+    container {
+      name = "app"
+      image = "nginx"
+      dynamic "security_context" {
+        for_each = %s
+        content { privileged = true }
+      }
+    }
+  }
+}`, defaultValue, expression)})
+				obj, errs := terraformObject(t, dir)
+				require.Empty(t, errs, "the input cannot change the selected collection")
+				assert.Equal(t, map[string]interface{}{"privileged": true}, terraformFirstContainer(t, obj)["securityContext"])
+			})
+		}
+	}
+}
+
+func TestTerraformDynamicCoalesceTypeChecksAreBounded(t *testing.T) {
+	var previous float64
+	for _, count := range []int{10, 13} {
+		args := []string{`[true]`}
+		declared := map[string]terraformVariable{}
+		for length := 2; length <= count; length++ {
+			name := fmt.Sprintf("optional%d", length)
+			elements := make([]cty.Type, length)
+			for i := range elements {
+				elements[i] = cty.Bool
+			}
+			declared[name] = terraformVariable{ty: cty.Tuple(elements)}
+			args = append(args, "try(var."+name+", [true"+strings.Repeat(", true", length-1)+"])")
+		}
+		body := parseTypedHCL(t, "value = coalesce("+strings.Join(args, ", ")+")")
+		ctx := newTerraformEvalContext(nil, nil)
+		allocs := testing.AllocsPerRun(1, func() {
+			checker := terraformReferenceChecker{moduleCtx: ctx, declaredVariables: declared}
+			require.True(t, checker.hasUnresolvableVariables(body.Attributes["value"].Expr, ctx))
+		})
+		if previous != 0 {
+			assert.Less(t, allocs, 3*previous, "adding three optional argument types must not triple analysis work")
+		}
+		t.Logf("arguments=%d allocations=%.0f", count, allocs)
+		previous = allocs
+	}
+}
+
+func TestTerraformDynamicCoalesceTypeAnalysisMemoryIsLinear(t *testing.T) {
+	for _, unresolved := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unresolved=%t", unresolved), func(t *testing.T) {
+			var previous int64
+			for _, count := range []int{1024, 2048} {
+				args := make([]string, count)
+				for i := range args {
+					args[i] = fmt.Sprintf("{field%d = true}", i)
+				}
+				expression := "coalesce(" + strings.Join(args, ", ") + ")"
+				if unresolved {
+					expression = "try(coalesce(" + strings.Join(args, ", ") + ", can(var.missing)), [])"
+				}
+				body := parseTypedHCL(t, "value = "+expression)
+				ctx := newTerraformEvalContext(nil, nil)
+				require.Equal(t, unresolved, hasUnresolvableVariables(body.Attributes["value"].Expr, ctx))
+				measurement := testing.Benchmark(func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						hasUnresolvableVariables(body.Attributes["value"].Expr, ctx)
+					}
+				})
+				allocated := measurement.AllocedBytesPerOp()
+				if previous != 0 {
+					assert.Less(t, allocated, 3*previous, "doubling arguments must not quadruple allocation work")
+				}
+				t.Logf("arguments=%d bytes=%d", count, allocated)
+				previous = allocated
+			}
+		})
+	}
+}
+
+func TestTerraformDynamicCoalesceSharedLocalProofIsBounded(t *testing.T) {
+	const count = 256
+	source := parseTypedHCL(t, "value = "+strings.Repeat("can(var.missing) || ", count-1)+"can(var.missing)").Attributes["value"].Expr
+	expr := parseTypedHCL(t, "value = coalesce(true"+strings.Repeat(", local.alias", count)+")").Attributes["value"].Expr
+	ctx := newTerraformEvalContext(nil, map[string]cty.Value{"alias": cty.False})
+	allocs := testing.AllocsPerRun(1, func() {
+		checker := terraformReferenceChecker{moduleCtx: ctx, localExpressions: map[string]hcl.Expression{"alias": source}}
+		require.False(t, checker.hasUnresolvableVariables(expr, ctx), "the local's Boolean value cannot change the result")
+	})
+	assert.Less(t, allocs, 4_000_000.0, "repeated local references must not repeatedly walk every proof subtree")
+	t.Logf("arguments=%d allocations=%.0f", count, allocs)
 }
 
 func TestTerraformDirectoryKnownDynamicCollections(t *testing.T) {

@@ -149,11 +149,8 @@ func evaluateCoalesce(args []cty.Value) (cty.Value, error) {
 		if moreDiags.HasErrors() {
 			continue
 		}
-		if !v.IsKnown() || v.IsNull() || (v.Type() == cty.String && v.AsString() == "") {
-			continue
-		}
-		if v.Type() != cty.DynamicPseudoType {
-			types = append(types, v.Type())
+		if ty := terraformCoalesceArgumentType(v); ty != cty.NilType {
+			types = append(types, ty)
 		}
 	}
 
@@ -182,6 +179,13 @@ func evaluateCoalesce(args []cty.Value) (cty.Value, error) {
 	}
 
 	return selectedVal, nil
+}
+
+func terraformCoalesceArgumentType(value cty.Value) cty.Type {
+	if !value.IsKnown() || value.IsNull() || (value.Type() == cty.String && value.AsString() == "") {
+		return cty.NilType
+	}
+	return value.Type()
 }
 
 var lookupFunc = function.New(&function.Spec{
