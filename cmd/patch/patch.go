@@ -158,6 +158,8 @@ func validateImagePatchInfo(patchInfo *metav1.PatchInfo) error {
 		return errors.New("image tag is required")
 	}
 
+	patchInfo.OutputMode = strings.ToLower(strings.TrimSpace(patchInfo.OutputMode))
+
 	if patchInfo.Push {
 		if patchInfo.OutputMode != "" && patchInfo.OutputMode != "docker" && patchInfo.OutputMode != "image" {
 			return fmt.Errorf("--push and --output-mode %q are mutually exclusive; --push always pushes to the registry (output-mode=image)", patchInfo.OutputMode)
