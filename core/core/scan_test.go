@@ -1790,6 +1790,22 @@ func TestIsPrioritizationScanType(t *testing.T) {
 	}
 }
 
+func TestScanContextWorkloadImageCredentialsRequireAuthority(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		info cautils.ScanInfo
+	}{
+		{"token without authority", cautils.ScanInfo{ScanImages: true, RegistryToken: "token"}},
+		{"username and password with blank authority", cautils.ScanInfo{ScanImages: true, RegistryUsername: "user", RegistryPassword: "pass", RegistryAuthority: " \t "}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := (&Kubescape{}).ScanContext(context.Background(), &tc.info, nil)
+			require.ErrorIs(t, err, imagescan.ErrRegistryAuthorityMissing)
+			assert.Nil(t, result)
+		})
+	}
+}
+
 func TestRegistryCredentialsFromScanInfo(t *testing.T) {
 	scanInfo := &cautils.ScanInfo{
 		RegistryAuthority: "registry.example.com",

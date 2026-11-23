@@ -40,6 +40,8 @@ const (
 	defaultDBDirName       = "grypedb"
 )
 
+var ErrRegistryAuthorityMissing = errors.New("registry credentials for --scan-images require registry authority")
+
 type RegistryCredentials struct {
 	Authority string
 	Username  string
@@ -49,6 +51,15 @@ type RegistryCredentials struct {
 
 func (c RegistryCredentials) hasAuthenticator() bool {
 	return strings.TrimSpace(c.Token) != "" || (strings.TrimSpace(c.Username) != "" && strings.TrimSpace(c.Password) != "")
+}
+
+// ValidateWorkloadAuthority requires explicit credentials for workload images
+// to be scoped to a registry. Anonymous scans need no authority.
+func (c RegistryCredentials) ValidateWorkloadAuthority() error {
+	if strings.TrimSpace(c.Authority) == "" && c.hasAuthenticator() {
+		return ErrRegistryAuthorityMissing
+	}
+	return nil
 }
 
 func (c RegistryCredentials) Trimmed() RegistryCredentials {
