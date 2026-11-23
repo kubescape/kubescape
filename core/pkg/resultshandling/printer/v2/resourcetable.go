@@ -347,7 +347,8 @@ func isFieldUncomposed(rawObj, renderedObj map[string]any, path string) bool {
 		return false
 	}
 
-	// Find the longest ancestor prefix that exists in renderedObj.
+	// The line resolver uses the nearest source ancestor. The nearest ancestor
+	// must be the same path in both objects before we can report its line.
 	// If the path contains an indexed segment (e.g. containers[0]), that indexed
 	// entity must exist in renderedObj.
 	lastIndexed := -1
@@ -363,12 +364,12 @@ func isFieldUncomposed(rawObj, renderedObj map[string]any, path string) bool {
 			// Cannot match an ancestor higher than the indexed entity (e.g. spec cannot stand in for containers[0])
 			break
 		}
-		renderedAncestor, ok := getPathValue(renderedObj, prefix)
-		if ok {
-			rawAncestor, rawOk := getPathValue(rawObj, prefix)
-			if !rawOk {
-				return false
-			}
+		renderedAncestor, renderedOK := getPathValue(renderedObj, prefix)
+		rawAncestor, rawOK := getPathValue(rawObj, prefix)
+		if rawOK != renderedOK {
+			return false
+		}
+		if rawOK {
 			// If ancestor is an object with a name, check name match safely without panic
 			if rMap, ok := renderedAncestor.(map[string]any); ok {
 				if rawMap, rawOk := rawAncestor.(map[string]any); rawOk {
