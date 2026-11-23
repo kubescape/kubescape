@@ -554,6 +554,32 @@ func TestGetDocsForControl(t *testing.T) {
 			},
 			expectedDocsLink: "https://kubescape.io/docs/controls/ctrlid1",
 		},
+		{
+			name: "control with empty ID",
+			controlSummary: &reportsummary.ControlSummary{
+				ControlID: "",
+			},
+			expectedDocsLink: "",
+		},
+		{
+			name: "control with whitespace ID",
+			controlSummary: &reportsummary.ControlSummary{
+				ControlID: "   ",
+			},
+			expectedDocsLink: "",
+		},
+		{
+			name:             "nil control",
+			controlSummary:   nil,
+			expectedDocsLink: "",
+		},
+		{
+			name: "control with whitespace-padded ID",
+			controlSummary: &reportsummary.ControlSummary{
+				ControlID: "  C-0001  ",
+			},
+			expectedDocsLink: "https://kubescape.io/docs/controls/c-0001",
+		},
 	}
 
 	for _, test := range tests {
@@ -586,6 +612,32 @@ func TestGetRunCommandForControl(t *testing.T) {
 				ControlID: "ctrlid1",
 			},
 			expectedRunLink: "$ kubescape scan control ctrlid1 -v",
+		},
+		{
+			name: "control with empty ID",
+			controlSummary: &reportsummary.ControlSummary{
+				ControlID: "",
+			},
+			expectedRunLink: "",
+		},
+		{
+			name: "control with whitespace ID",
+			controlSummary: &reportsummary.ControlSummary{
+				ControlID: "   ",
+			},
+			expectedRunLink: "",
+		},
+		{
+			name:            "nil control",
+			controlSummary:  nil,
+			expectedRunLink: "",
+		},
+		{
+			name: "control with whitespace-padded ID",
+			controlSummary: &reportsummary.ControlSummary{
+				ControlID: "  C-0001  ",
+			},
+			expectedRunLink: "$ kubescape scan control C-0001 -v",
 		},
 	}
 
