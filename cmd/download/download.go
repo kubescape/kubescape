@@ -156,6 +156,8 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 
 // Check if the flag entered are valid
 func flagValidationDownload(downloadInfo *v1.DownloadInfo) error {
+	downloadInfo.AccountID = strings.TrimSpace(downloadInfo.AccountID)
+	downloadInfo.AccessKey = strings.TrimSpace(downloadInfo.AccessKey)
 
 	// Validate the user's credentials
 	return cautils.ValidateAccountID(downloadInfo.AccountID)
