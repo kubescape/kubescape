@@ -71,6 +71,11 @@ grep ruleLanguage C-0016.json         # confirm the edit took
 kubescape scan control C-0016 --use-from C-0016.json
 ```
 
+The downloaded rule still holds its Rego. A CEL rule whose `rule` text is Rego
+(its first statement is a `package` clause) runs the bundled policy for its
+control, the same as an empty `rule`. Any other non-empty text is read as an
+inline `ValidatingAdmissionPolicy`, as `--custom-rules` does.
+
 The `grep` is worth doing. A Rego run of the same control prints an identical
 results table, so a scan that skipped the edit looks exactly like a scan that
 used it.
