@@ -1227,3 +1227,29 @@ func TestMdWriteFailedSection_NilSafety(t *testing.T) {
 		assert.Contains(t, buf.String(), "| res-missing | — | — |")
 	})
 }
+
+func TestMarkdown_NilReceiverSafety(t *testing.T) {
+	var mp *MarkdownPrinter
+
+	assert.NotPanics(t, func() {
+		err := mp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := mp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := mp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		mp.Score(100)
+		mp.PrintNextSteps()
+	})
+}
