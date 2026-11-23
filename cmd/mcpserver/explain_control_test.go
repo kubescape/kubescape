@@ -1272,6 +1272,103 @@ func TestExplainControl_ExceptionAware(t *testing.T) {
 		require.NotNil(t, resp.FailingResources)
 		assert.Len(t, *resp.FailingResources, 1, "control still failing in MITRE must be included")
 	})
+
+	t.Run("excepted in framework is excluded when finding has non-canonical control ID", func(t *testing.T) {
+		ctrlNonCanonical := remediationFailedControl("c-0017", "Immutable container filesystem", exceptedRule)
+		resultNonCanonical := remediationClusterResult(res, ctrlNonCanonical)
+		reportNonCanonical := remediationClusterReport([]resourcesresults.Result{resultNonCanonical}, res)
+		reportNonCanonical.SummaryDetails = cautilsSummaryWith(map[string][]string{"NSA": {"C-0017"}})
+		reportPath := writeRemediationReport(t, dir, reportNonCanonical, nil)
+
+		callRes, err := ks.CallTool(context.Background(), "explain_control", map[string]any{
+			"control_id":  "C-0017",
+			"report_path": reportPath,
+		})
+		require.NoError(t, err)
+		assert.False(t, callRes.IsError, toolResultText(t, callRes))
+
+		var resp explainControlResponse
+		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, callRes)), &resp))
+
+		require.NotNil(t, resp.FailingResources)
+		assert.Empty(t, *resp.FailingResources, "fully excepted control must have no failing resources even when finding has non-canonical control ID")
+	})
+
+	t.Run("excepted in framework is excluded when finding has unpadded control ID", func(t *testing.T) {
+		ctrlUnpadded := remediationFailedControl("C-017", "Immutable container filesystem", exceptedRule)
+		resultUnpadded := remediationClusterResult(res, ctrlUnpadded)
+		reportUnpadded := remediationClusterReport([]resourcesresults.Result{resultUnpadded}, res)
+		reportUnpadded.SummaryDetails = cautilsSummaryWith(map[string][]string{"NSA": {"C-0017"}})
+		reportPath := writeRemediationReport(t, dir, reportUnpadded, nil)
+
+		callRes, err := ks.CallTool(context.Background(), "explain_control", map[string]any{
+			"control_id":  "C-0017",
+			"report_path": reportPath,
+		})
+		require.NoError(t, err)
+		assert.False(t, callRes.IsError, toolResultText(t, callRes))
+
+		var resp explainControlResponse
+		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, callRes)), &resp))
+
+		require.NotNil(t, resp.FailingResources)
+		assert.Empty(t, *resp.FailingResources, "fully excepted control must have no failing resources even when finding has unpadded control ID")
+	})
+
+	t.Run("FailedRules applies framework exceptions when finding has unpadded control ID", func(t *testing.T) {
+		failingRule := resourcesresults.ResourceAssociatedRule{
+			Name:   "rule-still-failing",
+			Status: apis.StatusFailed,
+			Paths: []armotypes.PosturePaths{
+				{
+					FailedPath: "spec.containers[0].securityContext.privileged",
+				},
+			},
+		}
+		ctrlMultiRule := remediationFailedControl("C-017", "Immutable container filesystem", exceptedRule, failingRule)
+		resultMultiRule := remediationClusterResult(res, ctrlMultiRule)
+		reportMultiRule := remediationClusterReport([]resourcesresults.Result{resultMultiRule}, res)
+		reportMultiRule.SummaryDetails = cautilsSummaryWith(map[string][]string{"NSA": {"C-0017"}})
+		reportPath := writeRemediationReport(t, dir, reportMultiRule, nil)
+
+		callRes, err := ks.CallTool(context.Background(), "explain_control", map[string]any{
+			"control_id":  "C-0017",
+			"report_path": reportPath,
+		})
+		require.NoError(t, err)
+		assert.False(t, callRes.IsError, toolResultText(t, callRes))
+
+		var resp explainControlResponse
+		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, callRes)), &resp))
+
+		require.NotNil(t, resp.FailingResources)
+		require.Len(t, *resp.FailingResources, 1, "resource must be failing due to non-excepted rule")
+		assert.Equal(t, []string{"spec.containers[0].securityContext.privileged"}, (*resp.FailingResources)[0].FailedPaths, "excepted rule path must be excluded by FailedRules even with unpadded control ID")
+	})
+}
+
+func TestCanonicalControlIDFromSummary(t *testing.T) {
+	summary := &reportsummary.SummaryDetails{
+		Controls: reportsummary.ControlSummaries{
+			"C-0017": reportsummary.ControlSummary{ControlID: "C-0017"},
+		},
+		Frameworks: []reportsummary.FrameworkSummary{
+			{
+				Name: "NSA",
+				Controls: reportsummary.ControlSummaries{
+					"C-0041": reportsummary.ControlSummary{ControlID: "C-0041"},
+				},
+			},
+		},
+	}
+
+	assert.Equal(t, "C-0017", canonicalControlIDFromSummary(summary, "c-0017"))
+	assert.Equal(t, "C-0017", canonicalControlIDFromSummary(summary, "C-017"))
+	assert.Equal(t, "C-0017", canonicalControlIDFromSummary(summary, "C-0017"))
+	assert.Equal(t, "C-0041", canonicalControlIDFromSummary(summary, "c-0041"))
+	assert.Equal(t, "C-0041", canonicalControlIDFromSummary(summary, "C-041"))
+	assert.Equal(t, "C-9999", canonicalControlIDFromSummary(summary, "C-9999"))
+	assert.Equal(t, "C-0017", canonicalControlIDFromSummary(nil, "C-0017"))
 }
 
 func TestExplainScanKey_DistinctFromVerifyScanKey(t *testing.T) {
