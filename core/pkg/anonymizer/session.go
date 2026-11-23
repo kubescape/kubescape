@@ -792,8 +792,17 @@ func transformExceptionAudit(audit *cautils.ExceptionAudit, exceptions *exceptio
 					return err
 				}
 			}
-			if match.Namespace, err = transformValue(transformer, "ns", match.Namespace); err != nil {
-				return err
+			if match.Namespace != "" {
+				trimmed := strings.TrimSpace(match.Namespace)
+				if trimmed == "" {
+					match.Namespace = ""
+				} else {
+					ns, err := transformValue(transformer, "ns", trimmed)
+					if err != nil {
+						return err
+					}
+					match.Namespace = ns
+				}
 			}
 			if match.Name, err = transformValue(transformer, "res", match.Name); err != nil {
 				return err
@@ -1242,8 +1251,16 @@ func transformRBACSubjects(obj map[string]any, transformer Transformer) error {
 			if err := transformStringField(&subjects[i].Name, "res", transformer); err != nil {
 				return err
 			}
-			if err := transformStringField(&subjects[i].Namespace, "ns", transformer); err != nil {
-				return err
+			if subjects[i].Namespace != "" {
+				trimmed := strings.TrimSpace(subjects[i].Namespace)
+				if trimmed == "" {
+					subjects[i].Namespace = ""
+				} else {
+					subjects[i].Namespace = trimmed
+					if err := transformStringField(&subjects[i].Namespace, "ns", transformer); err != nil {
+						return err
+					}
+				}
 			}
 		}
 		obj["subjects"] = subjects
@@ -1256,6 +1273,14 @@ func transformRBACSubjects(obj map[string]any, transformer Transformer) error {
 func transformRBACSubjectMap(subject map[string]any, transformer Transformer) error {
 	if err := transformMapStringField(subject, "name", "res", transformer); err != nil {
 		return err
+	}
+	if raw, ok := subject["namespace"].(string); ok && raw != "" {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			subject["namespace"] = ""
+			return nil
+		}
+		subject["namespace"] = trimmed
 	}
 	return transformMapStringField(subject, "namespace", "ns", transformer)
 }
@@ -1414,9 +1439,13 @@ func transformClusterMetadata(cluster *reporthandlingv2.ClusterMetadata, transfo
 		namespaceCounts := make(map[string]int, len(clusterCopy.MapNamespaceToNumberOfResources))
 
 		for namespace, count := range clusterCopy.MapNamespaceToNumberOfResources {
-			namespace, err = transformValue(transformer, "ns", namespace)
-			if err != nil {
-				return err
+			if strings.TrimSpace(namespace) == "" {
+				namespace = ""
+			} else {
+				namespace, err = transformValue(transformer, "ns", strings.TrimSpace(namespace))
+				if err != nil {
+					return err
+				}
 			}
 
 			namespaceCounts[namespace] += count

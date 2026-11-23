@@ -761,3 +761,46 @@ func TestAnonymizationHidesRBACBindingReferencesConsistently(t *testing.T) {
 	assert.Equal(t, anonSubject.GetName(), topSubjects[0].(map[string]any)["name"])
 	assert.Equal(t, anonClusterRole.GetName(), topObj["roleRef"].(map[string]any)["name"])
 }
+
+func TestTransformSession_RBACSubjectPaddedNamespaceNormalized(t *testing.T) {
+	binding := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "RoleBinding",
+		"metadata":   map[string]any{"name": "workers-binding", "namespace": "prod"},
+		"subjects": []any{
+			map[string]any{"kind": "ServiceAccount", "name": "worker", "namespace": " prod "},
+			map[string]any{"kind": "ServiceAccount", "name": "scoped-worker", "namespace": "   "},
+		},
+		"roleRef": map[string]any{
+			"apiGroup": "rbac.authorization.k8s.io",
+			"kind":     "Role",
+			"name":     "worker-role",
+		},
+	})
+
+	serviceAccount := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ServiceAccount",
+		"metadata":   map[string]any{"name": "worker", "namespace": "prod"},
+	})
+
+	session := identitySession(binding, serviceAccount)
+	require.NoError(t, Apply(&resultshandling.ResultsHandler{ScanData: session}))
+
+	var anonBinding, anonSA workloadinterface.IMetadata
+	for _, res := range session.GetCatalog().All() {
+		switch res.GetKind() {
+		case "RoleBinding":
+			anonBinding = res
+		case "ServiceAccount":
+			anonSA = res
+		}
+	}
+	require.NotNil(t, anonBinding)
+	require.NotNil(t, anonSA)
+
+	subjects := anonBinding.GetObject()["subjects"].([]any)
+	require.Len(t, subjects, 2)
+	assert.Equal(t, anonSA.GetNamespace(), subjects[0].(map[string]any)["namespace"], "padded subject namespace must match SA namespace pseudonym")
+	assert.Empty(t, subjects[1].(map[string]any)["namespace"], "whitespace-only subject namespace must normalize to empty")
+}
