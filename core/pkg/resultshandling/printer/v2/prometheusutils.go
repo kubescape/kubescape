@@ -247,6 +247,7 @@ func (miv *mImageVulnerability) prefix() string {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 func escapePrometheusLabelValue(value string) string {
+	value = strings.ReplaceAll(value, "\x00", "")
 	value = strings.ReplaceAll(value, "\r\n", "\n")
 	value = strings.ReplaceAll(value, "\r", "\n")
 	return strings.NewReplacer(

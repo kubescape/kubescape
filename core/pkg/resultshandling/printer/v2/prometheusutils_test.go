@@ -720,6 +720,16 @@ func TestEscapePrometheusLabelValue(t *testing.T) {
 			input:    "name=\"evil\"\r\nkubescape_score 100",
 			expected: `name=\"evil\"\nkubescape_score 100`,
 		},
+		{
+			name:     "strips null bytes",
+			input:    "foo\x00bar",
+			expected: "foobar",
+		},
+		{
+			name:     "strips null bytes with crlf and quotes",
+			input:    "foo\x00\r\nbar\"test\"",
+			expected: `foo\nbar\"test\"`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -727,6 +737,7 @@ func TestEscapePrometheusLabelValue(t *testing.T) {
 			got := escapePrometheusLabelValue(tt.input)
 			assert.Equal(t, tt.expected, got)
 			assert.NotContains(t, got, "\r", "output must never contain raw carriage returns")
+			assert.NotContains(t, got, "\x00", "output must never contain raw null bytes")
 		})
 	}
 }
@@ -759,6 +770,40 @@ func TestPrometheusMetrics_CarriageReturnNeutralization(t *testing.T) {
 	assert.Contains(t, output, `name="my-pod\nfake-line"`)
 	assert.Contains(t, output, `path="manifests/pod\n.yaml"`)
 	assert.Contains(t, output, `image="my-image:latest\nmalicious"`)
+}
+
+func TestPrometheusMetrics_NullByteSanitization(t *testing.T) {
+	m := &Metrics{
+		listResources: []mResources{
+			{
+				apiVersion: "v1",
+				kind:       "Pod",
+				namespace:  "default\x00injected",
+				name:       "my-pod\x00extra",
+				path:       "manifests/pod\x00.yaml",
+				withPath:   true,
+			},
+		},
+		listImages: []mImageVulnerability{
+			{
+				image:    "my-image:latest\x00extra",
+				platform: "linux/amd64",
+				severity: "High",
+				cveCount: 1,
+			},
+		},
+	}
+
+	output := m.String()
+	assert.NotContains(t, output, "\x00", "prometheus metrics output must not contain raw null bytes")
+	assert.Contains(t, output, `namespace="defaultinjected"`)
+	assert.Contains(t, output, `name="my-podextra"`)
+	assert.Contains(t, output, `path="manifests/pod.yaml"`)
+	assert.Contains(t, output, `image="my-image:latestextra"`)
+
+	parser := expfmt.NewTextParser(model.LegacyValidation)
+	_, err := parser.TextToMetricFamilies(strings.NewReader(output))
+	require.NoError(t, err, "Prometheus text parser must successfully parse sanitized metrics")
 }
 
 type mockCounters struct {
