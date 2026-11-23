@@ -790,6 +790,94 @@ func TestValidateControlFilters(t *testing.T) {
 	}
 }
 
+func TestValidateCommonScanFlags_ControlFilters(t *testing.T) {
+	tests := []struct {
+		name        string
+		flagName    string
+		flagVal     string
+		setFlag     bool
+		setInfo     func(*cautils.ScanInfo, string)
+		expectedErr string
+	}{
+		{
+			name:     "omitted include-controls is valid",
+			flagName: "include-controls",
+			setFlag:  false,
+			setInfo:  func(s *cautils.ScanInfo, v string) { s.IncludeControls = v },
+		},
+		{
+			name:     "omitted skip-controls is valid",
+			flagName: "skip-controls",
+			setFlag:  false,
+			setInfo:  func(s *cautils.ScanInfo, v string) { s.SkipControls = v },
+		},
+		{
+			name:        "explicit empty include-controls is rejected",
+			flagName:    "include-controls",
+			flagVal:     "",
+			setFlag:     true,
+			setInfo:     func(s *cautils.ScanInfo, v string) { s.IncludeControls = v },
+			expectedErr: "--include-controls contains an empty control identifier",
+		},
+		{
+			name:        "explicit whitespace include-controls is rejected",
+			flagName:    "include-controls",
+			flagVal:     "   ",
+			setFlag:     true,
+			setInfo:     func(s *cautils.ScanInfo, v string) { s.IncludeControls = v },
+			expectedErr: "--include-controls contains an empty control identifier",
+		},
+		{
+			name:        "explicit empty skip-controls is rejected",
+			flagName:    "skip-controls",
+			flagVal:     "",
+			setFlag:     true,
+			setInfo:     func(s *cautils.ScanInfo, v string) { s.SkipControls = v },
+			expectedErr: "--skip-controls contains an empty control identifier",
+		},
+		{
+			name:        "explicit whitespace skip-controls is rejected",
+			flagName:    "skip-controls",
+			flagVal:     "   ",
+			setFlag:     true,
+			setInfo:     func(s *cautils.ScanInfo, v string) { s.SkipControls = v },
+			expectedErr: "--skip-controls contains an empty control identifier",
+		},
+		{
+			name:     "valid include-controls passes",
+			flagName: "include-controls",
+			flagVal:  "C-0016",
+			setFlag:  true,
+			setInfo:  func(s *cautils.ScanInfo, v string) { s.IncludeControls = v },
+		},
+		{
+			name:     "valid skip-controls passes",
+			flagName: "skip-controls",
+			flagVal:  "C-0016",
+			setFlag:  true,
+			setInfo:  func(s *cautils.ScanInfo, v string) { s.SkipControls = v },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := &cautils.ScanInfo{Format: "json"}
+			tt.setInfo(info, tt.flagVal)
+			cmd := &cobra.Command{}
+			cmd.Flags().String(tt.flagName, "", "")
+			if tt.setFlag {
+				require.NoError(t, cmd.Flags().Set(tt.flagName, tt.flagVal))
+			}
+			err := ValidateCommonScanFlags(cmd, info, ScanFormats)
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.EqualError(t, err, tt.expectedErr)
+			}
+		})
+	}
+}
+
 func TestValidateLabelSelector(t *testing.T) {
 	tests := []struct {
 		name          string

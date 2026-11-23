@@ -245,6 +245,18 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := ValidateExcludeControls(scanInfo); err != nil {
 		return err
 	}
+	for _, selection := range []struct {
+		name string
+		flag string
+		val  string
+	}{
+		{"include-controls", "--include-controls", scanInfo.IncludeControls},
+		{"skip-controls", "--skip-controls", scanInfo.SkipControls},
+	} {
+		if commandFlagChanged(cmd, selection.name) && strings.TrimSpace(selection.val) == "" {
+			return fmt.Errorf("%s contains an empty control identifier", selection.flag)
+		}
+	}
 	if err := ValidateControlFilters(scanInfo); err != nil {
 		return err
 	}
