@@ -170,6 +170,32 @@ func TestRunPSS_FlagValidation(t *testing.T) {
 		err := runPSS(ctx, flags, []string{"some/file.yaml"})
 		assert.EqualError(t, err, "--output requires a file path")
 	})
+
+	t.Run("whitespace workload flag in local mode is treated as no filter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		podYAML := filepath.Join(tmpDir, "pod.yaml")
+		require.NoError(t, os.WriteFile(podYAML, []byte(`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: compliant-pod
+spec:
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+  - name: c1
+    image: nginx
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+`), 0600))
+		flags := &pssFlags{level: "Restricted", format: "pretty-printer", workload: "   "}
+		err := runPSS(ctx, flags, []string{podYAML})
+		assert.NoError(t, err)
+	})
 }
 
 func TestRunPSS_LocalFiles(t *testing.T) {
@@ -494,8 +520,18 @@ func TestFilterWorkloads(t *testing.T) {
 	filtered := filterWorkloads(workloads, "api")
 	assert.Len(t, filtered, 2)
 
+	// Filter by bare name with whitespace padding
+	filtered = filterWorkloads(workloads, "  api  ")
+	assert.Len(t, filtered, 2)
+
 	// Filter by Kind/Name
 	filtered = filterWorkloads(workloads, "Deployment/api")
+	require.Len(t, filtered, 1)
+	assert.Equal(t, "Deployment", filtered[0].GetKind())
+	assert.Equal(t, "api", filtered[0].GetName())
+
+	// Filter by Kind/Name with whitespace padding
+	filtered = filterWorkloads(workloads, "  Deployment  /  api  ")
 	require.Len(t, filtered, 1)
 	assert.Equal(t, "Deployment", filtered[0].GetKind())
 	assert.Equal(t, "api", filtered[0].GetName())
