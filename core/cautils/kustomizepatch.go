@@ -1,20 +1,19 @@
 package cautils
 
 import (
-	"bytes"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/kustomize/api/types"
+	"sigs.k8s.io/kustomize/kyaml/resid"
 )
 
 // TraceKustomizePatch inspects the Kustomize directory that rendered resource to
@@ -56,8 +55,8 @@ func TraceKustomizePatch(resource workloadinterface.IMetadata, paths []string, s
 
 	// Unify all patches in Kustomize application order:
 	// 1. patchesStrategicMerge (legacy)
-	// 2. patchesJson6902 (legacy)
-	// 3. patches (modern)
+	// 2. patches (modern), before name, label and annotation transformers
+	// 3. patchesJson6902 (legacy), after those transformers
 	var allPatches []types.Patch
 
 	for _, smp := range kustomization.PatchesStrategicMerge { //nolint:staticcheck // SA1019: legacy patchesStrategicMerge must still be traced for backwards compatibility
@@ -70,37 +69,149 @@ func TraceKustomizePatch(resource workloadinterface.IMetadata, paths []string, s
 		}
 	}
 
-	allPatches = append(allPatches, kustomization.PatchesJson6902...) //nolint:staticcheck // SA1019: legacy patchesJson6902 must still be traced for backwards compatibility
-
 	allPatches = append(allPatches, kustomization.Patches...)
+	beforeTransformers := len(allPatches)
+	allPatches = append(allPatches, kustomization.PatchesJson6902...) //nolint:staticcheck // trace legacy patches
 
-	var effectivePatch string
-	for _, patch := range allPatches {
-		if !matchKustomizeTarget(patch.Target, resource) {
-			continue
-		}
-		var patchData []byte
-		var patchPath string
-		if patch.Path != "" {
-			patchPath = filepath.Clean(filepath.Join(source.KustomizeDirectoryName, filepath.FromSlash(patch.Path)))
-			data, err := os.ReadFile(patchPath)
-			if err != nil {
-				continue
+	// Walk backwards. Once a possible writer cannot be resolved, reporting an
+	// earlier writer would be just as misleading as reporting the uncertain one.
+	if len(kustomization.Replacements) != 0 || len(kustomization.Transformers) != 0 {
+		return ""
+	}
+	legacyLabels := len(kustomization.CommonLabels) != 0 //nolint:staticcheck // Legacy commonLabels still changes patch selection metadata.
+	metadataKnown := true
+	identityKnown := true
+	originalName := resource.GetName()
+	if kustomization.NamePrefix != "" || kustomization.NameSuffix != "" {
+		switch {
+		case resource.GetKind() == "Namespace", resource.GetKind() == "CustomResourceDefinition", resource.GetKind() == "APIService" && strings.HasPrefix(resource.GetApiVersion(), "apiregistration.k8s.io/"):
+			// Kustomize skips these built-in identities when adding affixes.
+		default:
+			name, ok := strings.CutPrefix(originalName, kustomization.NamePrefix)
+			if !ok {
+				return ""
 			}
-			patchData = data
-		} else if patch.Patch != "" {
-			patchPath = kustFile
-			patchData = []byte(patch.Patch)
-		} else {
-			continue
-		}
-
-		if patchMatchesPaths(patchData, patch.Target, resource, cleanPaths) {
-			effectivePatch = formatRelativePatchPath(source.Path, patchPath)
+			originalName, ok = strings.CutSuffix(name, kustomization.NameSuffix)
+			if !ok || originalName == "" {
+				return ""
+			}
 		}
 	}
+	for i := len(allPatches) - 1; i >= 0; i-- {
+		patch := allPatches[i]
+		if i == beforeTransformers-1 && (len(kustomization.Labels) != 0 || legacyLabels || len(kustomization.CommonAnnotations) != 0 || len(kustomization.BuildMetadata) != 0) {
+			metadataKnown = false
+		}
+		data := []byte(patch.Patch)
+		path := kustFile
+		if patch.Path != "" {
+			path, err = pathcontainment.ResolveContainedPath(source.KustomizeDirectoryName, filepath.FromSlash(patch.Path))
+			if err != nil {
+				return ""
+			}
+			data, err = readKustomizationFile(path)
+			path = filepath.Join(source.KustomizeDirectoryName, filepath.FromSlash(patch.Path))
+			if err != nil {
+				return ""
+			}
+		}
 
-	return effectivePatch
+		docs, err := splitYAMLDocuments(data)
+		if err != nil {
+			return ""
+		}
+		matched := false
+		for _, doc := range docs {
+			if len(docs) > 1 {
+				// Kustomize reads JSON operations from the first document only.
+				// Only strategic-merge mappings can be traced across documents.
+				var mapping map[string]any
+				if err := yaml.Unmarshal(doc, &mapping); err != nil || mapping == nil {
+					return ""
+				}
+			}
+			if !isPatchDocumentProvablySafe(doc) || (patch.Options != nil && (patch.Options.AllowNameChange || patch.Options.AllowKindChange)) {
+				identityKnown = false
+				metadataKnown = false
+			}
+			match, err := patchMatchesPaths(doc, patch.Target, resource, originalName, cleanPaths)
+			if err != nil {
+				return ""
+			}
+			matched = matched || match
+		}
+		if !matched {
+			continue
+		}
+		selection := resource
+		target := patch.Target
+		if target == nil && !identityKnown {
+			return ""
+		}
+		if target != nil && target.Namespace != "" && i < beforeTransformers && kustomization.Namespace != "" {
+			// The rendered namespace may differ from the one used for selection.
+			return ""
+		}
+		if target != nil && (!identityKnown || (!metadataKnown && (target.LabelSelector != "" || target.AnnotationSelector != ""))) {
+			// A direct resource is exactly the input to the first overlay patch.
+			// For intermediate or composed resources we cannot reconstruct the
+			// selection metadata reliably from either end of the build.
+			if i != 0 || i >= beforeTransformers || len(kustomization.Components) != 0 {
+				return ""
+			}
+			selection = directPatchInput(kustomization.Resources, source, resource, originalName)
+			if selection == nil {
+				return ""
+			}
+		}
+		if matchKustomizeTarget(target, selection, originalName) ||
+			(i >= beforeTransformers && matchKustomizeTarget(target, selection, resource.GetName())) {
+			return formatRelativePatchPath(source.Path, path)
+		}
+	}
+	return ""
+}
+
+// directPatchInput identifies a single input document from the recorded origin
+// or, for directory-only evidence, from the sole declared resource and its identity.
+func directPatchInput(resources []string, source reporthandling.Source, rendered workloadinterface.IMetadata, name string) workloadinterface.IMetadata {
+	if source.Path == "" || source.RelativePath == "" {
+		return nil
+	}
+	origin, err := pathcontainment.ResolveContainedPath(source.Path, source.RelativePath)
+	if err != nil {
+		return nil
+	}
+	// With selectors, origin tracking can retain only the directory. Its
+	// sole direct input can still be identified by its Kubernetes identity.
+	directory, err := pathcontainment.ResolveContainedPath(source.KustomizeDirectoryName, ".")
+	if err != nil {
+		return nil
+	}
+	singleInput := len(resources) == 1 && origin == directory
+	for _, entry := range resources {
+		path, err := pathcontainment.ResolveContainedPath(source.KustomizeDirectoryName, entry)
+		if err != nil || (!singleInput && path != origin) {
+			continue
+		}
+		data, err := readKustomizationFile(path)
+		if err != nil {
+			return nil
+		}
+		docs, err := splitYAMLDocuments(data)
+		if err != nil || len(docs) != 1 {
+			return nil
+		}
+		var obj map[string]any
+		if err := yaml.Unmarshal(docs[0], &obj); err != nil {
+			return nil
+		}
+		input := workloadinterface.NewWorkloadObj(obj)
+		if input.GetName() == name && (!singleInput || input.GetNamespace() == rendered.GetNamespace()) && input.GetKind() == rendered.GetKind() && input.GetApiVersion() == rendered.GetApiVersion() {
+			return input
+		}
+	}
+	return nil
 }
 
 // CleanFindingPath extracts the raw dot-notation field path from an evidence entry,
@@ -147,32 +258,17 @@ func getMetadataMap(resource workloadinterface.IMetadata, key string) map[string
 	return res
 }
 
-func matchKustomizeTarget(target *types.Selector, resource workloadinterface.IMetadata) bool {
+func matchKustomizeTarget(target *types.Selector, resource workloadinterface.IMetadata, name string) bool {
 	if target == nil {
 		return true
 	}
-	if target.Kind != "" && !strings.EqualFold(target.Kind, resource.GetKind()) {
+	selector, err := types.NewSelectorRegex(target)
+	if err != nil {
 		return false
 	}
-	if target.Name != "" && target.Name != resource.GetName() {
-		return false
-	}
-	if target.Namespace != "" && resource.GetNamespace() != "" && target.Namespace != resource.GetNamespace() {
-		return false
-	}
-	apiVersion := resource.GetApiVersion()
-	parts := strings.Split(apiVersion, "/")
-	var group, version string
-	if len(parts) > 1 {
-		group = parts[0]
-		version = parts[1]
-	} else {
-		version = parts[0]
-	}
-	if target.Group != "" && !strings.EqualFold(target.Group, group) {
-		return false
-	}
-	if target.Version != "" && !strings.EqualFold(target.Version, version) {
+	group, version := resid.ParseGroupVersion(resource.GetApiVersion())
+	id := resid.NewResIdWithNamespace(resid.NewGvk(group, version, resource.GetKind()), name, resource.GetNamespace())
+	if !selector.MatchName(name) || !selector.MatchGvk(id.Gvk) || !selector.MatchNamespace(id.EffectiveNamespace()) {
 		return false
 	}
 	if target.LabelSelector != "" {
@@ -190,7 +286,7 @@ func matchKustomizeTarget(target *types.Selector, resource workloadinterface.IMe
 	return true
 }
 
-func matchYamlHeader(yamlObj map[string]any, resource workloadinterface.IMetadata) bool {
+func matchYamlHeader(yamlObj map[string]any, resource workloadinterface.IMetadata, name string) bool {
 	if k, ok := yamlObj["kind"].(string); ok && k != "" && !strings.EqualFold(k, resource.GetKind()) {
 		return false
 	}
@@ -200,7 +296,7 @@ func matchYamlHeader(yamlObj map[string]any, resource workloadinterface.IMetadat
 		}
 	}
 	if meta, ok := yamlObj["metadata"].(map[string]any); ok {
-		if n, ok := meta["name"].(string); ok && n != "" && n != resource.GetName() {
+		if n, ok := meta["name"].(string); ok && n != "" && n != name {
 			return false
 		}
 		if ns, ok := meta["namespace"].(string); ok && ns != "" && resource.GetNamespace() != "" && ns != resource.GetNamespace() {
@@ -210,7 +306,7 @@ func matchYamlHeader(yamlObj map[string]any, resource workloadinterface.IMetadat
 	return true
 }
 
-func patchMatchesPaths(patchData []byte, target *types.Selector, resource workloadinterface.IMetadata, cleanPaths []string) bool {
+func patchMatchesPaths(patchData []byte, target *types.Selector, resource workloadinterface.IMetadata, name string, cleanPaths []string) (bool, error) {
 	var ops []struct {
 		Op   string `json:"op" yaml:"op"`
 		Path string `json:"path" yaml:"path"`
@@ -223,36 +319,26 @@ func patchMatchesPaths(patchData []byte, target *types.Selector, resource worklo
 			jsonPath := jsonPointerToDotPath(op.Path)
 			for _, cp := range cleanPaths {
 				if pathMatches(jsonPath, cp) {
-					return true
+					return true, nil
 				}
 			}
 		}
-		return false
+		return false, nil
 	}
 
-	dec := yaml.NewDecoder(bytes.NewReader(patchData))
-	for {
-		var yamlObj map[string]any
-		err := dec.Decode(&yamlObj)
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil || len(yamlObj) == 0 {
-			continue
-		}
-		if target == nil {
-			if !matchYamlHeader(yamlObj, resource) {
-				continue
-			}
-		}
-		for _, cp := range cleanPaths {
-			if yamlDefinesField(yamlObj, cp, resource) {
-				return true
-			}
+	var obj map[string]any
+	if err := yaml.Unmarshal(patchData, &obj); err != nil {
+		return false, err
+	}
+	if target == nil && !matchYamlHeader(obj, resource, name) {
+		return false, nil
+	}
+	for _, cp := range cleanPaths {
+		if yamlDefinesField(obj, cp, resource) {
+			return true, nil
 		}
 	}
-
-	return false
+	return false, nil
 }
 
 func jsonPointerToDotPath(ptr string) string {
