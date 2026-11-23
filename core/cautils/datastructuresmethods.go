@@ -1,6 +1,8 @@
 package cautils
 
 import (
+	"slices"
+
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -30,7 +32,9 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, excludedRul
 			continue
 		}
 		if frameworks[i].Name != "" && len(frameworks[i].Controls) > 0 {
-			policies.Frameworks = append(policies.Frameworks, frameworks[i].Name)
+			if !slices.Contains(policies.Frameworks, frameworks[i].Name) {
+				policies.Frameworks = append(policies.Frameworks, frameworks[i].Name)
+			}
 		}
 		for j := range frameworks[i].Controls {
 			// operate on a local copy so we never mutate the caller's backing array -

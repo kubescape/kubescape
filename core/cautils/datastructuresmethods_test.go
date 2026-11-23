@@ -668,6 +668,42 @@ func TestPolicies_Set_NilSafety(t *testing.T) {
 	assert.Contains(t, emptyPolicies.Frameworks, "test-framework")
 }
 
+func TestPolicies_Set_DeduplicatesFrameworkNames(t *testing.T) {
+	control1 := reporthandling.Control{
+		ControlID: "C-0001",
+		Rules: []reporthandling.PolicyRule{
+			{Name: "rule-1"},
+		},
+	}
+	control2 := reporthandling.Control{
+		ControlID: "C-0002",
+		Rules: []reporthandling.PolicyRule{
+			{Name: "rule-2"},
+		},
+	}
+	frameworkA1 := reporthandling.Framework{
+		Name:     "cis-aks",
+		Controls: []reporthandling.Control{control1},
+	}
+	frameworkA2 := reporthandling.Framework{
+		Name:     "cis-aks",
+		Controls: []reporthandling.Control{control2},
+	}
+	frameworkB := reporthandling.Framework{
+		Name:     "nsa",
+		Controls: []reporthandling.Control{control1},
+	}
+
+	policies := NewPolicies()
+	// Set with duplicate framework names in input slice
+	policies.Set([]reporthandling.Framework{frameworkA1, frameworkA2, frameworkB}, nil, reporthandling.ScopeFile)
+	assert.Equal(t, []string{"cis-aks", "nsa"}, policies.Frameworks)
+
+	// Repeated call to Set should not introduce duplicates into existing Frameworks slice
+	policies.Set([]reporthandling.Framework{frameworkA1, frameworkB}, nil, reporthandling.ScopeFile)
+	assert.Equal(t, []string{"cis-aks", "nsa"}, policies.Frameworks)
+}
+
 func TestShouldSkipRuleWithWarned_NilWarnedMap(t *testing.T) {
 	ruleInvalidUntil := reporthandling.PolicyRule{
 		Name: "rule-invalid-until",
