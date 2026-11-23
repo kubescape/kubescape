@@ -723,9 +723,10 @@ func (a *QuayAdaptor) Login(ctx context.Context, registry string, credentials Re
 
 	var username, password, token string
 	if credentials.hasAuthenticator() {
-		username = credentials.Username
-		password = credentials.Password
-		token = credentials.Token
+		trimmed := credentials.Trimmed()
+		username = trimmed.Username
+		password = trimmed.Password
+		token = trimmed.Token
 	}
 
 	client := a.clientFactory(baseURL, username, password, token)

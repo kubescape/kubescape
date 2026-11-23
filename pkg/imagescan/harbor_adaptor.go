@@ -106,9 +106,10 @@ func (a *HarborAdaptor) Login(ctx context.Context, registry string, credentials 
 	}
 
 	if credentials.hasAuthenticator() {
-		wrapper.username = credentials.Username
-		wrapper.password = credentials.Password
-		wrapper.token = credentials.Token
+		trimmed := credentials.Trimmed()
+		wrapper.username = trimmed.Username
+		wrapper.password = trimmed.Password
+		wrapper.token = trimmed.Token
 	}
 
 	// Ping to verify connectivity. Note: /api/v2.0/systeminfo permits anonymous requests,

@@ -2,6 +2,7 @@ package shared
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
@@ -21,6 +22,15 @@ type ImageCredentials struct {
 	Username  string
 	Password  string
 	Token     string
+}
+
+func (c ImageCredentials) Trimmed() ImageCredentials {
+	return ImageCredentials{
+		Authority: strings.TrimSpace(c.Authority),
+		Username:  strings.TrimSpace(c.Username),
+		Password:  strings.TrimSpace(c.Password),
+		Token:     strings.TrimSpace(c.Token),
+	}
 }
 
 // ValidateImageScanInfo validates the ScanInfo struct for image scanning commands
@@ -72,13 +82,18 @@ func ValidateWorkloadImageCredentials(credentials ImageCredentials) error {
 	if err := ValidateImageCredentials(credentials); err != nil {
 		return err
 	}
-	if credentials.Authority == "" && hasRegistryAuthenticator(credentials.Username, credentials.Password, credentials.Token) {
+	if strings.TrimSpace(credentials.Authority) == "" && hasRegistryAuthenticator(credentials.Username, credentials.Password, credentials.Token) {
 		return ErrRegistryAuthorityMissing
 	}
 	return nil
 }
 
 func ValidateRegistryCredentials(username, password, token, authority string) error {
+	username = strings.TrimSpace(username)
+	password = strings.TrimSpace(password)
+	token = strings.TrimSpace(token)
+	authority = strings.TrimSpace(authority)
+
 	hasUsernamePassword := username != "" || password != ""
 	hasCompleteUsernamePassword := username != "" && password != ""
 	hasToken := token != ""
@@ -100,5 +115,8 @@ func ValidateRegistryCredentials(username, password, token, authority string) er
 }
 
 func hasRegistryAuthenticator(username, password, token string) bool {
+	username = strings.TrimSpace(username)
+	password = strings.TrimSpace(password)
+	token = strings.TrimSpace(token)
 	return token != "" || (username != "" && password != "")
 }

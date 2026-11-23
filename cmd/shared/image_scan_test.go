@@ -253,6 +253,26 @@ func TestValidateWorkloadImageCredentialsRequiresAuthority(t *testing.T) {
 			Credentials: ImageCredentials{Authority: "registry.example.com", Username: "user"},
 			Want:        ErrRegistryUsernamePassword,
 		},
+		{
+			Description: "Whitespace-only credentials with authority return ErrRegistryAuthorityNoAuth",
+			Credentials: ImageCredentials{Authority: "registry.example.com", Username: "   ", Password: "   "},
+			Want:        ErrRegistryAuthorityNoAuth,
+		},
+		{
+			Description: "Whitespace-only credentials and authority are treated as no credentials",
+			Credentials: ImageCredentials{Authority: "   ", Username: "   ", Password: "   "},
+			Want:        nil,
+		},
+		{
+			Description: "Whitespace-only authority with valid credentials is rejected as missing authority",
+			Credentials: ImageCredentials{Authority: "   ", Username: "user", Password: "pass"},
+			Want:        ErrRegistryAuthorityMissing,
+		},
+		{
+			Description: "Whitespace-only authority with token is rejected as missing authority",
+			Credentials: ImageCredentials{Authority: "   ", Token: "token"},
+			Want:        ErrRegistryAuthorityMissing,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -271,6 +291,97 @@ func TestValidateRegistryCredentials_EnvVarBug(t *testing.T) {
 
 	// Should return conflict error because both token and username are present
 	assert.Equal(t, ErrRegistryAuthConflict, err)
+}
+
+func TestValidateRegistryCredentials_WhitespaceHandling(t *testing.T) {
+	tests := []struct {
+		name      string
+		username  string
+		password  string
+		token     string
+		authority string
+		wantErr   error
+	}{
+		{
+			name:      "whitespace-only credentials treated as empty",
+			username:  "   ",
+			password:  "   ",
+			token:     "   ",
+			authority: "   ",
+			wantErr:   nil,
+		},
+		{
+			name:      "whitespace-only username with valid password is rejected",
+			username:  "   ",
+			password:  "secret",
+			token:     "",
+			authority: "",
+			wantErr:   ErrRegistryUsernamePassword,
+		},
+		{
+			name:      "valid username with whitespace-only password is rejected",
+			username:  "admin",
+			password:  "   ",
+			token:     "",
+			authority: "",
+			wantErr:   ErrRegistryUsernamePassword,
+		},
+		{
+			name:      "whitespace-padded valid credentials accepted",
+			username:  " admin ",
+			password:  " secret ",
+			token:     "",
+			authority: " registry.example.com ",
+			wantErr:   nil,
+		},
+		{
+			name:      "whitespace-only token with whitespace-only authority does not trigger conflict",
+			username:  "",
+			password:  "",
+			token:     "   ",
+			authority: "   ",
+			wantErr:   nil,
+		},
+		{
+			name:      "whitespace-only token does not conflict with valid username/password",
+			username:  "user",
+			password:  "pass",
+			token:     "   ",
+			authority: "",
+			wantErr:   nil,
+		},
+		{
+			name:      "whitespace-only authority with no credentials returns nil",
+			username:  "",
+			password:  "",
+			token:     "",
+			authority: "   ",
+			wantErr:   nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateRegistryCredentials(tt.username, tt.password, tt.token, tt.authority)
+			assert.Equal(t, tt.wantErr, err)
+		})
+	}
+}
+
+func TestImageCredentials_Trimmed(t *testing.T) {
+	creds := ImageCredentials{
+		Authority: "  registry.example.com  ",
+		Username:  "  user  ",
+		Password:  "  pass  ",
+		Token:     "  token  ",
+	}
+	trimmed := creds.Trimmed()
+	assert.Equal(t, ImageCredentials{
+		Authority: "registry.example.com",
+		Username:  "user",
+		Password:  "pass",
+		Token:     "token",
+	}, trimmed)
 }
 
 // TestValidateImageScanAnonymization guards a silent data leak: --hide and

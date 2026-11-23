@@ -48,7 +48,16 @@ type RegistryCredentials struct {
 }
 
 func (c RegistryCredentials) hasAuthenticator() bool {
-	return c.Token != "" || (c.Username != "" && c.Password != "")
+	return strings.TrimSpace(c.Token) != "" || (strings.TrimSpace(c.Username) != "" && strings.TrimSpace(c.Password) != "")
+}
+
+func (c RegistryCredentials) Trimmed() RegistryCredentials {
+	return RegistryCredentials{
+		Authority: strings.TrimSpace(c.Authority),
+		Username:  strings.TrimSpace(c.Username),
+		Password:  strings.TrimSpace(c.Password),
+		Token:     strings.TrimSpace(c.Token),
+	}
 }
 
 // NewDefaultDBConfig builds the Grype distribution/installation configs.
@@ -253,11 +262,12 @@ func EnforceDBAge(svc *Service, shouldUpdate bool, failOnStale bool, maxAge time
 func getProviderConfig(creds RegistryCredentials, sources []string, options ScanOptions, keychain authn.Keychain) pkg.ProviderConfig {
 	var syftCreds []image.RegistryCredentials
 	if creds.hasAuthenticator() {
+		trimmed := creds.Trimmed()
 		syftCreds = append(syftCreds, image.RegistryCredentials{
-			Authority: creds.Authority,
-			Username:  creds.Username,
-			Password:  creds.Password,
-			Token:     creds.Token,
+			Authority: trimmed.Authority,
+			Username:  trimmed.Username,
+			Password:  trimmed.Password,
+			Token:     trimmed.Token,
 		})
 	}
 	regOpts := &image.RegistryOptions{
