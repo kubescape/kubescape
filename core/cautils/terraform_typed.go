@@ -861,7 +861,7 @@ func hasUnresolvableVariables(expr hcl.Expression, evalCtx *hcl.EvalContext) boo
 
 	if obj, ok := expr.(*hclsyntax.ObjectConsExpr); ok {
 		for _, item := range obj.Items {
-			if hasUnresolvableVariables(item.KeyExpr, evalCtx) || hasUnresolvableVariables(item.ValueExpr, evalCtx) {
+			if hasUnresolvableVariables(objectKeyExpr(item.KeyExpr), evalCtx) || hasUnresolvableVariables(item.ValueExpr, evalCtx) {
 				return true
 			}
 		}
@@ -899,6 +899,20 @@ func hasUnresolvableVariables(expr hcl.Expression, evalCtx *hcl.EvalContext) boo
 		}
 	}
 	return false
+}
+
+// objectKeyExpr returns the expression an object key is evaluated from. HCL
+// wraps every key in an ObjectConsKeyExpr and reads a bare name such as
+// namespace as a literal string, so that case has no expression (nil).
+func objectKeyExpr(expr hclsyntax.Expression) hcl.Expression {
+	key, ok := expr.(*hclsyntax.ObjectConsKeyExpr)
+	if !ok || key == nil {
+		return expr
+	}
+	if !key.ForceNonLiteral && hcl.ExprAsKeyword(key.Wrapped) != "" {
+		return nil
+	}
+	return key.Wrapped
 }
 
 // applyProviderDefaults fills in defaults for the fields the block leaves out

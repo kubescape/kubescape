@@ -1192,3 +1192,105 @@ resource "kubernetes_service_account_v1" "can_missing_attribute_null" {
 	assert.Equal(t, "default", byName["can_missing_attribute_null"]["metadata"].(map[string]interface{})["namespace"],
 		"can() guard catching missing attribute on known object should evaluate false branch to null and receive provider default")
 }
+
+func TestHasUnresolvableVariables_ObjectKeys(t *testing.T) {
+	evalCtx := &hcl.EvalContext{
+		Variables: map[string]cty.Value{
+			"var": cty.ObjectVal(map[string]cty.Value{
+				"valid_str": cty.StringVal("prod"),
+			}),
+		},
+		Functions: terraformFunctions,
+	}
+
+	tests := []struct {
+		name string
+		expr string
+		want bool
+	}{
+		{
+			name: "key where try catches a missing variable",
+			expr: `{ (try("key", var.missing)) = null }`,
+			want: false,
+		},
+		{
+			name: "key from a resolved variable",
+			expr: `{ (var.valid_str) = null }`,
+			want: false,
+		},
+		{
+			name: "key from a missing variable retains protection",
+			expr: `{ (var.missing) = null }`,
+			want: true,
+		},
+		{
+			name: "key falling back to a missing variable retains protection",
+			expr: `{ (try(var.missing, "key")) = null }`,
+			want: true,
+		},
+		{
+			name: "bare name key is a literal string",
+			expr: `{ missing = null }`,
+			want: false,
+		},
+		{
+			name: "missing variable in the value retains protection",
+			expr: `{ (try("key", var.missing)) = var.missing }`,
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file, diags := hclsyntax.ParseConfig([]byte("x = "+tt.expr), "test.tf", hcl.Pos{Line: 1, Column: 1})
+			require.False(t, diags.HasErrors())
+			attr := file.Body.(*hclsyntax.Body).Attributes["x"]
+			got := hasUnresolvableVariables(attr.Expr, evalCtx)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestExtractTypedResourcesResolvesObjectKeysThatTryCatches(t *testing.T) {
+	src := `
+resource "kubernetes_service_account_v1" "key_in_value" {
+  metadata {
+    name      = "key_in_value"
+    namespace = contains(keys({ (try("ns", var.missing)) = true }), "ns") ? "team-a" : null
+  }
+}
+
+resource "kubernetes_service_account_v1" "key_before_default" {
+  metadata {
+    name      = "key_before_default"
+    namespace = contains(keys({ (try("ns", var.missing)) = true }), "other") ? "team-a" : null
+  }
+}
+
+resource "kubernetes_service_account_v1" "missing_key" {
+  metadata {
+    name      = "missing_key"
+    namespace = contains(keys({ (var.missing) = true }), "other") ? "team-a" : null
+  }
+}
+`
+	evalCtx := &hcl.EvalContext{
+		Variables: map[string]cty.Value{"var": cty.EmptyObjectVal},
+		Functions: terraformFunctions,
+	}
+
+	manifests, _ := extractTypedResources(parseTypedHCL(t, src), evalCtx)
+	require.Len(t, manifests, 3)
+
+	byName := map[string]map[string]interface{}{}
+	for _, m := range manifests {
+		byName[m["metadata"].(map[string]interface{})["name"].(string)] = m
+	}
+
+	assert.Equal(t, "team-a", byName["key_in_value"]["metadata"].(map[string]interface{})["namespace"],
+		"an object key that try() resolves should keep the evaluated namespace")
+	assert.Equal(t, "default", byName["key_before_default"]["metadata"].(map[string]interface{})["namespace"],
+		"an object key that try() resolves should not block the provider default")
+	assert.NotContains(t, byName["missing_key"]["metadata"].(map[string]interface{}), "namespace",
+		"an object key from an unresolvable variable should not receive the provider default")
+}
