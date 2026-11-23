@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/kustomize/api/krusty"
+	"sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 )
 
@@ -1524,6 +1525,63 @@ patches:
 		}
 	}
 	assert.Contains(t, byKindAndName, "Deployment/demo")
+}
+
+func TestManifestHasOriginAnnotation_BoundedRead(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	t.Run("directory path is rejected safely by bounded reader", func(t *testing.T) {
+		t.Parallel()
+		assert.True(t, manifestHasOriginAnnotation(tmpDir), "unreadable/non-regular path conservatively falls back to true")
+	})
+
+	t.Run("non-existent file falls back safely to true", func(t *testing.T) {
+		t.Parallel()
+		missing := filepath.Join(tmpDir, "does-not-exist.yaml")
+		assert.True(t, manifestHasOriginAnnotation(missing))
+	})
+
+	t.Run("regular file without origin annotation returns false", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(tmpDir, "plain.yaml")
+		require.NoError(t, os.WriteFile(path, []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: plain\n"), 0o600))
+		assert.False(t, manifestHasOriginAnnotation(path))
+	})
+
+	t.Run("regular file with origin annotation returns true", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(tmpDir, "with-origin.yaml")
+		content := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: annotated\n  annotations:\n    config.kubernetes.io/origin: \"path: origin.yaml\"\n"
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+		assert.True(t, manifestHasOriginAnnotation(path))
+	})
+}
+
+func TestIsPatchProvablySafe_BoundedRead(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	t.Run("patch file pointing to directory returns false", func(t *testing.T) {
+		t.Parallel()
+		subDir := filepath.Join(tmpDir, "patchdir")
+		require.NoError(t, os.MkdirAll(subDir, 0o755))
+
+		patch := types.Patch{Path: "patchdir"}
+		assert.False(t, isPatchProvablySafe(tmpDir, patch))
+	})
+
+	t.Run("valid regular patch file succeeds", func(t *testing.T) {
+		t.Parallel()
+		patchPath := filepath.Join(tmpDir, "patch.yaml")
+		patchContent := "- op: replace\n  path: /spec/replicas\n  value: 3\n"
+		require.NoError(t, os.WriteFile(patchPath, []byte(patchContent), 0o600))
+
+		patch := types.Patch{Path: "patch.yaml"}
+		assert.True(t, isPatchProvablySafe(tmpDir, patch))
+	})
 }
 
 func TestIsRemoteReference(t *testing.T) {

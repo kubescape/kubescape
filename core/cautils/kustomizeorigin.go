@@ -294,7 +294,7 @@ func inspectKustomizationNode(file string, isRoot bool, visited, visiting map[in
 }
 
 func manifestHasOriginAnnotation(file string) bool {
-	bytesContent, err := os.ReadFile(file)
+	bytesContent, err := readKustomizationFile(file)
 	if err != nil {
 		return true
 	}
@@ -396,7 +396,7 @@ func isPatchProvablySafe(baseDir string, patch types.Patch) bool {
 		if !pathcontainment.IsPathContained(baseDir, canonPatch) {
 			return false
 		}
-		bytesContent, err := os.ReadFile(canonPatch)
+		bytesContent, err := readKustomizationFile(canonPatch)
 		if err != nil {
 			return false
 		}
