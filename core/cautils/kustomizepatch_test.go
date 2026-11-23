@@ -570,6 +570,20 @@ func TestTraceKustomizePatch_ReplicaEntryForAnotherResource(t *testing.T) {
 	require.Equal(t, "patch.yaml", TraceKustomizePatch(localworkload.NewLocalWorkload(obj), []string{"spec.replicas"}, src))
 }
 
+func TestTraceKustomizePatch_ReplicaEntryForMiddleName(t *testing.T) {
+	// Two bases rename the resource, so a-demo is a name only Kustomize saw.
+	root, obj := renderKustomization(t, map[string]string{
+		"inner/kustomization.yaml":   "resources: [deployment.yaml]\nnamePrefix: a-\n",
+		"inner/deployment.yaml":      "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: demo, namespace: start}\nspec: {replicas: 1}\n",
+		"outer/kustomization.yaml":   "resources: [../inner]\nnamePrefix: b-\n",
+		"overlay/kustomization.yaml": "resources: [../outer]\npatches:\n- path: patch.yaml\n  target: {kind: Deployment, name: b-a-demo}\nreplicas: [{name: a-demo, count: 5}]\n",
+		"overlay/patch.yaml":         "- {op: replace, path: /spec/replicas, value: 2}\n",
+	}, "overlay", "start")
+	require.EqualValues(t, 5, obj["spec"].(map[string]any)["replicas"])
+	src := reporthandling.Source{Path: root, RelativePath: "inner/deployment.yaml", FileType: reporthandling.SourceTypeKustomizeDirectory, KustomizeDirectoryName: filepath.Join(root, "overlay")}
+	require.Empty(t, TraceKustomizePatch(localworkload.NewLocalWorkload(obj), []string{"spec.replicas"}, src))
+}
+
 func TestTraceKustomizePatch_AmbiguousOriginDocument(t *testing.T) {
 	// Both documents share a name, so the origin file cannot tell which one
 	// became the traced resource, nor which namespace it started in.

@@ -82,18 +82,19 @@ func TraceKustomizePatch(resource workloadinterface.IMetadata, paths []string, s
 	}
 	// Patches also select by the name and namespace a nested base or component
 	// gave the resource first, which this directory alone cannot reveal.
-	hiddenOrigin := len(kustomization.Components) != 0
+	nestedInput := len(kustomization.Components) != 0
 	inputs := append(slices.Clone(kustomization.Resources), kustomization.Bases...) //nolint:staticcheck // Legacy bases are still nested inputs.
 	for _, entry := range inputs {
 		path, err := pathcontainment.ResolveContainedPath(source.KustomizeDirectoryName, entry)
 		if err != nil {
-			hiddenOrigin = true
+			nestedInput = true
 			continue
 		}
 		if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
-			hiddenOrigin = true
+			nestedInput = true
 		}
 	}
+	hiddenOrigin := nestedInput
 	legacyLabels := len(kustomization.CommonLabels) != 0 //nolint:staticcheck // Legacy commonLabels still changes patch selection metadata.
 	metadataKnown := true
 	identityKnown := true
@@ -126,6 +127,8 @@ func TraceKustomizePatch(resource workloadinterface.IMetadata, paths []string, s
 	}
 	// The replica transformer runs after every patch and selects by any name
 	// the resource has had. An entry that may name it decides the count.
+	// Names a nested base gave it between its origin and this overlay are
+	// never recorded, so a nested input only rules entries out by count.
 	if slices.ContainsFunc(cleanPaths, func(p string) bool { return pathMatches(p, "spec.replicas") }) {
 		spec, _ := resource.GetObject()["spec"].(map[string]any)
 		names := []string{orgName, originalName, kustomization.NamePrefix + originalName, resource.GetName()}
@@ -133,7 +136,7 @@ func TraceKustomizePatch(resource workloadinterface.IMetadata, paths []string, s
 			if fmt.Sprint(spec["replicas"]) != strconv.FormatInt(r.Count, 10) {
 				continue // this entry did not set the rendered count
 			}
-			if hiddenOrigin || slices.Contains(names, r.Name) || patchesMayRename(source.KustomizeDirectoryName, kustFile, allPatches) {
+			if nestedInput || slices.Contains(names, r.Name) || patchesMayRename(source.KustomizeDirectoryName, kustFile, allPatches) {
 				return ""
 			}
 		}
