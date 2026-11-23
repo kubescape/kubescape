@@ -25,6 +25,15 @@ type ResourcesPrioritizationHandler struct {
 	buildResourcesMap      bool
 }
 
+// policyArtifactPersistence is implemented by the attack-track getters that
+// know whether what they return may be published to Kubescape's shared,
+// unversioned disk fallback: getter.LoadPolicy never may (it reads a local
+// file, such as an --use-artifacts-from directory's), and
+// getter.DownloadReleasedPolicy may not for a pinned release.
+type policyArtifactPersistence interface {
+	ShouldPersistPolicyArtifacts() bool
+}
+
 var defaultSupportedKinds = []string{
 	"Deployment",
 	"Pod",
@@ -66,10 +75,19 @@ func NewResourcesPrioritizationHandler(ctx context.Context, attackTracksGetter g
 		return nil, fmt.Errorf("expected to find at least one attack track")
 	}
 
-	// Store attack tracks in cache
-	cache := getter.GetDefaultPath(cautils.LocalAttackTracksFilename)
-	if err := getter.SaveInFile(tracks, cache); err != nil {
-		logger.L().Ctx(ctx).Warning("failed to cache attack track", helpers.String("file", cache), helpers.Error(err))
+	// Store attack tracks in the shared fallback a later offline scan reads,
+	// unless their source opts out the way it does for frameworks and controls:
+	// the cache path records no provenance, so tracks from an explicit local
+	// file or a pinned release would later be served as the latest release's.
+	persistAttackTracks := true
+	if persistence, ok := attackTracksGetter.(policyArtifactPersistence); ok {
+		persistAttackTracks = persistence.ShouldPersistPolicyArtifacts()
+	}
+	if persistAttackTracks {
+		cache := getter.GetDefaultPath(cautils.LocalAttackTracksFilename)
+		if err := getter.SaveInFile(tracks, cache); err != nil {
+			logger.L().Ctx(ctx).Warning("failed to cache attack track", helpers.String("file", cache), helpers.Error(err))
+		}
 	}
 
 	return handler, nil
