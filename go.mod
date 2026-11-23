@@ -47,10 +47,11 @@ require (
 	github.com/google/go-containerregistry v0.22.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/schema v1.4.1
+	github.com/hashicorp/go-version v1.9.0
 	github.com/hashicorp/hcl/v2 v2.25.0
 	github.com/jedib0t/go-pretty/v6 v6.8.3
 	github.com/johnfercher/go-tree v1.1.0
-	github.com/johnfercher/maroto/v2 v2.4.2
+	github.com/johnfercher/maroto/v2 v2.4.4
 	github.com/json-iterator/go v1.1.12
 	github.com/jwalton/gchalk v1.3.0
 	github.com/klauspost/compress v1.20.2
@@ -93,6 +94,9 @@ require (
 	github.com/sylabs/sif/v2 v2.24.2
 	github.com/valyala/fastjson v1.6.10
 	github.com/zclconf/go-cty v1.20.0
+	go.lsp.dev/jsonrpc2 v1.0.1
+	go.lsp.dev/protocol v1.0.1
+	go.lsp.dev/uri v1.0.1
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.72.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.47.0
@@ -397,12 +401,9 @@ require (
 	github.com/hashicorp/go-getter v1.8.10 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
-	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/henvic/httpretty v0.1.4 // indirect
-	github.com/hhrutter/lzw v1.0.0 // indirect
-	github.com/hhrutter/pkcs7 v0.2.0 // indirect
-	github.com/hhrutter/tiff v1.0.2 // indirect
+	github.com/hhrutter/tiff v1.0.7 // indirect
 	github.com/hiddeco/sshsig v0.2.0 // indirect
 	github.com/huandu/xstrings v1.5.0 // indirect
 	github.com/iancoleman/strcase v0.3.0 // indirect
@@ -438,7 +439,7 @@ require (
 	github.com/magiconair/properties v1.18.12 // indirect
 	github.com/masahiro331/go-mvn-version v0.0.0-20260119054159-d21fcd2e7de1 // indirect
 	github.com/mattn/go-colorable v0.1.16 // indirect
-	github.com/mattn/go-runewidth v0.0.27 // indirect
+	github.com/mattn/go-runewidth v0.0.30 // indirect
 	github.com/mattn/go-sqlite3 v1.14.48 // indirect
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d // indirect
 	github.com/mholt/archives v0.1.5 // indirect
@@ -495,7 +496,7 @@ require (
 	github.com/parthivsaikia/go-pacman-version v0.0.0-20260212091406-8640ae78daee // indirect
 	github.com/pborman/indent v1.2.1 // indirect
 	github.com/pborman/uuid v1.2.1 // indirect
-	github.com/pdfcpu/pdfcpu v0.11.1 // indirect
+	github.com/pdfcpu/pdfcpu v0.16.2 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
@@ -583,6 +584,7 @@ require (
 	github.com/wagoodman/go-progress v0.0.0-20260303201901-10176f79b2c0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
+	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/xeipuuv/gojsonpointer v0.0.0-20190905194746-02993c407bfb // indirect
 	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 // indirect
@@ -597,9 +599,6 @@ require (
 	go.etcd.io/etcd/api/v3 v3.7.0 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.7.1 // indirect
 	go.etcd.io/etcd/client/v3 v3.7.0 // indirect
-	go.lsp.dev/jsonrpc2 v1.0.1 // indirect
-	go.lsp.dev/protocol v1.0.1 // indirect
-	go.lsp.dev/uri v1.0.1 // indirect
 	go.mongodb.org/mongo-driver v1.17.7 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/bridges/otelslog v0.21.0 // indirect
@@ -623,7 +622,7 @@ require (
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
-	golang.org/x/image v0.45.0 // indirect
+	golang.org/x/image v0.46.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
@@ -638,7 +637,6 @@ require (
 	gopkg.in/ini.v1 v1.67.3 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gorm.io/gorm v1.31.1 // indirect
 	howett.net/plist v1.0.1 // indirect
 	k8s.io/apiextensions-apiserver v0.37.0 // indirect
