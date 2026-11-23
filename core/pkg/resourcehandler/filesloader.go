@@ -107,14 +107,17 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		addWorkloadsToResourcesMap(mappedResources, input.workloads)
 	}
 
-	// locate input k8s object in the mapped resources - if not found or not a valid resource, return error
-	var err error
-	if sessionObj.SingleResourceScan, err = findScanObjectResource(mappedResources, scanInfo.ScanObject); err != nil {
+	sessionObj.SingleResourceScan = nil
+	selected, err := findScanObjectResource(mappedResources, scanInfo.ScanObject)
+	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-
-	if sessionObj.SingleResourceScan != nil && workloadHasParent(sessionObj.SingleResourceScan.GetObject()) {
-		return nil, nil, nil, nil, fmt.Errorf("resource %s has a parent and cannot be scanned", sessionObj.SingleResourceScan.GetID())
+	if selected != nil {
+		workload := workloadinterface.NewWorkloadObj(selected.GetObject())
+		sessionObj.SingleResourceScan = workload
+		if workloadHasParent(workload.GetObject()) {
+			return nil, nil, nil, nil, fmt.Errorf("resource %s has a parent and cannot be scanned", workload.GetID())
+		}
 	}
 
 	scanningScope := cautils.GetScanningScope(sessionObj.Metadata.ContextMetadata)
@@ -146,7 +149,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 
 	logger.L().StopSuccess("Done accessing local objects")
 	// save input resource in resource maps
-	addSingleResourceToResourceMaps(k8sResources, allResources, sessionObj.SingleResourceScan, offlineResolver)
+	addSingleResourceToResourceMaps(k8sResources, allResources, selected, offlineResolver)
 
 	if err := applyKindFilter(k8sResources, allResources, scanInfo, sessionObj.SingleResourceScan); err != nil {
 		return nil, nil, nil, nil, err

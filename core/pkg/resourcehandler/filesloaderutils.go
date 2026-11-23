@@ -105,7 +105,7 @@ func isWorkloadMetadata(r workloadinterface.IMetadata) bool {
 }
 
 // findScanObjectResource finds the requested k8s object to be scanned in the resources map
-func findScanObjectResource(mappedResources map[string][]workloadinterface.IMetadata, resource *objectsenvelopes.ScanObject) (workloadinterface.IWorkload, error) {
+func findScanObjectResource(mappedResources map[string][]workloadinterface.IMetadata, resource *objectsenvelopes.ScanObject) (workloadinterface.IMetadata, error) {
 	if resource == nil {
 		return nil, nil
 	}
@@ -113,7 +113,7 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
 
 	type matchResult struct {
-		workloads    []workloadinterface.IWorkload
+		workloads    []workloadinterface.IMetadata
 		nonWorkloads []workloadinterface.IMetadata
 	}
 
@@ -148,8 +148,7 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 
 				seenResources[r.GetID()] = struct{}{}
 				if isWorkloadMetadata(r) {
-					wl := workloadinterface.NewWorkloadObj(r.GetObject())
-					res.workloads = append(res.workloads, wl)
+					res.workloads = append(res.workloads, r)
 				} else {
 					res.nonWorkloads = append(res.nonWorkloads, r)
 				}
