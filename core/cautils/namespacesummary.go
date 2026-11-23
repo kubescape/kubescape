@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -66,8 +67,10 @@ func BuildNamespaceSummariesFromCatalog(controls reportsummary.ControlSummaries,
 
 	namespaceOf := func(resourceID string) string {
 		if catalog != nil {
-			if resource, ok := catalog.Get(resourceID); ok && resource != nil && resource.GetNamespace() != "" {
-				return resource.GetNamespace()
+			if resource, ok := catalog.Get(resourceID); ok && resource != nil {
+				if ns := strings.TrimSpace(resource.GetNamespace()); ns != "" {
+					return ns
+				}
 			}
 		}
 		return ClusterScopedNamespace
@@ -81,8 +84,10 @@ func BuildNamespaceSummariesFromCatalog(controls reportsummary.ControlSummaries,
 	if catalog != nil {
 		catalog.ForEach(func(resourceID string, resource workloadinterface.IMetadata) bool {
 			namespace := ClusterScopedNamespace
-			if resource != nil && resource.GetNamespace() != "" {
-				namespace = resource.GetNamespace()
+			if resource != nil {
+				if ns := strings.TrimSpace(resource.GetNamespace()); ns != "" {
+					namespace = ns
+				}
 			}
 			if resourcesByNamespace[namespace] == nil {
 				resourcesByNamespace[namespace] = make(map[string]struct{})
