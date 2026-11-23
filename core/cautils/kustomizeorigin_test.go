@@ -1604,3 +1604,147 @@ func TestIsRemoteReference(t *testing.T) {
 		assert.Equal(t, tt.want, isRemoteReference(tt.ref), "ref: %s", tt.ref)
 	}
 }
+
+// writeKustomizeFiles writes files, keyed by slash-separated paths relative to
+// root.
+func writeKustomizeFiles(t *testing.T, root string, files map[string]string) {
+	t.Helper()
+	for name, content := range files {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	}
+}
+
+const demoDeployment = "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  replicas: 1\n"
+
+// A base reached through a directory link climbs out of the link's target, not
+// out of the link: Kustomize resolves the link first. Its origin annotation is
+// the references joined as text, so it names a path next to the link instead.
+// Attribution has to report the file Kustomize read, and must not report a
+// different file that happens to sit at the annotated path.
+func TestKustomizeOriginThroughALinkedBase(t *testing.T) {
+	root := t.TempDir()
+	writeKustomizeFiles(t, root, map[string]string{
+		"app/kustomization.yaml":           "resources:\n- base-link\n",
+		"shared/base/kustomization.yaml":   "resources:\n- ../common\n",
+		"shared/common/kustomization.yaml": "resources:\n- deployment.yaml\n",
+		"shared/common/deployment.yaml":    demoDeployment,
+	})
+	if err := os.Symlink(filepath.Join("..", "shared", "base"), filepath.Join(root, "app", "base-link")); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	require.NoError(t, err)
+	want := filepath.Join(resolvedRoot, "shared", "common", "deployment.yaml")
+	app := filepath.Join(root, "app")
+
+	t.Run("the file Kustomize read is reported", func(t *testing.T) {
+		byName, origins := renderedKustomizeWorkloads(t, app)
+		require.Contains(t, byName, "Deployment/demo")
+		assert.Equal(t, want, origins[byName["Deployment/demo"].GetID()])
+	})
+
+	t.Run("not a different file at the path the annotation names", func(t *testing.T) {
+		writeKustomizeFiles(t, root, map[string]string{
+			"app/common/deployment.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: unrelated\n",
+		})
+		byName, origins := renderedKustomizeWorkloads(t, app)
+		require.Len(t, byName, 1, "the file next to the link is not part of the build")
+		assert.Equal(t, want, origins[byName["Deployment/demo"].GetID()])
+	})
+
+	t.Run("nothing when the build reads two files under the same name", func(t *testing.T) {
+		writeKustomizeFiles(t, root, map[string]string{
+			"app/kustomization.yaml":        "resources:\n- base-link\n- common\n",
+			"app/common/kustomization.yaml": "resources:\n- deployment.yaml\n",
+		})
+		byName, origins := renderedKustomizeWorkloads(t, app)
+		require.Len(t, byName, 2)
+		assert.Empty(t, origins, "both resources are annotated with app/common/deployment.yaml")
+	})
+}
+
+// Git shorthand only applies to a base or a component. A resource that is a
+// local file is read from disk whatever its name, and so is a patch file.
+func TestKustomizeOriginForFileNamesWithAColon(t *testing.T) {
+	probe := filepath.Join(t.TempDir(), "a:b.yaml")
+	if err := os.WriteFile(probe, nil, 0o600); err != nil {
+		t.Skipf("this file system does not allow a colon in a file name: %v", err)
+	}
+
+	t.Run("a resource", func(t *testing.T) {
+		root := t.TempDir()
+		writeKustomizeFiles(t, root, map[string]string{
+			"app/kustomization.yaml": "resources:\n- \"demo:v1.yaml\"\n",
+			"app/demo:v1.yaml":       demoDeployment,
+		})
+		app := filepath.Join(root, "app")
+		require.Equal(t, originWrapper, originModeFor(app).mode)
+		byName, origins := renderedKustomizeWorkloads(t, app)
+		assert.Equal(t, filepath.Join(app, "demo:v1.yaml"), origins[byName["Deployment/demo"].GetID()])
+	})
+
+	t.Run("a patch file", func(t *testing.T) {
+		root := t.TempDir()
+		writeKustomizeFiles(t, root, map[string]string{
+			"base/kustomization.yaml":    "resources:\n- deployment.yaml\n",
+			"base/deployment.yaml":       demoDeployment,
+			"overlay/kustomization.yaml": "resources:\n- ../base\npatches:\n- path: \"replicas:v2.yaml\"\n",
+			"overlay/replicas:v2.yaml":   "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  replicas: 2\n",
+		})
+		overlay := filepath.Join(root, "overlay")
+		require.Equal(t, originWrapper, originModeFor(overlay).mode)
+		byName, origins := renderedKustomizeWorkloads(t, overlay)
+		assert.Equal(t, filepath.Join(root, "base", "deployment.yaml"), origins[byName["Deployment/demo"].GetID()])
+	})
+
+	t.Run("a base is still taken for Git shorthand", func(t *testing.T) {
+		app := t.TempDir()
+		writeKustomizeFiles(t, app, map[string]string{
+			"kustomization.yaml":             "resources:\n- \"gh:org/repo\"\n",
+			"gh:org/repo/kustomization.yaml": "resources:\n- deployment.yaml\n",
+			"gh:org/repo/deployment.yaml":    demoDeployment,
+		})
+		assert.Equal(t, originUnavailable, originModeFor(app).mode)
+	})
+}
+
+// Kustomize reads a patchesStrategicMerge entry as patch content first, and as
+// a file name only when it is not, so a patch on one line is content.
+func TestKustomizeOriginForAOneLineStrategicMergePatch(t *testing.T) {
+	root := t.TempDir()
+	writeKustomizeFiles(t, root, map[string]string{
+		"base/kustomization.yaml": "resources:\n- deployment.yaml\n",
+		"base/deployment.yaml":    demoDeployment,
+		"overlay/kustomization.yaml": `resources:
+- ../base
+patchesStrategicMerge:
+- '{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "demo"}, "spec": {"replicas": 2}}'
+`,
+	})
+	overlay := filepath.Join(root, "overlay")
+	require.Equal(t, originWrapper, originModeFor(overlay).mode)
+	byName, origins := renderedKustomizeWorkloads(t, overlay)
+	assert.Equal(t, filepath.Join(root, "base", "deployment.yaml"), origins[byName["Deployment/demo"].GetID()])
+}
+
+func TestStrategicMergeEntry(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry string
+		want  types.Patch
+	}{
+		{"a file name", "replicas.yaml", types.Patch{Path: "replicas.yaml"}},
+		{"a file name with a colon", "replicas:v2.yaml", types.Patch{Path: "replicas:v2.yaml"}},
+		{"a patch on one line", `{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "demo"}}`,
+			types.Patch{Patch: `{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "demo"}}`}},
+		{"a patch on several lines", "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n",
+			types.Patch{Patch: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, strategicMergeEntry(tt.entry))
+		})
+	}
+}
