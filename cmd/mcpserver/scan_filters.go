@@ -11,6 +11,11 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 )
 
+const (
+	defaultFailedResourcesLimit = maxFailedResources
+	maxFailedResourcesLimit     = maxFailedResources
+)
+
 type scanFilterArgs struct {
 	includeKinds       string
 	excludeKinds       string
@@ -19,6 +24,7 @@ type scanFilterArgs struct {
 	minSeverity        string
 	maxSeverity        string
 	excludedNamespaces string
+	limit              int
 }
 
 func (f scanFilterArgs) keySuffix() string {
@@ -60,6 +66,7 @@ func (f scanFilterArgs) applyToRequest(req *scanRequest) {
 	req.minSeverity = f.minSeverity
 	req.maxSeverity = f.maxSeverity
 	req.excludedNamespaces = f.excludedNamespaces
+	req.limit = f.limit
 }
 
 func withOptionalExcludeControlsProperty(desc string) mcp.ToolOption {
@@ -99,6 +106,9 @@ func scanFilterOptions() []mcp.ToolOption {
 			mcp.Description("Comma-separated namespaces to exclude from the scan (optional, e.g. \"kube-system,kube-public\")"),
 		),
 		withOptionalExcludeControlsProperty("Control IDs to exclude from the scan: a comma-separated string (e.g. \"C-0012,C-0017\") or an array of strings (optional)"),
+		mcp.WithNumber("limit",
+			mcp.Description("Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100)"),
+		),
 	}
 }
 
@@ -117,6 +127,9 @@ func iacScanFilterOptions() []mcp.ToolOption {
 			mcp.Description("Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. \"Job,CronJob\")"),
 		),
 		withOptionalExcludeControlsProperty("Control IDs to exclude from the scan: a comma-separated string (e.g. \"C-0012,C-0017\") or an array of strings (optional)"),
+		mcp.WithNumber("limit",
+			mcp.Description("Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100)"),
+		),
 	}
 }
 
@@ -129,6 +142,9 @@ func workloadScanFilterOptions() []mcp.ToolOption {
 			mcp.Description("Maximum control severity to include in the scan results: Critical, High, Medium, Low (optional, case-insensitive)"),
 		),
 		withOptionalExcludeControlsProperty("Control IDs to exclude from the scan: a comma-separated string (e.g. \"C-0012,C-0017\") or an array of strings (optional)"),
+		mcp.WithNumber("limit",
+			mcp.Description("Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100)"),
+		),
 	}
 }
 
@@ -245,6 +261,19 @@ func parseScanFilterArgs(arguments map[string]any, activeNamespace string) (scan
 		}
 		filters.excludeControls = excludeControls
 	}
+
+	limit := defaultFailedResourcesLimit
+	if requestedLimit, set, argErr := mcpIntArg(arguments, "limit"); argErr != nil {
+		return filters, argErr
+	} else if set {
+		if requestedLimit < 1 || requestedLimit > maxFailedResourcesLimit {
+			return filters, mcpToolError(ErrCodeInvalidArgument,
+				fmt.Sprintf("limit must be between 1 and %d", maxFailedResourcesLimit),
+				map[string]any{"argument": "limit"})
+		}
+		limit = requestedLimit
+	}
+	filters.limit = limit
 
 	return filters, nil
 }

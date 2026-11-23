@@ -420,6 +420,16 @@ func TestBuildScanResponse_SeveritySortingTruncation(t *testing.T) {
 	for i := 50; i < 100; i++ {
 		assert.Contains(t, resp.FailedResources[i].(resourcesresults.Result).ResourceID, "a-low-")
 	}
+
+	// buildScanResponseWithLimit with custom limit
+	resp50 := buildScanResponseWithLimit(summary, results, nil, "test", false, 0, 2, 50)
+	assert.Equal(t, 120, resp50.TotalFailed)
+	assert.Equal(t, 50, resp50.ReturnedFailed)
+	assert.True(t, resp50.Truncated)
+	require.Len(t, resp50.FailedResources, 50)
+	for i := 0; i < 50; i++ {
+		assert.Equal(t, fmt.Sprintf("z-crit-%02d", i), resp50.FailedResources[i].(resourcesresults.Result).ResourceID)
+	}
 }
 
 func TestBuildScanInfo_Filters(t *testing.T) {
