@@ -2064,3 +2064,29 @@ func TestFrameworkContainsControl_NilSafety(t *testing.T) {
 	assert.False(t, frameworkContainsControl(nil, "fw", "C-0001"))
 	assert.False(t, frameworkContainsControl(&cautils.OPASessionObj{}, "fw", "C-0001"))
 }
+
+func TestJunit_NilReceiverSafety(t *testing.T) {
+	var jp *JunitPrinter
+
+	assert.NotPanics(t, func() {
+		err := jp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := jp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := jp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		jp.Score(100)
+		jp.PrintNextSteps()
+	})
+}
