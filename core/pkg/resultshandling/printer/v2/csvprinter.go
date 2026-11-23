@@ -74,6 +74,9 @@ func csvSafeRow(row []string) []string {
 }
 
 func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if cp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.CsvFormat, outputFile, csvOutputFile)
 	if explicitOutput {
 		var err error
@@ -85,6 +88,9 @@ func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) error {
 }
 
 func (cp *CsvPrinter) Score(score float32) {
+	if cp == nil {
+		return
+	}
 	if score > 100 {
 		score = 100
 	} else if score < 0 {
@@ -99,6 +105,9 @@ func (cp *CsvPrinter) Score(score float32) {
 // cluster-wide skipped or unevaluated controls. A missing session or posture
 // report returns an error instead of reading a nil report.
 func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) (err error) {
+	if cp == nil {
+		return fmt.Errorf("failed to write csv results: printer is nil")
+	}
 	if err := printer.PrepareOutput(cp.writer); err != nil {
 		return err
 	}
@@ -402,7 +411,7 @@ func (cp *CsvPrinter) PrintNextSteps() {
 
 // CloseWriter closes the CSV output writer, returning any error from flushing or closing.
 func (cp *CsvPrinter) CloseWriter() error {
-	if cp.writer != nil && cp.writer != os.Stdout {
+	if cp != nil && cp.writer != nil && cp.writer != os.Stdout {
 		return printer.CloseOutput(cp.writer)
 	}
 	return nil

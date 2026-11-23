@@ -1546,3 +1546,29 @@ func TestActionPrint_Csv_NilSummaryControlsDoesNotPanic(t *testing.T) {
 		assert.True(t, foundSkippedRow, "expected skipped control row with nil summary controls")
 	})
 }
+
+func TestCsvPrinter_NilReceiverSafety(t *testing.T) {
+	var cp *CsvPrinter
+
+	assert.NotPanics(t, func() {
+		err := cp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := cp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := cp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		cp.Score(100)
+		cp.PrintNextSteps()
+	})
+}
