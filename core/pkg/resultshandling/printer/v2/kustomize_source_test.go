@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // A Kustomize resource is attributed to the file Kustomize read it from, but it
@@ -775,4 +776,125 @@ spec:
 
 	assert.Contains(t, out, "spec.template.spec.containers[0].ports[0].protocol (current: TCP) (app)")
 	assert.NotContains(t, out, "(line ", "reordered unnamed port must not attribute the other port's line")
+}
+
+// The scan writes containers back into the object as []corev1.Container
+// (opaprocessor.removePodData). A container field that comes straight from the
+// base file must still resolve to its line, like the pod-level field next to it.
+func TestResourceTable_KustomizeTypedContainersResolveLine(t *testing.T) {
+	baseManifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  namespace: default
+spec:
+  template:
+    spec:
+      hostNetwork: true
+      containers:
+      - name: app
+        image: nginx:1
+        securityContext:
+          privileged: true
+`
+	privileged := true
+	renderedObj := map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "demo",
+			"namespace": "default",
+		},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"hostNetwork": true,
+					"containers": []corev1.Container{{
+						Name:            "app",
+						Image:           "nginx:1",
+						SecurityContext: &corev1.SecurityContext{Privileged: &privileged},
+					}},
+				},
+			},
+		},
+	}
+
+	paths := []armotypes.PosturePaths{
+		{DeletePath: "spec.template.spec.hostNetwork"},
+		{FixPath: armotypes.FixPath{
+			Path:  "spec.template.spec.containers[0].securityContext.privileged",
+			Value: "false",
+		}},
+		{FixPath: armotypes.FixPath{
+			Path:  "spec.template.spec.containers[0].securityContext.runAsNonRoot",
+			Value: "true",
+		}},
+		{FixPath: armotypes.FixPath{
+			Path:  "spec.template.spec.containers[0].resources.limits.cpu",
+			Value: "YOUR_VALUE",
+		}},
+	}
+
+	session := kustomizeTestSession(t, baseManifest, renderedObj, paths)
+	out := renderResourceTable(t, session, true)
+
+	assert.Contains(t, out, "spec.template.spec.hostNetwork (current: true) (line 9)")
+	assert.Contains(t, out, "spec.template.spec.containers[0].securityContext.privileged=false (app) (line 14)")
+	assert.Contains(t, out, "spec.template.spec.containers[0].securityContext.runAsNonRoot=true (app) (line 14)")
+	// The typed container encodes resources as {} although the base has none.
+	assert.Contains(t, out, "spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE (app) (line 11)")
+}
+
+// An overlay that removes a container's resources still leaves resources: {} in
+// the typed container, so the base's resources block must not stand in as the
+// nearest ancestor: its first line is gone from the rendered object.
+func TestResourceTable_KustomizeTypedContainerRemovedResourcesOmitsLine(t *testing.T) {
+	baseManifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  namespace: default
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: nginx:1
+        resources:
+          limits:
+            memory: 128Mi
+`
+	renderedObj := map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "demo",
+			"namespace": "default",
+		},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []corev1.Container{{Name: "app", Image: "nginx:1"}},
+				},
+			},
+		},
+	}
+
+	paths := []armotypes.PosturePaths{
+		{FixPath: armotypes.FixPath{
+			Path:  "spec.template.spec.containers[0].resources.requests.cpu",
+			Value: "YOUR_VALUE",
+		}},
+		{FixPath: armotypes.FixPath{
+			Path:  "spec.template.spec.containers[0].resources.limits.cpu",
+			Value: "YOUR_VALUE",
+		}},
+	}
+
+	session := kustomizeTestSession(t, baseManifest, renderedObj, paths)
+	out := renderResourceTable(t, session, true)
+
+	assert.Contains(t, out, "spec.template.spec.containers[0].resources.requests.cpu=YOUR_VALUE (app)")
+	assert.Contains(t, out, "spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE (app)")
+	assert.NotContains(t, out, "(line ", "the overlay removed the resources block")
 }
