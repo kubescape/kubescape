@@ -453,6 +453,7 @@ func TestTraceKustomizePatch_RenderedOverlay(t *testing.T) {
 		{"selector matches only after transform", "commonLabels: {stage: new}\npatches:\n- path: modern.yaml\n  target: {kind: Deployment, labelSelector: stage=new}\n", replace, "", 1},
 		{"replica transformer overrides patch", affixes + modern + "replicas: [{name: demo, count: 5}]\n", replace, "", 5},
 		{"replica transformer matches rendered name", affixes + modern + "replicas: [{name: prod-demo-west, count: 5}]\n", replace, "", 5},
+		{"replica transformer matches name before an earlier rename", "patches:\n- path: modern.yaml\n  target: {kind: Deployment, name: demo}\n- path: legacy.yaml\n  target: {kind: Deployment, name: renamed}\nreplicas: [{name: demo, count: 5}]\n", "- {op: replace, path: /metadata/name, value: renamed}\n", "", 5},
 		{"legacy selector matches only build metadata label", "buildMetadata: [managedByLabel]\npatchesJson6902:\n- path: legacy.yaml\n  target: {kind: Deployment, name: demo, labelSelector: app.kubernetes.io/managed-by}\n", replace, "", 1},
 		{"legacy selector unaffected by build metadata", "buildMetadata: [managedByLabel]\npatchesJson6902:\n- path: legacy.yaml\n  target: {kind: Deployment, name: demo, labelSelector: stage=old}\n", replace, "legacy.yaml", 3},
 		{"modern selector unaffected by build metadata", "buildMetadata: [managedByLabel]\n" + selected, replace, "modern.yaml", 2},
@@ -494,6 +495,7 @@ func TestTraceKustomizePatch_RenderedNestedBase(t *testing.T) {
 		{"recorded origin reveals a later merge patch", "namePrefix: base-\n", "namePrefix: prod-\npatchesStrategicMerge: [early-smp.yaml, late-smp.yaml]\n", "late-smp.yaml", 3, "base/deployment.yaml", "resources"},
 		{"recorded origin rules out an unrelated name", "namePrefix: base-\n", "namePrefix: prod-\n" + early + "- path: late.yaml\n  target: {kind: Deployment, name: other}\n", "early.yaml", 2, "base/deployment.yaml", "resources"},
 		{"recorded origin namespace", "namespace: moved\n", "patches:\n- path: late.yaml\n  target: {kind: Deployment, name: demo, namespace: start}\n", "late.yaml", 3, "base/deployment.yaml", "resources"},
+		{"recorded origin namespace pattern", "namespace: moved\n", early + "- path: late.yaml\n  target: {kind: Deployment, name: demo, namespace: sta.*}\n", "late.yaml", 3, "base/deployment.yaml", "resources"},
 		{"later writer for another kind", "namePrefix: base-\n", "namePrefix: prod-\n" + early + "- path: late.yaml\n  target: {kind: StatefulSet, name: demo}\n", "early.yaml", 2, "", "resources"},
 		{"single writer through a base prefix", "namePrefix: base-\n", "namePrefix: prod-\n" + early, "early.yaml", 2, "", "resources"},
 		{"single writer through a plain base", "", "patches:\n- path: early.yaml\n  target: {kind: Deployment, name: demo}\n", "early.yaml", 2, "", "resources"},
@@ -532,6 +534,55 @@ func TestTraceKustomizePatch_RenderedNestedBase(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		})
 	}
+}
+
+// renderKustomization writes files under a temporary root, builds dir with
+// Kustomize and returns the root and the rendered resource in namespace.
+func renderKustomization(t *testing.T, files map[string]string, dir, namespace string) (string, map[string]any) {
+	t.Helper()
+	root := t.TempDir()
+	for file, contents := range files {
+		require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(root, file)), 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(root, file), []byte(contents), 0o600))
+	}
+	result, err := krusty.MakeKustomizer(krusty.MakeDefaultOptions()).Run(filesys.MakeFsOnDisk(), filepath.Join(root, dir))
+	require.NoError(t, err)
+	for _, res := range result.Resources() {
+		if res.GetNamespace() == namespace {
+			obj, err := res.Map()
+			require.NoError(t, err)
+			return root, obj
+		}
+	}
+	require.FailNow(t, "no rendered resource in namespace "+namespace)
+	return "", nil
+}
+
+func TestTraceKustomizePatch_ReplicaEntryForAnotherResource(t *testing.T) {
+	root, obj := renderKustomization(t, map[string]string{
+		"kustomization.yaml": "resources: [demo.yaml, worker.yaml]\npatches:\n- path: patch.yaml\n  target: {kind: Deployment, name: demo}\nreplicas: [{name: worker, count: 2}]\n",
+		"demo.yaml":          "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: demo, namespace: a}\nspec: {replicas: 1}\n",
+		"worker.yaml":        "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: worker, namespace: b}\nspec: {replicas: 1}\n",
+		"patch.yaml":         "- {op: replace, path: /spec/replicas, value: 2}\n",
+	}, ".", "a")
+	require.EqualValues(t, 2, obj["spec"].(map[string]any)["replicas"])
+	src := reporthandling.Source{Path: root, RelativePath: "demo.yaml", FileType: reporthandling.SourceTypeKustomizeDirectory, KustomizeDirectoryName: root}
+	require.Equal(t, "patch.yaml", TraceKustomizePatch(localworkload.NewLocalWorkload(obj), []string{"spec.replicas"}, src))
+}
+
+func TestTraceKustomizePatch_AmbiguousOriginDocument(t *testing.T) {
+	// Both documents share a name, so the origin file cannot tell which one
+	// became the traced resource, nor which namespace it started in.
+	root, obj := renderKustomization(t, map[string]string{
+		"base/kustomization.yaml":    "resources: [deployments.yaml]\n",
+		"base/deployments.yaml":      "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: demo, namespace: a}\nspec: {replicas: 1}\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata: {name: demo, namespace: b}\nspec: {replicas: 1}\n",
+		"overlay/kustomization.yaml": "resources: [../base]\npatches:\n- path: early.yaml\n  target: {kind: Deployment, name: demo, namespace: b}\n- path: late.yaml\n  target: {kind: Deployment, name: demo, namespace: a}\n",
+		"overlay/early.yaml":         "- {op: replace, path: /spec/replicas, value: 2}\n",
+		"overlay/late.yaml":          "- {op: replace, path: /spec/replicas, value: 3}\n",
+	}, "overlay", "b")
+	require.EqualValues(t, 2, obj["spec"].(map[string]any)["replicas"])
+	src := reporthandling.Source{Path: root, RelativePath: "base/deployments.yaml", FileType: reporthandling.SourceTypeKustomizeDirectory, KustomizeDirectoryName: filepath.Join(root, "overlay")}
+	require.Empty(t, TraceKustomizePatch(localworkload.NewLocalWorkload(obj), []string{"spec.replicas"}, src))
 }
 
 func TestTraceKustomizePatch_InvalidDocument(t *testing.T) {
