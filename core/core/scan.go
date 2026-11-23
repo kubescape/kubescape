@@ -1433,10 +1433,10 @@ func registryCredentialsFromScanInfo(scanInfo *cautils.ScanInfo) imagescan.Regis
 		return imagescan.RegistryCredentials{}
 	}
 	return imagescan.RegistryCredentials{
-		Authority: strings.TrimSpace(scanInfo.RegistryAuthority),
-		Username:  strings.TrimSpace(scanInfo.RegistryUsername),
-		Password:  strings.TrimSpace(scanInfo.RegistryPassword),
-		Token:     strings.TrimSpace(scanInfo.RegistryToken),
+		Authority: scanInfo.RegistryAuthority,
+		Username:  scanInfo.RegistryUsername,
+		Password:  scanInfo.RegistryPassword,
+		Token:     scanInfo.RegistryToken,
 	}
 }
 
