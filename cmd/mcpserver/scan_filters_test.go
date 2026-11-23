@@ -346,4 +346,30 @@ func TestCallTool_ScanFilters_ForwardedAndValidated(t *testing.T) {
 		assert.Contains(t, errPayload, string(ErrCodeInvalidArgument))
 		assert.Contains(t, errPayload, "exclude_namespaces is not supported for local IaC scans")
 	})
+
+	t.Run("valid limit argument", func(t *testing.T) {
+		res, err := ksServer.CallTool(context.Background(), "run_framework_security_scan", map[string]any{
+			"framework_name": "nsa",
+			"limit":          50,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		assert.False(t, res.IsError)
+		assert.Equal(t, 50, capturedFilters.limit)
+		assert.NotContains(t, capturedFilters.keySuffix(), "limit")
+	})
+
+	t.Run("invalid limit argument", func(t *testing.T) {
+		for _, invalidLimit := range []any{0, 101, -5, "10", 3.14} {
+			res, err := ksServer.CallTool(context.Background(), "run_framework_security_scan", map[string]any{
+				"framework_name": "nsa",
+				"limit":          invalidLimit,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, res)
+			assert.True(t, res.IsError, "expected error for limit=%v", invalidLimit)
+			errPayload := toolResultText(t, res)
+			assert.Contains(t, errPayload, string(ErrCodeInvalidArgument))
+		}
+	})
 }

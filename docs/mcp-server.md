@@ -539,6 +539,7 @@ Scan local Infrastructure-as-Code (Helm charts, Kustomize directories, YAML mani
 | `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"Deployment,DaemonSet"`) |
 | `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. `"Job,CronJob"`) |
 | `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
+| `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
 
 #### `scan_local_iac_controls`
 
@@ -555,16 +556,17 @@ Scan local Infrastructure-as-Code files against specific control IDs rather than
 | `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"Deployment,DaemonSet"`) |
 | `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. `"Job,CronJob"`) |
 | `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
+| `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
 
 ### Live Scanning Tools
 
 The live scanning tools run on-demand scans against the cluster or local files.
-All live scan tools support optional filtering parameters (`min_severity`, `max_severity`, `include_kinds`, `exclude_kinds`, `label_selector`, `exclude_namespaces`, `exclude_controls`). Omitting `exclude_controls` or passing `null` leaves all controls eligible for the scan.
-Returned `failed_resources` are prioritized by severity rank descending (`Critical` > `High` > `Medium` > `Low`, with alphabetical resource ID as tie-breaker) before being capped at 100 entries.
+Live scan tools (`run_framework_security_scan`, `scan_controls`, `run_rbac_security_scan`, `run_network_security_scan`) support optional filtering parameters (`min_severity`, `max_severity`, `include_kinds`, `exclude_kinds`, `label_selector`, `exclude_namespaces`, `exclude_controls`) and an optional initial page size (`limit`). `scan_workload` supports severity filters (`min_severity`, `max_severity`), `exclude_controls`, and `limit` (resource kind, label selector, and namespace exclusion filters are not applicable to single-workload scans). Omitting `exclude_controls` or passing `null` leaves all controls eligible for the scan.
+Returned `failed_resources` are prioritized by severity rank descending (`Critical` > `High` > `Medium` > `Low`, with alphabetical resource ID as tie-breaker) before truncation. When more results remain, `truncated` is `true`, and `scan_id` and `next_offset` are returned. Subsequent pages should be fetched using `get_scan_results` with `scan_id` and `offset` set to `next_offset`.
 
 #### `run_framework_security_scan`
 
-Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the failed resources along with the compliance score. Check the `degraded` flag in the response to ensure the scan fully completed (e.g. no control timeouts). Note that `compliance_score` is optional and may be omitted if the scan produces no framework summary. The `failed_resources` array is sorted by severity and truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
+Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the failed resources along with the compliance score. Check the `degraded` flag in the response to ensure the scan fully completed (e.g. no control timeouts). Note that `compliance_score` is optional and may be omitted if the scan produces no framework summary. The `failed_resources` array is sorted by severity and capped at `limit` (default 100 entries); check `truncated`, `total_failed`, `returned_failed`, and `next_offset` to understand if the list is partial and use `get_scan_results` to fetch subsequent pages.
 
 **Parameters:**
 
@@ -579,6 +581,7 @@ Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the 
 | `label_selector` | string | No | Kubernetes label selector to filter collected resources (optional, e.g. `"app=web,env!=dev"`) |
 | `exclude_namespaces` | string | No | Comma-separated namespaces to exclude from scan (optional; mutually exclusive with `namespace`) |
 | `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
+| `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
 
 **Example Response:**
 ```json
@@ -612,10 +615,11 @@ Run an on-demand, live security scan restricted to a given set of controls by co
 | `label_selector` | string | No | Kubernetes label selector to filter collected resources (optional, e.g. `"app=web,env!=dev"`) |
 | `exclude_namespaces` | string | No | Comma-separated namespaces to exclude from scan (optional; mutually exclusive with `namespace`) |
 | `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
+| `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
 
 #### `run_rbac_security_scan`
 
-Run an on-demand, live RBAC security scan (evaluating RBAC-related controls) and return the failed resources. The `failed_resources` array is sorted by severity and truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
+Run an on-demand, live RBAC security scan (evaluating RBAC-related controls) and return the failed resources. The `failed_resources` array is sorted by severity and capped at `limit` (default 100 entries); check `truncated`, `total_failed`, `returned_failed`, and `next_offset` to understand if the list is partial and use `get_scan_results` to paginate.
 
 **Parameters:**
 
@@ -629,6 +633,7 @@ Run an on-demand, live RBAC security scan (evaluating RBAC-related controls) and
 | `label_selector` | string | No | Kubernetes label selector to filter collected resources (optional) |
 | `exclude_namespaces` | string | No | Comma-separated namespaces to exclude from scan (optional; mutually exclusive with `namespace`) |
 | `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
+| `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
 
 **Example Response:**
 ```json
@@ -645,7 +650,7 @@ Run an on-demand, live RBAC security scan (evaluating RBAC-related controls) and
 
 #### `run_network_security_scan`
 
-Run an on-demand, live Network security scan (evaluating network-related controls) and return the failed resources. The `failed_resources` array is sorted by severity and truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
+Run an on-demand, live Network security scan (evaluating network-related controls) and return the failed resources. The `failed_resources` array is sorted by severity and capped at `limit` (default 100 entries); check `truncated`, `total_failed`, `returned_failed`, and `next_offset` to understand if the list is partial and use `get_scan_results` to paginate.
 
 **Parameters:**
 
@@ -659,6 +664,7 @@ Run an on-demand, live Network security scan (evaluating network-related control
 | `label_selector` | string | No | Kubernetes label selector to filter collected resources (optional) |
 | `exclude_namespaces` | string | No | Comma-separated namespaces to exclude from scan (optional; mutually exclusive with `namespace`) |
 | `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
+| `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
 
 **Example Response:**
 ```json
@@ -695,6 +701,7 @@ A workload that is owned by another resource — a Pod belonging to a ReplicaSet
 | `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
 | `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
 | `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
+| `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
 
 **Example Response:**
 ```json

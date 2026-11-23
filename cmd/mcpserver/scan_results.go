@@ -55,18 +55,22 @@ func scanResultOwner(ctx context.Context) string {
 
 // firstPage takes ownership of doc's immutable decoded JSON. Callers must not
 // mutate it afterwards. Failure to retain results must not discard a good scan.
-func (s *scanResultStore) firstPage(owner string, doc scanResultDocument, size int, now time.Time) ([]byte, error) {
-	if len(doc.Resources) <= maxFailedResources {
+func (s *scanResultStore) firstPage(owner string, doc scanResultDocument, size int, now time.Time, limitOpt ...int) ([]byte, error) {
+	limit := maxFailedResources
+	if len(limitOpt) > 0 && limitOpt[0] > 0 {
+		limit = limitOpt[0]
+	}
+	if len(doc.Resources) <= limit {
 		return json.Marshal(doc)
 	}
 	if owner == "" || size > scanResultsMaxBytes {
 		doc.PaginationWarning = "Full results could not be retained (missing session or retention limit exceeded); narrow the scan scope."
-		return marshalScanPage(doc, 0, maxFailedResources)
+		return marshalScanPage(doc, 0, limit)
 	}
 	var token [32]byte
 	if _, err := rand.Read(token[:]); err != nil {
 		doc.PaginationWarning = "Full results could not be retained; narrow the scan scope or retry."
-		return marshalScanPage(doc, 0, maxFailedResources)
+		return marshalScanPage(doc, 0, limit)
 	}
 	id := hex.EncodeToString(token[:])
 	expires := now.Add(scanResultsTTL)
@@ -90,7 +94,7 @@ func (s *scanResultStore) firstPage(owner string, doc scanResultDocument, size i
 	}
 	s.entries[id] = scanResultSnapshot{owner: owner, expires: expires, document: doc, size: size}
 	s.bytes += size
-	return marshalScanPage(doc, 0, maxFailedResources)
+	return marshalScanPage(doc, 0, limit)
 }
 
 func (s *scanResultStore) page(owner, id string, offset, limit int, now time.Time) ([]byte, error) {
@@ -109,6 +113,9 @@ func (s *scanResultStore) page(owner, id string, offset, limit int, now time.Tim
 
 func marshalScanPage(doc scanResultDocument, offset, limit int) ([]byte, error) {
 	total := len(doc.Resources)
+	if offset > total {
+		offset = total
+	}
 	count := min(limit, total-offset)
 	end := offset + count
 	doc.Resources = doc.Resources[offset:end]
@@ -137,7 +144,7 @@ func (s *scanResultStore) removeLocked(id string) {
 
 // doResultScan retains ownership only after shared execution has returned to
 // each caller. A shared scan must never inherit its first caller's session.
-func (ksServer *KubescapeMcpserver) doResultScan(ctx context.Context, key string, run func(context.Context) (interface{}, error)) (interface{}, error) {
+func (ksServer *KubescapeMcpserver) doResultScan(ctx context.Context, key string, run func(context.Context) (interface{}, error), limitOpt ...int) (interface{}, error) {
 	v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
 		return run(context.WithValue(scanCtx, fullScanResultsKey{}, true))
 	})
@@ -158,7 +165,7 @@ func (ksServer *KubescapeMcpserver) doResultScan(ctx context.Context, key string
 	if doc.TotalFailed != len(doc.Resources) {
 		return nil, errors.New("scan returned incomplete results before pagination")
 	}
-	return ksServer.scanResults.firstPage(scanResultOwner(ctx), doc, len(data), time.Now())
+	return ksServer.scanResults.firstPage(scanResultOwner(ctx), doc, len(data), time.Now(), limitOpt...)
 }
 
 func createScanResultsTool(ksServer *KubescapeMcpserver) {

@@ -90,6 +90,7 @@ type scanRequest struct {
 	minSeverity        string
 	maxSeverity        string
 	excludedNamespaces string
+	limit              int
 }
 
 func runControlScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string, controlIDs []string, label string, filters ...scanFilterArgs) ([]byte, error) {
@@ -232,6 +233,8 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, req scanRequest)
 	limit := maxFailedResources
 	if full, _ := ctx.Value(fullScanResultsKey{}).(bool); full {
 		limit = len(scanData.ResourcesResult)
+	} else if req.limit > 0 {
+		limit = req.limit
 	}
 	response := buildScanResponseWithLimit(summary, scanData.ResourcesResult, complianceScore, frameworkName, degraded, notEvaluated, totalControls, limit)
 	if req.namespaceDefaulted && req.scanObject != nil {
@@ -351,7 +354,7 @@ func buildScanResponseWithLimit(summary *reportsummary.SummaryDetails, results m
 
 	totalFailed := len(failed)
 	returnedCount := totalFailed
-	if returnedCount > limit {
+	if limit < returnedCount {
 		returnedCount = limit
 	}
 

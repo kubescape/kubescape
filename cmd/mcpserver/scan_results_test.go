@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -157,4 +158,79 @@ func TestScanResultToolValidation(t *testing.T) {
 	result, err := ks.CallTool(context.Background(), "get_scan_results", map[string]any{"scan_id": "unknown"})
 	require.NoError(t, err)
 	require.Contains(t, toolResultText(t, result), "SCAN_RESULTS_UNAVAILABLE")
+}
+
+func TestDoResultScan_WithPagination(t *testing.T) {
+	ks := &KubescapeMcpserver{}
+	_, data := resultTestDocument(t) // 120 resources
+
+	// Test 1: doResultScan with custom first-page limit=50
+	ctx := resultTestContext("client-pagination")
+	v, err := ks.doResultScan(ctx, "scan-paginated", func(scanCtx context.Context) (interface{}, error) {
+		require.Equal(t, true, scanCtx.Value(fullScanResultsKey{}))
+		return data, nil
+	}, 50)
+	require.NoError(t, err)
+
+	page := decodeResultPage(t, v.([]byte))
+	require.Len(t, page.Resources, 50)
+	require.Equal(t, 50, page.ReturnedFailed)
+	require.Equal(t, 120, page.TotalFailed)
+	require.True(t, page.Truncated)
+	require.NotNil(t, page.NextOffset)
+	require.Equal(t, 50, *page.NextOffset)
+	require.NotEmpty(t, page.ScanID)
+	for i := 0; i < 50; i++ {
+		assert.Contains(t, string(page.Resources[i]), fmt.Sprintf("resource-%03d", i))
+	}
+
+	// Fetch subsequent page via get_scan_results
+	vPage2, err := ks.getScanResults(ctx, map[string]any{
+		"scan_id": page.ScanID,
+		"offset":  *page.NextOffset,
+		"limit":   50,
+	})
+	require.NoError(t, err)
+	require.False(t, vPage2.IsError)
+	page2 := decodeResultPage(t, []byte(toolResultText(t, vPage2)))
+	require.Len(t, page2.Resources, 50)
+	require.Equal(t, 50, page2.ReturnedFailed)
+	require.Equal(t, 120, page2.TotalFailed)
+	require.True(t, page2.Truncated)
+	require.NotNil(t, page2.NextOffset)
+	require.Equal(t, 100, *page2.NextOffset)
+	for i := 0; i < 50; i++ {
+		assert.Contains(t, string(page2.Resources[i]), fmt.Sprintf("resource-%03d", 50+i))
+	}
+
+	// Final page
+	vPage3, err := ks.getScanResults(ctx, map[string]any{
+		"scan_id": page.ScanID,
+		"offset":  *page2.NextOffset,
+		"limit":   50,
+	})
+	require.NoError(t, err)
+	require.False(t, vPage3.IsError)
+	page3 := decodeResultPage(t, []byte(toolResultText(t, vPage3)))
+	require.Len(t, page3.Resources, 20)
+	require.Equal(t, 20, page3.ReturnedFailed)
+	require.Nil(t, page3.NextOffset)
+	for i := 0; i < 20; i++ {
+		assert.Contains(t, string(page3.Resources[i]), fmt.Sprintf("resource-%03d", 100+i))
+	}
+
+	// Test 2: doResultScan with default limit (100)
+	vDefault, err := ks.doResultScan(ctx, "scan-default", func(scanCtx context.Context) (interface{}, error) {
+		require.Equal(t, true, scanCtx.Value(fullScanResultsKey{}))
+		return data, nil
+	})
+	require.NoError(t, err)
+
+	pageDefault := decodeResultPage(t, vDefault.([]byte))
+	require.Len(t, pageDefault.Resources, 100)
+	require.Equal(t, 100, pageDefault.ReturnedFailed)
+	require.Equal(t, 120, pageDefault.TotalFailed)
+	require.True(t, pageDefault.Truncated)
+	require.NotNil(t, pageDefault.NextOffset)
+	require.Equal(t, 100, *pageDefault.NextOffset)
 }

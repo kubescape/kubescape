@@ -139,11 +139,17 @@ func mcpIntArg(arguments map[string]any, name string) (int, bool, *mcp.CallToolR
 	if !ok || raw == nil {
 		return 0, false, nil
 	}
-	f, ok := raw.(float64)
-	if !ok || f != float64(int(f)) {
+	switch v := raw.(type) {
+	case float64:
+		if v != float64(int(v)) {
+			return 0, false, mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("%s argument must be an integer", name), map[string]any{"argument": name})
+		}
+		return int(v), true, nil
+	case int:
+		return v, true, nil
+	default:
 		return 0, false, mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("%s argument must be an integer", name), map[string]any{"argument": name})
 	}
-	return int(f), true, nil
 }
 
 // jsonMarshal is a package-level var so tests can inject marshal failures.
@@ -733,7 +739,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		key := fmt.Sprintf("rbac_scan:%s%s", namespace, filters.keySuffix())
 		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
 			return rbacScanFn(ksServer, scanCtx, namespace, filters)
-		})
+		}, filters.limit)
 		if err != nil {
 			code := classifyScanError(err)
 			msg := classifyScanErrorMessage(code, "RBAC", err)
@@ -758,7 +764,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		key := fmt.Sprintf("scan_local_iac:%s:%s%s", url.QueryEscape(path), url.QueryEscape(framework), filters.keySuffix())
 		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
 			return ksServer.runIaCScan(scanCtx, path, framework, filters)
-		})
+		}, filters.limit)
 		if err != nil {
 			code := classifyScanError(err)
 			msg := classifyScanErrorMessage(code, "IaC", err)
@@ -783,7 +789,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		key := fmt.Sprintf("scan_local_iac_controls:%s:%s%s", url.QueryEscape(path), url.QueryEscape(strings.Join(controlIDs, ",")), filters.keySuffix())
 		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
 			return ksServer.runIaCScanControls(scanCtx, path, controlIDs, filters)
-		})
+		}, filters.limit)
 		if err != nil {
 			code := classifyScanError(err)
 			msg := classifyScanErrorMessage(code, "IaC control", err)
@@ -835,7 +841,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		key := fmt.Sprintf("network_scan:%s%s", namespace, filters.keySuffix())
 		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
 			return networkScanFn(ksServer, scanCtx, namespace, filters)
-		})
+		}, filters.limit)
 		if err != nil {
 			code := classifyScanError(err)
 			msg := classifyScanErrorMessage(code, "Network", err)
@@ -998,7 +1004,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		key := fmt.Sprintf("framework_scan:%s:%s%s", namespace, url.QueryEscape(frameworkNameStr), filters.keySuffix())
 		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
 			return frameworkScanFn(ksServer, scanCtx, namespace, frameworkNameStr, filters)
-		})
+		}, filters.limit)
 		if err != nil {
 			code := classifyScanError(err)
 			msg := classifyScanErrorMessage(code, "framework", err)
@@ -1026,7 +1032,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		key := fmt.Sprintf("control_scan:%s:%s%s", namespace, url.QueryEscape(strings.Join(controlIDs, ",")), filters.keySuffix())
 		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
 			return ksServer.ScanControls(scanCtx, namespace, controlIDs, filters)
-		})
+		}, filters.limit)
 		if err != nil {
 			code := classifyScanError(err)
 			msg := classifyScanErrorMessage(code, "control", err)
@@ -1078,7 +1084,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			filters.keySuffix())
 		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
 			return workloadScanFn(ksServer, scanCtx, workload, namespace, path, framework, filters)
-		})
+		}, filters.limit)
 		if err != nil {
 			code := classifyScanError(err)
 			msg := classifyScanErrorMessage(code, "workload", err)
