@@ -506,7 +506,10 @@ patches:
 	wrapped, err := ReadFile(rendered, YAML_FILE_FORMAT)
 	require.NoError(t, err)
 	require.Len(t, wrapped, 1)
-	require.Equal(t, decoyFile, takeKustomizeOrigin(wrapped[0].GetObject(), base, true, root))
+	// The wrapper's base is resolved and root may not be (on macOS, /private/var
+	// and /var), so the forged path is checked by the file it names.
+	forged := takeKustomizeOrigin(wrapped[0].GetObject(), base, true, root)
+	require.True(t, isSameFile(decoyFile, forged), "the forged annotation names %q", forged)
 
 	byName, origins := renderedKustomizeWorkloads(t, root)
 	require.Contains(t, byName, "Deployment/demo")
