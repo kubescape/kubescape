@@ -3,6 +3,7 @@ package cautils
 import (
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -161,7 +162,7 @@ func evaluateCoalesce(args []cty.Value) (cty.Value, error) {
 		if targetType == cty.NilType {
 			return cty.NilVal, fmt.Errorf("all arguments must have the same type")
 		}
-		if targetType != selectedVal.Type() {
+		if !targetType.Equals(selectedVal.Type()) {
 			if terraformValueSize(selectedVal, maxTerraformFunctionSize) > maxTerraformFunctionSize {
 				return cty.NilVal, fmt.Errorf("coalesce: argument exceeds the size limit of %d bytes", maxTerraformFunctionSize)
 			}
@@ -438,7 +439,7 @@ func applyTerraformVarFiles(parser *hclparse.Parser, dir, workspaceDir string, d
 	return errs
 }
 
-func resolveLocals(files []*hcl.File, vars map[string]cty.Value) map[string]cty.Value {
+func resolveLocals(files []*hcl.File, vars map[string]cty.Value) (map[string]cty.Value, map[string]hcl.Expression) {
 	pending := map[string]hcl.Expression{}
 	schema := &hcl.BodySchema{Blocks: []hcl.BlockHeaderSchema{{Type: "locals"}}}
 	for _, file := range files {
@@ -451,6 +452,7 @@ func resolveLocals(files []*hcl.File, vars map[string]cty.Value) map[string]cty.
 		}
 	}
 
+	localExpressions := maps.Clone(pending)
 	resolved := map[string]cty.Value{}
 	budget := maxTerraformLocalsTotalSize
 	for len(pending) > 0 {
@@ -470,7 +472,7 @@ func resolveLocals(files []*hcl.File, vars map[string]cty.Value) map[string]cty.
 			if budget <= 0 {
 				logger.L().Warning("Skipping remaining Terraform locals: total size limit reached",
 					helpers.Int("skipped", len(pending)))
-				return resolved
+				return resolved, localExpressions
 			}
 			expr := pending[name]
 			val, diags := expr.Value(evalCtx)
@@ -491,7 +493,7 @@ func resolveLocals(files []*hcl.File, vars map[string]cty.Value) map[string]cty.
 			resolved[name] = val
 		}
 	}
-	return resolved
+	return resolved, localExpressions
 }
 
 func referencesPendingLocal(expr hcl.Expression, pending map[string]hcl.Expression) bool {

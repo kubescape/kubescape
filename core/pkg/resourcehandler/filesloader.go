@@ -596,7 +596,8 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 	if err != nil && !errors.Is(err, cautils.ErrNoManifestFiles) {
 		return "", nil, nil, allSkips, err
 	}
-	terraformSourceToWorkloads, err := cautils.LoadResourcesFromTerraformFiltered(ctx, path, pathFilter, workspaceDir)
+	terraformSourceToWorkloads, terraformSkips, err := cautils.LoadResourcesFromTerraformFilteredWithSkips(ctx, path, pathFilter, workspaceDir)
+	allSkips = append(allSkips, terraformSkips...)
 	if err != nil {
 		return "", nil, nil, allSkips, err
 	}
