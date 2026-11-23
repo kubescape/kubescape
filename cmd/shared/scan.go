@@ -231,6 +231,9 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := ValidateKindFilters(scanInfo); err != nil {
 		return err
 	}
+	if err := ValidateNamespaceFilters(scanInfo); err != nil {
+		return err
+	}
 	if err := ValidateExcludePaths(scanInfo); err != nil {
 		return err
 	}
@@ -386,4 +389,25 @@ func validateKindList(flag, value string) error {
 		}
 	}
 	return fmt.Errorf("%s value %q contains no valid kind names", flag, value)
+}
+
+// ValidateNamespaceFilters returns an error when --include-namespaces or --exclude-namespaces
+// contain only whitespace or separator tokens, which would silently result in invalid or empty filtering.
+func ValidateNamespaceFilters(scanInfo *cautils.ScanInfo) error {
+	if err := validateNamespaceList("--include-namespaces", scanInfo.IncludeNamespaces); err != nil {
+		return err
+	}
+	return validateNamespaceList("--exclude-namespaces", scanInfo.ExcludedNamespaces)
+}
+
+func validateNamespaceList(flag, value string) error {
+	if value == "" {
+		return nil
+	}
+	for _, ns := range strings.Split(value, ",") {
+		if strings.TrimSpace(ns) != "" {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s value %q contains no valid namespace names", flag, value)
 }

@@ -618,6 +618,80 @@ func TestValidateKindFilters(t *testing.T) {
 	}
 }
 
+func TestValidateNamespaceFilters(t *testing.T) {
+	tests := []struct {
+		name              string
+		includeNamespaces string
+		excludeNamespaces string
+		expectedErr       string
+	}{
+		{
+			name:              "both empty is valid",
+			includeNamespaces: "",
+			excludeNamespaces: "",
+			expectedErr:       "",
+		},
+		{
+			name:              "valid include-namespaces",
+			includeNamespaces: "default,kube-system",
+			excludeNamespaces: "",
+			expectedErr:       "",
+		},
+		{
+			name:              "valid exclude-namespaces",
+			includeNamespaces: "",
+			excludeNamespaces: "kube-system,kube-public",
+			expectedErr:       "",
+		},
+		{
+			name:              "include-namespaces whitespace-only tokens are rejected",
+			includeNamespaces: " , , ",
+			excludeNamespaces: "",
+			expectedErr:       "contains no valid namespace names",
+		},
+		{
+			name:              "exclude-namespaces whitespace-only tokens are rejected",
+			includeNamespaces: "",
+			excludeNamespaces: "  ,  ",
+			expectedErr:       "contains no valid namespace names",
+		},
+		{
+			name:              "single valid namespace passes",
+			includeNamespaces: "prod",
+			excludeNamespaces: "",
+			expectedErr:       "",
+		},
+		{
+			name:              "padded valid namespace passes",
+			includeNamespaces: "  prod  ",
+			excludeNamespaces: "",
+			expectedErr:       "",
+		},
+		{
+			name:              "wildcard namespace passes",
+			includeNamespaces: "*",
+			excludeNamespaces: "",
+			expectedErr:       "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				IncludeNamespaces:  tt.includeNamespaces,
+				ExcludedNamespaces: tt.excludeNamespaces,
+			}
+			err := ValidateNamespaceFilters(scanInfo)
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
 func TestValidateExcludePaths(t *testing.T) {
 	tests := []struct {
 		name         string
