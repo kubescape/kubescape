@@ -2,12 +2,13 @@
 // each other in this repo: image vulnerability data (a workload's known
 // CVEs, sourced from an already-running in-cluster scanner via
 // VulnerabilityManifest objects) and how reachable that workload actually
-// is, per two already-existing exposure models: NetworkPolicy ingress
-// exposure (core/pkg/networkpolicy) and Service/Ingress/Gateway API external
+// is, per two already-existing exposure models: NetworkPolicy ingress and
+// egress exposure (core/pkg/networkpolicy) and Service/Ingress/Gateway API external
 // exposure (core/pkg/exposure). Neither, on its own, answers the question
 // that actually matters for prioritization: a critical, fixable CVE on a
 // workload wide open to the whole cluster -- or reachable directly from
-// outside the cluster via a Service/Ingress/Gateway -- is a materially
+// outside the cluster via a Service/Ingress/Gateway, or unrestricted in outbound
+// egress to contact command-and-control servers -- is a materially
 // different risk than the same CVE on a workload nothing lets anything
 // reach.
 package vulnexposure
@@ -83,8 +84,9 @@ type Workload struct {
 }
 
 // Finding is one (workload, vulnerability) pair worth surfacing, joined with
-// how reachable that workload is: its NetworkPolicy ingress exposure, and
-// any external exposure via a Service/Ingress/Gateway.
+// how reachable that workload is: its NetworkPolicy ingress exposure, its
+// NetworkPolicy outbound egress exposure, and any external exposure via a
+// Service/Ingress/Gateway.
 type Finding struct {
 	Workload      Workload
 	Vulnerability storagev1beta1.VulnerabilityMetadata
@@ -94,6 +96,12 @@ type Finding struct {
 	// produces.
 	FixAvailable bool
 	Exposure     networkpolicy.Exposure
+	// EgressExposure classifies the broadest destination class admitted by the
+	// egress NetworkPolicies that select this workload (or default-allow
+	// ExposureOpen if unisolated). In security incident response, workloads
+	// with unrestricted outbound egress carry elevated risk of data exfiltration
+	// and C2 callback.
+	EgressExposure networkpolicy.Exposure
 	// ExternalExposure lists every reason (per core/pkg/exposure) this
 	// workload's Service(s) are reachable from outside the cluster --
 	// LoadBalancer/NodePort/externalIPs, or an Ingress/HTTPRoute/GRPCRoute
@@ -126,10 +134,11 @@ func exposureRank(f Finding) int {
 }
 
 // Correlate joins each workload's known vulnerabilities (at or above
-// minSeverity) with how reachable it is: its NetworkPolicy ingress exposure,
-// plus whatever external exposure the caller already computed for it via
+// minSeverity) with how reachable it is: its NetworkPolicy ingress and egress
+// exposure, plus whatever external exposure the caller already computed for it via
 // core/pkg/exposure. A nil idx is treated as an empty index (no NetworkPolicies
-// in the cluster), so all workloads are evaluated as default-allow (ExposureOpen).
+// in the cluster), so all workloads are evaluated as default-allow (ExposureOpen)
+// for both ingress and egress.
 // A workload with vulnerabilities but no entry in
 // endpoints is skipped, not guessed at: this package never assumes an
 // exposure level for a workload it was not given a resolved Endpoint for
@@ -143,9 +152,9 @@ func exposureRank(f Finding) int {
 // with a resolved endpoint already gets.
 //
 // Results are sorted most-actionable first: externally reachable workloads
-// first, then widest NetworkPolicy exposure, then highest severity, then a
-// stable ID/name tiebreak, so a caller displaying only the top N never has
-// to sort them itself.
+// first, then widest NetworkPolicy ingress exposure, then highest severity,
+// then widest outbound egress exposure, then a stable ID/name tiebreak, so a
+// caller displaying only the top N never has to sort them itself.
 func Correlate(idx *networkpolicy.Index, endpoints map[Workload]networkpolicy.Endpoint, vulnerabilitiesByWorkload map[Workload][]storagev1beta1.Vulnerability, minSeverity Severity, externalExposure map[Workload][]exposure.ExposurePath) (findings []Finding, skipped []Workload) {
 	for workload, vulns := range vulnerabilitiesByWorkload {
 		ep, ok := endpoints[workload]
@@ -155,6 +164,7 @@ func Correlate(idx *networkpolicy.Index, endpoints map[Workload]networkpolicy.En
 		}
 
 		npExposure := idx.IngressExposure(ep)
+		npEgressExposure := idx.EgressExposure(ep)
 		extPaths := externalExposure[workload]
 		for _, v := range vulns {
 			if ParseSeverity(v.Severity) < minSeverity {
@@ -165,11 +175,30 @@ func Correlate(idx *networkpolicy.Index, endpoints map[Workload]networkpolicy.En
 				Vulnerability:    v.VulnerabilityMetadata,
 				FixAvailable:     FixAvailable(v),
 				Exposure:         npExposure,
+				EgressExposure:   npEgressExposure,
 				ExternalExposure: extPaths,
 			})
 		}
 	}
 
+	SortFindings(findings)
+	sort.Slice(skipped, func(i, j int) bool {
+		if skipped[i].Namespace != skipped[j].Namespace {
+			return skipped[i].Namespace < skipped[j].Namespace
+		}
+		if skipped[i].Kind != skipped[j].Kind {
+			return skipped[i].Kind < skipped[j].Kind
+		}
+		return skipped[i].Name < skipped[j].Name
+	})
+
+	return findings, skipped
+}
+
+// SortFindings orders findings by priority: externally reachable first, then
+// widest ingress exposure, then highest severity, then widest outbound egress
+// exposure, with a deterministic workload and vulnerability ID tiebreak.
+func SortFindings(findings []Finding) {
 	sort.Slice(findings, func(i, j int) bool {
 		a, b := findings[i], findings[j]
 		if ra, rb := exposureRank(a), exposureRank(b); ra != rb {
@@ -177,6 +206,9 @@ func Correlate(idx *networkpolicy.Index, endpoints map[Workload]networkpolicy.En
 		}
 		if sa, sb := ParseSeverity(a.Vulnerability.Severity), ParseSeverity(b.Vulnerability.Severity); sa != sb {
 			return sa > sb
+		}
+		if a.EgressExposure.Level != b.EgressExposure.Level {
+			return a.EgressExposure.Level > b.EgressExposure.Level
 		}
 		if a.Workload != b.Workload {
 			if a.Workload.Namespace != b.Workload.Namespace {
@@ -189,15 +221,4 @@ func Correlate(idx *networkpolicy.Index, endpoints map[Workload]networkpolicy.En
 		}
 		return a.Vulnerability.ID < b.Vulnerability.ID
 	})
-	sort.Slice(skipped, func(i, j int) bool {
-		if skipped[i].Namespace != skipped[j].Namespace {
-			return skipped[i].Namespace < skipped[j].Namespace
-		}
-		if skipped[i].Kind != skipped[j].Kind {
-			return skipped[i].Kind < skipped[j].Kind
-		}
-		return skipped[i].Name < skipped[j].Name
-	})
-
-	return findings, skipped
 }
