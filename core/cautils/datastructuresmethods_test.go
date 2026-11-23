@@ -643,11 +643,13 @@ func TestPolicies_Set_NilSafety(t *testing.T) {
 	control := reporthandling.Control{
 		ControlID: "C-0001",
 		Rules: []reporthandling.PolicyRule{
-			{Name: "test-rule"},
+			{PortalBase: armotypes.PortalBase{Name: "test-rule"}},
 		},
 	}
 	framework := reporthandling.Framework{
-		Name:     "test-framework",
+		PortalBase: armotypes.PortalBase{
+			Name: "test-framework",
+		},
 		Controls: []reporthandling.Control{control},
 	}
 
@@ -670,27 +672,35 @@ func TestPolicies_Set_NilSafety(t *testing.T) {
 
 func TestShouldSkipRuleWithWarned_NilWarnedMap(t *testing.T) {
 	ruleInvalidUntil := reporthandling.PolicyRule{
-		Name: "rule-invalid-until",
-		Attributes: map[string]any{
-			"useUntilKubescapeVersion": "invalid-semver",
+		PortalBase: armotypes.PortalBase{
+			Name: "rule-invalid-until",
+			Attributes: map[string]any{
+				"useUntilKubescapeVersion": "invalid-semver",
+			},
 		},
 	}
 	ruleInvalidFrom := reporthandling.PolicyRule{
-		Name: "rule-invalid-from",
-		Attributes: map[string]any{
-			"useFromKubescapeVersion": "invalid-semver",
+		PortalBase: armotypes.PortalBase{
+			Name: "rule-invalid-from",
+			Attributes: map[string]any{
+				"useFromKubescapeVersion": "invalid-semver",
+			},
 		},
 	}
 	ruleNonStringUntil := reporthandling.PolicyRule{
-		Name: "rule-nonstring-until",
-		Attributes: map[string]any{
-			"useUntilKubescapeVersion": 123,
+		PortalBase: armotypes.PortalBase{
+			Name: "rule-nonstring-until",
+			Attributes: map[string]any{
+				"useUntilKubescapeVersion": 123,
+			},
 		},
 	}
 	ruleNonStringFrom := reporthandling.PolicyRule{
-		Name: "rule-nonstring-from",
-		Attributes: map[string]any{
-			"useFromKubescapeVersion": true,
+		PortalBase: armotypes.PortalBase{
+			Name: "rule-nonstring-from",
+			Attributes: map[string]any{
+				"useFromKubescapeVersion": true,
+			},
 		},
 	}
 
