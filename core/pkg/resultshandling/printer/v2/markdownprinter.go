@@ -37,6 +37,9 @@ func NewMarkdownPrinter() *MarkdownPrinter {
 }
 
 func (mp *MarkdownPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if mp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.MarkdownFormat, outputFile, markdownOutputFile)
 	if !explicitOutput {
 		outputFile = printer.ResolveDefaultOutputFile(printer.MarkdownFormat, markdownOutputFile)
@@ -56,6 +59,9 @@ func (mp *MarkdownPrinter) Score(score float32) {
 }
 
 func (mp *MarkdownPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if mp == nil {
+		return fmt.Errorf("failed to write markdown results: printer is nil")
+	}
 	if mp.writer == nil {
 		return fmt.Errorf("failed to write markdown results: output writer is nil")
 	}
@@ -115,7 +121,7 @@ func (mp *MarkdownPrinter) PrintNextSteps() {}
 
 // CloseWriter closes the Markdown output writer, returning any error from flushing or closing.
 func (mp *MarkdownPrinter) CloseWriter() error {
-	if mp.writer != nil && mp.writer != os.Stdout {
+	if mp != nil && mp.writer != nil && mp.writer != os.Stdout {
 		return printer.CloseOutput(mp.writer)
 	}
 	return nil
