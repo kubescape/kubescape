@@ -1661,6 +1661,7 @@ func TestKustomizeOriginThroughALinkedBase(t *testing.T) {
 		writeKustomizeFiles(t, root, map[string]string{
 			"app/kustomization.yaml":        "resources:\n- base-link\n- common\n",
 			"app/common/kustomization.yaml": "resources:\n- deployment.yaml\n",
+			"app/common/deployment.yaml":    "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: unrelated\n",
 		})
 		byName, origins := renderedKustomizeWorkloads(t, app)
 		require.Len(t, byName, 2)
