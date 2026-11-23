@@ -10,6 +10,8 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"sigs.k8s.io/kustomize/api/krusty"
+	"sigs.k8s.io/kustomize/kyaml/filesys"
 )
 
 func newMockKustomizeWorkload(kind, name string) workloadinterface.IMetadata {
@@ -426,4 +428,53 @@ spec:
 	// Finding is on sidecar (containers[0] in rendered resource) -> patch does NOT touch sidecar, so must not match
 	sidecarPatch := TraceKustomizePatch(wl, []string{"spec.template.spec.containers[0].securityContext.privileged"}, source)
 	assert.Equal(t, "", sidecarPatch, "patch touching only nginx must not attribute sidecar")
+}
+
+func TestTraceKustomizePatch_RenderedOverlay(t *testing.T) {
+	const base = "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: demo, labels: {stage: old}, annotations: {tier: old}}\nspec: {replicas: 1}\n"
+	const replace = "- {op: replace, path: /spec/replicas, value: 2}\n"
+	const legacy = "patchesJson6902:\n- path: legacy.yaml\n  target: {kind: Deployment, name: demo}\n"
+	const modern = "patches:\n- path: modern.yaml\n  target: {kind: Deployment, name: demo}\n"
+	const affixes = "namePrefix: prod-\nnameSuffix: -west\n"
+	const selected = "patches:\n- path: modern.yaml\n  target: {kind: Deployment, labelSelector: stage=old, annotationSelector: tier=old}\n"
+	const changeMetadata = "- {op: replace, path: /metadata/labels/stage, value: new}\n- {op: replace, path: /metadata/annotations/tier, value: new}\n"
+	for _, tc := range []struct {
+		name, config, patch, want string
+		replicas                  int64
+	}{
+		{"mixed patch families", modern + legacy, replace, "legacy.yaml", 3},
+		{"prefixed target", affixes + modern, replace, "modern.yaml", 2},
+		{"prefixed merge identity", affixes + "patchesStrategicMerge: [modern.yaml]\n", "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: demo}\nspec: {replicas: 2}\n", "modern.yaml", 2},
+		{"selector before patch changes metadata", selected, replace + changeMetadata, "modern.yaml", 2},
+		{"ambiguous later writer hides earlier candidate", "patches:\n- path: legacy.yaml\n  target: {kind: Deployment, name: demo}\n- path: modern.yaml\n  target: {kind: Deployment, labelSelector: stage=old}\n", replace + changeMetadata, "", 2},
+		{"selector matches only after transform", "commonLabels: {stage: new}\npatches:\n- path: modern.yaml\n  target: {kind: Deployment, labelSelector: stage=new}\n", replace, "", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for file, contents := range map[string]string{
+				"kustomization.yaml": "resources: [base.yaml]\n" + tc.config,
+				"base.yaml":          base,
+				"modern.yaml":        tc.patch,
+				"legacy.yaml":        "- {op: replace, path: /spec/replicas, value: 3}\n",
+			} {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, file), []byte(contents), 0600))
+			}
+			result, err := krusty.MakeKustomizer(krusty.MakeDefaultOptions()).Run(filesys.MakeFsOnDisk(), dir)
+			require.NoError(t, err)
+			require.Len(t, result.Resources(), 1)
+			obj, err := result.Resources()[0].Map()
+			require.NoError(t, err)
+			require.EqualValues(t, tc.replicas, obj["spec"].(map[string]any)["replicas"])
+			src := reporthandling.Source{Path: dir, RelativePath: ".", FileType: reporthandling.SourceTypeKustomizeDirectory, KustomizeDirectoryName: dir}
+			require.Equal(t, tc.want, TraceKustomizePatch(localworkload.NewLocalWorkload(obj), []string{"spec.replicas"}, src))
+		})
+	}
+}
+
+func TestTraceKustomizePatch_InvalidDocument(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte("patchesStrategicMerge: [patch.yaml]\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "patch.yaml"), []byte("kind: Deployment\nmetadata: {name: demo}\nspec: {replicas: 3}\n---\n[\n"), 0600))
+	src := reporthandling.Source{Path: dir, FileType: reporthandling.SourceTypeKustomizeDirectory, KustomizeDirectoryName: dir}
+	require.Empty(t, TraceKustomizePatch(newMockKustomizeWorkload("Deployment", "demo"), []string{"spec.replicas"}, src))
 }
