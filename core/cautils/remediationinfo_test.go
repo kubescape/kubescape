@@ -41,8 +41,12 @@ func TestRemediationInfo_ValidatePayload(t *testing.T) {
 		{"unknown action", RemediationInfo{Action: "explode", Kind: "Deployment", Namespace: "ns", Name: "a"}, true},
 		{"later-phase action", RemediationInfo{Action: "cordon", Kind: "Deployment", Namespace: "ns", Name: "a"}, true},
 		{"missing name", RemediationInfo{Action: "annotate", Kind: "Deployment", Namespace: "ns"}, true},
+		{"whitespace name", RemediationInfo{Action: "annotate", Kind: "Deployment", Namespace: "ns", Name: "   "}, true},
 		{"unsupported kind", RemediationInfo{Action: "annotate", Kind: "Service", Namespace: "ns", Name: "a"}, true},
+		{"whitespace kind", RemediationInfo{Action: "annotate", Kind: "   ", Namespace: "ns", Name: "a"}, true},
 		{"missing namespace", RemediationInfo{Action: "annotate", Kind: "Deployment", Name: "a"}, true},
+		{"whitespace namespace", RemediationInfo{Action: "annotate", Kind: "Deployment", Namespace: "   ", Name: "a"}, true},
+		{"padded target fields are trimmed", RemediationInfo{Action: "annotate", Kind: " Deployment ", Namespace: " payments ", Name: " api "}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -193,6 +197,12 @@ func TestRemediationInfo_HasTargetAndSelector(t *testing.T) {
 	// either selector axis alone is a selector
 	assert.True(t, (&RemediationInfo{Control: "C-0016"}).HasSelector())
 	assert.True(t, (&RemediationInfo{MinSeverity: "High"}).HasSelector())
+
+	// whitespace-only fields do not count as explicit target or selector
+	assert.False(t, (&RemediationInfo{Kind: "   "}).HasExplicitTarget())
+	assert.False(t, (&RemediationInfo{Name: "   "}).HasExplicitTarget())
+	assert.False(t, (&RemediationInfo{Control: "   "}).HasSelector())
+	assert.False(t, (&RemediationInfo{MinSeverity: "   "}).HasSelector())
 }
 
 func TestRemediationInfo_ValidatePayload_Selector(t *testing.T) {
@@ -212,6 +222,8 @@ func TestRemediationInfo_ValidatePayload_Selector(t *testing.T) {
 		// revert by selector re-selects the set that was acted on: a quarantined
 		// workload still fails the control that justified quarantining it
 		{"revert by selector", RemediationInfo{Action: "revert", Control: "C-0016"}, false},
+		{"selector with whitespace name is valid selector", RemediationInfo{Action: "quarantine", Control: "C-0016", Name: "   "}, false},
+		{"selector with whitespace namespace is valid selector", RemediationInfo{Action: "quarantine", Control: "C-0016", Namespace: "   "}, false},
 		{"bogus severity", RemediationInfo{Action: "quarantine", MinSeverity: "Extreme"}, true},
 		// selector and explicit target describe different target sets
 		{"selector with kind", RemediationInfo{Action: "quarantine", Control: "C-0016", Kind: "Deployment"}, true},

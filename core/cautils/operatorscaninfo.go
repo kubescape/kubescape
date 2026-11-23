@@ -163,12 +163,12 @@ type RemediationInfo struct {
 
 // HasSelector reports whether findings-driven targeting was requested.
 func (r *RemediationInfo) HasSelector() bool {
-	return r.Control != "" || r.MinSeverity != ""
+	return strings.TrimSpace(r.Control) != "" || strings.TrimSpace(r.MinSeverity) != ""
 }
 
 // HasExplicitTarget reports whether a single concrete object was named.
 func (r *RemediationInfo) HasExplicitTarget() bool {
-	return r.Kind != "" || r.Name != ""
+	return strings.TrimSpace(r.Kind) != "" || strings.TrimSpace(r.Name) != ""
 }
 
 // IsDryRun reports whether the action should be sent as a plan-only dry-run.
@@ -234,6 +234,9 @@ func (r *RemediationInfo) ValidatePayload(*apis.Commands) error {
 // resolved in-cluster by the operator against the stored scan results, so the
 // CLI validates only what it can know locally.
 func (r *RemediationInfo) validateSelector() error {
+	r.Control = strings.TrimSpace(r.Control)
+	r.MinSeverity = strings.TrimSpace(r.MinSeverity)
+	r.Namespace = strings.TrimSpace(r.Namespace)
 	if r.MinSeverity != "" && !isSupportedRemediationSeverity(r.MinSeverity) {
 		return fmt.Errorf("unsupported --min-severity %q (supported: %s)", r.MinSeverity, strings.Join(remediationSeverities, ", "))
 	}
@@ -250,6 +253,9 @@ func (r *RemediationInfo) validateSelector() error {
 
 // validateExplicitTarget checks a single named object.
 func (r *RemediationInfo) validateExplicitTarget() error {
+	r.Kind = strings.TrimSpace(r.Kind)
+	r.Name = strings.TrimSpace(r.Name)
+	r.Namespace = strings.TrimSpace(r.Namespace)
 	if r.Kind == "" || r.Name == "" {
 		return errors.New("remediation target requires --kind and --name")
 	}
@@ -281,15 +287,15 @@ func (r *RemediationInfo) GetRequestPayload() *apis.Commands {
 	// which the operator would take as a request to act on a nameless object.
 	if r.HasExplicitTarget() {
 		args.Target = &apis.OperatorActionTarget{
-			Kind:      r.Kind,
-			Namespace: r.Namespace,
-			Name:      r.Name,
+			Kind:      strings.TrimSpace(r.Kind),
+			Namespace: strings.TrimSpace(r.Namespace),
+			Name:      strings.TrimSpace(r.Name),
 		}
 	}
 	if r.HasSelector() {
 		args.Selector = &apis.OperatorActionSelector{
-			Control:     r.Control,
-			MinSeverity: r.MinSeverity,
+			Control:     strings.TrimSpace(r.Control),
+			MinSeverity: strings.TrimSpace(r.MinSeverity),
 		}
 	}
 	// ToArgs marshals a plain struct, so it cannot fail in practice; an empty
