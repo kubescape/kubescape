@@ -639,3 +639,81 @@ func TestGetListCmd_FormatCompletion(t *testing.T) {
 	assert.Empty(t, suggestions)
 	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
 }
+
+func TestFlagValidationList_AccountIDTrimming(t *testing.T) {
+	tests := []struct {
+		name          string
+		accountID     string
+		format        string
+		wantAccountID string
+		wantFormat    string
+		wantErr       bool
+		errContains   string
+	}{
+		{
+			name:          "valid account ID with surrounding whitespace",
+			accountID:     "  24e0b04a-8db6-48eb-a912-7815cf15b222  ",
+			format:        "pretty-print",
+			wantAccountID: "24e0b04a-8db6-48eb-a912-7815cf15b222",
+			wantFormat:    "pretty-print",
+			wantErr:       false,
+		},
+		{
+			name:          "whitespace-only account ID trimmed to empty",
+			accountID:     "   ",
+			format:        "json",
+			wantAccountID: "",
+			wantFormat:    "json",
+			wantErr:       false,
+		},
+		{
+			name:          "empty account ID accepted",
+			accountID:     "",
+			format:        "yaml",
+			wantAccountID: "",
+			wantFormat:    "yaml",
+			wantErr:       false,
+		},
+		{
+			name:        "invalid account ID rejected",
+			accountID:   "not-a-uuid",
+			format:      "json",
+			wantErr:     true,
+			errContains: "bad argument: account ID must be a valid UUID",
+		},
+		{
+			name:        "empty format rejected",
+			accountID:   "",
+			format:      "   ",
+			wantErr:     true,
+			errContains: "format cannot be empty",
+		},
+		{
+			name:        "unsupported format rejected",
+			accountID:   "",
+			format:      "xml",
+			wantErr:     true,
+			errContains: "invalid format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			policy := &metav1.ListPolicies{
+				AccountID: tt.accountID,
+				Format:    tt.format,
+			}
+			err := flagValidationList(policy)
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantAccountID, policy.AccountID)
+				assert.Equal(t, tt.wantFormat, policy.Format)
+			}
+		})
+	}
+}
