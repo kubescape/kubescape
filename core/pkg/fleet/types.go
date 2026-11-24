@@ -123,7 +123,7 @@ type ClusterResult struct {
 // can still be nil on a result this returns true for, so anything reading them
 // needs its own check; Scored covers the common case.
 func (c *ClusterResult) Scanned() bool {
-	return c.Status == ClusterScanned && c.Report != nil
+	return c != nil && c.Status == ClusterScanned && c.Report != nil
 }
 
 // Scored reports whether the cluster carries the measurements a fleet-wide
@@ -131,7 +131,7 @@ func (c *ClusterResult) Scanned() bool {
 // is not a zero, it is an absence, and callers that average across clusters
 // have to exclude it rather than fold a nil into the arithmetic.
 func (c *ClusterResult) Scored() bool {
-	return c.Scanned() && c.ComplianceScore != nil && c.Coverage != nil
+	return c != nil && c.Scanned() && c.ComplianceScore != nil && c.Coverage != nil
 }
 
 // FleetControlMatrix is the control x cluster grid: for each control, its

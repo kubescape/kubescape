@@ -499,3 +499,29 @@ func TestPrintFleetReportShowsRetries(t *testing.T) {
 	assert.Contains(t, out, "scanned (2 attempts)", "a cluster that answered on a retry still shows it needed one")
 	assert.NotContains(t, out, "(1 attempts)")
 }
+
+func TestPrintFleetReport_NilSafety(t *testing.T) {
+	assert.NotPanics(t, func() {
+		PrintFleetReport(nil, nil)
+		PrintFleetReport(nil, &fleet.FleetReport{})
+		PrintFleetReport(&bytes.Buffer{}, nil)
+
+		printFleetClusters(nil, nil)
+		printFleetClusters(&bytes.Buffer{}, nil)
+		printFleetClusters(nil, &fleet.FleetReport{})
+
+		printFleetCompliance(nil, nil)
+		printFleetCompliance(&bytes.Buffer{}, nil)
+		printFleetCompliance(nil, &fleet.ComplianceRollup{})
+
+		printFleetDivergence(nil, nil, matrixComparability{})
+		printFleetDivergence(&bytes.Buffer{}, nil, matrixComparability{})
+		printFleetDivergence(nil, &fleet.FleetDivergence{}, matrixComparability{})
+		printFleetDivergence(&bytes.Buffer{}, &fleet.FleetDivergence{Controls: []fleet.ControlDivergence{{}}}, matrixComparability{})
+
+		assert.Equal(t, matrixComparability{}, comparability(nil))
+		assert.Equal(t, notMeasured, fleetCoverageText(nil))
+		assert.Equal(t, "", exclusionText(nil, 50))
+		assert.Equal(t, "exception", divergenceKindText(nil))
+	})
+}

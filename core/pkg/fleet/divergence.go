@@ -155,6 +155,9 @@ func clusterInMatrix(matrix FleetControlMatrix, clusterID string) bool {
 // outcomesRepresented counts how many distinct outcomes the clusters reached on
 // one control. Fewer than two means they agreed.
 func outcomesRepresented(control *ControlDivergence) int {
+	if control == nil {
+		return 0
+	}
 	represented := 0
 	for _, clusters := range [][]string{
 		control.Passed, control.Failed, control.Skipped, control.NotEvaluated,
