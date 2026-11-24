@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
@@ -65,8 +66,9 @@ func GetVersionCmd(ks meta.IKubescape, version, commit, date string) *cobra.Comm
 				if ks.Context() != nil {
 					ctx = ks.Context()
 				}
-				v := versioncheck.NewIVersionCheckHandler(ctx)
-				_ = v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest("", version, "", "", "version", nil))
+				cautils.CheckLatestVersion(ctx, cautils.VersionCheckTimeout, versioncheck.NewIVersionCheckHandler(ctx), func() *versioncheck.VersionCheckRequest {
+					return versioncheck.NewVersionCheckRequest("", version, "", "", "version", nil)
+				})
 
 				out := cmd.OutOrStdout()
 				colored := shouldColor(out)

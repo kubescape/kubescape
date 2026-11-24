@@ -172,12 +172,15 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 	// ================== version testing ======================================
 	// Skip version check in air-gapped mode (when keep-local flag is set)
 	if !scanInfo.Local {
-		v := versioncheck.NewIVersionCheckHandler(ctx)
-		_ = v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(policyIdentifiers), "", string(scanInfo.GetScanningContext()), k8sClient))
+		// Copied here so the background check never reads scanInfo while the scan runs.
+		accountID, frameworks, scanningContext := scanInfo.AccountID, policyIdentifierIdentities(policyIdentifiers), string(scanInfo.GetScanningContext())
+		cautils.CheckLatestVersion(ctx, cautils.VersionCheckTimeout, versioncheck.NewIVersionCheckHandler(ctx), func() *versioncheck.VersionCheckRequest {
+			return versioncheck.NewVersionCheckRequest(accountID, versioncheck.BuildNumber, frameworks, "", scanningContext, k8sClient)
+		})
 	}
 
 	// ================== setup host scanner object ======================================
-	// The version check above reads the cluster without the scan's context.
+	// The version check above stops waiting when ctx ends; stop here too.
 	if err := ctx.Err(); err != nil {
 		err = fmt.Errorf("scan stopped while setting up: %w", err)
 		span.RecordError(err)
