@@ -1085,6 +1085,11 @@ func TestSetSeverityToSummaryMap(t *testing.T) {
 					Severity:   "high",
 					FixedState: string(v5.FixedState),
 				},
+				{
+					ID:         "CVE-2024-0004",
+					Severity:   "  CustomSeverity  ",
+					FixedState: string(v5.NotFixedState),
+				},
 			},
 			originalMap: nil,
 			want: map[string]*imageprinter.SeveritySummary{
@@ -1095,6 +1100,10 @@ func TestSetSeverityToSummaryMap(t *testing.T) {
 				"High": {
 					NumberOfCVEs:        1,
 					NumberOfFixableCVEs: 1,
+				},
+				"CustomSeverity": {
+					NumberOfCVEs:        1,
+					NumberOfFixableCVEs: 0,
 				},
 			},
 		},
