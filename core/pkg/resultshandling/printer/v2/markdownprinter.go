@@ -257,10 +257,14 @@ func mdWriteFailedSection(ctx context.Context, w io.Writer, controls []reportsum
 				ew.printf("| %s | — | — |\n", mdEscapeCell(id))
 				continue
 			}
+			namespace := res.GetNamespace()
+			if namespace == "" {
+				namespace = `\<cluster-scoped\>`
+			}
 			ew.printf("| %s | %s | %s |\n",
 				mdEscapeCell(res.GetName()),
 				mdEscapeCell(res.GetKind()),
-				mdEscapeCell(res.GetNamespace()),
+				mdEscapeCell(namespace),
 			)
 		}
 		ew.printf("\n")

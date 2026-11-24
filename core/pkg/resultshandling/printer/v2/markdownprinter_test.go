@@ -1253,3 +1253,62 @@ func TestMarkdown_NilReceiverSafety(t *testing.T) {
 		mp.PrintNextSteps()
 	})
 }
+
+func TestMarkdownPrinter_ActionPrint_ClusterScopedAndNamespacedResources(t *testing.T) {
+	clusterRoleID := "rbac.authorization.k8s.io/v1/ClusterRole//cluster-admin"
+	deploymentID := "apps/v1/Deployment/default/nginx"
+
+	clusterRole := localworkload.NewLocalWorkload(map[string]interface{}{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRole",
+		"metadata":   map[string]interface{}{"name": "cluster-admin"},
+		"spec":       map[string]interface{}{},
+	})
+	deployment := localworkload.NewLocalWorkload(map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]interface{}{"name": "nginx", "namespace": "default"},
+		"spec":       map[string]interface{}{},
+	})
+
+	session := cautils.NewOPASessionObjMock()
+	session.AllResources[clusterRoleID] = clusterRole
+	session.AllResources[deploymentID] = deployment
+
+	ctrl := &reportsummary.ControlSummary{
+		ControlID:   "C-0012",
+		Name:        "Cluster admin binding",
+		ScoreFactor: 10.0,
+		StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+	}
+	failedStatus := &apis.StatusInfo{InnerStatus: apis.StatusFailed}
+	ctrl.Append(failedStatus, clusterRoleID, deploymentID)
+
+	session.ResourcesResult[clusterRoleID] = resourcesresults.Result{
+		ResourceID: clusterRoleID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{ControlID: "C-0012", Name: "Cluster admin binding", Status: apis.StatusInfo{InnerStatus: apis.StatusFailed}},
+		},
+	}
+	session.ResourcesResult[deploymentID] = resourcesresults.Result{
+		ResourceID: deploymentID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{ControlID: "C-0012", Name: "Cluster admin binding", Status: apis.StatusInfo{InnerStatus: apis.StatusFailed}},
+		},
+	}
+
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			ComplianceScore: 50,
+			Controls: reportsummary.ControlSummaries{
+				"C-0012": *ctrl,
+			},
+		},
+	}
+
+	out := mdRunActionPrint(t, session)
+
+	assert.Contains(t, out, "| Resource | Kind | Namespace |")
+	assert.Contains(t, out, "| cluster-admin | ClusterRole | \\<cluster-scoped\\> |")
+	assert.Contains(t, out, "| nginx | Deployment | default |")
+}
