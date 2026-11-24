@@ -128,7 +128,9 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 					strings.ToLower(level),
 					strings.ToLower(toComplete),
 				) {
-					matches = append(matches, level)
+					if len(toComplete) <= len(level) {
+						matches = append(matches, toComplete+level[len(toComplete):])
+					}
 				}
 			}
 
