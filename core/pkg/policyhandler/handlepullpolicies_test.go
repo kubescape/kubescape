@@ -1013,3 +1013,15 @@ func TestGetScanPolicies_ConcurrentDifferentFrameworksAtomicCache(t *testing.T) 
 
 	wg.Wait()
 }
+
+func TestPolicyHandler_NilReceiverSafety(t *testing.T) {
+	var ph *PolicyHandler
+	assert.NotPanics(t, func() {
+		ph.Close()
+	})
+
+	session, err := ph.CollectPolicies(context.Background(), nil, nil, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "policy handler is nil")
+	assert.Nil(t, session)
+}

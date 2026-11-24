@@ -91,6 +91,9 @@ func NewRequestScopedPolicyHandler(clusterName string) *PolicyHandler {
 
 // Close stops all internal caches and background goroutines to prevent leaks.
 func (policyHandler *PolicyHandler) Close() {
+	if policyHandler == nil {
+		return
+	}
 	if policyHandler.cachedPolicies != nil {
 		policyHandler.cachedPolicies.Stop()
 	}
@@ -103,6 +106,9 @@ func (policyHandler *PolicyHandler) Close() {
 }
 
 func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo, getters *cautils.Getters) (*cautils.OPASessionObj, error) {
+	if policyHandler == nil {
+		return nil, fmt.Errorf("failed to collect policies: policy handler is nil")
+	}
 	// get policies, exceptions and controls inputs
 	policies, exceptions, controlInputs, degradations, err := policyHandler.getPolicies(ctx, policyIdentifier, scanInfo, getters)
 	if err != nil {
