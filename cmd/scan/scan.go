@@ -461,7 +461,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	// Wrap after the subcommands are registered so each one is covered.
 	installTelemetry(scanCmd, ks, &scanInfo)
-
+	registerScanFlagCompletions(scanCmd)
 	return scanCmd
 }
 
