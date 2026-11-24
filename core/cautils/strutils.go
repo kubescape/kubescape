@@ -5,6 +5,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -27,7 +28,7 @@ func ParseIntEnvVar(varName string, defaultValue int) (int, error) {
 		return defaultValue, nil
 	}
 
-	intValue, err := strconv.Atoi(varValue)
+	intValue, err := strconv.Atoi(strings.TrimSpace(varValue))
 	if err != nil {
 		return defaultValue, fmt.Errorf("failed to parse %s env var as int: %w", varName, err)
 	}
@@ -41,7 +42,7 @@ func ParseBoolEnvVar(varName string, defaultValue bool) (bool, error) {
 		return defaultValue, nil
 	}
 
-	boolValue, err := strconv.ParseBool(varValue)
+	boolValue, err := strconv.ParseBool(strings.TrimSpace(varValue))
 	if err != nil {
 		return defaultValue, fmt.Errorf("failed to parse %s env var as bool: %w", varName, err)
 	}
@@ -60,7 +61,7 @@ func ParseDurationEnvVar(varName string, defaultValue time.Duration) (time.Durat
 		return defaultValue, nil
 	}
 
-	d, err := time.ParseDuration(varValue)
+	d, err := time.ParseDuration(strings.TrimSpace(varValue))
 	if err != nil {
 		return defaultValue, fmt.Errorf("failed to parse %s env var as duration: %w", varName, err)
 	}
