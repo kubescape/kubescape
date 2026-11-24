@@ -106,6 +106,16 @@ func addEmptySeverities(mapSeverityTSummary map[string]*imageprinter.SeveritySum
 	}
 }
 
+func canonicalSeverity(severity string) string {
+	trimmed := strings.TrimSpace(severity)
+	for _, canonical := range cveSeverities {
+		if strings.EqualFold(trimmed, canonical) {
+			return canonical
+		}
+	}
+	return trimmed
+}
+
 // getFilteredCVEs returns a list of CVEs to show in the table. If there are no vulnerabilities with severity Critical or High, it will return vulnerabilities with severity Medium. Otherwise it will return vulnerabilities with severity Critical or High.
 // Vulnerabilities on the CISA KEV catalog are always returned, whatever their severity.
 func getFilteredCVEs(cves []imageprinter.CVE) []imageprinter.CVE {
@@ -118,12 +128,14 @@ func getFilteredCVEs(cves []imageprinter.CVE) []imageprinter.CVE {
 
 	severityMap := make(map[string]bool, len(severities))
 	for _, severity := range severities {
-		severityMap[severity] = true
+		severityMap[strings.ToLower(strings.TrimSpace(severity))] = true
 	}
 
 	filteredCVEs := []imageprinter.CVE{}
 	for _, cve := range cves {
-		if cve.KEV || severityMap[cve.Severity] {
+		normSev := canonicalSeverity(cve.Severity)
+		if cve.KEV || severityMap[strings.ToLower(normSev)] {
+			cve.Severity = normSev
 			filteredCVEs = append(filteredCVEs, cve)
 		}
 	}
@@ -136,13 +148,15 @@ func filterCVEsBySeverities(cves []imageprinter.CVE, severities []string) []imag
 	// Create a map to efficiently check if a severity is present in the severities slice
 	severityMap := make(map[string]bool)
 	for _, severity := range severities {
-		severityMap[severity] = true
+		severityMap[strings.ToLower(strings.TrimSpace(severity))] = true
 	}
 
 	// Filter CVEs based on the severityMap
 	filteredCVEs := []imageprinter.CVE{}
 	for _, cve := range cves {
-		if severityMap[cve.Severity] {
+		normSev := canonicalSeverity(cve.Severity)
+		if severityMap[strings.ToLower(normSev)] {
+			cve.Severity = normSev
 			filteredCVEs = append(filteredCVEs, cve)
 		}
 	}
