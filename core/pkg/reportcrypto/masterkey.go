@@ -114,10 +114,13 @@ func ValidateMasterKey(masterKey []byte) error {
 // choice, not a way to skip the KDF.
 func GetMasterKeyFromEnv(operation string) ([]byte, error) {
 
-	masterKey := strings.TrimSpace(os.Getenv(masterKeyEnvVar))
+	rawMasterKey := os.Getenv(masterKeyEnvVar)
 	masterKeyHex := strings.TrimSpace(os.Getenv(masterKeyHexEnvVar))
 
-	if masterKey != "" && masterKeyHex != "" {
+	hasMasterKey := strings.TrimSpace(rawMasterKey) != ""
+	hasMasterKeyHex := masterKeyHex != ""
+
+	if hasMasterKey && hasMasterKeyHex {
 		return nil, fmt.Errorf(
 			"%s cannot proceed: %w, set exactly one",
 			operation,
@@ -128,7 +131,7 @@ func GetMasterKeyFromEnv(operation string) ([]byte, error) {
 	var keyBytes []byte
 
 	switch {
-	case masterKeyHex != "":
+	case hasMasterKeyHex:
 		decoded, err := hex.DecodeString(masterKeyHex)
 		if err != nil {
 			return nil, fmt.Errorf(
@@ -138,8 +141,11 @@ func GetMasterKeyFromEnv(operation string) ([]byte, error) {
 		}
 		keyBytes = decoded
 
-	case masterKey != "":
-		keyBytes = []byte(masterKey)
+	case hasMasterKey:
+		// Preserve raw passphrase bytes verbatim to guarantee cryptographic
+		// compatibility with existing encrypted reports that derived keys with
+		// leading or trailing whitespace.
+		keyBytes = []byte(rawMasterKey)
 
 	default:
 		return nil, fmt.Errorf(
@@ -154,7 +160,7 @@ func GetMasterKeyFromEnv(operation string) ([]byte, error) {
 		zeroBytes(keyBytes)
 
 		envVar := masterKeyEnvVar
-		if masterKeyHex != "" {
+		if hasMasterKeyHex {
 			envVar = masterKeyHexEnvVar
 		}
 

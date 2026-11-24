@@ -306,13 +306,22 @@ func TestGetMasterKeyFromEnv(t *testing.T) {
 		assert.Equal(t, want, key)
 	})
 
-	t.Run("whitespace-padded passphrase is trimmed", func(t *testing.T) {
-		t.Setenv(masterKeyEnvVar, "  a-sufficiently-long-passphrase  \n")
-		t.Setenv(masterKeyHexEnvVar, "")
+	t.Run("whitespace-only hex does not conflict with valid passphrase", func(t *testing.T) {
+		t.Setenv(masterKeyEnvVar, "a-sufficiently-long-passphrase")
+		t.Setenv(masterKeyHexEnvVar, "   \t\n")
 
 		key, err := GetMasterKeyFromEnv("encryption")
 		require.NoError(t, err)
 		assert.Equal(t, []byte("a-sufficiently-long-passphrase"), key)
+	})
+
+	t.Run("whitespace-padded passphrase preserves raw bytes for backwards compatibility", func(t *testing.T) {
+		t.Setenv(masterKeyEnvVar, "  a-sufficiently-long-passphrase  ")
+		t.Setenv(masterKeyHexEnvVar, "")
+
+		key, err := GetMasterKeyFromEnv("encryption")
+		require.NoError(t, err)
+		assert.Equal(t, []byte("  a-sufficiently-long-passphrase  "), key)
 	})
 }
 
