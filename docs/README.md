@@ -44,7 +44,6 @@ Welcome to the Kubescape documentation. This directory contains detailed guides 
 |----------|-------------|
 | [Security Self-Assessment](security/self-assessment.md) | Evidence-backed security assessment; currently incomplete pending maintainer review |
 | [Environment Dependencies Policy](environment-dependencies-policy.md) | Policy on external dependencies |
-| [Resource Streaming Implementation](streaming-implementation.md) | How resource streaming bounds collection memory; documents KUBESCAPE_SPILL_DIR and KUBESCAPE_PARTITION_STORE |
 
 ## 📁 Subdirectories
 
