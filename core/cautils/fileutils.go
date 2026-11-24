@@ -1863,6 +1863,7 @@ func manifestObjectToWorkloads(obj map[string]any) ([]workloadinterface.IMetadat
 		return expandListEnvelope(obj, kind)
 	}
 
+	trimManifestNamespace(obj)
 	if o := objectsenvelopes.NewObject(obj); !isNilEnvelope(o) {
 		return []workloadinterface.IMetadata{o}, nil
 	}
@@ -1877,6 +1878,16 @@ func manifestObjectToWorkloads(obj map[string]any) ([]workloadinterface.IMetadat
 		return nil, fmt.Errorf("not a valid Kubernetes object")
 	}
 	return nil, nil
+}
+
+// trimManifestNamespace trims metadata.namespace once at ingestion so resource
+// IDs, namespace filters, summaries and printers all see the same value. Real
+// namespaces are DNS-1123 labels, so only hand-edited manifests change.
+func trimManifestNamespace(obj map[string]any) {
+	metadata, _ := obj["metadata"].(map[string]any)
+	if ns, ok := metadata["namespace"].(string); ok {
+		metadata["namespace"] = strings.TrimSpace(ns)
+	}
 }
 
 // isNilEnvelope reports whether NewObject returned a nil pointer held in a
