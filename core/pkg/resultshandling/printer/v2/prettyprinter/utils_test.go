@@ -480,6 +480,24 @@ func TestGetSortPackageScores(t *testing.T) {
 			},
 			expectedResult: []string{"packageA", "packageB"},
 		},
+		{
+			name: "Non-empty input, same score and same name tie-broken by map key",
+			pkgScores: map[string]*imageprinter.PackageScore{
+				"pkg:b": {
+					Name:                    "openssl",
+					Version:                 "2.0",
+					Score:                   10,
+					MapSeverityToCVEsNumber: map[string]int{},
+				},
+				"pkg:a": {
+					Name:                    "openssl",
+					Version:                 "1.0",
+					Score:                   10,
+					MapSeverityToCVEsNumber: map[string]int{},
+				},
+			},
+			expectedResult: []string{"pkg:a", "pkg:b"},
+		},
 	}
 
 	for _, tc := range tests {
@@ -670,6 +688,14 @@ func TestGetSortedCVEsBySeverity(t *testing.T) {
 			name:           "Empty input",
 			severityToCVEs: map[string]int{},
 			expectedResult: []string{},
+		},
+		{
+			name: "Severities with same rank are tie-broken alphabetically",
+			severityToCVEs: map[string]int{
+				"Unknown": 1,
+				"Other":   2,
+			},
+			expectedResult: []string{"Other", "Unknown"},
 		},
 	}
 
