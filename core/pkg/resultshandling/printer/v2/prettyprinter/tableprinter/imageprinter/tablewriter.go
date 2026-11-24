@@ -30,6 +30,9 @@ func NewTableWriter() *TableWriter {
 var _ TablePrinter = &TableWriter{}
 
 func (tw *TableWriter) PrintImageScanningTable(writer io.Writer, summary ImageScanSummary) {
+	if tw == nil || writer == nil {
+		return
+	}
 	rows := generateRows(summary)
 	if len(rows) == 0 {
 		return

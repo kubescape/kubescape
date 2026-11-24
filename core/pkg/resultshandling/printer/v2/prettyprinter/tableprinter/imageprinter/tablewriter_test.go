@@ -111,3 +111,15 @@ func TestNewTableWriter(t *testing.T) {
 	assert.NotNil(t, tw)
 	assert.Empty(t, tw)
 }
+
+func TestTableWriter_NilSafety(t *testing.T) {
+	var nilTW *TableWriter
+	assert.NotPanics(t, func() {
+		nilTW.PrintImageScanningTable(nil, ImageScanSummary{})
+	})
+
+	tw := NewTableWriter()
+	assert.NotPanics(t, func() {
+		tw.PrintImageScanningTable(nil, ImageScanSummary{})
+	})
+}

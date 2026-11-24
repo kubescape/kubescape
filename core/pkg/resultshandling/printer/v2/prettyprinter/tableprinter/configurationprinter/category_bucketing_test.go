@@ -185,12 +185,24 @@ func TestCategoryPrintersAndHelpers_NilSafety(t *testing.T) {
 	// Category table printers with nil summaryDetails
 	assert.NotPanics(t, func() {
 		NewClusterPrinter().PrintCategoriesTables(&buf, nil, nil)
+		NewClusterPrinter().PrintCategoriesTables(nil, nil, nil)
+		var cp *ClusterPrinter
+		cp.PrintCategoriesTables(nil, nil, nil)
+		cp.PrintSummaryTable(nil, nil, nil)
 	})
 	assert.NotPanics(t, func() {
 		NewRepoPrinter(nil).PrintCategoriesTables(&buf, nil, nil)
+		NewRepoPrinter(nil).PrintCategoriesTables(nil, nil, nil)
+		var rp *RepoPrinter
+		rp.PrintCategoriesTables(nil, nil, nil)
+		rp.PrintSummaryTable(nil, nil, nil)
 	})
 	assert.NotPanics(t, func() {
 		NewWorkloadPrinter().PrintCategoriesTables(&buf, nil, nil)
+		NewWorkloadPrinter().PrintCategoriesTables(nil, nil, nil)
+		var wp *WorkloadPrinter
+		wp.PrintCategoriesTables(nil, nil, nil)
+		wp.PrintSummaryTable(nil, nil, nil)
 	})
 
 	// Helpers with nil controlSummary
