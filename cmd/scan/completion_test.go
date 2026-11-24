@@ -27,10 +27,16 @@ func TestCompleteValues(t *testing.T) {
 			expected: []string{"high"},
 		},
 		{
-			name:     "case insensitive",
+			name:     "preserve uppercase prefix",
 			input:    "H",
 			values:   []string{"low", "medium", "high", "critical"},
-			expected: []string{"high"},
+			expected: []string{"High"},
+		},
+		{
+			name:     "preserve mixed case prefix",
+			input:    "HiG",
+			values:   []string{"low", "medium", "high", "critical"},
+			expected: []string{"HiGh"},
 		},
 		{
 			name:     "no match",
@@ -76,9 +82,19 @@ func TestCompleteCommaSeparated(t *testing.T) {
 			expected: []string{"json", "junit"},
 		},
 		{
+			name:     "uppercase prefix",
+			input:    "J",
+			expected: []string{"Json", "Junit"},
+		},
+		{
 			name:     "comma separated prefix",
 			input:    "json,h",
 			expected: []string{"json,html"},
+		},
+		{
+			name:     "uppercase comma separated prefix",
+			input:    "json,H",
+			expected: []string{"json,Html"},
 		},
 		{
 			name:     "exclude selected values",
@@ -89,6 +105,16 @@ func TestCompleteCommaSeparated(t *testing.T) {
 			name:     "no duplicate values",
 			input:    "json,j",
 			expected: []string{"json,junit"},
+		},
+		{
+			name:     "exclude selected value with whitespace",
+			input:    "json ,j",
+			expected: []string{"json ,junit"},
+		},
+		{
+			name:     "exclude selected value with whitespace and case",
+			input:    "JSON ,J",
+			expected: []string{"JSON ,Junit"},
 		},
 		{
 			name:     "case insensitive",
@@ -228,5 +254,15 @@ func TestScanFormatCompletionByCommand(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestCompleteCommaSeparatedLeadingComma(t *testing.T) {
+	complete := completeCommaSeparated([]string{"json", "html"})
+
+	results, _ := complete(nil, nil, ",j")
+
+	if len(results) != 1 || results[0] != ",json" {
+		t.Fatalf("expected [,json], got %v", results)
 	}
 }

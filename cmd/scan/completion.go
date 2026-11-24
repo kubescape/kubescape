@@ -21,7 +21,9 @@ func completeValues(values []string) cobra.CompletionFunc {
 				strings.ToLower(value),
 				strings.ToLower(toComplete),
 			) {
-				matches = append(matches, value)
+				if len(toComplete) <= len(value) {
+					matches = append(matches, toComplete+value[len(toComplete):])
+				}
 			}
 		}
 
@@ -44,7 +46,7 @@ func completeCommaSeparated(values []string) cobra.CompletionFunc {
 		selected := make(map[string]bool)
 
 		for _, part := range parts[:len(parts)-1] {
-			selected[strings.ToLower(part)] = true
+			selected[strings.ToLower(strings.TrimSpace(part))] = true
 		}
 
 		var results []string
@@ -61,10 +63,16 @@ func completeCommaSeparated(values []string) cobra.CompletionFunc {
 				continue
 			}
 
-			if prefix == "" {
-				results = append(results, value)
+			if len(current) > len(value) {
+				continue
+			}
+
+			candidate := current + value[len(current):]
+
+			if len(parts) == 1 {
+				results = append(results, candidate)
 			} else {
-				results = append(results, prefix+","+value)
+				results = append(results, prefix+","+candidate)
 			}
 		}
 
