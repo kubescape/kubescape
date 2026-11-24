@@ -107,13 +107,17 @@ func normalizeSemVer(v string) string {
 }
 
 // Checks that kubescape version is in range of use for this rule
-// In local build (BuildNumber = ""):
+// In local build (BuildNumber = "" or any non-semver value such as "dev"):
 // returns true only if rule doesn't have the "until" attribute
 func isRuleKubescapeVersionCompatible(ruleName string, attributes map[string]any, version string, warned map[string]struct{}) bool {
 	if warned == nil {
 		warned = make(map[string]struct{})
 	}
 	normalizedVersion := normalizeSemVer(version)
+	if !semver.IsValid(normalizedVersion) {
+		// "dev" would otherwise pass both the "from" and the "until" gate and run legacy and -v1 rules together.
+		normalizedVersion = ""
+	}
 
 	if from, ok := attributes["useFromKubescapeVersion"]; ok && from != nil {
 		switch sfrom := from.(type) {
@@ -128,7 +132,7 @@ func isRuleKubescapeVersionCompatible(ruleName string, attributes map[string]any
 						helpers.String("rule", ruleName))
 				}
 			}
-			if normalizedVersion != "" && semver.IsValid(normalizedVersion) && semver.Compare(normalizedVersion, normalizedFrom) == -1 {
+			if normalizedVersion != "" && semver.Compare(normalizedVersion, normalizedFrom) == -1 {
 				return false
 			}
 		default:

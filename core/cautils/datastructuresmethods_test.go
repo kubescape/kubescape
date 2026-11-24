@@ -273,6 +273,13 @@ func TestIsRuleKubescapeVersionCompatible(t *testing.T) {
 	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_133.Attributes, buildNumberMock, make(map[string]struct{})))
 	assert.True(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_134.Attributes, buildNumberMock, make(map[string]struct{})))
 
+	// a non-semver build number ("dev" from go build / make build) behaves like a local build
+	buildNumberMock = "dev"
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_131.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_132.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_133.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.True(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_134.Attributes, buildNumberMock, make(map[string]struct{})))
+
 	// should only use rules that version is in range of use
 	buildNumberMock = "v1.0.130"
 	assert.True(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_131.Attributes, buildNumberMock, make(map[string]struct{})))
