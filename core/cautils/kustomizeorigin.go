@@ -3,6 +3,7 @@ package cautils
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -139,6 +140,14 @@ func originModeFor(directory string) originPlan {
 		return originPlan{mode: originOwn, allowedRoots: allowedRoots, sources: walk.sources}
 	}
 	return originPlan{mode: originWrapper, preserved: preserved, allowedRoots: allowedRoots, sources: walk.sources}
+}
+
+// sameAs reports whether two inspections reached the same plan.
+func (p originPlan) sameAs(other originPlan) bool {
+	return p.mode == other.mode &&
+		slices.Equal(p.preserved, other.preserved) &&
+		slices.Equal(p.allowedRoots, other.allowedRoots) &&
+		maps.Equal(p.sources, other.sources)
 }
 
 func inspectKustomizationGraph(directory string) (safe bool, preserved []string, ownOrigins bool, walk *originWalk) {
