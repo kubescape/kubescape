@@ -164,9 +164,15 @@ func downloadArtifacts(ctx context.Context, downloadInfo *metav1.DownloadInfo) (
 		TargetFramework:      downloadFramework,
 		TargetAttackTracks:   downloadAttackTracks,
 	}
+	artifactOrder := []string{
+		TargetControlsInputs,
+		TargetExceptions,
+		TargetFramework,
+		TargetAttackTracks,
+	}
 	var files []string
 	var errs []error
-	for artifact := range artifacts {
+	for _, artifact := range artifactOrder {
 		artifactFiles, err := downloadArtifact(ctx, &metav1.DownloadInfo{
 			Target:    artifact,
 			Path:      downloadInfo.Path,

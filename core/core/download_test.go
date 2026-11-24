@@ -1105,6 +1105,27 @@ func TestDownloadArtifacts(t *testing.T) {
 		_, statErr = os.Stat(filepath.Join(dir, "nsa.json"))
 		assert.NoError(t, statErr, "nsa.json should still have been written")
 	})
+
+	t.Run("downloads artifacts in deterministic order", func(t *testing.T) {
+		withTenantConfig(t, &fakeTenantConfig{})
+		withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: map[string][]string{"a": {"1"}}}, nil)
+		withExceptionsGetter(t, &fakeExceptionsGetter{exceptions: []armotypes.PostureExceptionPolicy{{}}}, nil)
+		withAttackTracksGetter(t, &fakeAttackTracksGetter{tracks: []v1alpha1.AttackTrack{{}}}, nil)
+		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{{PortalBase: armotypes.PortalBase{Name: "nsa"}}}, named: fakeSecurityViewFrameworks()}, nil)
+
+		dir1 := t.TempDir()
+		files1, err1 := downloadArtifacts(context.Background(), &metav1.DownloadInfo{Target: TargetArtifacts, Path: dir1})
+		require.NoError(t, err1)
+
+		dir2 := t.TempDir()
+		files2, err2 := downloadArtifacts(context.Background(), &metav1.DownloadInfo{Target: TargetArtifacts, Path: dir2})
+		require.NoError(t, err2)
+
+		require.Len(t, files1, len(files2))
+		for i := range files1 {
+			assert.Equal(t, filepath.Base(files1[i]), filepath.Base(files2[i]))
+		}
+	})
 }
 
 // readJSONFile reads and unmarshals a JSON file, failing the test on error.
