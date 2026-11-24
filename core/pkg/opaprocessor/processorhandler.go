@@ -28,6 +28,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/scancache"
 	"github.com/kubescape/kubescape/v4/core/pkg/score"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -1907,7 +1908,7 @@ func (opap *OPAProcessor) evaluateRuleOnScope(ctx context.Context, rule *reporth
 		return resources, attribution, fmt.Errorf("enumerator failed for namespace %q: %w", scope.name, err)
 	}
 
-	inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
+	inputResources = opap.policyResources(enumeratedData)
 
 	// enumeratedIDs scopes which failed resources get reported, without
 	// scoping what the rule evaluates against below (that stays
@@ -2043,11 +2044,12 @@ func (opap *OPAProcessor) evaluateRuleOnScope(ctx context.Context, rule *reporth
 				for _, relatedObject := range ruleResponse.RelatedObjects {
 					wl := objectsenvelopes.NewObject(relatedObject.Object)
 					if wl != nil {
-						if !relatedResourcesSet.Contains(wl.GetID()) {
-							ruleResult.RelatedResourcesIDs = append(ruleResult.RelatedResourcesIDs, wl.GetID())
+						id := opap.resolveSelectedManifest(wl).GetID()
+						if !relatedResourcesSet.Contains(id) {
+							ruleResult.RelatedResourcesIDs = append(ruleResult.RelatedResourcesIDs, id)
 						}
-						relatedResourcesSet.Add(wl.GetID())
-						ruleResult.Paths = appendPaths(ruleResult.Paths, relatedObject.AssistedRemediation, wl.GetID())
+						relatedResourcesSet.Add(id)
+						ruleResult.Paths = appendPaths(ruleResult.Paths, relatedObject.AssistedRemediation, id)
 					}
 				}
 			}
@@ -2314,6 +2316,44 @@ func (opap *OPAProcessor) notEvaluatedReasons() map[string]string {
 		merged[id] = reason
 	}
 	return merged
+}
+
+// policyResources restores the selected workload's manifest identity when
+// policy output uses the Kubernetes object without the loader's source path.
+func (opap *OPAProcessor) policyResources(objects []map[string]any) []workloadinterface.IMetadata {
+	resources := objectsenvelopes.ListMapToMeta(objects)
+	if opap.OPASessionObj != nil && opap.SingleResourceScan != nil && len(opap.ResourceSource) > 0 {
+		for i, resource := range resources {
+			resources[i] = opap.resolveSelectedManifest(resource)
+		}
+	}
+	return resources
+}
+
+func (opap *OPAProcessor) resolveSelectedManifest(resource workloadinterface.IMetadata) workloadinterface.IMetadata {
+	if opap.OPASessionObj == nil || len(opap.ResourceSource) == 0 {
+		return resource
+	}
+	// Synthetic policy results can have an ID that looks like a workload's.
+	switch resource.(type) {
+	case *workloadinterface.Workload, *workloadinterface.BaseObject:
+	default:
+		return resource
+	}
+	selected := opap.SingleResourceScan
+	if selected == nil || resource.GetID() != selected.GetID() {
+		return resource
+	}
+	object := selected.GetObject()
+	if path, ok := object[localworkload.PathKey].(string); !ok || path == "" {
+		return resource
+	}
+	// The policy may return only metadata, so keep the loaded manifest's body.
+	local := localworkload.NewLocalWorkload(object)
+	if _, found := opap.ResourceSource[local.GetID()]; found {
+		return local
+	}
+	return resource
 }
 
 // appendPaths appends the failedPaths, fixPaths and fixCommand to the paths slice with the resourceID

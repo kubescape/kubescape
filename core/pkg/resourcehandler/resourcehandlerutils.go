@@ -27,7 +27,7 @@ func workloadHasParent(obj map[string]any) bool {
 }
 
 // utils which are common to all resource handlers
-func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, wl workloadinterface.IWorkload, resolver resourceResolver) {
+func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, wl workloadinterface.IMetadata, resolver resourceResolver) {
 	if wl == nil {
 		return
 	}
@@ -35,7 +35,8 @@ func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResou
 	// 	return
 	// }
 
-	resolved := resolver(wl.GetGroup(), wl.GetVersion(), wl.GetKind())
+	group, version := k8sinterface.SplitApiVersion(wl.GetApiVersion())
+	resolved := resolver(group, version, wl.GetKind())
 	if len(resolved) != 1 {
 		logger.L().Warning("unable to resolve object resource", helpers.String("kind", wl.GetKind()), helpers.String("id", wl.GetID()))
 		return

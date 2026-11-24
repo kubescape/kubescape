@@ -179,7 +179,7 @@ func (opap *OPAProcessor) newCacheCandidate(controlID string, cacheWrite *cacheW
 // cache's verification sees exactly what results are built from.
 func (opap *OPAProcessor) attributedFailedResources(response reporthandling.RuleResponse, enumeratedIDs map[string]struct{}) []workloadinterface.IMetadata {
 	var attributed []workloadinterface.IMetadata
-	for _, failedResource := range objectsenvelopes.ListMapToMeta(response.GetFailedResources()) {
+	for _, failedResource := range opap.policyResources(response.GetFailedResources()) {
 		if opap.skipObject(failedResource) {
 			continue
 		}
@@ -195,7 +195,9 @@ func (opap *OPAProcessor) attributedFailedResources(response reporthandling.Rule
 // after only the namespace filter. The enumerator filter is left out on
 // purpose: the enumerated scope is built from the objects evaluated in this
 // scan, which excludes cache hits, so it would hide a finding against a cache
-// hit that a full scan keeps.
+// hit that a full scan keeps. Keep the reported IDs here and in isolated
+// enumerator verification: a verdict that depends on the selected manifest's
+// alias is not reusable by a scan without that selection.
 func (opap *OPAProcessor) reportedObjects(response reporthandling.RuleResponse) []workloadinterface.IMetadata {
 	var reported []workloadinterface.IMetadata
 	for _, object := range objectsenvelopes.ListMapToMeta(response.GetFailedResources()) {
