@@ -393,6 +393,49 @@ func TestGCPAdaptor_GetImagesVulnerabilities(t *testing.T) {
 	assert.Equal(t, []string{"https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2023-1234"}, vuln.Links)
 }
 
+func TestGCPAdaptor_GetImagesVulnerabilities_SanitizesLinksAndID(t *testing.T) {
+	mockOccurrences := []*grafeaspb.Occurrence{
+		{
+			Details: &grafeaspb.Occurrence_Vulnerability{
+				Vulnerability: &grafeaspb.VulnerabilityOccurrence{
+					ShortDescription:  "  CVE-2024-5678  ",
+					EffectiveSeverity: grafeaspb.Severity_CRITICAL,
+					LongDescription:   "Vulnerability with whitespace and duplicate URLs",
+					RelatedUrls: []*grafeaspb.RelatedUrl{
+						nil,
+						{Url: ""},
+						{Url: "   "},
+						{Url: " https://security-tracker.debian.org/tracker/CVE-2024-5678 "},
+						{Url: "https://security-tracker.debian.org/tracker/CVE-2024-5678"},
+						{Url: "https://nvd.nist.gov/vuln/detail/CVE-2024-5678"},
+					},
+				},
+			},
+		},
+	}
+
+	adaptor := NewGCPAdaptor()
+	adaptor.client = &mockGCPClient{
+		occurrences: mockOccurrences,
+	}
+
+	images := []ContainerImageIdentifier{
+		{Registry: "us-docker.pkg.dev", Repository: "my-project/my-repo/my-image", Hash: "sha256:1234"},
+	}
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
+	assert.NoError(t, err)
+	assert.Len(t, reports, 1)
+	assert.Len(t, reports[0].Vulnerabilities, 1)
+
+	vuln := reports[0].Vulnerabilities[0]
+	assert.Equal(t, "CVE-2024-5678", vuln.ID)
+	assert.Equal(t, []string{
+		"https://security-tracker.debian.org/tracker/CVE-2024-5678",
+		"https://nvd.nist.gov/vuln/detail/CVE-2024-5678",
+	}, vuln.Links)
+}
+
 func TestGCPAdaptor_GetImagesVulnerabilities_WithSuccessfulDiscovery(t *testing.T) {
 	now := time.Now()
 	mockOccurrences := []*grafeaspb.Occurrence{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -301,14 +302,17 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 					}
 
 					vuln := Vulnerability{
-						ID:          id,
+						ID:          strings.TrimSpace(id),
 						Severity:    NormalizeSeverity(vulnDetails.GetEffectiveSeverity().String()),
 						Description: vulnDetails.GetLongDescription(),
 						Links:       []string{},
 					}
 
 					for _, uri := range vulnDetails.GetRelatedUrls() {
-						vuln.Links = append(vuln.Links, uri.GetUrl())
+						u := strings.TrimSpace(uri.GetUrl())
+						if u != "" && !slices.Contains(vuln.Links, u) {
+							vuln.Links = append(vuln.Links, u)
+						}
 					}
 
 					report.Vulnerabilities = append(report.Vulnerabilities, vuln)
