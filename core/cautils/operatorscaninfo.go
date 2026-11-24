@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/armosec/armoapi-go/apis"
@@ -45,6 +46,23 @@ type OperatorScanInfo interface {
 	ValidatePayload(*apis.Commands) error
 }
 
+func cleanPayloadStrings(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	res := make([]string, 0, len(items))
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed != "" && !slices.Contains(res, trimmed) {
+			res = append(res, trimmed)
+		}
+	}
+	if len(res) == 0 {
+		return nil
+	}
+	return res
+}
+
 func (v *VulnerabilitiesScanInfo) ValidatePayload(commands *apis.Commands) error {
 	return nil
 }
@@ -52,8 +70,9 @@ func (v *VulnerabilitiesScanInfo) ValidatePayload(commands *apis.Commands) error
 func (v *VulnerabilitiesScanInfo) GetRequestPayload() *apis.Commands {
 	var commands []apis.Command
 
-	clusterName := v.ClusterName
-	if len(v.IncludeNamespaces) == 0 {
+	clusterName := strings.TrimSpace(v.ClusterName)
+	namespaces := cleanPayloadStrings(v.IncludeNamespaces)
+	if len(namespaces) == 0 {
 		wildWlid := wlid.GetWLID(clusterName, "", "", "")
 		command := apis.Command{
 			CommandName: apis.TypeScanImages,
@@ -61,8 +80,8 @@ func (v *VulnerabilitiesScanInfo) GetRequestPayload() *apis.Commands {
 		}
 		commands = append(commands, command)
 	} else {
-		for i := range v.IncludeNamespaces {
-			wildWlid := wlid.GetWLID(clusterName, v.IncludeNamespaces[i], "", "")
+		for _, ns := range namespaces {
+			wildWlid := wlid.GetWLID(clusterName, ns, "", "")
 			command := apis.Command{
 				CommandName: apis.TypeScanImages,
 				WildWlid:    wildWlid,
@@ -90,10 +109,10 @@ func (c *ConfigScanInfo) GetRequestPayload() *apis.Commands {
 				CommandName: apis.TypeRunKubescape,
 				Args: map[string]any{
 					KubescapeScanV1: utilsmetav1.PostScanRequest{
-						ExcludedNamespaces: c.ExcludedNamespaces,
-						IncludeNamespaces:  c.IncludedNamespaces,
+						ExcludedNamespaces: cleanPayloadStrings(c.ExcludedNamespaces),
+						IncludeNamespaces:  cleanPayloadStrings(c.IncludedNamespaces),
 						TargetType:         apisv1.KindFramework,
-						TargetNames:        c.Frameworks,
+						TargetNames:        cleanPayloadStrings(c.Frameworks),
 						HostScanner:        &c.HostScanner,
 					},
 				},

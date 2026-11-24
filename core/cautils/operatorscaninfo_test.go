@@ -129,6 +129,20 @@ func TestConfigScanInfo_GetRequestPayload(t *testing.T) {
 		require.NotNil(t, request.HostScanner)
 		assert.True(t, *request.HostScanner)
 	})
+
+	t.Run("normalizes and deduplicates namespaces and frameworks", func(t *testing.T) {
+		info := &ConfigScanInfo{
+			IncludedNamespaces: []string{"  prod  ", "prod", "  ", "staging"},
+			ExcludedNamespaces: []string{"  kube-system  ", "kube-system", ""},
+			Frameworks:         []string{"  nsa  ", "nsa", "   ", "mitre"},
+		}
+		payload := info.GetRequestPayload()
+		request := requireConfigScanRequest(t, payload)
+
+		assert.Equal(t, []string{"prod", "staging"}, request.IncludeNamespaces)
+		assert.Equal(t, []string{"kube-system"}, request.ExcludedNamespaces)
+		assert.Equal(t, []string{"nsa", "mitre"}, request.TargetNames)
+	})
 }
 
 func TestVulnerabilitiesScanInfo_ValidatePayload(t *testing.T) {
@@ -168,5 +182,37 @@ func TestVulnerabilitiesScanInfo_GetRequestPayload(t *testing.T) {
 			assert.Equal(t, apis.TypeScanImages, cmd.CommandName)
 			assert.Equal(t, expectedWildWlids[i], cmd.WildWlid)
 		}
+	})
+
+	t.Run("normalizes whitespace and deduplicates namespaces", func(t *testing.T) {
+		info := &VulnerabilitiesScanInfo{
+			ClusterName:       "  test-cluster  ",
+			IncludeNamespaces: []string{"  ns-a  ", "ns-a", "  ", " ns-b "},
+		}
+		payload := info.GetRequestPayload()
+
+		require.NotNil(t, payload)
+		require.Len(t, payload.Commands, 2)
+		expectedWildWlids := []string{
+			"wlid://cluster-test-cluster/namespace-ns-a",
+			"wlid://cluster-test-cluster/namespace-ns-b",
+		}
+		for i, cmd := range payload.Commands {
+			assert.Equal(t, apis.TypeScanImages, cmd.CommandName)
+			assert.Equal(t, expectedWildWlids[i], cmd.WildWlid)
+		}
+	})
+
+	t.Run("whitespace-only namespaces fall back to wildcard command", func(t *testing.T) {
+		info := &VulnerabilitiesScanInfo{
+			ClusterName:       "test-cluster",
+			IncludeNamespaces: []string{"   ", ""},
+		}
+		payload := info.GetRequestPayload()
+
+		require.NotNil(t, payload)
+		require.Len(t, payload.Commands, 1)
+		assert.Equal(t, apis.TypeScanImages, payload.Commands[0].CommandName)
+		assert.Equal(t, "wlid://cluster-test-cluster/namespace-", payload.Commands[0].WildWlid)
 	})
 }
