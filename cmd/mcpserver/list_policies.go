@@ -3,13 +3,17 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/core"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/maruel/natural"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 )
 
 const (
@@ -25,7 +29,7 @@ type controlsListResponse struct {
 	Controls   []metav1.ControlListEntry `json:"controls"`
 }
 
-func (ksServer *KubescapeMcpserver) ListFrameworks(ctx context.Context) ([]byte, error) {
+func (ksServer *KubescapeMcpserver) ListFrameworks(ctx context.Context, search string) ([]byte, error) {
 	pg, err := ksServer.readyPolicyGetter(ctx)
 	if err != nil {
 		return nil, err
@@ -36,8 +40,132 @@ func (ksServer *KubescapeMcpserver) ListFrameworks(ctx context.Context) ([]byte,
 	}
 	sorted := make([]string, len(names))
 	copy(sorted, names)
-	sort.Strings(sorted)
+	sort.Slice(sorted, func(i, j int) bool {
+		return natural.Less(sorted[i], sorted[j])
+	})
+	if term := strings.ToLower(strings.TrimSpace(search)); term != "" {
+		filtered := make([]string, 0, len(sorted))
+		for _, name := range sorted {
+			if strings.Contains(strings.ToLower(name), term) {
+				filtered = append(filtered, name)
+			}
+		}
+		sorted = filtered
+	}
 	return json.Marshal(sorted)
+}
+
+// ListControlsConfig lists configurable control parameters, their resolved
+// values, descriptions, and the security controls that consume them.
+// Optional controlID filters to entries affecting a specific control;
+// optional search filters across name, title, description, or control IDs.
+func (ksServer *KubescapeMcpserver) ListControlsConfig(ctx context.Context, search, controlID string) ([]byte, error) {
+	pg, err := ksServer.readyPolicyGetter(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var values map[string][]string
+	if k8sClient, err := ksServer.getK8sClient(); err == nil && k8sClient != nil {
+		crdInputs, err := getter.NewCRDControlInputsWithClient(k8sClient.DynamicClient)
+		if err != nil {
+			return nil, err
+		}
+		crdValues, err := crdInputs.GetControlsInputs(ctx, "")
+		if err != nil {
+			if !isMissingCRDErr(err) {
+				return nil, err
+			}
+		} else {
+			values = crdValues
+		}
+	}
+	if values == nil {
+		if cig, ok := pg.(getter.IControlsInputsGetter); ok {
+			v, err := cig.GetControlsInputs(ctx, "")
+			if err != nil {
+				return nil, err
+			}
+			values = v
+		}
+	}
+	if values == nil {
+		values = make(map[string][]string)
+	}
+
+	frameworks, err := pg.GetFrameworks()
+	if err != nil {
+		return nil, err
+	}
+
+	entries := core.BuildControlsConfigEntries(values, frameworks)
+	if controlID != "" {
+		entries = filterControlsConfigByControlID(entries, controlID)
+	}
+	if search != "" {
+		entries = filterControlsConfigBySearch(entries, search)
+	}
+
+	return json.Marshal(entries)
+}
+
+func isMissingCRDErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+		return true
+	}
+	var noResMatch *meta.NoResourceMatchError
+	if errors.As(err, &noResMatch) {
+		return true
+	}
+	var noKindMatch *meta.NoKindMatchError
+	return errors.As(err, &noKindMatch)
+}
+
+func filterControlsConfigByControlID(entries []metav1.ControlConfigEntry, controlID string) []metav1.ControlConfigEntry {
+	normID := strings.TrimSpace(controlID)
+	if normID == "" {
+		return entries
+	}
+	filtered := make([]metav1.ControlConfigEntry, 0, len(entries))
+	for _, entry := range entries {
+		for _, cid := range entry.Controls {
+			if strings.EqualFold(cid, normID) {
+				filtered = append(filtered, entry)
+				break
+			}
+		}
+	}
+	return filtered
+}
+
+func filterControlsConfigBySearch(entries []metav1.ControlConfigEntry, search string) []metav1.ControlConfigEntry {
+	term := strings.ToLower(strings.TrimSpace(search))
+	if term == "" {
+		return entries
+	}
+	filtered := make([]metav1.ControlConfigEntry, 0, len(entries))
+	for _, entry := range entries {
+		if strings.Contains(strings.ToLower(entry.Name), term) ||
+			strings.Contains(strings.ToLower(entry.Title), term) ||
+			strings.Contains(strings.ToLower(entry.Description), term) {
+			filtered = append(filtered, entry)
+			continue
+		}
+		matchedControl := false
+		for _, cid := range entry.Controls {
+			if strings.Contains(strings.ToLower(cid), term) {
+				matchedControl = true
+				break
+			}
+		}
+		if matchedControl {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 // ListControls lists a page of available controls, naturally sorted by ID. When

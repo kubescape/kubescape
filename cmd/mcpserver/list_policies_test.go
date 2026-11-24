@@ -7,13 +7,23 @@ import (
 	"path/filepath"
 	"testing"
 
+	"errors"
+
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/maruel/natural"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	clienttesting "k8s.io/client-go/testing"
 )
 
 func TestParsePolicyPipe_Empty(t *testing.T) {
@@ -60,7 +70,7 @@ func TestParsePolicyPipe_FrameworksWithSpaces(t *testing.T) {
 
 func TestListFrameworks_ReturnsJSON(t *testing.T) {
 	srv := &KubescapeMcpserver{}
-	data, err := srv.ListFrameworks(t.Context())
+	data, err := srv.ListFrameworks(t.Context(), "")
 	require.NoError(t, err)
 	var names []string
 	require.NoError(t, json.Unmarshal(data, &names), "output must be a JSON array of strings")
@@ -82,12 +92,12 @@ func TestListControls_ReturnsJSON(t *testing.T) {
 
 func TestListFrameworks_IsSorted(t *testing.T) {
 	srv := &KubescapeMcpserver{}
-	data, err := srv.ListFrameworks(t.Context())
+	data, err := srv.ListFrameworks(t.Context(), "")
 	require.NoError(t, err)
 	var names []string
 	require.NoError(t, json.Unmarshal(data, &names))
 	for i := 1; i < len(names); i++ {
-		assert.LessOrEqual(t, names[i-1], names[i], "frameworks must be sorted")
+		assert.True(t, natural.Less(names[i-1], names[i]) || names[i-1] == names[i], "frameworks must be sorted naturally")
 	}
 }
 
@@ -410,4 +420,430 @@ func TestListPolicyTools_RegistrationAndAnnotations(t *testing.T) {
 	assert.True(t, *ctrlTool.Annotations.ReadOnlyHint)
 	assert.Contains(t, ctrlTool.InputSchema.Properties, "search", "list_controls schema must have search property")
 	assert.Contains(t, ctrlTool.InputSchema.Properties, "framework", "list_controls schema must have framework property")
+
+	cfgTool, ok := toolMap["list_controls_config"]
+	require.True(t, ok, "list_controls_config must be registered")
+	require.NotNil(t, cfgTool.Annotations.ReadOnlyHint, "list_controls_config must have ReadOnlyHint annotation")
+	assert.True(t, *cfgTool.Annotations.ReadOnlyHint)
+	assert.Contains(t, cfgTool.InputSchema.Properties, "search", "list_controls_config schema must have search property")
+	assert.Contains(t, cfgTool.InputSchema.Properties, "control_id", "list_controls_config schema must have control_id property")
+}
+
+type fakeControlsConfigGetter struct {
+	getter.IPolicyGetter
+	frameworksList []string
+	controlsList   []string
+	frameworks     []reporthandling.Framework
+	controlInputs  map[string][]string
+}
+
+func (f *fakeControlsConfigGetter) ListFrameworks() ([]string, error) {
+	return f.frameworksList, nil
+}
+func (f *fakeControlsConfigGetter) ListControls() ([]string, error) {
+	return f.controlsList, nil
+}
+func (f *fakeControlsConfigGetter) GetFrameworks() ([]reporthandling.Framework, error) {
+	return f.frameworks, nil
+}
+func (f *fakeControlsConfigGetter) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {
+	return f.controlInputs, nil
+}
+
+func listControlsConfigServer(t *testing.T) *KubescapeMcpserver {
+	t.Helper()
+	origLoadK8sConfig := loadK8sConfig
+	origSetConnectedToCluster := setConnectedToCluster
+	t.Cleanup(func() {
+		loadK8sConfig = origLoadK8sConfig
+		setConnectedToCluster = origSetConnectedToCluster
+	})
+	loadK8sConfig = func() error { return errors.New("no kubeconfig in test") }
+	setConnectedToCluster = func(bool) {}
+
+	s := server.NewMCPServer("test", "test")
+	ks := &KubescapeMcpserver{s: s}
+	createPolicyListingTools(ks)
+	createSuggestFixTools(ks)
+	createDiffReportsTools(ks)
+	cfg := &fakeControlsConfigGetter{
+		frameworksList: []string{"nsa", "mitre", "cis-v1.12.0", "cis-v1.2.0"},
+		controlsList: []string{
+			"C-0016|Ensure that only approved container images are used|cis-v1.2.0,nsa",
+			"C-0050|Limit CPU and memory requests|cis-v1.2.0",
+		},
+		frameworks: []reporthandling.Framework{
+			{
+				Controls: []reporthandling.Control{
+					{
+						ControlID: "C-0016",
+						Rules: []reporthandling.PolicyRule{
+							{
+								ControlConfigInputs: []reporthandling.ControlConfigInputs{
+									{
+										Path:        "settings.postureControlInputs.imageRepositoryAllowList",
+										Name:        "Allowed image repositories",
+										Description: "Repositories images may come from.",
+									},
+								},
+							},
+						},
+					},
+					{
+						ControlID: "C-0050",
+						Rules: []reporthandling.PolicyRule{
+							{
+								ControlConfigInputs: []reporthandling.ControlConfigInputs{
+									{
+										Path:        "settings.postureControlInputs.cpu_limit_max",
+										Name:        "cpu_limit_max",
+										Description: "Maximum allowed CPU limit.",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		controlInputs: map[string][]string{
+			"imageRepositoryAllowList": {"docker.io", "quay.io"},
+			"cpu_limit_max":            {"4"},
+			"unboundSetting":           {"value1"},
+		},
+	}
+	ks.startPolicyLoad(func() getter.IPolicyGetter { return cfg })
+	return ks
+}
+
+func TestListFrameworks_NaturalSorting(t *testing.T) {
+	ks := listControlsConfigServer(t)
+	data, err := ks.ListFrameworks(context.Background(), "")
+	require.NoError(t, err)
+	var names []string
+	require.NoError(t, json.Unmarshal(data, &names))
+	// In natural sorting, cis-v1.2.0 must appear before cis-v1.12.0
+	assert.Equal(t, []string{"cis-v1.2.0", "cis-v1.12.0", "mitre", "nsa"}, names)
+}
+
+func TestListFrameworks_Search(t *testing.T) {
+	ks := listControlsConfigServer(t)
+	data, err := ks.ListFrameworks(context.Background(), "cis")
+	require.NoError(t, err)
+	var names []string
+	require.NoError(t, json.Unmarshal(data, &names))
+	assert.Equal(t, []string{"cis-v1.2.0", "cis-v1.12.0"}, names)
+
+	data, err = ks.ListFrameworks(context.Background(), "NSA")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &names))
+	assert.Equal(t, []string{"nsa"}, names)
+
+	data, err = ks.ListFrameworks(context.Background(), "nonexistent")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &names))
+	assert.Empty(t, names)
+}
+
+func TestListControlsConfig_AllEntries(t *testing.T) {
+	ks := listControlsConfigServer(t)
+	data, err := ks.ListControlsConfig(context.Background(), "", "")
+	require.NoError(t, err)
+	var entries []metav1.ControlConfigEntry
+	require.NoError(t, json.Unmarshal(data, &entries))
+	require.Len(t, entries, 3)
+
+	assert.Equal(t, "cpu_limit_max", entries[0].Name)
+	assert.Equal(t, []string{"4"}, entries[0].Values)
+	assert.Equal(t, []string{"C-0050"}, entries[0].Controls)
+
+	assert.Equal(t, "imageRepositoryAllowList", entries[1].Name)
+	assert.Equal(t, "Allowed image repositories", entries[1].Title)
+	assert.Equal(t, "Repositories images may come from.", entries[1].Description)
+	assert.Equal(t, []string{"docker.io", "quay.io"}, entries[1].Values)
+	assert.Equal(t, []string{"C-0016"}, entries[1].Controls)
+
+	assert.Equal(t, "unboundSetting", entries[2].Name)
+	assert.Equal(t, []string{"value1"}, entries[2].Values)
+	assert.Empty(t, entries[2].Controls)
+}
+
+func TestListControlsConfig_FilterByControlID(t *testing.T) {
+	ks := listControlsConfigServer(t)
+	data, err := ks.ListControlsConfig(context.Background(), "", "c-0016")
+	require.NoError(t, err)
+	var entries []metav1.ControlConfigEntry
+	require.NoError(t, json.Unmarshal(data, &entries))
+	require.Len(t, entries, 1)
+	assert.Equal(t, "imageRepositoryAllowList", entries[0].Name)
+
+	data, err = ks.ListControlsConfig(context.Background(), "", "C-9999")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &entries))
+	assert.Empty(t, entries)
+}
+
+func TestListControlsConfig_FilterBySearch(t *testing.T) {
+	ks := listControlsConfigServer(t)
+	// Search by description keyword
+	data, err := ks.ListControlsConfig(context.Background(), "repositories", "")
+	require.NoError(t, err)
+	var entries []metav1.ControlConfigEntry
+	require.NoError(t, json.Unmarshal(data, &entries))
+	require.Len(t, entries, 1)
+	assert.Equal(t, "imageRepositoryAllowList", entries[0].Name)
+
+	// Search by control ID substring
+	data, err = ks.ListControlsConfig(context.Background(), "0050", "")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &entries))
+	require.Len(t, entries, 1)
+	assert.Equal(t, "cpu_limit_max", entries[0].Name)
+}
+
+func TestListControlsConfig_ViaCallTool(t *testing.T) {
+	ks := listControlsConfigServer(t)
+	res, err := ks.CallTool(context.Background(), "list_controls_config", map[string]any{"control_id": "C-0016"})
+	require.NoError(t, err)
+	require.False(t, res.IsError, toolResultText(t, res))
+	var entries []metav1.ControlConfigEntry
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, res)), &entries))
+	require.Len(t, entries, 1)
+	assert.Equal(t, "imageRepositoryAllowList", entries[0].Name)
+}
+
+func TestListFrameworks_ViaCallTool_WithSearch(t *testing.T) {
+	ks := listControlsConfigServer(t)
+	res, err := ks.CallTool(context.Background(), "list_frameworks", map[string]any{"search": "cis"})
+	require.NoError(t, err)
+	require.False(t, res.IsError, toolResultText(t, res))
+	var names []string
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, res)), &names))
+	assert.Equal(t, []string{"cis-v1.2.0", "cis-v1.12.0"}, names)
+}
+
+func TestListControlsConfig_CRDForbiddenReturnsError(t *testing.T) {
+	origLoadK8sConfig := loadK8sConfig
+	origSetConnectedToCluster := setConnectedToCluster
+	t.Cleanup(func() {
+		loadK8sConfig = origLoadK8sConfig
+		setConnectedToCluster = origSetConnectedToCluster
+	})
+	loadK8sConfig = func() error { return errors.New("no kubeconfig in test") }
+	setConnectedToCluster = func(bool) {}
+
+	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())
+	dyn.PrependReactor("get", "controlinputs", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Group: "kubescape.io", Resource: "controlinputs"}, "default", errors.New("RBAC forbidden"))
+	})
+
+	ks := &KubescapeMcpserver{
+		s:         server.NewMCPServer("test", "test"),
+		k8sClient: &k8sinterface.KubernetesApi{DynamicClient: dyn},
+	}
+	cfg := &fakeControlsConfigGetter{}
+	ks.startPolicyLoad(func() getter.IPolicyGetter { return cfg })
+
+	_, err := ks.ListControlsConfig(context.Background(), "", "")
+	require.Error(t, err)
+	assert.True(t, apierrors.IsForbidden(err), "forbidden error must be returned, not swallowed: %v", err)
+}
+
+func TestListControlsConfig_CRDNotFoundFallsBackToPolicyDefaults(t *testing.T) {
+	origLoadK8sConfig := loadK8sConfig
+	origSetConnectedToCluster := setConnectedToCluster
+	t.Cleanup(func() {
+		loadK8sConfig = origLoadK8sConfig
+		setConnectedToCluster = origSetConnectedToCluster
+	})
+	loadK8sConfig = func() error { return errors.New("no kubeconfig in test") }
+	setConnectedToCluster = func(bool) {}
+
+	dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())
+
+	ks := &KubescapeMcpserver{
+		s:         server.NewMCPServer("test", "test"),
+		k8sClient: &k8sinterface.KubernetesApi{DynamicClient: dyn},
+	}
+	cfg := &fakeControlsConfigGetter{
+		frameworks: []reporthandling.Framework{
+			{
+				Controls: []reporthandling.Control{
+					{
+						ControlID: "C-0050",
+						Rules: []reporthandling.PolicyRule{
+							{
+								ControlConfigInputs: []reporthandling.ControlConfigInputs{
+									{
+										Path: "settings.postureControlInputs.cpu_limit_max",
+										Name: "cpu_limit_max",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		controlInputs: map[string][]string{
+			"cpu_limit_max": {"2"},
+		},
+	}
+	ks.startPolicyLoad(func() getter.IPolicyGetter { return cfg })
+
+	data, err := ks.ListControlsConfig(context.Background(), "", "")
+	require.NoError(t, err)
+	var entries []metav1.ControlConfigEntry
+	require.NoError(t, json.Unmarshal(data, &entries))
+	require.Len(t, entries, 1)
+	assert.Equal(t, "cpu_limit_max", entries[0].Name)
+	assert.Equal(t, []string{"2"}, entries[0].Values)
+}
+
+func TestListControlsConfig_CRDValuesUsed(t *testing.T) {
+	origLoadK8sConfig := loadK8sConfig
+	origSetConnectedToCluster := setConnectedToCluster
+	t.Cleanup(func() {
+		loadK8sConfig = origLoadK8sConfig
+		setConnectedToCluster = origSetConnectedToCluster
+	})
+	loadK8sConfig = func() error { return errors.New("no kubeconfig in test") }
+	setConnectedToCluster = func(bool) {}
+
+	controlInputGVR := schema.GroupVersionResource{
+		Group:    "kubescape.io",
+		Version:  "v1",
+		Resource: "controlinputs",
+	}
+	controlInputObj := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "kubescape.io/v1",
+			"kind":       "ControlInput",
+			"metadata": map[string]any{
+				"name": "default",
+			},
+			"spec": map[string]any{
+				"controls": map[string]any{
+					"cpu_limit_max": []any{"8"},
+				},
+			},
+		},
+	}
+
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{controlInputGVR: "ControlInputList"},
+		controlInputObj,
+	)
+
+	ks := &KubescapeMcpserver{
+		s:         server.NewMCPServer("test", "test"),
+		k8sClient: &k8sinterface.KubernetesApi{DynamicClient: dyn},
+	}
+	cfg := &fakeControlsConfigGetter{
+		frameworks: []reporthandling.Framework{
+			{
+				Controls: []reporthandling.Control{
+					{
+						ControlID: "C-0050",
+						Rules: []reporthandling.PolicyRule{
+							{
+								ControlConfigInputs: []reporthandling.ControlConfigInputs{
+									{
+										Path: "settings.postureControlInputs.cpu_limit_max",
+										Name: "cpu_limit_max",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		controlInputs: map[string][]string{
+			"cpu_limit_max": {"2"}, // Policy default should be overridden by CRD value ("8")
+		},
+	}
+	ks.startPolicyLoad(func() getter.IPolicyGetter { return cfg })
+
+	data, err := ks.ListControlsConfig(context.Background(), "", "")
+	require.NoError(t, err)
+	var entries []metav1.ControlConfigEntry
+	require.NoError(t, json.Unmarshal(data, &entries))
+	require.Len(t, entries, 1)
+	assert.Equal(t, "cpu_limit_max", entries[0].Name)
+	assert.Equal(t, []string{"8"}, entries[0].Values)
+}
+
+func TestListControlsConfig_CRDEmptyValuesUsed(t *testing.T) {
+	origLoadK8sConfig := loadK8sConfig
+	origSetConnectedToCluster := setConnectedToCluster
+	t.Cleanup(func() {
+		loadK8sConfig = origLoadK8sConfig
+		setConnectedToCluster = origSetConnectedToCluster
+	})
+	loadK8sConfig = func() error { return errors.New("no kubeconfig in test") }
+	setConnectedToCluster = func(bool) {}
+
+	controlInputGVR := schema.GroupVersionResource{
+		Group:    "kubescape.io",
+		Version:  "v1",
+		Resource: "controlinputs",
+	}
+	controlInputObj := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "kubescape.io/v1",
+			"kind":       "ControlInput",
+			"metadata": map[string]any{
+				"name": "default",
+			},
+			"spec": map[string]any{
+				"controls": map[string]any{},
+			},
+		},
+	}
+
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{controlInputGVR: "ControlInputList"},
+		controlInputObj,
+	)
+
+	ks := &KubescapeMcpserver{
+		s:         server.NewMCPServer("test", "test"),
+		k8sClient: &k8sinterface.KubernetesApi{DynamicClient: dyn},
+	}
+	cfg := &fakeControlsConfigGetter{
+		frameworks: []reporthandling.Framework{
+			{
+				Controls: []reporthandling.Control{
+					{
+						ControlID: "C-0050",
+						Rules: []reporthandling.PolicyRule{
+							{
+								ControlConfigInputs: []reporthandling.ControlConfigInputs{
+									{
+										Path: "settings.postureControlInputs.cpu_limit_max",
+										Name: "cpu_limit_max",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		controlInputs: map[string][]string{
+			"cpu_limit_max": {"2"}, // Should NOT be used when cluster CRD exists with empty controls
+		},
+	}
+	ks.startPolicyLoad(func() getter.IPolicyGetter { return cfg })
+
+	data, err := ks.ListControlsConfig(context.Background(), "", "")
+	require.NoError(t, err)
+	var entries []metav1.ControlConfigEntry
+	require.NoError(t, json.Unmarshal(data, &entries))
+	require.Len(t, entries, 1)
+	assert.Equal(t, "cpu_limit_max", entries[0].Name)
+	assert.Empty(t, entries[0].Values)
 }
