@@ -322,6 +322,15 @@ func gitLabExploitDetails(cve imageprinter.CVE) map[string]gitLabDetail {
 // has no CVE for a match, and GitLab shows the identifier type and links its URL,
 // so only a CVE ID is typed "cve" and linked to NVD.
 func gitLabAdvisoryIdentifier(id string) gitLabIdentifier {
+	trimmed := strings.TrimSpace(id)
+	if trimmed == "" {
+		return gitLabIdentifier{
+			Type:  "advisory",
+			Name:  "unknown",
+			Value: "unknown",
+		}
+	}
+	id = trimmed
 	identifier := gitLabIdentifier{Type: gitLabCVEIDType, Name: id, Value: id}
 	prefix, _, found := strings.Cut(id, "-")
 	switch {
