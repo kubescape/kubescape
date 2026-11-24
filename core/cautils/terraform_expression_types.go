@@ -195,6 +195,48 @@ func (c *terraformReferenceChecker) expressionType(expr hcl.Expression, ctx *hcl
 	return cty.DynamicPseudoType
 }
 
+// convertsToBool proves an operand converts to bool whichever conditional branch inputs select.
+func (c *terraformReferenceChecker) convertsToBool(expr hcl.Expression, ctx *hcl.EvalContext) bool {
+	expr = unwrapParentheses(expr)
+	// Without input references, only unavailable functions are unresolved and inputs cannot fail the conversion.
+	if !c.referencesDeclaredInput(expr, ctx) && c.expressionType(expr, ctx).Equals(cty.Bool) {
+		return true
+	}
+	switch e := expr.(type) {
+	case *hclsyntax.ScopeTraversalExpr:
+		// A typed input reference cannot fail; locals and index steps can.
+		if len(e.Traversal) == 2 && e.Traversal.RootName() == "var" && c.expressionType(expr, ctx).Equals(cty.Bool) {
+			return true
+		}
+	case *hclsyntax.FunctionCallExpr:
+		// can() and try() catch errors, so their Boolean type holds for any input.
+		if (e.Name == "can" || e.Name == "try") && c.expressionType(expr, ctx).Equals(cty.Bool) {
+			return true
+		}
+	case *hclsyntax.UnaryOpExpr:
+		// Operators report a Boolean type even when converting an operand fails.
+		if e.Op == hclsyntax.OpLogicalNot {
+			return c.convertsToBool(e.Val, ctx)
+		}
+	case *hclsyntax.BinaryOpExpr:
+		if e.Op == hclsyntax.OpLogicalAnd || e.Op == hclsyntax.OpLogicalOr {
+			return c.convertsToBool(e.LHS, ctx) && c.convertsToBool(e.RHS, ctx)
+		}
+	case *hclsyntax.ConditionalExpr:
+		left, right := c.expressionType(e.TrueResult, ctx), c.expressionType(e.FalseResult, ctx)
+		if common, _ := convert.UnifyUnsafe([]cty.Type{left, right}); common == cty.NilType {
+			return false
+		}
+		return c.convertsToBool(e.Condition, ctx) && c.convertsToBool(e.TrueResult, ctx) && c.convertsToBool(e.FalseResult, ctx)
+	}
+	value := c.provenExpressionValue(expr, ctx)
+	if value == cty.NilVal || !value.IsWhollyKnown() || value.IsNull() {
+		return false
+	}
+	_, err := convert.Convert(value, cty.Bool)
+	return err == nil
+}
+
 func terraformTraversalType(ty cty.Type, traversal hcl.Traversal) cty.Type {
 	if ty == cty.NilType || ty == cty.DynamicPseudoType {
 		return ty
@@ -439,18 +481,14 @@ func (c *terraformReferenceChecker) guaranteedCoalesceTypes(args []hclsyntax.Exp
 	}
 	sameTraversal := func(left, right hcl.Traversal) bool {
 		return slices.EqualFunc(left, right, func(left, right hcl.Traverser) bool {
-			switch left := left.(type) {
-			case hcl.TraverseRoot:
+			if root, ok := left.(hcl.TraverseRoot); ok {
 				right, ok := right.(hcl.TraverseRoot)
-				return ok && left.Name == right.Name
-			case hcl.TraverseAttr:
-				right, ok := right.(hcl.TraverseAttr)
-				return ok && left.Name == right.Name
-			case hcl.TraverseIndex:
-				right, ok := right.(hcl.TraverseIndex)
-				return ok && left.Key.RawEquals(right.Key)
+				return ok && root.Name == right.Name
 			}
-			return false
+			// var.name and var["name"] select the same value.
+			leftKey, leftOK := terraformObjectSelectionKey(left)
+			rightKey, rightOK := terraformObjectSelectionKey(right)
+			return leftOK && rightOK && leftKey.RawEquals(rightKey)
 		})
 	}
 	var groups []presence
@@ -518,8 +556,7 @@ func (c *terraformReferenceChecker) guaranteedCoalesceTypes(args []hclsyntax.Exp
 func (c *terraformReferenceChecker) coalesceTypesIndependent(args []hclsyntax.Expression, ctx *hcl.EvalContext, selected cty.Type) bool {
 	needsTypeCheck := false
 	for _, arg := range args {
-		_, diags := c.expressionValue(arg, ctx)
-		if !diags.HasErrors() && c.hasUnresolvableVariables(arg, ctx) {
+		if c.hasUnresolvableVariables(arg, ctx) {
 			needsTypeCheck = true
 			break
 		}
@@ -528,18 +565,23 @@ func (c *terraformReferenceChecker) coalesceTypesIndependent(args []hclsyntax.Ex
 		return true
 	}
 	observed := []cty.Type{selected}
-	possibilities := [][]cty.Type{{selected}}
+	var argumentCandidates [][]cty.Type
 	for _, arg := range args {
 		value, diags := c.expressionValue(arg, ctx)
-		if diags.HasErrors() {
+		// An argument failing only on missing inputs may contribute a type once supplied.
+		unresolved := c.hasUnresolvableVariables(arg, ctx)
+		if diags.HasErrors() && !unresolved {
 			continue
 		}
-		ty := terraformCoalesceArgumentType(value)
-		if ty != cty.NilType {
-			observed = append(observed, ty)
+		var candidates []cty.Type
+		if !diags.HasErrors() {
+			ty := terraformCoalesceArgumentType(value)
+			if ty != cty.NilType {
+				observed = append(observed, ty)
+			}
+			candidates = []cty.Type{ty}
 		}
-		candidates := []cty.Type{ty}
-		if c.hasUnresolvableVariables(arg, ctx) {
+		if unresolved {
 			candidates = nil
 			visits := 0
 			if !c.visitCoalesceTypes(arg, ctx, map[terraformExpressionContext]bool{}, func(ty cty.Type) bool {
@@ -552,9 +594,20 @@ func (c *terraformReferenceChecker) coalesceTypesIndependent(args []hclsyntax.Ex
 				}
 				return true
 			}) {
+				// Undeclared references fail whatever is supplied, so their argument is never used.
+				if diags.HasErrors() && !c.referencesDeclaredInput(arg, ctx) {
+					continue
+				}
 				return false
 			}
 		}
+		argumentCandidates = append(argumentCandidates, candidates)
+	}
+	if terraformCoalesceTypesInvariant(selected, observed, argumentCandidates) {
+		return true
+	}
+	possibilities := [][]cty.Type{{selected}}
+	for _, candidates := range argumentCandidates {
 		var next [][]cty.Type
 		for _, types := range possibilities {
 			for _, candidate := range candidates {
@@ -594,6 +647,46 @@ func (c *terraformReferenceChecker) coalesceTypesIndependent(args []hclsyntax.Ex
 		}
 	}
 	return checked
+}
+
+// referencesDeclaredInput reports whether supplying a module input or local could change expr.
+func (c *terraformReferenceChecker) referencesDeclaredInput(expr hcl.Expression, ctx *hcl.EvalContext) bool {
+	return slices.ContainsFunc(expr.Variables(), func(traversal hcl.Traversal) bool {
+		root := traversal.RootName()
+		if (root != "var" && root != "local") || terraformVariableScope(root, ctx) != c.moduleCtx {
+			return false
+		}
+		if root == "local" || len(traversal) < 2 {
+			return true
+		}
+		name, valid := terraformObjectSelectionKey(traversal[1])
+		_, declared := c.declaredVariables[name.AsString()]
+		return !valid || declared
+	})
+}
+
+// terraformCoalesceTypesInvariant reports whether every combination unifies to
+// the selected list(E): lists and tuples of E always unify with it to list(E).
+func terraformCoalesceTypesInvariant(selected cty.Type, observed []cty.Type, argumentCandidates [][]cty.Type) bool {
+	if !selected.IsListType() {
+		return false
+	}
+	element := selected.ElementType()
+	invariant := func(ty cty.Type) bool {
+		switch {
+		case ty == cty.NilType || ty.Equals(selected):
+			return true
+		case ty.IsTupleType():
+			return !slices.ContainsFunc(ty.TupleElementTypes(), func(ty cty.Type) bool { return !ty.Equals(element) })
+		}
+		return false
+	}
+	for _, types := range append([][]cty.Type{observed}, argumentCandidates...) {
+		if slices.ContainsFunc(types, func(ty cty.Type) bool { return !invariant(ty) }) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *terraformReferenceChecker) visitCoalesceTypes(expr hcl.Expression, ctx *hcl.EvalContext, active map[terraformExpressionContext]bool, visit func(cty.Type) bool) bool {
