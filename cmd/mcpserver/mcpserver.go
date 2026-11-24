@@ -58,15 +58,18 @@ var frameworkScanFn = func(s *KubescapeMcpserver, ctx context.Context, namespace
 }
 
 // mcpScanNamespace reads the optional CallTool namespace argument. "*" means
-// cluster-wide, the same as omitting the argument.
+// cluster-wide, the same as omitting the argument. Like mcpStringArg, it
+// treats a JSON null as an omitted argument and trims the value, so the scan
+// tools accept the same spellings of "no namespace" as the tools that read
+// namespace through mcpStringArg.
 func mcpScanNamespace(arguments map[string]any) (string, error) {
 	namespace := ""
-	if ns, ok := arguments["namespace"]; ok {
+	if ns, ok := arguments["namespace"]; ok && ns != nil {
 		nsStr, ok := ns.(string)
 		if !ok {
 			return "", fmt.Errorf("namespace argument must be a string")
 		}
-		namespace = nsStr
+		namespace = strings.TrimSpace(nsStr)
 	}
 	if namespace == "*" {
 		namespace = ""
