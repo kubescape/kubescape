@@ -426,6 +426,45 @@ func TestJunitActionPrintImageScanKeepsMultiArchSuitesDistinct(t *testing.T) {
 	assert.Contains(t, string(raw), `name="platform" value="linux/arm64"`)
 }
 
+func TestJunitActionPrintImageScanDistinguishesPackageVersions(t *testing.T) {
+	const advisory = "CVE-TEST"
+	const image = "registry.example.com/app:v1"
+	matches := match.NewMatches()
+	for _, version := range []string{"1.0.0", "1.1.0", ""} {
+		matches.Add(match.Match{
+			Vulnerability: vulnerability.Vulnerability{
+				Reference: vulnerability.Reference{ID: advisory, Namespace: "nvd"},
+			},
+			Package: grypepkg.Package{ID: grypepkg.ID("pkg-" + version), Name: "pkg", Version: version},
+		})
+	}
+
+	ctx := context.Background()
+	outputPath := filepath.Join(t.TempDir(), "images.xml")
+	jp := NewJunitPrinter(false)
+	require.NoError(t, jp.SetWriter(ctx, outputPath))
+	require.NoError(t, jp.ActionPrint(ctx, nil, []cautils.ImageScanData{{Image: image, Matches: matches}}))
+	require.NoError(t, jp.CloseWriter())
+
+	raw, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+	var got JUnitTestSuites
+	require.NoError(t, xml.Unmarshal(raw, &got))
+	require.Len(t, got.Suites, 1)
+	assert.Equal(t, 3, got.Failures)
+	var names []string
+	for _, testCase := range got.Suites[0].TestCases {
+		assert.Equal(t, image, testCase.Classname)
+		assert.NotNil(t, testCase.Failure)
+		names = append(names, testCase.Name)
+	}
+	assert.ElementsMatch(t, []string{
+		advisory + " (pkg) [1.0.0]",
+		advisory + " (pkg) [1.1.0]",
+		advisory + " (pkg)",
+	}, names)
+}
+
 func TestImageTestCasesIncludesVEXDetails(t *testing.T) {
 	cases := imageTestCases([]imageprinter.CVE{
 		{
@@ -1561,7 +1600,7 @@ func TestJunitActionPrint_NilReport_FallbackToImageScan(t *testing.T) {
 	for _, tc := range got.Suites[0].TestCases {
 		caseNames = append(caseNames, tc.Name)
 	}
-	assert.Contains(t, caseNames, "CVE-KEPT (pkg-CVE-KEPT)")
+	assert.Contains(t, caseNames, "CVE-KEPT (pkg-CVE-KEPT) [1.0.0]")
 }
 
 func TestJunitActionPrintMissingResourceNoPanic(t *testing.T) {
@@ -1749,7 +1788,7 @@ func TestJunitActionPrint_SanitizesControlCharacters(t *testing.T) {
 			Package: grypepkg.Package{
 				ID:      grypepkg.ID(packageName),
 				Name:    packageName,
-				Version: "1.0.0",
+				Version: "1.0\x03.0",
 			},
 		}
 	}
@@ -1813,7 +1852,7 @@ func TestJunitActionPrint_SanitizesControlCharacters(t *testing.T) {
 		if suite.Name == "maliciousimage:v1.0 [linux/amd64]" {
 			foundImageSuite = true
 			for _, tc := range suite.TestCases {
-				if tc.Name == "CVE-2026-0001 (badpkg)" {
+				if tc.Name == "CVE-2026-0001 (badpkg) [1.0%03.0]" {
 					foundVulnCase = true
 				}
 			}
