@@ -2,6 +2,8 @@ package cautils
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"testing"
@@ -114,7 +116,7 @@ func TestTerraformDirectory_GetWorkloads_ResourceInstances(t *testing.T) {
 		{name: "count from a variable default", meta: `count = var.replicas`, names: []string{"web", "web", "web"}},
 		{name: "count from a local", meta: `count = local.enabled ? 1 : 0`, names: []string{"web"}},
 		{name: "for_each over an empty set", meta: `for_each = toset([])`},
-		{name: "for_each over a set of numbers", meta: `for_each = toset([1, 2])`, names: []string{"web", "web"}},
+		{name: "for_each over a mixed list made a set of strings", meta: `for_each = toset(["a", 1])`, names: []string{"web", "web"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -156,6 +158,8 @@ func TestTerraformDirectory_GetWorkloads_UnresolvableInstancesAreErrors(t *testi
 		{name: "for_each from a variable without a default", meta: `for_each = var.unset`, wantErr: "for_each"},
 		{name: "count and for_each together", meta: "count = 1\n  for_each = toset([\"a\"])", wantErr: "cannot be used together"},
 		{name: "for_each over a list", meta: `for_each = ["a", "b"]`, wantErr: "use toset()"},
+		{name: "for_each over a set of numbers", meta: `for_each = toset([1, 2])`, wantErr: "set of strings"},
+		{name: "for_each over a set of bools", meta: `for_each = toset([true])`, wantErr: "set of strings"},
 		{name: "negative count", meta: `count = -1`, wantErr: "whole number"},
 		{name: "fractional count", meta: `count = 1.5`, wantErr: "whole number"},
 		{name: "count that is not a number", meta: `count = "many"`, wantErr: "count must be a number"},
@@ -183,6 +187,52 @@ resource "kubernetes_service_account_v1" "web" {
 	}
 }
 
+// The instances of a resource share one size budget, so many instances that
+// each expand a dynamic block can't generate more than one resource could.
+func TestTerraformDirectory_GetWorkloads_InstancesShareTheSizeBudget(t *testing.T) {
+	tests := []struct {
+		name    string
+		count   int
+		wantErr bool
+	}{
+		{name: "one instance fits", count: 1},
+		{name: "instances that only fit one by one", count: 20, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeTerraformFiles(t, dir, map[string]string{
+				"main.tf": fmt.Sprintf(`
+resource "kubernetes_pod_v1" "big" {
+  count = %d
+  metadata { name = "big-${count.index}" }
+  spec {
+    container {
+      name  = "c"
+      image = "nginx:1.27"
+      dynamic "env" {
+        for_each = range(1000)
+        content {
+          name  = "E${env.value}"
+          value = "x"
+        }
+      }
+    }
+  }
+}
+`, tt.count),
+			})
+			_, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
+			if !tt.wantErr {
+				require.Empty(t, errs)
+				return
+			}
+			require.NotEmpty(t, errs)
+			assert.ErrorContains(t, errors.Join(errs...), "exceeds the size limit")
+		})
+	}
+}
+
 func TestTerraformDirectory_GetWorkloads_KubernetesManifestInstances(t *testing.T) {
 	dir := t.TempDir()
 	writeTerraformFiles(t, dir, map[string]string{
@@ -204,6 +254,21 @@ resource "kubernetes_manifest" "unresolved" {
     apiVersion = "v1"
     kind       = "ConfigMap"
     metadata   = { name = "unresolved", namespace = "default" }
+  }
+}
+
+locals {
+  # try() hides the unresolved variable behind a known fallback, so the
+  # number of instances still isn't known.
+  replicas = try(var.unset, 2)
+}
+
+resource "kubernetes_manifest" "hidden" {
+  count = local.replicas
+  manifest = {
+    apiVersion = "v1"
+    kind       = "ConfigMap"
+    metadata   = { name = "hidden-${count.index}", namespace = "default" }
   }
 }
 `,

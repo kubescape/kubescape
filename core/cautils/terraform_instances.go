@@ -72,22 +72,19 @@ func terraformForEachInstances(forEach *hcl.Attribute, evalCtx *hcl.EvalContext,
 	if !isMap && !valueType.IsSetType() {
 		return nil, fmt.Errorf("%s: for_each must be a map or a set of strings, not %s; use toset() for a list", path, valueType.FriendlyName())
 	}
+	// Terraform refuses a set of anything but strings, such as toset([1, 2]),
+	// rather than converting its elements. An empty set has no element type.
+	if !isMap && value.LengthInt() > 0 && !valueType.ElementType().Equals(cty.String) {
+		return nil, fmt.Errorf("%s: for_each must be a map or a set of strings, not %s", path, valueType.FriendlyName())
+	}
 	if err := checkTerraformInstanceCount(int64(value.LengthInt()), sourceSize, path); err != nil {
 		return nil, err
 	}
 	instances := make([]*hcl.EvalContext, 0, value.LengthInt())
 	for it := value.ElementIterator(); it.Next(); {
+		// A set's element is both its key and its value, which the set's
+		// iterator already returns.
 		key, element := it.Element()
-		if !isMap {
-			// A set's element is both its key and its value. Terraform
-			// accepts only strings, so a set of numbers is converted as it
-			// would be and anything else is refused.
-			str, err := convert.Convert(element, cty.String)
-			if err != nil || str.IsNull() {
-				return nil, fmt.Errorf("%s: for_each set must contain only strings", path)
-			}
-			key, element = str, str
-		}
 		instances = append(instances, terraformInstanceContext(evalCtx, "each", map[string]cty.Value{
 			"key":   key,
 			"value": element,

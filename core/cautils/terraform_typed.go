@@ -634,8 +634,11 @@ func extractTypedResources(body hcl.Body, evalCtx *hcl.EvalContext, references .
 			errs = append(errs, err)
 			continue
 		}
+		// All instances of the resource share one converter, so the values and
+		// dynamic blocks they generate are bounded together, not per instance.
+		converter := terraformBodyConverter{errs: &errs, remaining: maxTerraformLocalSize, references: reference}
 		for _, instanceCtx := range instances {
-			manifests = append(manifests, typedResourceManifest(block, gvk.apiVersion, gvk.kind, instanceCtx, &errs, path, references...))
+			manifests = append(manifests, typedResourceManifest(&converter, block, gvk.apiVersion, gvk.kind, instanceCtx, path))
 		}
 	}
 	return manifests, errs
@@ -651,8 +654,8 @@ func syntaxAttribute(body *hclsyntax.Body, name string) *hcl.Attribute {
 
 // typedResourceManifest converts one instance of a typed resource block,
 // evaluated in evalCtx, into a Kubernetes manifest.
-func typedResourceManifest(block *hclsyntax.Block, apiVersion, kind string, evalCtx *hcl.EvalContext, errs *[]error, path string, references ...terraformReferenceChecker) map[string]interface{} {
-	obj := hclResourceBodyToMap(block.Body, evalCtx, errs, path, references...)
+func typedResourceManifest(converter *terraformBodyConverter, block *hclsyntax.Block, apiVersion, kind string, evalCtx *hcl.EvalContext, path string) map[string]interface{} {
+	obj := converter.bodyToMap(block.Body, evalCtx, path, true, false)
 	obj["apiVersion"] = apiVersion
 	if block.Labels[0] == "kubernetes_horizontal_pod_autoscaler" && usesHPAV2beta2(obj) {
 		obj["apiVersion"] = "autoscaling/v2beta2"

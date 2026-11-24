@@ -184,7 +184,7 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 
 	workloads := map[string][]workloadinterface.IMetadata{}
 	for i, file := range files {
-		manifests, fileErrs := extractKubernetesManifests(file.Body, evalCtx)
+		manifests, fileErrs := extractKubernetesManifests(file.Body, evalCtx, references)
 		errs = append(errs, fileErrs...)
 
 		typedManifests, typedErrs := extractTypedResources(file.Body, evalCtx, references)
@@ -258,8 +258,13 @@ func collectVariableDefaults(body hcl.Body, defaults map[string]cty.Value, decla
 // blocks and returns each manifest as a plain Go map, ready for json.Marshal.
 // A resource with count or for_each gives one manifest per known instance. As
 // with an unresolved manifest, a count or for_each that can't be resolved
-// skips only that resource, with a warning.
-func extractKubernetesManifests(body hcl.Body, evalCtx *hcl.EvalContext) ([]map[string]interface{}, []error) {
+// skips only that resource, with a warning. references checks count and
+// for_each for unresolved references, including ones hidden in locals.
+func extractKubernetesManifests(body hcl.Body, evalCtx *hcl.EvalContext, references ...terraformReferenceChecker) ([]map[string]interface{}, []error) {
+	var reference terraformReferenceChecker
+	if len(references) > 0 {
+		reference = references[0]
+	}
 	var errs []error
 	schema := &hcl.BodySchema{
 		Blocks: []hcl.BlockHeaderSchema{
@@ -286,7 +291,7 @@ func extractKubernetesManifests(body hcl.Body, evalCtx *hcl.EvalContext) ([]map[
 			sourceSize = synBody.SrcRange.End.Byte - synBody.SrcRange.Start.Byte
 		}
 		instances, err := terraformResourceInstances(attrContent.Attributes["count"], attrContent.Attributes["for_each"],
-			evalCtx, terraformReferenceChecker{}, "kubernetes_manifest."+block.Labels[1], sourceSize)
+			evalCtx, reference, "kubernetes_manifest."+block.Labels[1], sourceSize)
 		if err != nil {
 			logger.L().Warning("skipping kubernetes_manifest with unresolved count or for_each",
 				helpers.String("resource", block.Labels[1]), helpers.Error(err))
