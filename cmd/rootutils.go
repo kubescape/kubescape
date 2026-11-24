@@ -72,9 +72,15 @@ func initLoggerLevel(cmd *cobra.Command) error {
 		}
 	}
 
-	if err := logger.L().SetLevel(rootInfo.Logger); err != nil {
+	level := strings.ToLower(strings.TrimSpace(rootInfo.Logger))
+	if logger.L().LoggerName() == zaplogger.LoggerName && level == "success" {
+		level = "info"
+	}
+
+	if err := logger.L().SetLevel(level); err != nil {
 		return fmt.Errorf("supported levels: %s: %w", strings.Join(helpers.SupportedLevels(), "/"), err)
 	}
+	rootInfo.Logger = level
 	return nil
 }
 
