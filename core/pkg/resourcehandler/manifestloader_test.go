@@ -107,3 +107,40 @@ func TestManifestResourceHandler_NonKubernetesYAML(t *testing.T) {
 	_, _, _, _, err := h.GetResources(context.Background(), session, scanInfo)
 	require.ErrorIs(t, err, ErrNoScannableResources)
 }
+
+func TestManifestResourceHandler_SingleResourceScan(t *testing.T) {
+	h := NewManifestResourceHandler([]byte(sampleMultiDocYAML))
+	session := cautils.NewOPASessionObjMock()
+	scanInfo := &cautils.ScanInfo{ScanObject: scanObject("apps/v1", "Deployment", "default", "test-deploy")}
+
+	_, allRes, _, _, err := h.GetResources(context.Background(), session, scanInfo)
+	require.NoError(t, err)
+	require.NotNil(t, session.SingleResourceScan)
+	require.Equal(t, "Deployment", session.SingleResourceScan.GetKind())
+	require.Equal(t, "test-deploy", session.SingleResourceScan.GetName())
+	require.Contains(t, allRes, session.SingleResourceScan.GetID())
+}
+
+func TestManifestResourceHandler_SingleResourceScanRejectsOwnedResource(t *testing.T) {
+	const ownedPodYAML = `apiVersion: v1
+kind: Pod
+metadata:
+  name: owned-pod
+  namespace: default
+  ownerReferences:
+  - apiVersion: apps/v1
+    kind: ReplicaSet
+    name: web-123
+    uid: 00000000-0000-0000-0000-000000000001
+spec:
+  containers:
+  - name: nginx
+    image: nginx:latest
+`
+	h := NewManifestResourceHandler([]byte(ownedPodYAML))
+	session := cautils.NewOPASessionObjMock()
+	scanInfo := &cautils.ScanInfo{ScanObject: scanObject("v1", "Pod", "default", "owned-pod")}
+
+	_, _, _, _, err := h.GetResources(context.Background(), session, scanInfo)
+	require.ErrorContains(t, err, "has a parent and cannot be scanned")
+}
