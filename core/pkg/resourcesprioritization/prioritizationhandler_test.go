@@ -3,18 +3,48 @@ package resourcesprioritization
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// TestMain keeps this package's tests away from the developer's own cache.
+// NewResourcesPrioritizationHandler caches the attack tracks it loads in
+// getter.DefaultLocalStore, ~/.kubescape by default, so without this every run
+// replaced a real attack-tracks.json with the mock tracks below.
+func TestMain(m *testing.M) {
+	store, err := os.MkdirTemp("", "kubescape-resourcesprioritization-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	getter.DefaultLocalStore = store
+	code := m.Run()
+	_ = os.RemoveAll(store)
+	os.Exit(code)
+}
+
+// useTempLocalStore points the shared policy cache at an empty directory for
+// the rest of the test and returns that directory.
+func useTempLocalStore(t *testing.T) string {
+	t.Helper()
+	original := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	t.Cleanup(func() { getter.DefaultLocalStore = original })
+	return getter.DefaultLocalStore
+}
 
 type AttackTracksGetterMock struct{}
 
@@ -127,6 +157,43 @@ func TestNewResourcesPrioritizationHandler(t *testing.T) {
 	assert.Equal(t, handler.attackTracks[2].GetName(), "TestAttackTrack_3")
 	assert.True(t, handler.GetPodTemplateFallback())
 	assert.Equal(t, DefaultSupportedKinds(), handler.GetSupportedKinds())
+}
+
+// The attack-tracks file of an artifacts directory (--use-artifacts-from) is
+// read through a LoadPolicy, which opts out of the shared disk fallback the
+// same way it does for frameworks and controls. The scan still uses the file's
+// tracks, but the fallback a later offline scan reads must stay as it was.
+func TestNewResourcesPrioritizationHandler_LocalSourcePreservesSharedFallback(t *testing.T) {
+	cachePath := filepath.Join(useTempLocalStore(t), cautils.LocalAttackTracksFilename)
+	rollingFallback := []byte(`[{"metadata":{"name":"rolling-fallback"}}]`)
+	require.NoError(t, os.WriteFile(cachePath, rollingFallback, 0o600))
+
+	tracks, err := (&AttackTracksGetterMock{}).GetAttackTracks()
+	require.NoError(t, err)
+	localFile := filepath.Join(t.TempDir(), cautils.LocalAttackTracksFilename)
+	require.NoError(t, getter.SaveInFile(tracks, localFile))
+
+	handler, err := NewResourcesPrioritizationHandler(context.Background(), getter.NewLoadPolicy([]string{localFile}), false)
+	require.NoError(t, err)
+	assert.Len(t, handler.attackTracks, 3, "the current scan must still use the local attack tracks")
+
+	after, err := os.ReadFile(cachePath)
+	require.NoError(t, err)
+	assert.Equal(t, string(rollingFallback), string(after),
+		"a local attack-tracks file must not replace the shared rolling fallback")
+}
+
+// A source that does not opt out, such as the latest release or the cloud
+// backend, keeps refreshing the fallback.
+func TestNewResourcesPrioritizationHandler_DefaultSourceRefreshesSharedFallback(t *testing.T) {
+	cachePath := filepath.Join(useTempLocalStore(t), cautils.LocalAttackTracksFilename)
+
+	_, err := NewResourcesPrioritizationHandler(context.Background(), &AttackTracksGetterMock{}, false)
+	require.NoError(t, err)
+
+	cached, err := getter.NewLoadPolicy([]string{cachePath}).GetAttackTracks()
+	require.NoError(t, err, "the attack tracks must still be cached for a later offline scan")
+	assert.Len(t, cached, 3)
 }
 
 func TestResourcesPrioritizationHandler_PrioritizeResources(t *testing.T) {
