@@ -808,3 +808,29 @@ func TestPrometheusActionPrint_NilWriterReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "output writer is nil")
 }
+
+func TestPrometheus_NilReceiverSafety(t *testing.T) {
+	var pp *PrometheusPrinter
+
+	assert.NotPanics(t, func() {
+		err := pp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := pp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := pp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		pp.Score(100)
+		pp.PrintNextSteps()
+	})
+}
