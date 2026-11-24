@@ -229,6 +229,92 @@ func TestCorrelate_ExposureIsAttachedFromTheIndex(t *testing.T) {
 	}
 }
 
+func TestCorrelate_EgressExposureIsAttachedFromTheIndex(t *testing.T) {
+	// A NetworkPolicy isolates egress on this workload with an IPBlock rule.
+	// Correlate must evaluate EgressExposure and attach it to the Finding.
+	egressPolicy := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "prod", Name: "egress-cidr"},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+			Egress: []networkingv1.NetworkPolicyEgressRule{{
+				To: []networkingv1.NetworkPolicyPeer{{
+					IPBlock: &networkingv1.IPBlock{CIDR: "198.51.100.0/24"},
+				}},
+			}},
+		},
+	}
+	idx, errs := networkpolicy.NewIndex([]*networkingv1.NetworkPolicy{egressPolicy}, nil)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+
+	w := Workload{Namespace: "prod", Kind: "Deployment", Name: "web"}
+	endpoints := map[Workload]networkpolicy.Endpoint{
+		w: {Namespace: "prod", Name: "web", Labels: map[string]string{"app": "web"}},
+	}
+
+	findings, _ := Correlate(idx, endpoints, map[Workload][]storagev1beta1.Vulnerability{
+		w: {vuln("CVE-1", "Critical", true)},
+	}, SeverityLow, nil)
+
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	f := findings[0]
+	if f.EgressExposure.Level != networkpolicy.ExposureExternalCIDR {
+		t.Errorf("expected EgressExposure level ExposureExternalCIDR, got %v", f.EgressExposure.Level)
+	}
+	if f.EgressExposure.MatchedPolicy != "prod/egress-cidr" {
+		t.Errorf("expected MatchedPolicy prod/egress-cidr, got %q", f.EgressExposure.MatchedPolicy)
+	}
+}
+
+func TestCorrelate_SortsBroaderEgressExposureFirstWhenIngressAndSeverityAreEqual(t *testing.T) {
+	// Two workloads with identical ingress exposure (default allow / open) and
+	// identical CVE severity (Critical).
+	// One workload has egress restricted by policy, while the other is open.
+	// The open egress workload must be prioritized first because unrestricted
+	// outbound access enables C2 callbacks and data exfiltration.
+	isolatedPolicy := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "prod", Name: "isolate-egress"},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": "isolated"}},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+			Egress:      []networkingv1.NetworkPolicyEgressRule{}, // Deny all egress
+		},
+	}
+	idx, errs := networkpolicy.NewIndex([]*networkingv1.NetworkPolicy{isolatedPolicy}, nil)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+
+	openEgressWorkload := Workload{Namespace: "prod", Kind: "Deployment", Name: "open-egress"}
+	isolatedEgressWorkload := Workload{Namespace: "prod", Kind: "Deployment", Name: "isolated-egress"}
+	endpoints := map[Workload]networkpolicy.Endpoint{
+		openEgressWorkload:     {Namespace: "prod", Name: "open-egress", Labels: map[string]string{"app": "open"}},
+		isolatedEgressWorkload: {Namespace: "prod", Name: "isolated-egress", Labels: map[string]string{"app": "isolated"}},
+	}
+
+	findings, _ := Correlate(idx, endpoints, map[Workload][]storagev1beta1.Vulnerability{
+		openEgressWorkload:     {vuln("CVE-1", "Critical", false)},
+		isolatedEgressWorkload: {vuln("CVE-1", "Critical", false)},
+	}, SeverityLow, nil)
+
+	if len(findings) != 2 {
+		t.Fatalf("expected 2 findings, got %d", len(findings))
+	}
+	if findings[0].Workload.Name != "open-egress" {
+		t.Errorf("expected open-egress workload to rank first, got %s", findings[0].Workload.Name)
+	}
+	if findings[0].EgressExposure.Level != networkpolicy.ExposureOpen {
+		t.Errorf("expected first finding EgressExposure to be ExposureOpen, got %v", findings[0].EgressExposure.Level)
+	}
+	if findings[1].EgressExposure.Level != networkpolicy.ExposureRestricted {
+		t.Errorf("expected second finding EgressExposure to be ExposureRestricted, got %v", findings[1].EgressExposure.Level)
+	}
+}
+
 func TestCorrelate_SortsWidestExposureAndHighestSeverityFirst(t *testing.T) {
 	restrictiveSel := metav1.LabelSelector{MatchLabels: map[string]string{"app": "restricted"}}
 	restrictivePolicy := &networkingv1.NetworkPolicy{
@@ -457,6 +543,12 @@ func TestCorrelate_NilIndexIsDefaultAllow(t *testing.T) {
 	}
 	if f.Exposure.Reason != "no NetworkPolicy selects this endpoint for ingress; default allow" {
 		t.Errorf("unexpected exposure reason: %q", f.Exposure.Reason)
+	}
+	if f.EgressExposure.Level != networkpolicy.ExposureOpen {
+		t.Errorf("expected EgressExposure ExposureOpen for nil index, got %v", f.EgressExposure.Level)
+	}
+	if f.EgressExposure.Reason != "no NetworkPolicy selects this endpoint for egress; default allow" {
+		t.Errorf("unexpected egress exposure reason: %q", f.EgressExposure.Reason)
 	}
 }
 
