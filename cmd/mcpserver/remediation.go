@@ -287,15 +287,12 @@ func createRemediationTools(ksServer *KubescapeMcpserver) {
 // report_path and base_path both change the result, so both are in it: two calls
 // that differ only in either must not share one execution.
 func toolRemediationKey(toolName, path, reportPath, basePath string, controlIDs []string) string {
-	sortedIDs := make([]string, len(controlIDs))
-	copy(sortedIDs, controlIDs)
-	sort.Strings(sortedIDs)
 	return fmt.Sprintf("%s:%s:%s:%s:%s",
 		toolName,
 		url.QueryEscape(path),
 		url.QueryEscape(reportPath),
 		url.QueryEscape(basePath),
-		url.QueryEscape(strings.Join(sortedIDs, ",")),
+		canonicalControlKey(controlIDs),
 	)
 }
 
