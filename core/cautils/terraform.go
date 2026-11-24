@@ -137,23 +137,28 @@ func NewTerraformDirectory(path string, workspaceOpt ...string) *TerraformDirect
 // same-module default or an auto-loaded tfvars file are evaluated — deliberately
 // not a full Terraform evaluator (see LoadResourcesFromTerraform doc).
 func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadinterface.IMetadata, []error) {
-	parser := hclparse.NewParser()
-	var errs []error
-
-	tfFiles, err := filepath.Glob(filepath.Join(path, "*.tf"))
+	path = filepath.Clean(path)
+	entries, err := os.ReadDir(path)
 	if err != nil {
 		return nil, []error{err}
 	}
 
+	parser := hclparse.NewParser()
+	var errs []error
 	varDefaults := map[string]cty.Value{}
 	declared := map[string]terraformVariable{}
 	var files []*hcl.File
 	var parsedPaths []string
-	for _, f := range tfFiles {
+	for _, entry := range entries {
+		if !IsTerraformFile(entry.Name()) {
+			continue
+		}
+		f := filepath.Join(path, entry.Name())
 		if td.workspaceDir != "" && !pathcontainment.IsPathContained(td.workspaceDir, f) {
 			logger.L().Warning("Skipping Terraform file outside workspace root", helpers.String("path", f), helpers.String("workspace", td.workspaceDir))
 			continue
 		}
+		// Let the reader report invalid .tf entries, including directories.
 		content, readErr := readTerraformFile(f)
 		if readErr != nil {
 			errs = append(errs, fmt.Errorf("reading %s: %w", f, readErr))
