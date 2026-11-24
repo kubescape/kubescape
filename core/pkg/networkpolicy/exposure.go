@@ -3,6 +3,7 @@ package networkpolicy
 import (
 	"fmt"
 	"net/netip"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -114,9 +115,11 @@ func (idx *Index) IngressExposure(ep Endpoint) Exposure {
 			// hasIngress is true (Ingress is in this policy's policyTypes)
 			// but it declares no ingress rules at all: it isolates the
 			// endpoint and admits nothing. Still a real, attributable
-			// policy -- record it unless a wider level already applies.
-			if !haveBest {
-				best = Exposure{Level: ExposureRestricted, Reason: "isolated by a policy with no ingress rules; admits nothing", MatchedPolicy: policyName}
+			// policy -- record it unless an admitting rule or wider level
+			// already applies.
+			candidate := Exposure{Level: ExposureRestricted, Reason: "isolated by a policy with no ingress rules; admits nothing", MatchedPolicy: policyName}
+			if shouldReplaceExposure(best, haveBest, candidate) {
+				best = candidate
 				haveBest = true
 			}
 			continue
@@ -124,8 +127,9 @@ func (idx *Index) IngressExposure(ep Endpoint) Exposure {
 
 		for _, rule := range cp.policy.Spec.Ingress {
 			level, reason := classifyPeers(rule.From)
-			if !haveBest || level > best.Level {
-				best = Exposure{Level: level, Reason: reason, MatchedPolicy: policyName}
+			candidate := Exposure{Level: level, Reason: reason, MatchedPolicy: policyName}
+			if shouldReplaceExposure(best, haveBest, candidate) {
+				best = candidate
 				haveBest = true
 				if best.Level == ExposureOpen {
 					return best
@@ -136,6 +140,41 @@ func (idx *Index) IngressExposure(ep Endpoint) Exposure {
 	return best
 }
 
+// admitsTraffic reports whether an Exposure result represents actual traffic admission
+// rather than an isolating rule/policy that admits nothing.
+func admitsTraffic(level ExposureLevel, reason string) bool {
+	if level > ExposureRestricted {
+		return true
+	}
+	return !strings.Contains(reason, "admit no") && !strings.Contains(reason, "admits no") && !strings.Contains(reason, "admits nothing")
+}
+
+// shouldReplaceExposure reports whether candidate represents a wider or more
+// specific admission than current best across additive NetworkPolicies.
+// Rules that admit traffic strictly outrank isolating rules/policies that admit
+// nothing (even at the same ExposureRestricted level). Ties between equal levels
+// and admission status are broken deterministically by policy name.
+func shouldReplaceExposure(best Exposure, haveBest bool, candidate Exposure) bool {
+	if !haveBest {
+		return true
+	}
+	if candidate.Level > best.Level {
+		return true
+	}
+	if candidate.Level < best.Level {
+		return false
+	}
+	candidateAdmits := admitsTraffic(candidate.Level, candidate.Reason)
+	bestAdmits := admitsTraffic(best.Level, best.Reason)
+	if candidateAdmits && !bestAdmits {
+		return true
+	}
+	if !candidateAdmits && bestAdmits {
+		return false
+	}
+	return candidate.MatchedPolicy < best.MatchedPolicy
+}
+
 // classifyPeers reports the widest exposure level a NetworkPolicy peer list
 // admits. An empty/nil list matches every peer, the same "absent means
 // unrestricted" semantics used by both ingress and egress rules.
@@ -144,16 +183,26 @@ func classifyPeers(peers []networkingv1.NetworkPolicyPeer) (ExposureLevel, strin
 		return ExposureOpen, "rule has no peer restriction; matches every peer"
 	}
 
+	allExcluded := true
+	for _, peer := range peers {
+		if peer.IPBlock == nil || !ipBlockFullyExcluded(peer.IPBlock) {
+			allExcluded = false
+			break
+		}
+	}
+	if allExcluded {
+		if len(peers) == 1 {
+			return ExposureRestricted, fmt.Sprintf("ipBlock %s admits no addresses: its except entries cover the whole CIDR", peers[0].IPBlock.CIDR)
+		}
+		return ExposureRestricted, "all ipBlock peers admit no addresses: their except entries cover their whole CIDRs"
+	}
+
 	best := ExposureRestricted
 	reason := "matches only specific, scoped peers"
-	for i, peer := range peers {
+	for _, peer := range peers {
 		level, r := classifyPeer(peer)
 		if level > best {
 			best, reason = level, r
-		} else if i == 0 && len(peers) == 1 {
-			// A lone peer's own explanation (e.g. a fully excluded
-			// ipBlock) is more specific than the generic default.
-			reason = r
 		}
 	}
 	return best, reason

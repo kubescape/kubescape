@@ -164,3 +164,40 @@ func TestEgressExposure_HostNetworkIsConservativelyOpen(t *testing.T) {
 		t.Fatalf("Reason = %q, want hostNetwork explanation", got.Reason)
 	}
 }
+
+func TestEgressExposure_ZeroRulePolicyBeforeScopedPolicyDoesNotMaskRule(t *testing.T) {
+	denyAll := policy("ns", "00-deny-all", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}, nil, nil)
+	allowClient := policy("ns", "allow-client", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+		nil, []networkingv1.NetworkPolicyEgressRule{egressRule(podSelectorPeer("app", "client"))})
+
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{denyAll, allowClient}, nil)
+	ep := Endpoint{Namespace: "ns", Name: "app", Labels: map[string]string{"app": "web"}}
+
+	got := idx.EgressExposure(ep)
+	if got.Level != ExposureRestricted {
+		t.Fatalf("Level = %v, want ExposureRestricted", got.Level)
+	}
+	if got.MatchedPolicy != "ns/allow-client" {
+		t.Fatalf("MatchedPolicy = %q, want ns/allow-client: scoped rule must not be masked by zero-rule deny-all policy", got.MatchedPolicy)
+	}
+	if strings.Contains(got.Reason, "admits no destinations") {
+		t.Fatalf("Reason = %q, must not claim 'admits no destinations' when an admitting rule exists", got.Reason)
+	}
+}
+
+func TestEgressExposure_DeterministicTieBreakBetweenEqualPolicies(t *testing.T) {
+	pB := policy("ns", "b-allow-client", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+		nil, []networkingv1.NetworkPolicyEgressRule{egressRule(podSelectorPeer("app", "client-b"))})
+	pA := policy("ns", "a-allow-client", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+		nil, []networkingv1.NetworkPolicyEgressRule{egressRule(podSelectorPeer("app", "client-a"))})
+
+	idx1, _ := NewIndex([]*networkingv1.NetworkPolicy{pB, pA}, nil)
+	idx2, _ := NewIndex([]*networkingv1.NetworkPolicy{pA, pB}, nil)
+	ep := Endpoint{Namespace: "ns", Name: "app", Labels: map[string]string{"app": "web"}}
+
+	got1 := idx1.EgressExposure(ep)
+	got2 := idx2.EgressExposure(ep)
+	if got1.MatchedPolicy != "ns/a-allow-client" || got2.MatchedPolicy != "ns/a-allow-client" {
+		t.Fatalf("got1 MatchedPolicy = %q, got2 MatchedPolicy = %q; want ns/a-allow-client for both", got1.MatchedPolicy, got2.MatchedPolicy)
+	}
+}
