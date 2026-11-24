@@ -1758,3 +1758,159 @@ func TestStrategicMergeEntry(t *testing.T) {
 		})
 	}
 }
+
+// changingDisk is the disk, with change run once, right after the build reads
+// the file whose slash-separated path ends in trigger.
+type changingDisk struct {
+	filesys.FileSystem
+	trigger string
+	change  func()
+	changed bool
+}
+
+func (d *changingDisk) ReadFile(path string) ([]byte, error) {
+	content, err := d.FileSystem.ReadFile(path)
+	if !d.changed && strings.HasSuffix(filepath.ToSlash(path), d.trigger) {
+		d.changed = true
+		d.change()
+	}
+	return content, err
+}
+
+// changeDuringBuild makes the next plain build run change once it has read
+// trigger, and reports whether it did.
+func changeDuringBuild(t *testing.T, trigger string, change func()) *changingDisk {
+	t.Helper()
+	disk := &changingDisk{FileSystem: filesys.MakeFsOnDisk(), trigger: trigger, change: change}
+	original := kustomizeDisk
+	t.Cleanup(func() { kustomizeDisk = original })
+	kustomizeDisk = func() filesys.FileSystem { return disk }
+	return disk
+}
+
+// assertEachInItsFile checks that every attributed resource is in the file it
+// is attributed to.
+func assertEachInItsFile(t *testing.T, byName map[string]workloadinterface.IMetadata, origins map[string]string) {
+	t.Helper()
+	for kindAndName, workload := range byName {
+		file := origins[workload.GetID()]
+		if file == "" {
+			continue
+		}
+		content, err := os.ReadFile(file)
+		require.NoError(t, err)
+		objects, err := ReadFile(content, YAML_FILE_FORMAT)
+		require.NoError(t, err)
+		var found bool
+		for _, obj := range objects {
+			found = found || obj.GetKind()+"/"+obj.GetName() == kindAndName
+		}
+		assert.True(t, found, "%s is attributed to %s, which does not hold it", kindAndName, file)
+	}
+}
+
+// The inspection and the builds read the disk at different times. A file that
+// changes during the scan must not get a resource attributed to a file that
+// does not hold it.
+func TestKustomizeOriginWhenAFileChangesDuringTheBuild(t *testing.T) {
+	const (
+		service     = "apiVersion: v1\nkind: Service\nmetadata:\n  name: demo\n"
+		harmless    = "- op: replace\n  path: /spec/replicas\n  value: 2\n"
+		forging     = "- op: replace\n  path: /metadata/annotations/config.kubernetes.io~1origin\n  value: |\n    path: service.yaml\n"
+		ownOrigins  = "buildMetadata: [originAnnotations]\n"
+		patchedKust = "resources:\n- deployment.yaml\n- service.yaml\n" + ownOrigins +
+			"patches:\n- path: patch.yaml\n  target:\n    kind: Deployment\n"
+	)
+
+	patchTests := []struct {
+		name          string
+		before, after string
+		trigger       string
+	}{
+		// The build reads the patch after the change.
+		{"a patch file rewritten to forge the origin", harmless, forging, "/deployment.yaml"},
+		// The build reads the patch before the change.
+		{"a forging patch file made harmless", forging, harmless, "/patch.yaml"},
+	}
+	for _, tt := range patchTests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeKustomizeFiles(t, dir, map[string]string{
+				"deployment.yaml":    demoDeployment,
+				"service.yaml":       service,
+				"patch.yaml":         tt.before,
+				"kustomization.yaml": patchedKust,
+			})
+			disk := changeDuringBuild(t, tt.trigger, func() {
+				writeKustomizeFiles(t, dir, map[string]string{"patch.yaml": tt.after})
+			})
+
+			byName, origins := renderedKustomizeWorkloads(t, dir)
+			require.True(t, disk.changed)
+			require.Equal(t, "service.yaml", takeOriginPath(byName["Deployment/demo"].GetObject(), false),
+				"the build applied the forging patch")
+			assertEachInItsFile(t, byName, origins)
+		})
+	}
+
+	linkTests := []struct {
+		name          string
+		buildMetadata string
+		trigger       string
+		built         string
+	}{
+		// The build follows the link after the change.
+		{"a base link pointed elsewhere before the build follows it, through the wrapper", "", "/app/kustomization.yaml", "ConfigMap/other"},
+		{"a base link pointed elsewhere before the build follows it, with the kustomization's own origins", ownOrigins, "/app/kustomization.yaml", "ConfigMap/other"},
+		// The build has read the base when the link changes.
+		{"a base link pointed elsewhere after the build read the base, through the wrapper", "", "/common/deployment.yaml", "Deployment/demo"},
+		{"a base link pointed elsewhere after the build read the base, with the kustomization's own origins", ownOrigins, "/common/deployment.yaml", "Deployment/demo"},
+	}
+	for _, tt := range linkTests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeKustomizeFiles(t, root, map[string]string{
+				"app/kustomization.yaml":           "resources:\n- base-link\n" + tt.buildMetadata,
+				"shared/base/kustomization.yaml":   "resources:\n- ../common\n",
+				"shared/common/kustomization.yaml": "resources:\n- deployment.yaml\n",
+				"shared/common/deployment.yaml":    demoDeployment,
+				"other/base/kustomization.yaml":    "resources:\n- ../common\n",
+				"other/common/kustomization.yaml":  "resources:\n- deployment.yaml\n",
+				"other/common/deployment.yaml":     "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: other\n",
+			})
+			link := filepath.Join(root, "app", "base-link")
+			if err := os.Symlink(filepath.Join("..", "shared", "base"), link); err != nil {
+				t.Skipf("symlinks are unavailable: %v", err)
+			}
+			disk := changeDuringBuild(t, tt.trigger, func() {
+				require.NoError(t, os.Remove(link))
+				require.NoError(t, os.Symlink(filepath.Join("..", "other", "base"), link))
+			})
+
+			byName, origins := renderedKustomizeWorkloads(t, filepath.Join(root, "app"))
+			require.True(t, disk.changed)
+			require.Len(t, byName, 1)
+			require.Contains(t, byName, tt.built)
+			assertEachInItsFile(t, byName, origins)
+		})
+	}
+
+	t.Run("a resource's content changing keeps the files", func(t *testing.T) {
+		dir := t.TempDir()
+		writeKustomizeFiles(t, dir, map[string]string{
+			"deployment.yaml":    demoDeployment,
+			"service.yaml":       service,
+			"kustomization.yaml": "resources:\n- deployment.yaml\n- service.yaml\n" + ownOrigins,
+		})
+		disk := changeDuringBuild(t, "/deployment.yaml", func() {
+			writeKustomizeFiles(t, dir, map[string]string{
+				"deployment.yaml": strings.Replace(demoDeployment, "replicas: 1", "replicas: 3", 1),
+			})
+		})
+
+		byName, origins := renderedKustomizeWorkloads(t, dir)
+		require.True(t, disk.changed)
+		assert.Equal(t, filepath.Join(dir, "deployment.yaml"), origins[byName["Deployment/demo"].GetID()])
+		assert.Equal(t, filepath.Join(dir, "service.yaml"), origins[byName["Service/demo"].GetID()])
+	})
+}

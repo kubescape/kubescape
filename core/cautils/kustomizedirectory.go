@@ -657,6 +657,10 @@ func isKustomizeHelmError(err error, helmCommand string) bool {
 	return false
 }
 
+// kustomizeDisk is the file system the plain build reads, as a variable so a
+// test can change files while the build is reading them.
+var kustomizeDisk = filesys.MakeFsOnDisk
+
 // Get Workloads, creates the yaml files(K8s resources) using Kustomize and
 // renders the workloads from the yaml files (k8s resources)
 func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[string][]workloadinterface.IMetadata, []error) {
@@ -681,7 +685,7 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	// right files either way, since the OS follows the symlink itself.
 	kustomizeDirectoryPath = lexicalAbsPath(kustomizeDirectoryPath)
 
-	fSys := &kustomizeHelmFileSystem{FileSystem: filesys.MakeFsOnDisk()}
+	fSys := &kustomizeHelmFileSystem{FileSystem: kustomizeDisk()}
 	opts := krusty.MakeDefaultOptions()
 	// Restrict individual files to their Kustomization root. References to base
 	// directories outside that root (e.g. ../base) still get their own loader.
@@ -700,6 +704,12 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	}
 	opts.PluginConfig.HelmConfig.Command = helmCommand
 	newKustomizer := func() *krusty.Kustomizer { return krusty.MakeKustomizer(opts) }
+
+	// The graph is inspected before the plain build and again once the files
+	// are known (see below). The build and the inspection read the disk at
+	// different times, so one inspection alone can describe a graph the build
+	// never read.
+	plan := originModeFor(kustomizeDirectoryPath)
 
 	// The plain build is what the scan evaluates, always: it is exactly what the
 	// scanned kustomization renders.
@@ -727,9 +737,19 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	// Learn which file each resource came from, so a finding can name it. This
 	// only ever adds information: it never changes a resource, and it must happen
 	// before the workloads are built below, which add to the objects.
+	//
+	// A file that changes during the scan, a base link pointed elsewhere or a
+	// patch rewritten, would otherwise get the resources attributed to a file
+	// the build did not read. So the files are kept only if a second inspection
+	// reaches the same plan as the first: with one change, the build read either
+	// what the first saw or what the second saw. Changes that undo each other
+	// between the two inspections are not caught.
 	var originFiles []string
 	if e == nil {
-		originFiles = originFilesFor(newKustomizer, kustomizeDirectoryPath, originModeFor(kustomizeDirectoryPath), wls)
+		originFiles = originFilesFor(newKustomizer, kustomizeDirectoryPath, plan, wls)
+		if originFiles != nil && !plan.sameAs(originModeFor(kustomizeDirectoryPath)) {
+			originFiles = nil
+		}
 	}
 
 	kd.origins = map[string]string{}
