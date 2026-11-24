@@ -108,6 +108,28 @@ func watchRoots(inputs []string) []string {
 // kustomization it finds below root, not only one at root, and a kustomization
 // reads the files at or below its own directory.
 func inKustomizationBelow(root, path string) bool {
+	return inDirectoryBelow(root, path, cautils.IsKustomizeDirectory)
+}
+
+// inHelmChartBelow reports whether path is in a Helm chart's directory, its own
+// or one between it and root. A directory scan renders every chart it finds
+// below root, and a chart's templates read the chart's own files through .Files
+// (configuration files, scripts) and its vendored subcharts from charts/,
+// whatever their extension, so a change to any of them can change what is
+// scanned.
+func inHelmChartBelow(root, path string) bool {
+	return inDirectoryBelow(root, path, isHelmChartDirectory)
+}
+
+// isHelmChartDirectory is the chart check chart discovery uses.
+func isHelmChartDirectory(dir string) bool {
+	isChart, err := cautils.IsHelmDirectory(dir)
+	return err == nil && isChart
+}
+
+// inDirectoryBelow reports whether path is in a directory that rendered
+// reports as rendered input, its own or one between it and root.
+func inDirectoryBelow(root, path string, rendered func(dir string) bool) bool {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return false
@@ -119,7 +141,7 @@ func inKustomizationBelow(root, path string) bool {
 
 	root = filepath.Clean(absRoot)
 	for dir := filepath.Dir(filepath.Clean(absPath)); ; dir = filepath.Dir(dir) {
-		if cautils.IsKustomizeDirectory(dir) {
+		if rendered(dir) {
 			return true
 		}
 		if dir == root || filepath.Dir(dir) == dir {
@@ -164,7 +186,7 @@ func watchSecurityScan(cmd *cobra.Command, ks interface{ Context() context.Conte
 	return runWatch(ks.Context(), watchConfig{
 		Roots: roots,
 		AcceptDependencies: func(root, path string) bool {
-			return isRenderedDirectory(root, scanInfo.InputPatterns) || inKustomizationBelow(root, path)
+			return isRenderedDirectory(root, scanInfo.InputPatterns) || inKustomizationBelow(root, path) || inHelmChartBelow(root, path)
 		},
 		Exclude: func(root string) (func(string, bool) bool, error) {
 			filter, err := newReloadingFilter(root, scanInfo.ExcludePaths, !scanInfo.NoIgnoreFile)
