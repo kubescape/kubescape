@@ -292,6 +292,28 @@ func TestGetMasterKeyFromEnv(t *testing.T) {
 		assert.Contains(t, err.Error(), masterKeyEnvVar)
 		assert.Contains(t, err.Error(), "decryption")
 	})
+
+	t.Run("whitespace-only does not conflict with valid key", func(t *testing.T) {
+		t.Setenv(masterKeyEnvVar, "   ")
+		raw := strings.Repeat("ab", 32)
+		t.Setenv(masterKeyHexEnvVar, "  "+raw+"  ")
+
+		key, err := GetMasterKeyFromEnv("encryption")
+		require.NoError(t, err)
+
+		want, err := hex.DecodeString(raw)
+		require.NoError(t, err)
+		assert.Equal(t, want, key)
+	})
+
+	t.Run("whitespace-padded passphrase is trimmed", func(t *testing.T) {
+		t.Setenv(masterKeyEnvVar, "  a-sufficiently-long-passphrase  \n")
+		t.Setenv(masterKeyHexEnvVar, "")
+
+		key, err := GetMasterKeyFromEnv("encryption")
+		require.NoError(t, err)
+		assert.Equal(t, []byte("a-sufficiently-long-passphrase"), key)
+	})
 }
 
 // TestEnvelopeReportsCurrentWorkFactors pins the parameters written into new

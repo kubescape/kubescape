@@ -114,8 +114,8 @@ func ValidateMasterKey(masterKey []byte) error {
 // choice, not a way to skip the KDF.
 func GetMasterKeyFromEnv(operation string) ([]byte, error) {
 
-	masterKey := os.Getenv(masterKeyEnvVar)
-	masterKeyHex := os.Getenv(masterKeyHexEnvVar)
+	masterKey := strings.TrimSpace(os.Getenv(masterKeyEnvVar))
+	masterKeyHex := strings.TrimSpace(os.Getenv(masterKeyHexEnvVar))
 
 	if masterKey != "" && masterKeyHex != "" {
 		return nil, fmt.Errorf(
@@ -129,7 +129,7 @@ func GetMasterKeyFromEnv(operation string) ([]byte, error) {
 
 	switch {
 	case masterKeyHex != "":
-		decoded, err := hex.DecodeString(strings.TrimSpace(masterKeyHex))
+		decoded, err := hex.DecodeString(masterKeyHex)
 		if err != nil {
 			return nil, fmt.Errorf(
 				"invalid %s configuration: value is not valid hex",
