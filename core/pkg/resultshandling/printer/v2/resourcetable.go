@@ -251,7 +251,12 @@ func (prettyPrinter *PrettyPrinter) pathLineResolver(opaSessionObj *cautils.OPAS
 	if err != nil || rawObj == nil {
 		return nil
 	}
-	renderedObj := resource.GetObject()
+	// The scan writes containers back into the object as []corev1.Container
+	// (opaprocessor.removePodData), which getPathValue cannot walk, so no
+	// container field would ever count as uncomposed. Normalize both sides to
+	// the same generic JSON types, as the value lookups in pathvalue.go do.
+	rawObj = normalizeForPathExtraction(rawObj)
+	renderedObj := normalizeForPathExtraction(resource.GetObject())
 
 	return func(path string) (int, bool) {
 		if !isFieldUncomposed(rawObj, renderedObj, path) {
@@ -366,6 +371,20 @@ func isFieldUncomposed(rawObj, renderedObj map[string]any, path string) bool {
 		}
 		renderedAncestor, renderedOK := getPathValue(renderedObj, prefix)
 		rawAncestor, rawOK := getPathValue(rawObj, prefix)
+		// A typed container always encodes its resources as {}, because
+		// corev1.Container.Resources is not a pointer, so an empty rendered
+		// object may stand for one that is absent.
+		if rMap, isMap := renderedAncestor.(map[string]any); renderedOK && isMap && len(rMap) == 0 {
+			if !rawOK {
+				// Missing from the source too: it carries nothing, so keep
+				// looking for an ancestor both objects share.
+				renderedOK = false
+			} else if rawMap, rawIsMap := rawAncestor.(map[string]any); rawIsMap && len(rawMap) > 0 {
+				// The composer removed everything under it, including the
+				// line the resolver would report for it.
+				return false
+			}
+		}
 		if rawOK != renderedOK {
 			return false
 		}
