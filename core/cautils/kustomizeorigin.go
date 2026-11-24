@@ -3,6 +3,7 @@ package cautils
 import (
 	"bytes"
 	"encoding/json"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"sigs.k8s.io/kustomize/api/krusty"
+	"sigs.k8s.io/kustomize/api/provider"
 	"sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 	kyaml "sigs.k8s.io/kustomize/kyaml/yaml"
@@ -66,11 +68,47 @@ type originPlan struct {
 	preserved []string
 	// allowedRoots are the directory roots that resources in this plan may originate from.
 	allowedRoots []string
+	// sources maps each path an origin annotation can name to the file
+	// Kustomize reads there (see originWalk.sources).
+	sources map[string]string
 }
 
 type inspectKey struct {
 	loaderDir string
 	config    string
+	// lexicalDir is the path Kustomize's origin annotations give the node's
+	// directory. The same kustomization reached under two names is inspected
+	// under each, so both names are recorded.
+	lexicalDir string
+}
+
+// originWalk is the state of one inspection of a kustomization graph.
+type originWalk struct {
+	visited  map[inspectKey]struct{}
+	visiting map[inspectKey]struct{}
+	// allowedDirs are the directories the walk inspected.
+	allowedDirs []string
+	// sources maps each local file an origin annotation can name, as an
+	// absolute path, to the file Kustomize reads when the build reaches it,
+	// with links resolved. Kustomize builds the annotation by joining the
+	// references it followed as text, so the name and the file differ when a
+	// reference goes through a directory link and then climbs out of it with
+	// "..": the name climbs out of the link, while Kustomize, which resolved
+	// the link, climbs out of its target. A name that two different files share
+	// maps to "", since it does not say which one a resource came from.
+	sources map[string]string
+}
+
+func (w *originWalk) recordSource(lexical, read string) {
+	lexical, err := filepath.Abs(lexical)
+	if err != nil {
+		return
+	}
+	if known, ok := w.sources[lexical]; ok && known != read {
+		w.sources[lexical] = ""
+		return
+	}
+	w.sources[lexical] = read
 }
 
 // originModeFor inspects the scanned kustomization and its configuration graph
@@ -91,17 +129,19 @@ type inspectKey struct {
 // metadata and cannot be proven safe (see inspectKustomizationNode) yields
 // originUnavailable, so file attribution falls back to the directory.
 func originModeFor(directory string) originPlan {
-	safe, preserved, ownOrigins, allowedRoots := inspectKustomizationGraph(directory)
+	safe, preserved, ownOrigins, walk := inspectKustomizationGraph(directory)
 	if !safe {
 		return originPlan{mode: originUnavailable}
 	}
+	slices.Sort(walk.allowedDirs)
+	allowedRoots := slices.Compact(walk.allowedDirs)
 	if ownOrigins {
-		return originPlan{mode: originOwn, allowedRoots: allowedRoots}
+		return originPlan{mode: originOwn, allowedRoots: allowedRoots, sources: walk.sources}
 	}
-	return originPlan{mode: originWrapper, preserved: preserved, allowedRoots: allowedRoots}
+	return originPlan{mode: originWrapper, preserved: preserved, allowedRoots: allowedRoots, sources: walk.sources}
 }
 
-func inspectKustomizationGraph(directory string) (safe bool, preserved []string, ownOrigins bool, allowedRoots []string) {
+func inspectKustomizationGraph(directory string) (safe bool, preserved []string, ownOrigins bool, walk *originWalk) {
 	file := selectedKustomizationFile(directory)
 	if file == "" {
 		return false, nil, false, nil
@@ -111,22 +151,23 @@ func inspectKustomizationGraph(directory string) (safe bool, preserved []string,
 		return false, nil, false, nil
 	}
 
-	visited := map[inspectKey]struct{}{}
-	visiting := map[inspectKey]struct{}{}
-	var allowedDirs []string
-	cleanDir := filepath.Clean(directory)
-	allowedDirs = append(allowedDirs, cleanDir)
-
-	safe, preserved, ownOrigins = inspectKustomizationNode(absFile, true, visited, visiting, &allowedDirs)
+	walk = &originWalk{
+		visited:     map[inspectKey]struct{}{},
+		visiting:    map[inspectKey]struct{}{},
+		allowedDirs: []string{filepath.Clean(directory)},
+		sources:     map[string]string{},
+	}
+	safe, preserved, ownOrigins = walk.inspectKustomizationNode(absFile, filepath.Dir(absFile), true)
 	if !safe {
 		return false, nil, false, nil
 	}
-	slices.Sort(allowedDirs)
-	allowedRoots = slices.Compact(allowedDirs)
-	return safe, preserved, ownOrigins, allowedRoots
+	return safe, preserved, ownOrigins, walk
 }
 
-func inspectKustomizationNode(file string, isRoot bool, visited, visiting map[inspectKey]struct{}, allowedDirs *[]string) (bool, []string, bool) {
+// inspectKustomizationNode inspects the kustomization file and what it
+// references. lexicalDir is the path Kustomize's origin annotations give the
+// file's directory.
+func (w *originWalk) inspectKustomizationNode(file, lexicalDir string, isRoot bool) (bool, []string, bool) {
 	canonical, err := filepath.EvalSymlinks(file)
 	if err != nil {
 		return false, nil, false
@@ -136,17 +177,21 @@ func inspectKustomizationNode(file string, isRoot bool, visited, visiting map[in
 		return false, nil, false
 	}
 	dir := loaderDir
-	*allowedDirs = append(*allowedDirs, loaderDir, filepath.Dir(canonical))
+	w.allowedDirs = append(w.allowedDirs, loaderDir, filepath.Dir(canonical))
 
-	nodeKey := inspectKey{loaderDir, canonical}
-	if _, inStack := visiting[nodeKey]; inStack {
+	nodeKey := inspectKey{loaderDir: loaderDir, config: canonical}
+	if _, inStack := w.visiting[nodeKey]; inStack {
 		return false, nil, false
 	}
-	if _, done := visited[nodeKey]; done {
+	visitKey := inspectKey{loaderDir: loaderDir, config: canonical, lexicalDir: lexicalDir}
+	if _, done := w.visited[visitKey]; done {
 		return true, nil, false
 	}
-	visiting[nodeKey] = struct{}{}
-	defer delete(visiting, nodeKey)
+	w.visiting[nodeKey] = struct{}{}
+	defer delete(w.visiting, nodeKey)
+	// A generated resource's annotation names the kustomization file that
+	// configured the generator.
+	w.recordSource(filepath.Join(lexicalDir, filepath.Base(file)), canonical)
 
 	contents, err := readKustomizationFile(canonical)
 	if err != nil {
@@ -224,34 +269,37 @@ func inspectKustomizationNode(file string, isRoot bool, visited, visiting map[in
 		}
 	}
 	for _, patch := range k.PatchesStrategicMerge { //nolint:staticcheck
-		strPatch := string(patch)
-		p := types.Patch{
-			Patch: strPatch,
-		}
-		if !strings.Contains(strPatch, "\n") {
-			p.Path = strPatch
-			p.Patch = ""
-		}
-		if !isPatchProvablySafe(dir, p) {
+		if !isPatchProvablySafe(dir, strategicMergeEntry(string(patch))) {
 			return false, nil, false
 		}
 	}
 
-	references := make([]string, 0, len(k.Resources)+len(k.Components)+len(k.Bases)) //nolint:staticcheck
+	// Kustomize reads a resource, or a base, as a file before it tries it as a
+	// directory or a Git repository. A component is always a directory.
+	references := make([]string, 0, len(k.Resources)+len(k.Bases)+len(k.Components)) //nolint:staticcheck
 	references = append(references, k.Resources...)
-	references = append(references, k.Components...)
 	references = append(references, k.Bases...) //nolint:staticcheck
+	maybeFiles := len(references)
+	references = append(references, k.Components...)
 
-	for _, ref := range references {
+	for i, ref := range references {
 		if ref == "" {
 			continue
-		}
-		if isRemoteReference(ref) {
-			return false, nil, false
 		}
 		refPath := ref
 		if !filepath.IsAbs(refPath) {
 			refPath = filepath.Join(dir, refPath)
+		}
+		// A local file is read as one even when its name looks like Git
+		// shorthand, as demo:v1.yaml does. Only a URL Kustomize fetches over
+		// HTTP is read from the network instead.
+		readAsFile := false
+		if i < maybeFiles && !isRemoteFile(ref) {
+			info, err := os.Stat(refPath)
+			readAsFile = err == nil && info.Mode().IsRegular()
+		}
+		if !readAsFile && isRemoteReference(ref) {
+			return false, nil, false
 		}
 		refCanonical, err := filepath.EvalSymlinks(refPath)
 		if err != nil {
@@ -272,8 +320,8 @@ func inspectKustomizationNode(file string, isRoot bool, visited, visiting map[in
 			if childFile == "" {
 				return false, nil, false
 			}
-			*allowedDirs = append(*allowedDirs, refCanonical)
-			childSafe, _, _ := inspectKustomizationNode(childFile, false, visited, visiting, allowedDirs)
+			w.allowedDirs = append(w.allowedDirs, refCanonical)
+			childSafe, _, _ := w.inspectKustomizationNode(childFile, filepath.Join(lexicalDir, ref), false)
 			if !childSafe {
 				return false, nil, false
 			}
@@ -284,12 +332,13 @@ func inspectKustomizationNode(file string, isRoot bool, visited, visiting map[in
 			if manifestHasOriginAnnotation(refCanonical) {
 				return false, nil, false
 			}
+			w.recordSource(filepath.Join(lexicalDir, ref), refCanonical)
 		} else {
 			return false, nil, false
 		}
 	}
 
-	visited[nodeKey] = struct{}{}
+	w.visited[visitKey] = struct{}{}
 	return true, preserved, ownOrigins
 }
 
@@ -369,6 +418,24 @@ func isRemoteReference(ref string) bool {
 	return false
 }
 
+// isRemoteFile reports whether Kustomize fetches path over HTTP rather than
+// reading it from disk. It is the test Kustomize's file loader makes.
+func isRemoteFile(path string) bool {
+	u, err := url.Parse(path)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https")
+}
+
+// strategicMergeEntry is the patch a patchesStrategicMerge entry stands for.
+// Kustomize first parses the entry itself as resources and only reads it as a
+// path when that fails, so a patch written on one line is content, not a file
+// name. The same parser decides here.
+func strategicMergeEntry(entry string) types.Patch {
+	if _, err := provider.NewDepProvider().GetResourceFactory().SliceFromBytes([]byte(entry)); err == nil {
+		return types.Patch{Patch: entry}
+	}
+	return types.Patch{Path: entry}
+}
+
 func isPatchProvablySafe(baseDir string, patch types.Patch) bool {
 	if patch.Target != nil {
 		if patch.Target.AnnotationSelector != "" || patch.Target.LabelSelector != "" {
@@ -381,7 +448,8 @@ func isPatchProvablySafe(baseDir string, patch types.Patch) bool {
 
 	content := patch.Patch
 	if patch.Path != "" {
-		if isRemoteReference(patch.Path) {
+		// A patch path is always a file, so Git shorthand does not apply to it.
+		if isRemoteFile(patch.Path) {
 			return false
 		}
 		patchFilePath := patch.Path
@@ -573,11 +641,11 @@ func originFilesFor(newKustomizer func() *krusty.Kustomizer, directory string, p
 		// carries them, relative to the directory. They stay where they are.
 		files := make([]string, len(plain))
 		for i := range plain {
-			files[i] = takeKustomizeOrigin(plain[i].GetObject(), directory, false, plan.allowedRoots...)
+			files[i] = plan.originFile(plain[i].GetObject(), directory, false)
 		}
 		return files
 	case originWrapper:
-		return wrapperOriginFiles(newKustomizer, directory, plan.preserved, plan.allowedRoots, plain)
+		return wrapperOriginFiles(newKustomizer, directory, plan, plain)
 	}
 	return nil
 }
@@ -585,8 +653,8 @@ func originFilesFor(newKustomizer func() *krusty.Kustomizer, directory string, p
 // wrapperOriginFiles is originFilesFor for a kustomization that did not ask for
 // origin annotations: render it through the wrapper, take the files from there,
 // and trust them only if the wrapper rendered the same resources.
-func wrapperOriginFiles(newKustomizer func() *krusty.Kustomizer, directory string, preserved []string, allowedRoots []string, plain []workloadinterface.IMetadata) []string {
-	rendered, base, ok := originRenderer(newKustomizer, directory, preserved)
+func wrapperOriginFiles(newKustomizer func() *krusty.Kustomizer, directory string, plan originPlan, plain []workloadinterface.IMetadata) []string {
+	rendered, base, ok := originRenderer(newKustomizer, directory, plan.preserved)
 	if !ok {
 		return nil
 	}
@@ -596,7 +664,7 @@ func wrapperOriginFiles(newKustomizer func() *krusty.Kustomizer, directory strin
 	}
 	files := make([]string, len(annotated))
 	for i := range annotated {
-		files[i] = takeKustomizeOrigin(annotated[i].GetObject(), base, true, allowedRoots...)
+		files[i] = plan.originFile(annotated[i].GetObject(), base, true)
 		if !reflect.DeepEqual(annotated[i].GetObject(), plain[i].GetObject()) {
 			return nil
 		}
@@ -616,6 +684,64 @@ func wrapperOriginFiles(newKustomizer func() *krusty.Kustomizer, directory strin
 // allowedRoots are the directory roots that the resolved file must be contained within.
 // If allowedRoots is empty, baseDir is used as the single allowed root.
 func takeKustomizeOrigin(obj map[string]any, baseDir string, remove bool, allowedRoots ...string) string {
+	relative := takeOriginPath(obj, remove)
+	if relative == "" {
+		return ""
+	}
+	return localOriginFile(baseDir, relative, allowedRoots)
+}
+
+// originFile is takeKustomizeOrigin for a resource of this plan's build. On
+// top of its checks, the file has to be the one Kustomize read: the annotation
+// is text, and the file it names can be another one, or none (see
+// originWalk.sources). When the walk knows the file Kustomize read instead, that
+// file is returned. When it does not, nothing is.
+func (p originPlan) originFile(obj map[string]any, baseDir string, remove bool) string {
+	relative := takeOriginPath(obj, remove)
+	if relative == "" {
+		return ""
+	}
+	named, err := filepath.Abs(filepath.Join(baseDir, filepath.FromSlash(relative)))
+	if err != nil {
+		return ""
+	}
+	read := p.sources[named]
+	if read == "" {
+		return ""
+	}
+	// The name the annotation gives is kept when it is the file, so a file
+	// reached through a link is reported under the name the repository shows.
+	if file := localOriginFile(baseDir, relative, p.allowedRoots); file != "" && isSameFile(file, read) {
+		return file
+	}
+	if isContainedInAny(read, p.allowedRoots) {
+		return read
+	}
+	return ""
+}
+
+func isSameFile(a, b string) bool {
+	infoA, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	infoB, err := os.Stat(b)
+	return err == nil && os.SameFile(infoA, infoB)
+}
+
+func isContainedInAny(file string, roots []string) bool {
+	for _, root := range roots {
+		if root != "" && pathcontainment.IsPathContained(root, file) {
+			return true
+		}
+	}
+	return false
+}
+
+// takeOriginPath returns the local path Kustomize's origin annotation on obj
+// names, relative to the directory the build started in, or "" when there is
+// none. With remove set it also takes the annotation off obj.
+func takeOriginPath(obj map[string]any, remove bool) string {
 	metadata, _ := obj["metadata"].(map[string]any)
 	annotations, _ := metadata["annotations"].(map[string]any)
 	raw, ok := annotations[kustomizeOriginAnnotation].(string)
@@ -633,14 +759,15 @@ func takeKustomizeOrigin(obj map[string]any, baseDir string, remove bool, allowe
 	if err := kyaml.Unmarshal([]byte(raw), &origin); err != nil || origin.Repo != "" {
 		return ""
 	}
-	relative := origin.Path
-	if relative == "" {
-		relative = origin.ConfiguredIn
+	if origin.Path != "" {
+		return origin.Path
 	}
-	if relative == "" {
-		return ""
-	}
+	return origin.ConfiguredIn
+}
 
+// localOriginFile returns the file relative names under baseDir, when it is a
+// regular file inside one of allowedRoots, or baseDir if there are none.
+func localOriginFile(baseDir, relative string, allowedRoots []string) string {
 	file := filepath.Clean(filepath.Join(baseDir, filepath.FromSlash(relative)))
 	canonFile, err := filepath.EvalSymlinks(file)
 	if err != nil {
@@ -655,15 +782,7 @@ func takeKustomizeOrigin(obj map[string]any, baseDir string, remove bool, allowe
 	if len(roots) == 0 {
 		roots = []string{baseDir}
 	}
-
-	contained := false
-	for _, root := range roots {
-		if root != "" && pathcontainment.IsPathContained(root, canonFile) {
-			contained = true
-			break
-		}
-	}
-	if !contained {
+	if !isContainedInAny(canonFile, roots) {
 		return ""
 	}
 	return file
