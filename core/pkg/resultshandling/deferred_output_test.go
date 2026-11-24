@@ -53,7 +53,7 @@ func TestPrinters_KeepOldFileUntilActionPrintThenReplaceIt(t *testing.T) {
 				got, err = os.ReadFile(path)
 				require.NoError(t, err)
 				switch format {
-				case printer.GitLabContainerScanningFormat, printer.PolicyReportFormat:
+				case printer.GitHubActionsFormat, printer.GitLabContainerScanningFormat, printer.PolicyReportFormat:
 					assert.Equal(t, old, string(got), "no-data ActionPrint must keep the old report")
 				default:
 					assert.NotContains(t, string(got), old, "ActionPrint must replace the old report")
