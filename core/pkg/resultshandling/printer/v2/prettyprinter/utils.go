@@ -184,6 +184,9 @@ func getSortPackageScores(pkgScores map[string]*imageprinter.PackageScore) []str
 
 	sort.Slice(sortedSlice, func(i, j int) bool {
 		if pkgScores[sortedSlice[i]].Score == pkgScores[sortedSlice[j]].Score {
+			if pkgScores[sortedSlice[i]].Name == pkgScores[sortedSlice[j]].Name {
+				return sortedSlice[i] < sortedSlice[j]
+			}
 			return pkgScores[sortedSlice[i]].Name < pkgScores[sortedSlice[j]].Name
 		}
 		return pkgScores[sortedSlice[i]].Score > pkgScores[sortedSlice[j]].Score
@@ -207,7 +210,12 @@ func getSortedCVEsBySeverity(mapSeverityToCVEsNumber map[string]int) []string {
 
 	// Sort the severity-CVEs count pairs by severity
 	sort.Slice(severityToCVEsCountPairs, func(i, j int) bool {
-		return utils.ImageSeverityToInt(severityToCVEsCountPairs[i][0]) > utils.ImageSeverityToInt(severityToCVEsCountPairs[j][0])
+		sevI := utils.ImageSeverityToInt(severityToCVEsCountPairs[i][0])
+		sevJ := utils.ImageSeverityToInt(severityToCVEsCountPairs[j][0])
+		if sevI == sevJ {
+			return severityToCVEsCountPairs[i][0] < severityToCVEsCountPairs[j][0]
+		}
+		return sevI > sevJ
 	})
 
 	// Extract severities from the sorted slice of pairs
