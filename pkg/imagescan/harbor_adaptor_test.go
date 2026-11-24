@@ -459,6 +459,42 @@ func TestHarborAdaptor_GetImagesVulnerabilities(t *testing.T) {
 	assert.Equal(t, "CVE-NESTED", reports[2].Vulnerabilities[0].ID)
 }
 
+func TestHarborAdaptor_GetImagesVulnerabilities_DeterministicMimeTypeOrder(t *testing.T) {
+	mockAPI := &mockHarborAPI{
+		responses: map[string][]byte{
+			"/api/v2.0/projects/myproject/repositories/multimime/artifacts/sha256:abc/additions/vulnerabilities": []byte(`{
+				"application/vnd.security.vulnerability.report; version=1.1": {
+					"vulnerabilities": [
+						{"id": "CVE-2", "severity": "Medium", "description": "from report 1.1"}
+					]
+				},
+				"application/vnd.scanner.adapter.vuln.report.harbor+json; version=1.0": {
+					"vulnerabilities": [
+						{"id": "CVE-1", "severity": "High", "description": "from report 1.0"}
+					]
+				}
+			}`),
+		},
+	}
+
+	adaptor := NewHarborAdaptor()
+	adaptor.client = mockAPI
+
+	imageIDs := []ContainerImageIdentifier{
+		{Repository: "myproject/multimime", Hash: "sha256:abc"},
+	}
+
+	for i := 0; i < 20; i++ {
+		reports, err := adaptor.GetImagesVulnerabilities(context.Background(), imageIDs)
+		require.NoError(t, err)
+		require.Len(t, reports, 1)
+		require.Len(t, reports[0].Vulnerabilities, 2)
+		// Alphabetically "application/vnd.scanner..." comes before "application/vnd.security..."
+		assert.Equal(t, "CVE-1", reports[0].Vulnerabilities[0].ID)
+		assert.Equal(t, "CVE-2", reports[0].Vulnerabilities[1].ID)
+	}
+}
+
 func TestNormalizeSeverity(t *testing.T) {
 	tests := []struct {
 		input    string
