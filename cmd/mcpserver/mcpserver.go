@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -569,6 +570,39 @@ func parseControlIDsNamed(argName string, raw any, present bool) ([]string, *mcp
 	return ids, nil
 }
 
+// canonicalControlKey formats control IDs into a deterministic, query-escaped,
+// sorted and deduplicated string for tool cache keys.
+func canonicalControlKey(ids []string) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	seen := make(map[string]struct{}, len(ids))
+	sorted := make([]string, 0, len(ids))
+	for _, id := range ids {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			continue
+		}
+		upper := strings.ToUpper(trimmed)
+		if _, ok := seen[upper]; !ok {
+			seen[upper] = struct{}{}
+			sorted = append(sorted, upper)
+		}
+	}
+	sort.Strings(sorted)
+	return url.QueryEscape(strings.Join(sorted, ","))
+}
+
+// canonicalFrameworkName normalizes framework names to lowercase and applies
+// the given default when the framework is omitted or empty.
+func canonicalFrameworkName(framework, defaultName string) string {
+	trimmed := strings.TrimSpace(framework)
+	if trimmed == "" {
+		return strings.ToLower(defaultName)
+	}
+	return strings.ToLower(trimmed)
+}
+
 // parseControlIDs extracts a list of trimmed, non-empty control IDs from an
 // argument value that may be either a comma-separated string or a JSON array
 // of strings. It returns a ToolResultError when the value is absent, has the
@@ -765,7 +799,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return toolErr, nil
 		}
 
-		key := fmt.Sprintf("scan_local_iac:%s:%s%s", url.QueryEscape(path), url.QueryEscape(framework), filters.keySuffix())
+		key := fmt.Sprintf("scan_local_iac:%s:%s%s", url.QueryEscape(path), url.QueryEscape(canonicalFrameworkName(framework, "nsa")), filters.keySuffix())
 		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
 			return ksServer.runIaCScan(scanCtx, path, framework, filters)
 		}, filters.limit)
@@ -790,7 +824,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		key := fmt.Sprintf("scan_local_iac_controls:%s:%s%s", url.QueryEscape(path), url.QueryEscape(strings.Join(controlIDs, ",")), filters.keySuffix())
+		key := fmt.Sprintf("scan_local_iac_controls:%s:%s%s", url.QueryEscape(path), canonicalControlKey(controlIDs), filters.keySuffix())
 		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
 			return ksServer.runIaCScanControls(scanCtx, path, controlIDs, filters)
 		}, filters.limit)
@@ -831,8 +865,13 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return toolErr, nil
 		}
 
+		canonicalFramework := ""
+		if len(controlIDs) == 0 {
+			canonicalFramework = canonicalFrameworkName(framework, "nsa")
+		}
+
 		h := sha256.Sum256([]byte(manifest))
-		key := fmt.Sprintf("scan_manifest:%x:%s:%s%s", h[:8], url.QueryEscape(framework), url.QueryEscape(strings.Join(controlIDs, ",")), filters.keySuffix())
+		key := fmt.Sprintf("scan_manifest:%x:%s:%s%s", h[:8], url.QueryEscape(canonicalFramework), canonicalControlKey(controlIDs), filters.keySuffix())
 		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
 			return ksServer.runManifestScan(scanCtx, manifest, framework, controlIDs, filters)
 		}, filters.limit)
@@ -1047,7 +1086,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if namespace == "*" {
 			namespace = ""
 		}
-		key := fmt.Sprintf("framework_scan:%s:%s%s", namespace, url.QueryEscape(frameworkNameStr), filters.keySuffix())
+		key := fmt.Sprintf("framework_scan:%s:%s%s", namespace, url.QueryEscape(strings.ToLower(frameworkNameStr)), filters.keySuffix())
 		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
 			return frameworkScanFn(ksServer, scanCtx, namespace, frameworkNameStr, filters)
 		}, filters.limit)
@@ -1075,7 +1114,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		key := fmt.Sprintf("control_scan:%s:%s%s", namespace, url.QueryEscape(strings.Join(controlIDs, ",")), filters.keySuffix())
+		key := fmt.Sprintf("control_scan:%s:%s%s", namespace, canonicalControlKey(controlIDs), filters.keySuffix())
 		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
 			return ksServer.ScanControls(scanCtx, namespace, controlIDs, filters)
 		}, filters.limit)
@@ -1126,7 +1165,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		// different request's key and serve it that scan's results.
 		key := fmt.Sprintf("workload_scan:%s:%s:%s:%s%s",
 			url.QueryEscape(workload), url.QueryEscape(namespace),
-			url.QueryEscape(path), url.QueryEscape(framework),
+			url.QueryEscape(path), url.QueryEscape(strings.ToLower(framework)),
 			filters.keySuffix())
 		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
 			return workloadScanFn(ksServer, scanCtx, workload, namespace, path, framework, filters)
