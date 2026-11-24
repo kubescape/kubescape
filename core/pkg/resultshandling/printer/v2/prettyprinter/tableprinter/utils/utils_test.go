@@ -146,11 +146,61 @@ func TestImageSeverityToInt(t *testing.T) {
 			severity: "-7",
 			expected: 0,
 		},
+		{
+			name:     "Lowercase critical severity",
+			severity: "critical",
+			expected: 5,
+		},
+		{
+			name:     "Uppercase high severity",
+			severity: "HIGH",
+			expected: 4,
+		},
+		{
+			name:     "Padded medium severity",
+			severity: "  Medium  ",
+			expected: 3,
+		},
+		{
+			name:     "Whitespace-only severity",
+			severity: "   ",
+			expected: 0,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.expected, ImageSeverityToInt(tt.severity))
+		})
+	}
+}
+
+func TestGetColorForVulnerabilitySeverity_CaseInsensitive(t *testing.T) {
+	tests := []struct {
+		name     string
+		severity string
+		expected string
+	}{
+		{
+			name:     "Standard critical",
+			severity: "Critical",
+			expected: GetColorForVulnerabilitySeverity("Critical")("test"),
+		},
+		{
+			name:     "Lowercase critical",
+			severity: "critical",
+			expected: GetColorForVulnerabilitySeverity("Critical")("test"),
+		},
+		{
+			name:     "Padded high",
+			severity: "  HIGH  ",
+			expected: GetColorForVulnerabilitySeverity("High")("test"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, GetColorForVulnerabilitySeverity(tt.severity)("test"))
 		})
 	}
 }

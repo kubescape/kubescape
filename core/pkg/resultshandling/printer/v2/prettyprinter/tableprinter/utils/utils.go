@@ -99,16 +99,16 @@ func GetColor(severity int) func(...string) string {
 }
 
 func ImageSeverityToInt(severity string) int {
-	switch severity {
-	case apis.SeverityCriticalString:
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case strings.ToLower(apis.SeverityCriticalString):
 		return 5
-	case apis.SeverityHighString:
+	case strings.ToLower(apis.SeverityHighString):
 		return 4
-	case apis.SeverityMediumString:
+	case strings.ToLower(apis.SeverityMediumString):
 		return 3
-	case apis.SeverityLowString:
+	case strings.ToLower(apis.SeverityLowString):
 		return 2
-	case apis.SeverityNegligibleString:
+	case strings.ToLower(apis.SeverityNegligibleString):
 		return 1
 	default:
 		return 0
@@ -240,18 +240,18 @@ func TruncateName(name string, maxLen int) string {
 }
 
 func GetColorForVulnerabilitySeverity(severity string) func(...string) string {
-	switch severity {
-	case apis.SeverityCriticalString:
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case strings.ToLower(apis.SeverityCriticalString):
 		return gchalk.WithAnsi256(1).Bold
-	case apis.SeverityHighString:
+	case strings.ToLower(apis.SeverityHighString):
 		return gchalk.WithAnsi256(196).Bold
-	case apis.SeverityMediumString:
+	case strings.ToLower(apis.SeverityMediumString):
 		return gchalk.WithAnsi256(166).Bold
-	case apis.SeverityLowString:
+	case strings.ToLower(apis.SeverityLowString):
 		return gchalk.WithAnsi256(220).Bold
-	case apis.SeverityNegligibleString:
+	case strings.ToLower(apis.SeverityNegligibleString):
 		return gchalk.WithAnsi256(39).Bold
-	case apis.SeverityUnknownString:
+	case strings.ToLower(apis.SeverityUnknownString):
 		return gchalk.WithAnsi256(30).Bold
 	default:
 		return gchalk.WithAnsi256(7).Bold
