@@ -318,6 +318,8 @@ func TestTerraformDirectoryDynamicControlDependencies(t *testing.T) {
 		{"logical operand condition conversion", `try((true || (!try(var.untyped, false) ? "true" : "false")) ? [] : [1], [1])`, true, false},
 		{"logical nested operand conversion", `try((true || (false || try(var.untyped, false))) ? [] : [1], [1])`, true, false},
 		{"coalesce later untyped missing input", `try(coalesce(1, var.untyped) == 1 ? [] : [1], [1])`, true, false},
+		{"logical null input index operand", `(true || can(var[null])) ? [1] : []`, false, true},
+		{"logical proven Boolean local operand", `(true || local.can_enabled) ? [1] : []`, false, true},
 		{"logical inconvertible string operand", `try((true || (can(var.enabled) ? "true" : "maybe")) ? [] : [1], [1])`, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -345,6 +347,7 @@ variable "null_set" {
 locals {
   boolean = try(var.enabled, false)
   alias = local.boolean
+  can_enabled = can(var.enabled)
 }
 resource "kubernetes_pod_v1" "demo" {
   metadata { name = "control-dependencies" }

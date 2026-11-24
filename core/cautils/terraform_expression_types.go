@@ -230,7 +230,14 @@ func (c *terraformReferenceChecker) convertsToBool(expr hcl.Expression, ctx *hcl
 		return c.convertsToBool(e.Condition, ctx) && c.convertsToBool(e.TrueResult, ctx) && c.convertsToBool(e.FalseResult, ctx)
 	}
 	value := c.provenExpressionValue(expr, ctx)
-	if value == cty.NilVal || !value.IsWhollyKnown() || value.IsNull() {
+	if value == cty.NilVal || value.IsNull() {
+		return false
+	}
+	// A proven non-null Boolean converts whatever its unknown value, e.g. a local set to can().
+	if value.Type() == cty.Bool && value.Range().DefinitelyNotNull() {
+		return true
+	}
+	if !value.IsWhollyKnown() {
 		return false
 	}
 	_, err := convert.Convert(value, cty.Bool)
@@ -660,8 +667,11 @@ func (c *terraformReferenceChecker) referencesDeclaredInput(expr hcl.Expression,
 			return true
 		}
 		name, valid := terraformObjectSelectionKey(traversal[1])
+		if !valid {
+			return true
+		}
 		_, declared := c.declaredVariables[name.AsString()]
-		return !valid || declared
+		return declared
 	})
 }
 
