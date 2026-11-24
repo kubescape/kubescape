@@ -410,6 +410,34 @@ func TestFilterCVEsBySeverities(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "case insensitive and whitespace trimming",
+			cves: []imageprinter.CVE{
+				{
+					Severity: " high ",
+					ID:       "CVE-2020-1234",
+				},
+				{
+					Severity: "MEDIUM",
+					ID:       "CVE-2020-1235",
+				},
+				{
+					Severity: "Low",
+					ID:       "CVE-2020-1236",
+				},
+			},
+			severities: []string{" HIGH", "medium "},
+			expectedCVEs: []imageprinter.CVE{
+				{
+					Severity: "High",
+					ID:       "CVE-2020-1234",
+				},
+				{
+					Severity: "Medium",
+					ID:       "CVE-2020-1235",
+				},
+			},
+		},
 	}
 
 	for _, tt := range test {
@@ -831,6 +859,18 @@ func TestGetFilteredCVEsKeepsKEV(t *testing.T) {
 				{ID: "CVE-1", Severity: "High"},
 			},
 		},
+		{
+			name: "case insensitive and whitespace-padded severities in getFilteredCVEs",
+			cves: []imageprinter.CVE{
+				{ID: "CVE-1", Severity: " critical "},
+				{ID: "CVE-2", Severity: "HIGH"},
+				{ID: "CVE-3", Severity: "low"},
+			},
+			want: []imageprinter.CVE{
+				{ID: "CVE-1", Severity: "Critical"},
+				{ID: "CVE-2", Severity: "High"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -838,6 +878,16 @@ func TestGetFilteredCVEsKeepsKEV(t *testing.T) {
 			assert.Equal(t, tt.want, getFilteredCVEs(tt.cves))
 		})
 	}
+}
+
+func TestCanonicalSeverity(t *testing.T) {
+	assert.Equal(t, "Critical", canonicalSeverity(" critical "))
+	assert.Equal(t, "High", canonicalSeverity("HIGH"))
+	assert.Equal(t, "Medium", canonicalSeverity("medium"))
+	assert.Equal(t, "Low", canonicalSeverity("  low  "))
+	assert.Equal(t, "Negligible", canonicalSeverity("NEGLIGIBLE"))
+	assert.Equal(t, "Unknown", canonicalSeverity("  unknown  "))
+	assert.Equal(t, "Custom", canonicalSeverity("Custom"))
 }
 
 // TestPrintTopComponents_PackageNameWithPercentVerbs guards against a
