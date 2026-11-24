@@ -309,3 +309,59 @@ func TestIngressExposure_DeterministicTieBreakBetweenEqualPolicies(t *testing.T)
 		t.Fatalf("got1 MatchedPolicy = %q, got2 MatchedPolicy = %q; want ns/a-allow-client for both", got1.MatchedPolicy, got2.MatchedPolicy)
 	}
 }
+
+func TestIngressExposure_DeterministicTieBreakBetweenEqualOpenPolicies(t *testing.T) {
+	pB := policy("ns", "b-allow-all", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+		[]networkingv1.NetworkPolicyIngressRule{ingressRule()}, nil)
+	pA := policy("ns", "a-allow-all", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+		[]networkingv1.NetworkPolicyIngressRule{ingressRule()}, nil)
+
+	// Both policies have equal open exposure; tie-break must be deterministic (a before b) regardless of index order
+	idx1, _ := NewIndex([]*networkingv1.NetworkPolicy{pB, pA}, nil)
+	idx2, _ := NewIndex([]*networkingv1.NetworkPolicy{pA, pB}, nil)
+	ep := Endpoint{Namespace: "ns", Name: "app", Labels: map[string]string{"app": "web"}}
+
+	got1 := idx1.IngressExposure(ep)
+	got2 := idx2.IngressExposure(ep)
+	if got1.Level != ExposureOpen || got2.Level != ExposureOpen {
+		t.Fatalf("got1 Level = %v, got2 Level = %v; want ExposureOpen", got1.Level, got2.Level)
+	}
+	if got1.MatchedPolicy != "ns/a-allow-all" || got2.MatchedPolicy != "ns/a-allow-all" {
+		t.Fatalf("got1 MatchedPolicy = %q, got2 MatchedPolicy = %q; want ns/a-allow-all for both", got1.MatchedPolicy, got2.MatchedPolicy)
+	}
+}
+
+func TestIngressExposure_AdmitsNothingStructuredFlag(t *testing.T) {
+	denyAll := policy("ns", "deny-all", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}, nil, nil)
+	idxDeny, _ := NewIndex([]*networkingv1.NetworkPolicy{denyAll}, nil)
+	gotDeny := idxDeny.IngressExposure(Endpoint{Namespace: "ns"})
+	if !gotDeny.AdmitsNothing {
+		t.Errorf("gotDeny.AdmitsNothing = false, want true for zero-rule policy")
+	}
+	if gotDeny.AdmitsTraffic() {
+		t.Errorf("gotDeny.AdmitsTraffic() = true, want false for zero-rule policy")
+	}
+
+	excluded := &networkingv1.IPBlock{CIDR: "10.0.0.0/24", Except: []string{"10.0.0.0/24"}}
+	pExcluded := policy("ns", "p-excluded", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+		[]networkingv1.NetworkPolicyIngressRule{ingressRule(networkingv1.NetworkPolicyPeer{IPBlock: excluded})}, nil)
+	idxExcluded, _ := NewIndex([]*networkingv1.NetworkPolicy{pExcluded}, nil)
+	gotExcluded := idxExcluded.IngressExposure(Endpoint{Namespace: "ns"})
+	if !gotExcluded.AdmitsNothing {
+		t.Errorf("gotExcluded.AdmitsNothing = false, want true for fully-excluded IPBlock")
+	}
+	if gotExcluded.AdmitsTraffic() {
+		t.Errorf("gotExcluded.AdmitsTraffic() = true, want false for fully-excluded IPBlock")
+	}
+
+	allowClient := policy("ns", "allow-client", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+		[]networkingv1.NetworkPolicyIngressRule{ingressRule(podSelectorPeer("app", "client"))}, nil)
+	idxClient, _ := NewIndex([]*networkingv1.NetworkPolicy{allowClient}, nil)
+	gotClient := idxClient.IngressExposure(Endpoint{Namespace: "ns"})
+	if gotClient.AdmitsNothing {
+		t.Errorf("gotClient.AdmitsNothing = true, want false for scoped allow rule")
+	}
+	if !gotClient.AdmitsTraffic() {
+		t.Errorf("gotClient.AdmitsTraffic() = false, want true for scoped allow rule")
+	}
+}
