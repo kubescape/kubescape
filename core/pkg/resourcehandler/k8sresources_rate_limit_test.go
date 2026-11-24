@@ -3,11 +3,14 @@ package resourcehandler
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler/partitionstore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -134,6 +137,40 @@ func TestPullResources_ConfigurableParallelism(t *testing.T) {
 		t.Setenv("KUBESCAPE_MAX_PARALLEL_PULLS", "5")
 		handler := &K8sResourceHandler{}
 		assert.Equal(t, 5, handler.getMaxParallelPulls())
+	})
+
+	t.Run("configured via environment variable with whitespace padding", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_MAX_PARALLEL_PULLS", "  7  \n")
+		handler := &K8sResourceHandler{}
+		assert.Equal(t, 7, handler.getMaxParallelPulls())
+	})
+
+	t.Run("partition store in-memory configured with whitespace padding", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_PARTITION_STORE", "  memory  ")
+		handler := &K8sResourceHandler{}
+		store, err := handler.newStore()
+		require.NoError(t, err)
+		require.NotNil(t, store)
+		t.Cleanup(func() { _ = store.Close() })
+		assert.IsType(t, &partitionstore.MemoryStore{}, store)
+	})
+
+	t.Run("spill dir configured with whitespace padding", func(t *testing.T) {
+		spillDir := t.TempDir()
+		t.Setenv("KUBESCAPE_PARTITION_STORE", " disk ")
+		t.Setenv("KUBESCAPE_SPILL_DIR", "  "+spillDir+"  \n")
+		handler := &K8sResourceHandler{}
+		store, err := handler.newStore()
+		require.NoError(t, err)
+		require.NotNil(t, store)
+		t.Cleanup(func() { _ = store.Close() })
+		assert.IsType(t, &partitionstore.DiskStore{}, store)
+
+		entries, err := os.ReadDir(spillDir)
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
+		assert.True(t, entries[0].IsDir())
+		assert.True(t, strings.HasPrefix(entries[0].Name(), "kubescape-spill-"))
 	})
 
 	t.Run("configured via scanInfo in GetResources", func(t *testing.T) {
