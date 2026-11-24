@@ -895,8 +895,12 @@ func (c *terraformReferenceChecker) forExpressionItems(loop *hclsyntax.ForExpr, 
 			_, err := convert.Convert(condition, cty.Bool)
 			failed = err != nil
 		}
-		if failed {
-			// HCL checks filters with unknown iterator placeholders before iteration.
+		// try() and can() catch input errors, so a Boolean type proves the filter converts.
+		call, isCall := unwrapParentheses(loop.CondExpr).(*hclsyntax.FunctionCallExpr)
+		caught := isCall && (call.Name == "try" || call.Name == "can") && c.expressionType(call, childCtx).Equals(cty.Bool)
+		// HCL checks filters with unknown iterator placeholders before iteration,
+		// so a successful probe still depends on inputs when nothing is iterated.
+		if failed || (collection.LengthInt() == 0 && !caught) {
 			precheck := terraformReferenceChecker{
 				localExpressions: c.localExpressions, moduleCtx: c.moduleCtx,
 				declaredVariables: c.declaredVariables,
@@ -907,7 +911,9 @@ func (c *terraformReferenceChecker) forExpressionItems(loop *hclsyntax.ForExpr, 
 			if precheck.hasUnresolvableVariables(loop.CondExpr, childCtx) {
 				return nil, true
 			}
-			return nil, false
+			if failed {
+				return nil, false
+			}
 		}
 	}
 	var items []terraformForItem
@@ -1378,7 +1384,7 @@ func (c *terraformReferenceChecker) hasUnresolvableSelection(expr hcl.Expression
 				if err == nil && value.IsKnown() && !value.IsNull() && value.True() == (binary.Op == hclsyntax.OpLogicalOr) && !c.hasUnresolvableVariables(operand, evalCtx) {
 					other := operands[1-i]
 					// HCL converts both operands before applying its logical shortcut.
-					return c.hasUnresolvableVariables(other, evalCtx) && !c.expressionType(other, evalCtx).Equals(cty.Bool)
+					return c.hasUnresolvableVariables(other, evalCtx) && !c.convertsToBool(other, evalCtx)
 				}
 			}
 		}

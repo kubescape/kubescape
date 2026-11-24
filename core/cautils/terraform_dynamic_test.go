@@ -246,7 +246,7 @@ func TestTerraformDirectoryDynamicControlDependencies(t *testing.T) {
 		{"coalesce type conversion", `coalesce([true], try(var.other, ["false"]))`, true, false},
 		{"coalesce unresolved null type", `try(coalesce([{privileged = true}], try(var.other, null)), [])`, true, false},
 		{"coalesce unresolved empty string type", `try(coalesce([{privileged = true}], try(var.other, "")), [])`, true, false},
-		{"coalesce ignored error", `coalesce([true], var.other)`, false, true},
+		{"coalesce later missing input widens type", `coalesce([true], var.other)`, true, false},
 		{"coalesce ignored null", `coalesce([true], try(null, var.other))`, false, true},
 		{"coalesce unused boolean value", `coalesce(true, can(var.enabled)) ? [1] : []`, false, true},
 		{"coalesce unused typed fallback", `coalesce(true, try(var.enabled, false)) ? [1] : []`, false, true},
@@ -311,6 +311,16 @@ func TestTerraformDirectoryDynamicControlDependencies(t *testing.T) {
 		{"logical untyped operand conversion", `try((true || try(var.untyped, false)) ? [] : [1], [1])`, true, false},
 		{"logical right untyped operand conversion", `try((try(var.untyped, false) || true) ? [] : [1], [1])`, true, false},
 		{"logical and untyped operand conversion", `try((false && try(var.untyped, true)) ? [1] : [], [1])`, true, false},
+		{"coalesce later argument missing input", `try(coalesce(1, "2", try(var.text, "3"), var.enabled ? [1] : [2]) == "1" ? [] : [1], [1])`, true, false},
+		{"coalesce only later argument missing input", `try(coalesce(1, "2", var.enabled ? [1] : [2]) == "1" ? [] : [1], [1])`, true, false},
+		{"empty filter successful probe operand conversion", `try([for item in [] : item if true || try(var.untyped, false)], [1])`, true, false},
+		{"logical convertible string operand", `(true || (can(var.enabled) ? "true" : "false")) ? [1] : []`, false, true},
+		{"logical operand condition conversion", `try((true || (!try(var.untyped, false) ? "true" : "false")) ? [] : [1], [1])`, true, false},
+		{"logical nested operand conversion", `try((true || (false || try(var.untyped, false))) ? [] : [1], [1])`, true, false},
+		{"coalesce later untyped missing input", `try(coalesce(1, var.untyped) == 1 ? [] : [1], [1])`, true, false},
+		{"logical null input index operand", `(true || can(var[null])) ? [1] : []`, false, true},
+		{"logical proven Boolean local operand", `(true || local.can_enabled) ? [1] : []`, false, true},
+		{"logical inconvertible string operand", `try((true || (can(var.enabled) ? "true" : "maybe")) ? [] : [1], [1])`, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -319,6 +329,7 @@ variable "enabled" { type = bool }
 variable "include" { type = bool }
 variable "other" { type = list(bool) }
 variable "untyped" { type = any }
+variable "text" { type = string }
 variable "known" { default = 1 }
 variable "numbers" {
   type = list(number)
@@ -336,6 +347,7 @@ variable "null_set" {
 locals {
   boolean = try(var.enabled, false)
   alias = local.boolean
+  can_enabled = can(var.enabled)
 }
 resource "kubernetes_pod_v1" "demo" {
   metadata { name = "control-dependencies" }
@@ -393,6 +405,7 @@ func TestTerraformDirectoryDynamicUnusedCanInputs(t *testing.T) {
 		`try([for item in [false] : item if item ? (can(var.enabled) ? 1 : 2) > 0 : {}], [1])`,
 		`try([for item in [false] : var.unused if item ? can(var.enabled) : {}], [1])`,
 		`try([for item in [false] : item if var.enabled ? can(var.enabled) : {}], [1])`,
+		`coalesce(var.numbers, ["2"], (can(var.enabled) ? var.extra : var.null_set), (can(var["enabled"]) ? var.null_set : var.extra))[0] == 1 ? [1] : []`,
 	} {
 		for _, supplied := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/supplied=%t", expression, supplied), func(t *testing.T) {
@@ -501,6 +514,38 @@ func TestTerraformDynamicCoalesceTypeAnalysisMemoryIsLinear(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTerraformDirectoryDynamicCoalesceInvariantFallbacks(t *testing.T) {
+	const count = 2 * maxTypeCombinations
+	var variables, fallbacks strings.Builder
+	for i := range count {
+		// Each distinct tuple type still unifies with list(string) to list(string).
+		fmt.Fprintf(&variables, "variable \"t%d\" { type = tuple([%s]) }\n", i, strings.TrimSuffix(strings.Repeat("string, ", i+1), ", "))
+		fmt.Fprintf(&fallbacks, ", try(var.t%d, null)", i)
+	}
+	dir := t.TempDir()
+	writeTerraformFiles(t, dir, map[string]string{"main.tf": fmt.Sprintf(`
+variable "names" {
+  type = list(string)
+  default = ["a"]
+}
+%s
+resource "kubernetes_pod_v1" "demo" {
+  spec {
+    container {
+      name = "app"
+      image = "nginx"
+      dynamic "security_context" {
+        for_each = coalesce(var.names%s)[0] == "a" ? [1] : []
+        content { privileged = true }
+      }
+    }
+  }
+}`, variables.String(), fallbacks.String())})
+	obj, errs := terraformObject(t, dir)
+	require.Empty(t, errs, "fallbacks of the selected type cannot change unification")
+	assert.Equal(t, map[string]interface{}{"privileged": true}, terraformFirstContainer(t, obj)["securityContext"])
 }
 
 func TestTerraformDynamicCoalesceSharedLocalProofIsBounded(t *testing.T) {
