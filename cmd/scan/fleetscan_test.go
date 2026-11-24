@@ -172,7 +172,7 @@ func TestPerContextOutputPaths_DirectoryOutputNamesReportsInsideIt(t *testing.T)
 		{output: "reports" + sep + ".", dir: "reports"},
 	} {
 		t.Run(tt.output, func(t *testing.T) {
-			paths, err := perContextOutputPaths(tt.output, []string{"prod", "dev"}, []string{"json"})
+			paths, err := perContextOutputPaths(tt.output, []string{"prod", "dev"}, []string{"json"}, false)
 			require.NoError(t, err)
 			for _, kubeContext := range []string{"prod", "dev"} {
 				dest, explicit := printer.ResolveOutputFile("json", paths[kubeContext], printer.DefaultBaseNameForFormat("json"))
@@ -186,11 +186,11 @@ func TestPerContextOutputPaths_DirectoryOutputNamesReportsInsideIt(t *testing.T)
 // A file --output keeps its name, and the format's default name is used for a
 // directory: an SBOM format writes sbom.<context>.
 func TestPerContextOutputPaths_DirectoryOutputUsesTheFormatsDefaultName(t *testing.T) {
-	paths, err := perContextOutputPaths("."+string(filepath.Separator), []string{"prod"}, []string{printer.CycloneDXFormat})
+	paths, err := perContextOutputPaths("."+string(filepath.Separator), []string{"prod"}, []string{printer.CycloneDXFormat}, false)
 	require.NoError(t, err)
 	assert.Equal(t, "sbom.prod", filepath.Base(paths["prod"]))
 
-	paths, err = perContextOutputPaths("report.json", []string{"prod"}, []string{"json"})
+	paths, err = perContextOutputPaths("report.json", []string{"prod"}, []string{"json"}, false)
 	require.NoError(t, err)
 	assert.Equal(t, "report.prod.json", paths["prod"])
 }
@@ -212,7 +212,7 @@ func scanContextOnlyRunner(ctx context.Context, scanInfo *cautils.ScanInfo, ks m
 // individual scans "succeed." perContextOutputPaths must catch this before
 // any scanning starts, not after.
 func TestPerContextOutputPaths_RejectsCollidingContexts(t *testing.T) {
-	_, err := perContextOutputPaths("report.json", []string{"prod/us-east-1", "prod_us-east-1", "ctx-c"}, nil)
+	_, err := perContextOutputPaths("report.json", []string{"prod/us-east-1", "prod_us-east-1", "ctx-c"}, nil, false)
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "prod/us-east-1")
@@ -235,7 +235,7 @@ func TestPerContextOutputPaths_RejectsCollidingContexts(t *testing.T) {
 // work on the build machine but silently break on a colleague's Mac or
 // Windows laptop.
 func TestPerContextOutputPaths_RejectsCaseFoldedCollision(t *testing.T) {
-	_, err := perContextOutputPaths("report.json", []string{"Prod", "prod"}, []string{"json"})
+	_, err := perContextOutputPaths("report.json", []string{"Prod", "prod"}, []string{"json"}, false)
 
 	require.Error(t, err, "paths differing only by case should collide")
 	assert.ErrorContains(t, err, "Prod")
@@ -245,7 +245,7 @@ func TestPerContextOutputPaths_RejectsCaseFoldedCollision(t *testing.T) {
 
 // Verify that contexts whose names differ by more than just case still pass.
 func TestPerContextOutputPaths_CaseDifferentContextsPass(t *testing.T) {
-	paths, err := perContextOutputPaths("report.json", []string{"production", "staging"}, []string{"json"})
+	paths, err := perContextOutputPaths("report.json", []string{"production", "staging"}, []string{"json"}, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, "report.production.json", paths["production"])
@@ -253,7 +253,7 @@ func TestPerContextOutputPaths_CaseDifferentContextsPass(t *testing.T) {
 }
 
 func TestPerContextOutputPaths_NoCollisions(t *testing.T) {
-	paths, err := perContextOutputPaths("report.json", []string{"ctx-a", "ctx-b", "ctx-c"}, nil)
+	paths, err := perContextOutputPaths("report.json", []string{"ctx-a", "ctx-b", "ctx-c"}, nil, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{
@@ -276,6 +276,75 @@ func TestFleetScan_RejectsCollidingContextsBeforeScanningAny(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "colliding")
 	assert.Empty(t, ks.callsOutputs, "no context should be scanned once a collision is detected up front")
+}
+
+func TestFleetScan_RejectsCSVImageCompanionCollisionsBeforeScanning(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		contexts  []string
+		fleetFile string
+		wantErr   string
+	}{
+		{
+			name:     "another context's posture report",
+			contexts: []string{"prod", "prod-vulnerabilities"},
+			wantErr:  "colliding --output path",
+		},
+		{
+			name:     "canonically equivalent Unicode filenames",
+			contexts: []string{"pr\u00f3d", "pro\u0301d-vulnerabilities"},
+			wantErr:  "colliding --output path",
+		},
+		{
+			name:     "canonically equivalent dotted I",
+			contexts: []string{"\u0130", "I\u0307-vulnerabilities"},
+			wantErr:  "colliding --output path",
+		},
+		{
+			name:     "Unicode case and composition",
+			contexts: []string{"J\u030c", "\u01f0-vulnerabilities"},
+			wantErr:  "colliding --output path",
+		},
+		{
+			name:     "Greek sigma case folding",
+			contexts: []string{"\u03c2", "\u03c3-vulnerabilities"},
+			wantErr:  "colliding --output path",
+		},
+		{
+			name:     "Unicode case folding with expansion",
+			contexts: []string{"Stra\u00dfe", "STRASSE-vulnerabilities"},
+			wantErr:  "colliding --output path",
+		},
+		{
+			name:      "combined fleet report",
+			contexts:  []string{"prod"},
+			fleetFile: "report.prod-vulnerabilities.csv",
+			wantErr:   `per-context report for "prod"; the fleet report would overwrite it`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			info := cautils.ScanInfo{
+				KubeContexts: tt.contexts,
+				Output:       filepath.Join(dir, "report"),
+				Format:       "json,csv",
+				ScanImages:   true,
+				ScanType:     cautils.ScanTypeCluster,
+			}
+			if tt.fleetFile != "" {
+				info.FleetReport = filepath.Join(dir, tt.fleetFile)
+			}
+			ks := &fleetTrackingKubescape{}
+
+			err := fleetScan(info, ks, nil, scanContextOnlyRunner)
+			require.ErrorContains(t, err, tt.wantErr)
+			assert.Empty(t, ks.callsOutputs)
+
+			info.ScanImages = false
+			require.NoError(t, fleetScan(info, ks, nil, scanContextOnlyRunner))
+			assert.Len(t, ks.callsOutputs, len(tt.contexts))
+		})
+	}
 }
 
 // TestValidateKubeContextsSupported_FrameworkControlWorkloadAllowed guards
@@ -1012,20 +1081,20 @@ func TestFleetScan_ReportsContextFailuresAndFleetReportFailureSeparately(t *test
 }
 
 func TestValidateFleetReportPath_RejectsCollisionWithPerContextReport(t *testing.T) {
-	paths, err := perContextOutputPaths("out/report.json", []string{"prod", "staging"}, nil)
+	paths, err := perContextOutputPaths("out/report.json", []string{"prod", "staging"}, nil, false)
 	require.NoError(t, err)
 
-	err = validateFleetReportPath("out/report.prod.json", paths, nil)
+	err = validateFleetReportPath("out/report.prod.json", paths, nil, false)
 	require.ErrorContains(t, err, "prod")
 	require.ErrorContains(t, err, "overwrite")
 
-	assert.NoError(t, validateFleetReportPath("out/fleet.json", paths, nil))
-	assert.NoError(t, validateFleetReportPath("", paths, nil), "no fleet report requested, nothing to collide with")
+	assert.NoError(t, validateFleetReportPath("out/fleet.json", paths, nil, false))
+	assert.NoError(t, validateFleetReportPath("", paths, nil, false), "no fleet report requested, nothing to collide with")
 
 	// The same file spelled two ways is still the same file.
 	abs, err := filepath.Abs("out/report.staging.json")
 	require.NoError(t, err)
-	err = validateFleetReportPath(abs, paths, nil)
+	err = validateFleetReportPath(abs, paths, nil, false)
 	require.ErrorContains(t, err, "staging", "an absolute --fleet-report must be caught against a relative --output")
 }
 
@@ -1171,6 +1240,42 @@ func TestFleetScan_RejectsSymlinkedParentDirectoryWithFailedContext(t *testing.T
 	assert.NoFileExists(t, filepath.Join(realDir, "report.prod.json"), "fleet JSON must not land at the per-context path through the aliased directory")
 }
 
+func TestFleetScan_RechecksCSVImageCompanionAliasAfterScanning(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs elevated rights on windows")
+	}
+	outputDir := t.TempDir()
+	fleetDir := filepath.Join(t.TempDir(), "fleet")
+	companion := filepath.Join(outputDir, "report.prod-vulnerabilities.csv")
+	const imageCSV = "Image,Platform\n"
+
+	ks := &fleetOutcomeKubescape{
+		outcomes: map[string]func() (*resultshandling.ResultsHandler, error){
+			"prod": func() (*resultshandling.ResultsHandler, error) {
+				require.NoError(t, os.WriteFile(companion, []byte(imageCSV), 0o600))
+				require.NoError(t, os.Symlink(outputDir, fleetDir))
+				return resultsWithControl(apis.StatusPassed, 100), nil
+			},
+		},
+	}
+	info := cautils.ScanInfo{
+		KubeContexts: []string{"prod"},
+		Output:       filepath.Join(outputDir, "report.csv"),
+		FleetReport:  filepath.Join(fleetDir, filepath.Base(companion)),
+		Format:       printer.CsvFormat,
+		ScanImages:   true,
+		ScanType:     cautils.ScanTypeCluster,
+	}
+
+	err := fleetScan(info, ks, nil, scanContextOnlyRunner)
+
+	assert.ErrorContains(t, err, "fleet report was not written")
+	assert.ErrorContains(t, err, "fleet report would overwrite it")
+	got, readErr := os.ReadFile(companion)
+	require.NoError(t, readErr)
+	assert.Equal(t, imageCSV, string(got))
+}
+
 func TestFleetScan_RejectsSymlinkedOutputDirectory(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation needs elevated rights on windows")
@@ -1240,7 +1345,7 @@ func TestPrinterDestinations_ResolvesTheExtensionEachFormatAppends(t *testing.T)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.ElementsMatch(t, tt.want, printerDestinations(tt.path, tt.formats))
+			assert.ElementsMatch(t, tt.want, printerDestinations(tt.path, tt.formats, false))
 		})
 	}
 }
@@ -1249,21 +1354,21 @@ func TestPerContextOutputPaths_RejectsCollisionOnlyVisibleAfterFormatResolution(
 	// Neither derived path collides on its own, "report.prod" and
 	// "report.prod.json", but under --format json the first gains the
 	// extension the second already has and both printers write one file.
-	_, err := perContextOutputPaths("report", []string{"prod", "prod.json"}, []string{"json"})
+	_, err := perContextOutputPaths("report", []string{"prod", "prod.json"}, []string{"json"}, false)
 
 	require.ErrorContains(t, err, "colliding")
 	require.ErrorContains(t, err, "report.prod.json")
 }
 
 func TestValidateFleetReportPath_ComparesResolvedDestinations(t *testing.T) {
-	paths, err := perContextOutputPaths("report", []string{"prod", "staging"}, []string{"json"})
+	paths, err := perContextOutputPaths("report", []string{"prod", "staging"}, []string{"json"}, false)
 	require.NoError(t, err)
 
 	// The raw per-context path is "report.prod"; what actually gets written is
 	// "report.prod.json", and that is what the fleet report must not name.
-	require.ErrorContains(t, validateFleetReportPath("report.prod.json", paths, []string{"json"}), "prod")
+	require.ErrorContains(t, validateFleetReportPath("report.prod.json", paths, []string{"json"}, false), "prod")
 
-	assert.NoError(t, validateFleetReportPath("fleet.json", paths, []string{"json"}))
+	assert.NoError(t, validateFleetReportPath("fleet.json", paths, []string{"json"}, false))
 }
 
 func TestFleetScan_RejectsFleetReportCollidingAfterFormatResolution(t *testing.T) {
@@ -1599,7 +1704,7 @@ func TestPerContextOutputPath_DevNullStaysDevNull(t *testing.T) {
 // context legitimately discards to the same sink, so sharing it is not the
 // silent overwrite the collision check exists to catch.
 func TestPerContextOutputPaths_DevNullIsNotACollision(t *testing.T) {
-	paths, err := perContextOutputPaths(os.DevNull, []string{"prod", "staging"}, []string{"json"})
+	paths, err := perContextOutputPaths(os.DevNull, []string{"prod", "staging"}, []string{"json"}, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{
@@ -1976,10 +2081,10 @@ func TestFleetScan_DevNullForContextAndFleetReports(t *testing.T) {
 		{name: "multiple formats", formats: []string{"json", "sarif"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Empty(t, printerDestinations(os.DevNull, tc.formats), "discarded reports cannot collide")
-			paths, err := perContextOutputPaths(os.DevNull, []string{"prod", "staging"}, tc.formats)
+			assert.Empty(t, printerDestinations(os.DevNull, tc.formats, false), "discarded reports cannot collide")
+			paths, err := perContextOutputPaths(os.DevNull, []string{"prod", "staging"}, tc.formats, false)
 			require.NoError(t, err)
-			require.NoError(t, validateFleetReportPath(os.DevNull, paths, tc.formats))
+			require.NoError(t, validateFleetReportPath(os.DevNull, paths, tc.formats, false))
 
 			ks := &fleetTrackingKubescape{}
 			info := cautils.ScanInfo{
