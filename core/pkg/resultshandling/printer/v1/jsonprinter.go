@@ -25,6 +25,9 @@ func NewJsonPrinter() *JsonPrinter {
 }
 
 func (jsonPrinter *JsonPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if jsonPrinter == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.JsonFormat, outputFile, jsonOutputFile)
 	if explicitOutput {
 		var err error
@@ -36,6 +39,9 @@ func (jsonPrinter *JsonPrinter) SetWriter(ctx context.Context, outputFile string
 }
 
 func (jsonPrinter *JsonPrinter) Score(score float32) {
+	if jsonPrinter == nil {
+		return
+	}
 	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.ComplianceScoreToInt(score))
 }
 
@@ -44,6 +50,9 @@ func (jsonPrinter *JsonPrinter) PrintNextSteps() {
 }
 
 func (jsonPrinter *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
+	if jsonPrinter == nil {
+		return fmt.Errorf("failed to write json results: printer is nil")
+	}
 	if err := printer.PrepareOutput(jsonPrinter.writer); err != nil {
 		return err
 	}
@@ -73,7 +82,7 @@ func (jsonPrinter *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *
 }
 
 func (p *JsonPrinter) CloseWriter() error {
-	if p.writer != nil && p.writer != os.Stdout {
+	if p != nil && p.writer != nil && p.writer != os.Stdout {
 		return printer.CloseOutput(p.writer)
 	}
 	return nil
