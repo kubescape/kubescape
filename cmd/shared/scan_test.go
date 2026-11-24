@@ -308,8 +308,17 @@ func TestValidateCommonScanFlags(t *testing.T) {
 			expectedErr:   "",
 		},
 		{
-			name:          "Padded max severity accepted",
+			name:          "Padded max severity accepted and normalized",
 			maxSeverity:   "  critical  ",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "",
+		},
+		{
+			name:          "Padded and mixed-case severities normalized",
+			severity:      "  HIGH  ",
+			minSeverity:   "  medium ",
+			maxSeverity:   " Critical ",
 			format:        "json",
 			formatChanged: true,
 			expectedErr:   "",
@@ -338,10 +347,88 @@ func TestValidateCommonScanFlags(t *testing.T) {
 
 			if tt.expectedErr == "" {
 				assert.NoError(t, err)
+				if tt.severity != "" {
+					assert.Equal(t, strings.ToLower(strings.TrimSpace(tt.severity)), scanInfo.FailThresholdSeverity)
+				}
+				if tt.minSeverity != "" {
+					assert.Equal(t, strings.ToLower(strings.TrimSpace(tt.minSeverity)), scanInfo.MinSeverity)
+				}
+				if tt.maxSeverity != "" {
+					assert.Equal(t, strings.ToLower(strings.TrimSpace(tt.maxSeverity)), scanInfo.MaxSeverity)
+				}
 			} else {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedErr)
 			}
+		})
+	}
+}
+
+func TestValidateCommonScanFlags_ExplicitEmptySeverityFlags(t *testing.T) {
+	tests := []struct {
+		name     string
+		flagName string
+		setup    func(*cobra.Command, *cautils.ScanInfo)
+	}{
+		{
+			name:     "empty --severity-threshold is rejected",
+			flagName: "severity-threshold",
+			setup: func(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
+				cmd.Flags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "")
+				_ = cmd.Flags().Set("severity-threshold", "")
+			},
+		},
+		{
+			name:     "whitespace --severity-threshold is rejected",
+			flagName: "severity-threshold",
+			setup: func(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
+				cmd.Flags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "")
+				_ = cmd.Flags().Set("severity-threshold", "   ")
+			},
+		},
+		{
+			name:     "empty --min-severity is rejected",
+			flagName: "min-severity",
+			setup: func(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
+				cmd.Flags().StringVar(&scanInfo.MinSeverity, "min-severity", "", "")
+				_ = cmd.Flags().Set("min-severity", "")
+			},
+		},
+		{
+			name:     "whitespace --min-severity is rejected",
+			flagName: "min-severity",
+			setup: func(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
+				cmd.Flags().StringVar(&scanInfo.MinSeverity, "min-severity", "", "")
+				_ = cmd.Flags().Set("min-severity", "   ")
+			},
+		},
+		{
+			name:     "empty --max-severity is rejected",
+			flagName: "max-severity",
+			setup: func(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
+				cmd.Flags().StringVar(&scanInfo.MaxSeverity, "max-severity", "", "")
+				_ = cmd.Flags().Set("max-severity", "")
+			},
+		},
+		{
+			name:     "whitespace --max-severity is rejected",
+			flagName: "max-severity",
+			setup: func(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
+				cmd.Flags().StringVar(&scanInfo.MaxSeverity, "max-severity", "", "")
+				_ = cmd.Flags().Set("max-severity", "   ")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{}
+			cmd := &cobra.Command{}
+			tt.setup(cmd, scanInfo)
+
+			err := ValidateCommonScanFlags(cmd, scanInfo, ScanFormats)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrUnknownSeverity)
 		})
 	}
 }
