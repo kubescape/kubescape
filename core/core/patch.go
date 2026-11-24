@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -142,7 +141,7 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	}
 
 	err = runWithCopaLoggerMuted(logger.L().GetLevel() == "debug", func() error {
-		return copaPatch(ks.Context(), patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.OutputMode, patchInfo.OutputPath, patchInfo.BuildKitOpts)
+		return copaPatch(ks.Context(), patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.OutputMode, patchInfo.OutputPath, patchInfo.BuildKitOpts)
 	})
 	if err != nil {
 		return false, err
@@ -271,13 +270,13 @@ func runWithCopaLoggerMuted(debug bool, fn func() error) error {
 
 // copaPatch is a slightly modified copy of the Patch function from the original "project-copacetic/copacetic" repo
 // https://github.com/project-copacetic/copacetic/blob/main/pkg/patch/patch.go
-func copaPatch(ctx context.Context, timeout time.Duration, buildkitAddr, image, reportFile, patchedImageName, workingFolder string, ignoreError bool, outputMode, outputPath string, bkOpts buildkit.Opts) error {
+func copaPatch(ctx context.Context, timeout time.Duration, buildkitAddr, image, reportFile, patchedImageName, workingFolder string, outputMode, outputPath string, bkOpts buildkit.Opts) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	ch := make(chan error, 1)
 	go func() {
-		ch <- patchWithContext(timeoutCtx, buildkitAddr, image, reportFile, patchedImageName, workingFolder, ignoreError, outputMode, outputPath, bkOpts)
+		ch <- patchWithContext(timeoutCtx, buildkitAddr, image, reportFile, patchedImageName, workingFolder, outputMode, outputPath, bkOpts)
 	}()
 
 	select {
@@ -302,7 +301,7 @@ func resolveBuildkitOpts(buildkitAddr string, bkOpts buildkit.Opts) buildkit.Opt
 	return bkOpts
 }
 
-func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patchedImageName, workingFolder string, ignoreError bool, outputMode, outputPath string, bkOpts buildkit.Opts) error {
+func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patchedImageName, workingFolder string, outputMode, outputPath string, bkOpts buildkit.Opts) error {
 	// Ensure working folder exists for call to InstallUpdates
 	if workingFolder == "" {
 		var err error
@@ -404,7 +403,7 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 		}
 
 		log.Infof("Patching %d vulnerabilities", updatesCount(updates))
-		patchedImageState, errPkgs, err := manager.InstallUpdates(ctx, updates, ignoreError)
+		patchedImageState, _, err := manager.InstallUpdates(ctx, updates, false)
 		if err != nil {
 			return nil, fmt.Errorf("copa: error installing updates :: %w", err)
 		}
@@ -424,34 +423,9 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 
 		res.AddMeta(exptypes.ExporterImageConfigKey, config.ConfigData)
 
-		// Currently can only validate updates if updating via scanner
-		if reportFile != "" {
-			// create a new manifest with the successfully patched packages
-			validatedManifest := &unversioned.UpdateManifest{
-				Metadata: unversioned.Metadata{
-					OS: unversioned.OS{
-						Type:    updates.Metadata.OS.Type,
-						Version: updates.Metadata.OS.Version,
-					},
-					Config: unversioned.Config{
-						Arch: updates.Metadata.Config.Arch,
-					},
-				},
-				OSUpdates:   []unversioned.UpdatePackage{},
-				LangUpdates: []unversioned.UpdatePackage{},
-			}
-			for _, update := range updates.OSUpdates {
-				if !slices.Contains(errPkgs, update.Name) {
-					validatedManifest.OSUpdates = append(validatedManifest.OSUpdates, update)
-				}
-			}
-			for _, update := range updates.LangUpdates {
-				if !slices.Contains(errPkgs, update.Name) {
-					validatedManifest.LangUpdates = append(validatedManifest.LangUpdates, update)
-				}
-			}
-			_ = validatedManifest
-		}
+		// Currently can only validate updates if updating via scanner.
+		// (The previous validatedManifest reconstruction was never consumed;
+		// keeping it would only mask partial-patch failures.)
 		return res, nil
 	}
 
