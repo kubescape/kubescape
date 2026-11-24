@@ -475,7 +475,11 @@ patches:
 }
 
 func TestKustomizeDoesNotTrustPatchedOriginAnnotation(t *testing.T) {
-	root := t.TempDir()
+	// takeKustomizeOrigin returns a resolved path, and the wrapper directory the
+	// forged origin is relative to is resolved too, so both the root and the
+	// temporary directory the forged path climbs from have to be resolved for
+	// the test to pass where they are links, as /var is on macOS.
+	root := resolvedTempDir(t)
 	deploymentFile := filepath.Join(root, "deployment.yaml")
 	decoyFile := filepath.Join(root, "service.yaml")
 	require.NoError(t, os.WriteFile(deploymentFile,
@@ -483,7 +487,9 @@ func TestKustomizeDoesNotTrustPatchedOriginAnnotation(t *testing.T) {
 	require.NoError(t, os.WriteFile(decoyFile,
 		[]byte("apiVersion: v1\nkind: Service\nmetadata:\n  name: demo\n"), 0o600))
 
-	relFromTemp, err := filepath.Rel(os.TempDir(), decoyFile)
+	tempDir, err := filepath.EvalSymlinks(os.TempDir())
+	require.NoError(t, err)
+	relFromTemp, err := filepath.Rel(tempDir, decoyFile)
 	require.NoError(t, err)
 	forgedOriginPath := filepath.ToSlash(filepath.Join("..", relFromTemp))
 
