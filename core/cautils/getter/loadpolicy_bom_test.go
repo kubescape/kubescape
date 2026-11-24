@@ -78,6 +78,64 @@ func TestLoadPolicy_UTF8BOM(t *testing.T) {
 		assert.Equal(t, want, got)
 	})
 
+	t.Run("frameworks (GetFrameworks, ListFrameworks)", func(t *testing.T) {
+		plain, withBOM, _ := writeWithAndWithoutBOM(t, testFrameworkFile("NSA"))
+
+		want, err := NewLoadPolicy([]string{plain}).GetFrameworks()
+		require.NoError(t, err)
+		require.NotEmpty(t, want)
+
+		got, err := NewLoadPolicy([]string{withBOM}).GetFrameworks()
+		require.NoError(t, err)
+		assert.Equal(t, want, got)
+
+		names, err := NewLoadPolicy([]string{withBOM}).ListFrameworks()
+		require.NoError(t, err)
+		assert.Equal(t, []string{"NSA"}, names)
+	})
+
+	t.Run("control file (GetControl, ListControls)", func(t *testing.T) {
+		plain, withBOM, _ := writeWithAndWithoutBOM(t, filepath.Join("testdata", "C-0001.json"))
+
+		want, err := NewLoadPolicy([]string{plain}).GetControl("C-0001")
+		require.NoError(t, err)
+
+		got, err := NewLoadPolicy([]string{withBOM}).GetControl("C-0001")
+		require.NoError(t, err)
+		assert.Equal(t, want, got)
+
+		wantList, err := NewLoadPolicy([]string{plain}).ListControls()
+		require.NoError(t, err)
+		require.NotEmpty(t, wantList)
+
+		gotList, err := NewLoadPolicy([]string{withBOM}).ListControls()
+		require.NoError(t, err)
+		assert.Equal(t, wantList, gotList)
+	})
+
+	t.Run("control from a framework file (GetControl)", func(t *testing.T) {
+		plain, withBOM, _ := writeWithAndWithoutBOM(t, testFrameworkFile("MITRE"))
+
+		want, err := NewLoadPolicy([]string{plain}).GetControl("C-0053")
+		require.NoError(t, err)
+
+		got, err := NewLoadPolicy([]string{withBOM}).GetControl("C-0053")
+		require.NoError(t, err)
+		assert.Equal(t, want, got)
+	})
+
+	t.Run("attack tracks (GetAttackTracks)", func(t *testing.T) {
+		plain, withBOM, _ := writeWithAndWithoutBOM(t, filepath.Join("testdata", "attack-tracks.json"))
+
+		want, err := NewLoadPolicy([]string{plain}).GetAttackTracks()
+		require.NoError(t, err)
+		require.NotEmpty(t, want)
+
+		got, err := NewLoadPolicy([]string{withBOM}).GetAttackTracks()
+		require.NoError(t, err)
+		assert.Equal(t, want, got)
+	})
+
 	t.Run("only one leading mark is removed", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "controls-inputs.json")
 		require.NoError(t, os.WriteFile(path, []byte("\xef\xbb\xbf\xef\xbb\xbf{}"), 0o600))
