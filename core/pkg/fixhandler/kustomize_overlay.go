@@ -279,6 +279,19 @@ func addPatchToKustomizationYAML(kustContent string, patchRelPath string, target
 		Kind: yaml.MappingNode,
 		Tag:  "!!map",
 	}
+	// The core API has no group, so a core resource is selected by version alone.
+	if target.Group != "" {
+		targetMap.Content = append(targetMap.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "group"},
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: target.Group},
+		)
+	}
+	if target.Version != "" {
+		targetMap.Content = append(targetMap.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "version"},
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: target.Version},
+		)
+	}
 	if target.Kind != "" {
 		targetMap.Content = append(targetMap.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "kind"},
@@ -396,10 +409,16 @@ func resolveTargetIdentity(overlayDir string, kustMeta kustomizationMeta, fix Re
 	renderedKind := fix.Resource.GetKind()
 	renderedName := fix.Resource.GetName()
 	renderedNamespace := fix.Resource.GetNamespace()
+	// Kustomize transformers don't change a resource's API group or version, so
+	// the rendered ones select it at the patches stage too. Without them a target
+	// also selects a resource of the same kind and name in another API.
+	group, version := parseGroupVersion(fix.Resource.GetApiVersion())
 
 	// 1. Try to resolve from origin manifest on disk if available
 	if name, ns, ok := tryResolveOriginManifest(fix, kustMeta); ok {
 		return kustomizeTarget{
+			Group:     group,
+			Version:   version,
 			Kind:      renderedKind,
 			Name:      name,
 			Namespace: ns,
@@ -434,6 +453,8 @@ func resolveTargetIdentity(overlayDir string, kustMeta kustomizationMeta, fix Re
 	}
 
 	return kustomizeTarget{
+		Group:     group,
+		Version:   version,
 		Kind:      renderedKind,
 		Name:      targetName,
 		Namespace: targetNamespace,
