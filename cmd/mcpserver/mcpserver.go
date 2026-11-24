@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -799,6 +800,48 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return mcpToolError(code, msg, nil), nil
 		}
 		return mcp.NewToolResultText(string(v.([]byte))), nil
+	case "scan_manifest":
+		rawManifest, ok := arguments["manifest"]
+		if !ok || rawManifest == nil {
+			return mcpToolError(ErrCodeInvalidArgument, "manifest argument is required and cannot be empty", map[string]any{"argument": "manifest"}), nil
+		}
+		manifest, ok := rawManifest.(string)
+		if !ok {
+			return mcpToolError(ErrCodeInvalidArgument, "manifest argument must be a string", map[string]any{"argument": "manifest"}), nil
+		}
+		if len(strings.TrimSpace(manifest)) == 0 {
+			return mcpToolError(ErrCodeInvalidArgument, "manifest argument cannot be empty", map[string]any{"argument": "manifest"}), nil
+		}
+		if len(manifest) > maxManifestBytes {
+			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("manifest argument exceeds maximum allowed size of %d bytes", maxManifestBytes), map[string]any{"argument": "manifest"}), nil
+		}
+		framework, toolErr := mcpStringArg(arguments, "framework")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		var controlIDs []string
+		if rawControlIDs, hasControlIDs := arguments["control_ids"]; hasControlIDs && rawControlIDs != nil {
+			controlIDs, toolErr = parseControlIDs(rawControlIDs, hasControlIDs)
+			if toolErr != nil {
+				return toolErr, nil
+			}
+		}
+		filters, toolErr := parseLocalIaCFilterArgs(arguments)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+
+		h := sha256.Sum256([]byte(manifest))
+		key := fmt.Sprintf("scan_manifest:%x:%s:%s%s", h[:8], url.QueryEscape(framework), url.QueryEscape(strings.Join(controlIDs, ",")), filters.keySuffix())
+		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return ksServer.runManifestScan(scanCtx, manifest, framework, controlIDs, filters)
+		}, filters.limit)
+		if err != nil {
+			code := classifyScanError(err)
+			msg := classifyScanErrorMessage(code, "manifest", err)
+			return mcpToolError(code, msg, nil), nil
+		}
+		return mcp.NewToolResultText(string(v.([]byte))), nil
 	case "apply_remediation", "suggest_fix":
 		return ksServer.handleRemediationTool(ctx, name, arguments)
 	case "verify_remediation":
@@ -1196,6 +1239,7 @@ func registerTools(ksServer *KubescapeMcpserver) {
 	createFrameworkScanningTools(ksServer)
 	createIaCScanningTools(ksServer)
 	createIaCControlScanningTool(ksServer)
+	createManifestScanningTool(ksServer)
 	createRemediationTools(ksServer)
 	createSuggestFixTools(ksServer)
 	createVerifyRemediationTools(ksServer)
@@ -1382,6 +1426,23 @@ func createIaCControlScanningTool(ksServer *KubescapeMcpserver) {
 	opts = append(opts, iacScanFilterOptions()...)
 	iacControlScanTool := mcp.NewTool("scan_local_iac_controls", opts...)
 	ksServer.s.AddTool(iacControlScanTool, ksServer.toolHandler(iacControlScanTool.Name))
+}
+
+func createManifestScanningTool(ksServer *KubescapeMcpserver) {
+	opts := []mcp.ToolOption{
+		mcp.WithDescription("Scan a Kubernetes YAML or JSON manifest string in memory for security misconfigurations, without requiring a file path. Supports multi-document YAML manifests."),
+		mcp.WithString("manifest",
+			mcp.Required(),
+			mcp.Description("Raw YAML or JSON Kubernetes manifest content (can contain multiple documents separated by '---')"),
+		),
+		mcp.WithString("framework",
+			mcp.Description("Framework to scan against (optional, defaults to nsa)"),
+		),
+		withOptionalControlIDsProperty("Control IDs to scan against: a comma-separated string (e.g. \"C-0012,C-0017\") or an array of strings (optional). Overrides framework when provided."),
+	}
+	opts = append(opts, iacScanFilterOptions()...)
+	manifestScanTool := mcp.NewTool("scan_manifest", opts...)
+	ksServer.s.AddTool(manifestScanTool, ksServer.toolHandler(manifestScanTool.Name))
 }
 
 func createControlScanningTools(ksServer *KubescapeMcpserver) {
