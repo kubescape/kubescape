@@ -558,6 +558,24 @@ Scan local Infrastructure-as-Code files against specific control IDs rather than
 | `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
 | `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
 
+#### `scan_manifest`
+
+Scan a Kubernetes YAML or JSON manifest string in memory for security misconfigurations, without requiring a file path on disk. Supports multi-document YAML manifests separated by `---`.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `manifest` | string | Yes | Raw YAML or JSON Kubernetes manifest content (capped at 2 MiB) |
+| `framework` | string | No | Security framework to scan against (optional, e.g., `'nsa'` (default) or `'mitre'`) |
+| `control_ids` | string or array of strings | No | Specific control IDs to check, as a comma-separated string or an array (e.g. `"C-0012,C-0057"` or `["C-0012", "C-0057"]`). Overrides `framework` when provided |
+| `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"Deployment,DaemonSet"`) |
+| `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. `"Job,CronJob"`) |
+| `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
+| `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
+
 ### Live Scanning Tools
 
 The live scanning tools run on-demand scans against the cluster or local files.

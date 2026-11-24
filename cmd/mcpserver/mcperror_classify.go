@@ -38,7 +38,8 @@ func classifyScanError(err error) ErrorCode {
 		return ErrCodeAmbiguousResource
 	case errors.Is(err, resourcehandler.ErrResourceHasParent):
 		return ErrCodeResourceHasParent
-	case errors.Is(err, resourcehandler.ErrNotWorkload):
+	case errors.Is(err, resourcehandler.ErrNotWorkload),
+		errors.Is(err, resourcehandler.ErrNoScannableResources):
 		return ErrCodeNotWorkload
 	case errors.Is(err, resourcehandler.ErrSecretScanDenied):
 		return ErrCodeSecretScanDenied
