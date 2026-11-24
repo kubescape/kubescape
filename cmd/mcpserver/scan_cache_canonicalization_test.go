@@ -179,6 +179,16 @@ func TestScanCacheKeyDeterminism(t *testing.T) {
 		assert.Equal(t, keyIaC1, keyIaC2)
 	})
 
+	t.Run("scanFrameworkKey and scanControlsKey query-escape namespace and normalize star", func(t *testing.T) {
+		assert.Equal(t, "framework_scan::nsa", scanFrameworkKey("*", "NSA", ""))
+		assert.Equal(t, "framework_scan::nsa", scanFrameworkKey("", "nsa", ""))
+		assert.Equal(t, "framework_scan:ns%3Asub:nsa", scanFrameworkKey("ns:sub", "NSA", ""))
+
+		assert.Equal(t, "control_scan::C-0012", scanControlsKey("*", []string{"c-0012"}, ""))
+		assert.Equal(t, "control_scan::C-0012", scanControlsKey("", []string{"C-0012"}, ""))
+		assert.Equal(t, "control_scan:ns%3Asub:C-0012%2CC-0017", scanControlsKey("ns:sub", []string{"C-0017", "c-0012"}, ""))
+	})
+
 	t.Run("toolRemediationKey delegates to canonicalControlKey", func(t *testing.T) {
 		key1 := toolRemediationKey("suggest_fix", "app.yaml", "", "", []string{"C-0017", "C-0012"})
 		key2 := toolRemediationKey("suggest_fix", "app.yaml", "", "", []string{"c-0012", "C-0017"})
@@ -236,4 +246,68 @@ func TestScanManifest_CallTool_FrameworkCacheHits(t *testing.T) {
 	require.False(t, res2.IsError)
 
 	assert.Equal(t, toolResultText(t, res1), toolResultText(t, res2))
+}
+
+func activeScanKeys(ksServer *KubescapeMcpserver) []string {
+	ksServer.scanCtxMu.Lock()
+	defer ksServer.scanCtxMu.Unlock()
+	keys := make([]string, 0, len(ksServer.scanCtxs))
+	for k := range ksServer.scanCtxs {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func TestRunFrameworkSecurityScan_CallTool_EscapedCacheKey(t *testing.T) {
+	origFrameworkFn := frameworkScanFn
+	t.Cleanup(func() { frameworkScanFn = origFrameworkFn })
+
+	ksServer := &KubescapeMcpserver{
+		s: server.NewMCPServer("test", "v1"),
+	}
+	registerTools(ksServer)
+
+	var frameworkKeys []string
+	frameworkScanFn = func(s *KubescapeMcpserver, ctx context.Context, namespace, frameworkName string, filters ...scanFilterArgs) ([]byte, error) {
+		frameworkKeys = append(frameworkKeys, activeScanKeys(ksServer)...)
+		return []byte(`{"summary":{}}`), nil
+	}
+
+	resFw, err := ksServer.CallTool(context.Background(), "run_framework_security_scan", map[string]any{
+		"namespace":      "  ns:sub  ",
+		"framework_name": "NSA",
+	})
+	require.NoError(t, err)
+	require.False(t, resFw.IsError)
+	assert.Equal(t, []string{"framework_scan:ns%3Asub:nsa"}, frameworkKeys)
+}
+
+func TestScanControls_CallTool_EscapedCacheKey(t *testing.T) {
+	origControlsFn := controlsScanFn
+	t.Cleanup(func() { controlsScanFn = origControlsFn })
+
+	ksServer := &KubescapeMcpserver{
+		s: server.NewMCPServer("test", "v1"),
+	}
+	registerTools(ksServer)
+
+	var controlKeys []string
+	controlsScanFn = func(s *KubescapeMcpserver, ctx context.Context, namespace string, controlIDs []string, filters ...scanFilterArgs) ([]byte, error) {
+		controlKeys = append(controlKeys, activeScanKeys(ksServer)...)
+		return []byte(`{"summary":{}}`), nil
+	}
+
+	for _, ns := range []any{"*", "   ", "  ns:sub  "} {
+		resCtrl, err := ksServer.CallTool(context.Background(), "scan_controls", map[string]any{
+			"namespace":   ns,
+			"control_ids": []any{"c-0012"},
+		})
+		require.NoError(t, err)
+		require.False(t, resCtrl.IsError)
+	}
+	assert.Equal(t, []string{
+		"control_scan::C-0012",
+		"control_scan::C-0012",
+		"control_scan:ns%3Asub:C-0012",
+	}, controlKeys)
 }
