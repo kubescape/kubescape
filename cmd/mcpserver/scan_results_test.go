@@ -1,10 +1,12 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -233,4 +235,208 @@ func TestDoResultScan_WithPagination(t *testing.T) {
 	require.True(t, pageDefault.Truncated)
 	require.NotNil(t, pageDefault.NextOffset)
 	require.Equal(t, 100, *pageDefault.NextOffset)
+}
+
+func oversizedTestPayload(totalResources int) []byte {
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, `{"total_failed":%d,"framework_name":"nsa","degraded":true,"warning":"oversized warning","failed_resources":[`, totalResources)
+	for i := 0; i < totalResources; i++ {
+		if i > 0 {
+			buf.WriteString(",")
+		}
+		fmt.Fprintf(&buf, `{"resourceID":"res-%03d"}`, i)
+	}
+	buf.WriteString(`],"padding":"`)
+	// Ensure total payload size exceeds 32 MiB retention bound
+	paddingLen := scanResultsMaxBytes - buf.Len() + 1024
+	if paddingLen > 0 {
+		buf.Write(bytes.Repeat([]byte{'x'}, paddingLen))
+	}
+	buf.WriteString(`"}`)
+	return buf.Bytes()
+}
+
+// oversizedResourceArrayPayload constructs a fixture where the failed_resources array itself
+// exceeds scanResultsMaxBytes, without relying on top-level padding fields.
+func oversizedResourceArrayPayload(totalResources int) []byte {
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, `{"total_failed":%d,"framework_name":"nsa","degraded":true,"warning":"oversized array","failed_resources":[`, totalResources)
+	resourcePadding := (scanResultsMaxBytes / totalResources) + 512
+	padBytes := bytes.Repeat([]byte{'a'}, resourcePadding)
+	for i := 0; i < totalResources; i++ {
+		if i > 0 {
+			buf.WriteString(",")
+		}
+		fmt.Fprintf(&buf, `{"resourceID":"res-%03d","payload":"%s"}`, i, padBytes)
+	}
+	buf.WriteString(`]}`)
+	return buf.Bytes()
+}
+
+func TestScanResultOversizedPayload(t *testing.T) {
+	ks := &KubescapeMcpserver{}
+	data := oversizedTestPayload(150)
+	require.Greater(t, len(data), scanResultsMaxBytes)
+
+	ctx := resultTestContext("alice")
+	v, err := ks.doResultScan(ctx, "oversized-scan", func(scanCtx context.Context) (interface{}, error) {
+		require.Equal(t, true, scanCtx.Value(fullScanResultsKey{}))
+		return data, nil
+	})
+	require.NoError(t, err)
+
+	page := decodeResultPage(t, v.([]byte))
+	require.Len(t, page.Resources, 100)
+	require.Equal(t, 100, page.ReturnedFailed)
+	require.Equal(t, 150, page.TotalFailed)
+	require.True(t, page.Truncated)
+	require.NotEmpty(t, page.PaginationWarning)
+	require.Empty(t, page.ScanID)
+	require.Nil(t, page.NextOffset)
+	require.Empty(t, ks.scanResults.entries)
+
+	// Custom limit on oversized payload
+	vLimited, err := ks.doResultScan(ctx, "oversized-scan-limited", func(scanCtx context.Context) (interface{}, error) {
+		return data, nil
+	}, 50)
+	require.NoError(t, err)
+	pageLimited := decodeResultPage(t, vLimited.([]byte))
+	require.Len(t, pageLimited.Resources, 50)
+	require.Equal(t, 50, pageLimited.ReturnedFailed)
+	require.Equal(t, 150, pageLimited.TotalFailed)
+	require.True(t, pageLimited.Truncated)
+	require.NotEmpty(t, pageLimited.PaginationWarning)
+	require.Empty(t, pageLimited.ScanID)
+	require.Nil(t, pageLimited.NextOffset)
+}
+
+func TestScanResultOversizedConcurrentClients(t *testing.T) {
+	ks := &KubescapeMcpserver{}
+	data := oversizedTestPayload(120)
+	require.Greater(t, len(data), scanResultsMaxBytes)
+
+	const callers = 6
+	key := "oversized-concurrent"
+	var scanInvocations atomic.Int32
+	var wg sync.WaitGroup
+
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ctx := resultTestContext(fmt.Sprintf("client-%d", i))
+			v, err := ks.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+				// Hold execution until the coordinator records all waiting callers,
+				// ensuring they join the single shared execution.
+				require.Eventually(t, func() bool {
+					ks.scanCtxMu.Lock()
+					defer ks.scanCtxMu.Unlock()
+					if state, ok := ks.scanCtxs[key]; ok {
+						return state.count >= callers
+					}
+					return false
+				}, 5*time.Second, 5*time.Millisecond)
+				scanInvocations.Add(1)
+				return data, nil
+			})
+			require.NoError(t, err)
+			page := decodeResultPage(t, v.([]byte))
+			require.Len(t, page.Resources, 100)
+			require.NotEmpty(t, page.PaginationWarning)
+			require.Empty(t, page.ScanID)
+			require.Nil(t, page.NextOffset)
+		}(i)
+	}
+	wg.Wait()
+	require.Equal(t, int32(1), scanInvocations.Load(), "scan callback should be invoked exactly once for all joined callers")
+	require.Empty(t, ks.scanResults.entries)
+}
+
+func TestScanResultSharedDecodingAcrossSnapshots(t *testing.T) {
+	ks := &KubescapeMcpserver{}
+	doc, data := resultTestDocument(t)
+	require.LessOrEqual(t, len(data), scanResultsMaxBytes)
+
+	const callers = 4
+	key := "shared-snapshots-test"
+	var scanInvocations atomic.Int32
+	var wg sync.WaitGroup
+
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ctx := resultTestContext(fmt.Sprintf("client-%d", i))
+			v, err := ks.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+				// Hold execution until the coordinator records all waiting callers.
+				require.Eventually(t, func() bool {
+					ks.scanCtxMu.Lock()
+					defer ks.scanCtxMu.Unlock()
+					if state, ok := ks.scanCtxs[key]; ok {
+						return state.count >= callers
+					}
+					return false
+				}, 5*time.Second, 5*time.Millisecond)
+				scanInvocations.Add(1)
+				return data, nil
+			})
+			require.NoError(t, err)
+			page := decodeResultPage(t, v.([]byte))
+			require.NotEmpty(t, page.ScanID)
+		}(i)
+	}
+	wg.Wait()
+
+	require.Equal(t, int32(1), scanInvocations.Load(), "scan callback should be invoked exactly once across all callers")
+	require.Len(t, ks.scanResults.entries, callers, "each caller session must have its own retained snapshot")
+
+	// Verify that all retained snapshots share the exact same underlying decoded resource array
+	// memory rather than each caller decoding its own copy.
+	var firstResourcePtr *json.RawMessage
+	for _, snapshot := range ks.scanResults.entries {
+		require.Len(t, snapshot.document.Resources, len(doc.Resources))
+		ptr := &snapshot.document.Resources[0]
+		if firstResourcePtr == nil {
+			firstResourcePtr = ptr
+		} else {
+			require.Same(t, firstResourcePtr, ptr, "snapshots must share the same decoded slice memory")
+		}
+	}
+}
+
+func BenchmarkScanResultOversizedDecoding(b *testing.B) {
+	ks := &KubescapeMcpserver{}
+	data := oversizedResourceArrayPayload(2000)
+	if len(data) <= scanResultsMaxBytes {
+		b.Fatalf("expected payload > %d bytes, got %d", scanResultsMaxBytes, len(data))
+	}
+	ctx := resultTestContext("bench-user")
+
+	b.Run("FirstPageExtraction", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			v, err := ks.doResultScan(ctx, fmt.Sprintf("bench-oversized-%d", i), func(scanCtx context.Context) (interface{}, error) {
+				return data, nil
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(v.([]byte)) == 0 {
+				b.Fatal("empty response")
+			}
+		}
+	})
+
+	b.Run("FullArrayDecoding", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			var doc scanResultDocument
+			if err := json.Unmarshal(data, &doc); err != nil {
+				b.Fatal(err)
+			}
+			if len(doc.Resources) == 0 {
+				b.Fatal("empty resources")
+			}
+		}
+	})
 }
