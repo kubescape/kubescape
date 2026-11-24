@@ -674,26 +674,26 @@ func TestPolicies_Set_DeduplicatesFrameworkNames(t *testing.T) {
 	control1 := reporthandling.Control{
 		ControlID: "C-0001",
 		Rules: []reporthandling.PolicyRule{
-			{Name: "rule-1"},
+			{PortalBase: armotypes.PortalBase{Name: "rule-1"}},
 		},
 	}
 	control2 := reporthandling.Control{
 		ControlID: "C-0002",
 		Rules: []reporthandling.PolicyRule{
-			{Name: "rule-2"},
+			{PortalBase: armotypes.PortalBase{Name: "rule-2"}},
 		},
 	}
 	frameworkA1 := reporthandling.Framework{
-		Name:     "cis-aks",
-		Controls: []reporthandling.Control{control1},
+		PortalBase: armotypes.PortalBase{Name: "cis-aks"},
+		Controls:   []reporthandling.Control{control1},
 	}
 	frameworkA2 := reporthandling.Framework{
-		Name:     "cis-aks",
-		Controls: []reporthandling.Control{control2},
+		PortalBase: armotypes.PortalBase{Name: "cis-aks"},
+		Controls:   []reporthandling.Control{control2},
 	}
 	frameworkB := reporthandling.Framework{
-		Name:     "nsa",
-		Controls: []reporthandling.Control{control1},
+		PortalBase: armotypes.PortalBase{Name: "nsa"},
+		Controls:   []reporthandling.Control{control1},
 	}
 
 	policies := NewPolicies()
