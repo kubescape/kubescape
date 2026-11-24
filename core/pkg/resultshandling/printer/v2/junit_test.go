@@ -357,7 +357,8 @@ func TestImageTestsSuitesUsesPlatformAwareTargets(t *testing.T) {
 	require.Len(t, got.Suites[1].Properties, 2)
 	assert.Equal(t, JUnitProperty{Name: "image", Value: "registry.example.com/app:v1"}, got.Suites[1].Properties[0])
 	assert.Equal(t, JUnitProperty{Name: "platform", Value: "linux/arm64"}, got.Suites[1].Properties[1])
-	assert.Empty(t, got.Suites[2].Properties)
+	require.Len(t, got.Suites[2].Properties, 1)
+	assert.Equal(t, JUnitProperty{Name: "image", Value: "registry.example.com/sidecar:v1"}, got.Suites[2].Properties[0])
 
 	for i, suite := range got.Suites {
 		require.Len(t, suite.TestCases, 1, "suite %d", i)

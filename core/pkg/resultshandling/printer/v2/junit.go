@@ -405,12 +405,13 @@ func imageTestsSuites(imageScanData []cautils.ImageScanData) *JUnitTestSuites {
 			Timestamp: timestamp,
 			TestCases: imageTestCases(cves, imageScanData[i].Platform),
 		}
-		if imageScanData[i].Platform != "" {
-			suite.Properties = []JUnitProperty{
-				{Name: "image", Value: xmlSanitize(imageScanData[i].Image)},
-				{Name: "platform", Value: xmlSanitize(imageScanData[i].Platform)},
-			}
+		props := []JUnitProperty{
+			{Name: "image", Value: xmlSanitize(imageScanData[i].Image)},
 		}
+		if imageScanData[i].Platform != "" {
+			props = append(props, JUnitProperty{Name: "platform", Value: xmlSanitize(imageScanData[i].Platform)})
+		}
+		suite.Properties = props
 		suites = append(suites, suite)
 	}
 
