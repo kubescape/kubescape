@@ -138,6 +138,16 @@ func TestManifestScan_CallTool(t *testing.T) {
 	text := toolResultText(t, result)
 	require.Contains(t, text, `"total_failed":1`)
 
+	// CallTool with manifest alone (framework and control_ids omitted: defaults to nsa)
+	result, err = ksServer.CallTool(context.Background(), "scan_manifest", map[string]any{
+		"manifest": samplePrivilegedPodManifest,
+	})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	text = toolResultText(t, result)
+	require.Contains(t, text, `"framework_name":"NSA"`)
+	require.NotContains(t, text, `"total_failed":0`)
+
 	// CallTool with manifest and framework (control_ids omitted)
 	result, err = ksServer.CallTool(context.Background(), "scan_manifest", map[string]any{
 		"manifest":  samplePrivilegedPodManifest,
@@ -182,4 +192,77 @@ func TestManifestScan_CallTool(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	require.Contains(t, toolResultText(t, result), "INVALID_ARGUMENT")
+}
+
+func TestManifestScan_CallTool_WithoutControlIDs(t *testing.T) {
+	ksServer := &KubescapeMcpserver{
+		s:            server.NewMCPServer("kubescape-test", "test"),
+		policyGetter: getSharedLiveClusterPolicyGetter(t),
+	}
+	registerTools(ksServer)
+
+	t.Run("manifest alone defaults to nsa framework", func(t *testing.T) {
+		result, err := ksServer.CallTool(context.Background(), "scan_manifest", map[string]any{
+			"manifest": samplePrivilegedPodManifest,
+		})
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+
+		var resp scanResponse
+		err = json.Unmarshal([]byte(toolResultText(t, result)), &resp)
+		require.NoError(t, err)
+
+		assert.True(t, strings.EqualFold(resp.FrameworkName, "nsa"), "expected default framework to be nsa")
+		assert.Greater(t, resp.TotalFailed, 0, "privileged pod should have failed controls in default nsa framework")
+		assert.NotEmpty(t, resp.FailedResources)
+	})
+
+	t.Run("manifest with explicit framework only", func(t *testing.T) {
+		result, err := ksServer.CallTool(context.Background(), "scan_manifest", map[string]any{
+			"manifest":  samplePrivilegedPodManifest,
+			"framework": "mitre",
+		})
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+
+		var resp scanResponse
+		err = json.Unmarshal([]byte(toolResultText(t, result)), &resp)
+		require.NoError(t, err)
+
+		assert.True(t, strings.EqualFold(resp.FrameworkName, "mitre"), "expected framework to be mitre")
+		assert.Greater(t, resp.TotalFailed, 0)
+		assert.NotEmpty(t, resp.FailedResources)
+	})
+
+	t.Run("valid JSON manifest alone defaults to nsa framework", func(t *testing.T) {
+		result, err := ksServer.CallTool(context.Background(), "scan_manifest", map[string]any{
+			"manifest": sampleValidJSONManifest,
+		})
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+
+		var resp scanResponse
+		err = json.Unmarshal([]byte(toolResultText(t, result)), &resp)
+		require.NoError(t, err)
+
+		assert.True(t, strings.EqualFold(resp.FrameworkName, "nsa"))
+		assert.Greater(t, resp.TotalFailed, 0)
+	})
+
+	t.Run("manifest alone with filters", func(t *testing.T) {
+		result, err := ksServer.CallTool(context.Background(), "scan_manifest", map[string]any{
+			"manifest":     samplePrivilegedPodManifest,
+			"min_severity": "High",
+			"limit":        10,
+		})
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+
+		var resp scanResponse
+		err = json.Unmarshal([]byte(toolResultText(t, result)), &resp)
+		require.NoError(t, err)
+
+		assert.True(t, strings.EqualFold(resp.FrameworkName, "nsa"))
+		assert.Greater(t, resp.TotalFailed, 0)
+	})
 }
