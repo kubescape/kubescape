@@ -679,6 +679,9 @@ type resourceSource struct {
 	// inMemory marks a resource with no manifest on disk, patched by rendering
 	// the scanned object instead of rewriting a file.
 	inMemory bool
+	// isKustomizeOverlay marks a resource that originates from a Kustomize overlay.
+	isKustomizeOverlay  bool
+	kustomizeOverlayDir string
 	// skipReason, when non-empty, means this resource cannot be fixed. The
 	// caller re-reports the resource's failed controls as unfixed rather than
 	// dropping them.
@@ -849,6 +852,10 @@ func (h *FixHandler) resolveResourceSource(ctx context.Context, resourceObj *rep
 		return src
 	}
 
+	if resourceObj.Source.FileType == reporthandling.SourceTypeKustomizeDirectory {
+		return h.resolveKustomizeOverlaySource(ctx, resourceObj, src.reportedPath)
+	}
+
 	relativePath, idx, err := h.getFilePathAndIndex(src.reportedPath)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning("Skipping invalid resource path: " + sanitizeForLog(src.reportedPath))
@@ -984,13 +991,16 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 		}
 
 		rfi := ResourceFixInfo{
-			FilePath:        src.filePath,
-			relativePath:    src.relativePath,
-			fileKey:         h.resourceFileKey(resourceObj),
-			Resource:        resourceObj,
-			YamlExpressions: make(map[string]armotypes.FixPath, 0),
-			DocumentIndex:   src.documentIndex,
-			inMemory:        src.inMemory,
+			FilePath:            src.filePath,
+			relativePath:        src.relativePath,
+			reportedPath:        src.reportedPath,
+			fileKey:             h.resourceFileKey(resourceObj),
+			Resource:            resourceObj,
+			YamlExpressions:     make(map[string]armotypes.FixPath, 0),
+			DocumentIndex:       src.documentIndex,
+			inMemory:            src.inMemory,
+			isKustomizeOverlay:  src.isKustomizeOverlay,
+			kustomizeOverlayDir: src.kustomizeOverlayDir,
 		}
 
 		// Tentative unfixed entries for this resource. We collect them locally
@@ -1552,6 +1562,20 @@ func formatExpectedChangesWithBuilder(resourcesToFix []ResourceFixInfo, chalk *g
 			fmt.Fprintf(&sb, "%s %s\n",
 				chalk.WithBrightCyan().Bold("Source:"),
 				chalk.BrightWhite("cluster"))
+		case resourceFixInfo.isKustomizeOverlay:
+			fmt.Fprintf(&sb, "%s %s\n",
+				chalk.WithBrightCyan().Bold("Kustomize overlay:"),
+				chalk.BrightWhite(resourceFixInfo.kustomizeOverlayDir))
+			if resourceFixInfo.reportedPath != "" {
+				fmt.Fprintf(&sb, "%s %s\n",
+					chalk.WithBrightCyan().Bold("Target manifest:"),
+					chalk.BrightWhite(resourceFixInfo.reportedPath))
+			}
+			if resNamespace != "" {
+				fmt.Fprintf(&sb, "%s %s\n",
+					chalk.WithBrightCyan().Bold("Namespace:"),
+					chalk.BrightWhite(resNamespace))
+			}
 		default:
 			fmt.Fprintf(&sb, "%s %s\n",
 				chalk.WithBrightCyan().Bold("File:"),
@@ -1618,9 +1642,82 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 	}
 
 	fixesByFile := make(map[string][]ResourceFixInfo)
+	overlayFixesByDir := make(map[string][]ResourceFixInfo)
 	for _, fix := range resourcesToFix {
-		if !fix.inMemory {
+		if fix.isKustomizeOverlay {
+			overlayFixesByDir[fix.kustomizeOverlayDir] = append(overlayFixesByDir[fix.kustomizeOverlayDir], fix)
+		} else if !fix.inMemory {
 			fixesByFile[fix.FilePath] = append(fixesByFile[fix.FilePath], fix)
+		}
+	}
+
+	overlayDirs := make([]string, 0, len(overlayFixesByDir))
+	for dir := range overlayFixesByDir {
+		overlayDirs = append(overlayDirs, dir)
+	}
+	sort.Strings(overlayDirs)
+
+	type overlayExecution struct {
+		dir            string
+		fixes          []ResourceFixInfo
+		plan           *overlayFixPlan
+		destOverlayDir string
+	}
+	overlayExecutions := make([]overlayExecution, 0, len(overlayDirs))
+	for _, dir := range overlayDirs {
+		fixes := overlayFixesByDir[dir]
+		plan, err := planOverlayChanges(dir, fixes)
+		if err != nil {
+			errors = append(errors, fmt.Errorf("failed to plan kustomize overlay fixes in %s: %w", dir, err))
+			continue
+		}
+
+		var destOverlayDir string
+		if output != nil {
+			if destKustPath, ok := outputPaths[plan.kustFile]; ok {
+				destOverlayDir = filepath.Dir(destKustPath)
+			} else {
+				sharedRoot, sErr := h.sharedScanRoot()
+				if sErr == nil {
+					if rel, rErr := filepath.Rel(sharedRoot, dir); rErr == nil {
+						destOverlayDir = filepath.Join(output.dir, rel)
+					}
+				}
+				if destOverlayDir == "" {
+					destOverlayDir = filepath.Join(output.dir, filepath.Base(dir))
+				}
+			}
+		}
+
+		overlayExecutions = append(overlayExecutions, overlayExecution{
+			dir:            dir,
+			fixes:          fixes,
+			plan:           plan,
+			destOverlayDir: destOverlayDir,
+		})
+	}
+
+	if output != nil {
+		sources := make([]string, 0, len(resourcesToFix))
+		for i := range resourcesToFix {
+			if !resourcesToFix[i].inMemory {
+				sources = append(sources, resourcesToFix[i].FilePath)
+			}
+		}
+		scanned := h.scannedFiles(sources...)
+		for _, exec := range overlayExecutions {
+			for _, patch := range exec.plan.patches {
+				destPatchPath := filepath.Join(exec.destOverlayDir, "patches", patch.fileName)
+				if overwritten, ok := scanned.overwritesScannedManifest(destPatchPath); ok {
+					return 0, []error{fmt.Errorf("output directory %q holds scanned manifests: writing overlay patch %q would overwrite %q. Choose a directory outside the scanned ones, or omit --output-dir to fix the manifests in place", h.fixInfo.OutputDir, sanitizeForLog(destPatchPath), sanitizeForLog(overwritten))}
+				}
+			}
+			if exec.plan.updatedKust != exec.plan.originalKust {
+				destKustPath := filepath.Join(exec.destOverlayDir, exec.plan.kustFileName)
+				if overwritten, ok := scanned.overwritesScannedManifest(destKustPath); ok {
+					return 0, []error{fmt.Errorf("output directory %q holds scanned manifests: writing %s %q would overwrite %q. Choose a directory outside the scanned ones, or omit --output-dir to fix the manifests in place", h.fixInfo.OutputDir, exec.plan.kustFileName, sanitizeForLog(destKustPath), sanitizeForLog(overwritten))}
+				}
+			}
 		}
 	}
 
@@ -1630,6 +1727,18 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 			continue
 		}
 		updatedFiles[path] = true
+	}
+
+	for _, exec := range overlayExecutions {
+		if err := applyKustomizeOverlayChanges(ctx, exec.plan, output, exec.destOverlayDir); err != nil {
+			errors = append(errors, fmt.Errorf("failed to apply kustomize overlay fixes in %s: %w", exec.dir, err))
+			continue
+		}
+		if len(exec.plan.patches) > 0 || exec.plan.updatedKust != exec.plan.originalKust {
+			for _, fix := range exec.fixes {
+				updatedFiles[fix.FilePath] = true
+			}
+		}
 	}
 
 	return len(updatedFiles), errors
@@ -1860,7 +1969,7 @@ func ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string)
 // rewrite. Helm-rendered resources carry their own type and are handled by
 // PrepareHelmSuggestions instead.
 func isFixableSourceType(fileType string) bool {
-	return fileType == reporthandling.SourceTypeYaml || fileType == reporthandling.SourceTypeJson
+	return fileType == reporthandling.SourceTypeYaml || fileType == reporthandling.SourceTypeJson || fileType == reporthandling.SourceTypeKustomizeDirectory
 }
 
 // applyFixToFileContent rewrites one file, keeping it in the format it was

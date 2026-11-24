@@ -45,6 +45,7 @@ type ResourceFixInfo struct {
 	// relativePath is FilePath as the report recorded it, relative to the
 	// resource's own base path. OutputPaths mirrors it under --output-dir.
 	relativePath string
+	reportedPath string
 
 	// failedControls and fixedCount let a resource be withdrawn after its
 	// controls have already been tallied: the entries are re-reported as
@@ -60,6 +61,12 @@ type ResourceFixInfo struct {
 	// cluster scan. Its fix is rendered from the scanned object by RenderFixes
 	// rather than written back by ApplyChanges, and FilePath is empty.
 	inMemory bool
+
+	// isKustomizeOverlay marks a resource that originates from a Kustomize overlay.
+	// Its fix is written as a surgical patch under <overlay>/patches/ and registered
+	// in <overlay>/kustomization.yaml, preserving the shared base manifest untouched.
+	isKustomizeOverlay  bool
+	kustomizeOverlayDir string
 }
 
 // HelmFixSuggestion describes a fix for a Helm-rendered resource. We do not

@@ -46,10 +46,17 @@ func (h *FixHandler) BuildPatch(ctx context.Context, resourcesToFix []ResourceFi
 	if err != nil {
 		return nil, err
 	}
+	sharedRoot, err := h.sharedScanRoot()
+	if err != nil {
+		return nil, fmt.Errorf("cannot lay out a patch: %w", err)
+	}
 
 	fixesByFile := make(map[string][]ResourceFixInfo)
+	overlayFixesByDir := make(map[string][]ResourceFixInfo)
 	for _, fix := range resourcesToFix {
-		if !fix.inMemory {
+		if fix.isKustomizeOverlay {
+			overlayFixesByDir[fix.kustomizeOverlayDir] = append(overlayFixesByDir[fix.kustomizeOverlayDir], fix)
+		} else if !fix.inMemory {
 			fixesByFile[fix.FilePath] = append(fixesByFile[fix.FilePath], fix)
 		}
 	}
@@ -88,6 +95,59 @@ func (h *FixHandler) BuildPatch(ctx context.Context, resourcesToFix []ResourceFi
 		patch.WriteString(section)
 		result.Files++
 		result.Resources += changed
+	}
+
+	overlayDirs := make([]string, 0, len(overlayFixesByDir))
+	for dir := range overlayFixesByDir {
+		overlayDirs = append(overlayDirs, dir)
+	}
+	sort.Strings(overlayDirs)
+
+	for _, dir := range overlayDirs {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("patch export cancelled: %w", err)
+		}
+		fixes := overlayFixesByDir[dir]
+		plan, err := planOverlayChanges(dir, fixes)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("failed to plan kustomize overlay fixes in %s: %w", dir, err))
+			continue
+		}
+
+		kustName := names[plan.kustFile]
+		if kustName == "" {
+			if sharedRoot != "" {
+				if rel, err := filepath.Rel(sharedRoot, plan.kustFile); err == nil {
+					kustName = path.Clean(filepath.ToSlash(rel))
+				}
+			}
+			if kustName == "" {
+				kustName = path.Clean(filepath.ToSlash(plan.kustFile))
+			}
+		}
+		kustDir := path.Dir(kustName)
+
+		for _, patchItem := range plan.patches {
+			patchNameInDiff := path.Clean(path.Join(kustDir, "patches", patchItem.fileName))
+			var patchSection string
+			if patchItem.isNewFile {
+				patchSection = unifiedDiffNewFile(patchNameInDiff, patchItem.updatedContent)
+			} else {
+				patchSection = unifiedDiff(patchNameInDiff, patchItem.originalContent, patchItem.updatedContent)
+			}
+			if patchSection != "" {
+				patch.WriteString(patchSection)
+				result.Files++
+				result.Resources++
+			}
+		}
+		if plan.updatedKust != plan.originalKust {
+			kustSection := unifiedDiff(kustName, plan.originalKust, plan.updatedKust)
+			if kustSection != "" {
+				patch.WriteString(kustSection)
+				result.Files++
+			}
+		}
 	}
 	if len(failures) > 0 {
 		return nil, errors.Join(failures...)
