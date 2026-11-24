@@ -151,7 +151,7 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 
 		switch pp.viewType {
 		case cautils.ControlViewType:
-			pp.printResults(&opaSessionObj.Report.SummaryDetails, opaSessionObj.GetCatalog(), opaSessionObj.ResourcesResult, sortedControlIDs)
+			pp.printResults(&opaSessionObj.Report.SummaryDetails, opaSessionObj.GetCatalog(), opaSessionObj.ResourcesResult, sortedControlIDs, opaSessionObj.PreservedEvidenceValues)
 		case cautils.ResourceViewType:
 			// The resource table is the one place that already reads
 			// showEvidence (see generateResourceRows), so gating it on
@@ -262,9 +262,13 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) error
 func (pp *PrettyPrinter) Score(_ float32) {
 }
 
-func (pp *PrettyPrinter) printResults(summary *reportsummary.SummaryDetails, catalog cautils.ResourceCatalog, resourcesResult map[string]resourcesresults.Result, sortedControlIDs [][]string) {
+func (pp *PrettyPrinter) printResults(summary *reportsummary.SummaryDetails, catalog cautils.ResourceCatalog, resourcesResult map[string]resourcesresults.Result, sortedControlIDs [][]string, preservedValues ...map[string]map[string]string) {
 	if summary == nil {
 		return
+	}
+	var preserved map[string]map[string]string
+	if len(preservedValues) > 0 {
+		preserved = preservedValues[0]
 	}
 	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
 		for _, c := range sortedControlID {
@@ -273,7 +277,7 @@ func (pp *PrettyPrinter) printResults(summary *reportsummary.SummaryDetails, cat
 				continue
 			}
 			pp.printTitle(controlSummary)
-			pp.printResources(summary, controlSummary, catalog, resourcesResult)
+			pp.printResources(summary, controlSummary, catalog, resourcesResult, preserved)
 			pp.printSummary(controlSummary)
 		}
 	}
@@ -331,7 +335,7 @@ func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.ICon
 	}
 }
 
-func (pp *PrettyPrinter) printResources(summary *reportsummary.SummaryDetails, controlSummary reportsummary.IControlSummary, catalog cautils.ResourceCatalog, resourcesResult map[string]resourcesresults.Result) {
+func (pp *PrettyPrinter) printResources(summary *reportsummary.SummaryDetails, controlSummary reportsummary.IControlSummary, catalog cautils.ResourceCatalog, resourcesResult map[string]resourcesresults.Result, preservedValues ...map[string]map[string]string) {
 	if controlSummary == nil {
 		return
 	}
@@ -342,7 +346,7 @@ func (pp *PrettyPrinter) printResources(summary *reportsummary.SummaryDetails, c
 	// then never consulted on this path, so `kubescape scan -E --view control`
 	// printed exactly what a bare scan printed.
 	if pp.verboseMode || pp.showEvidence {
-		attachAssistedRemediation(summary, workloadsSummary, controlSummary.GetID(), resourcesResult, pp.showSecrets, pp.showEvidence)
+		attachAssistedRemediation(summary, workloadsSummary, controlSummary.GetID(), resourcesResult, pp.showSecrets, pp.showEvidence, preservedValues...)
 	}
 
 	failedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummaryFailed)
@@ -376,15 +380,24 @@ func (pp *PrettyPrinter) printResources(summary *reportsummary.SummaryDetails, c
 // runs under --verbose as well as --show-evidence, and showEvidence is what
 // opts in to the extra detail: delete paths carry their current value only
 // then, so a bare --verbose prints what it always has.
-func attachAssistedRemediation(summary *reportsummary.SummaryDetails, workloads []WorkloadSummary, controlID string, resourcesResult map[string]resourcesresults.Result, showSecrets, showEvidence bool) {
+func attachAssistedRemediation(summary *reportsummary.SummaryDetails, workloads []WorkloadSummary, controlID string, resourcesResult map[string]resourcesresults.Result, showSecrets, showEvidence bool, preservedValues ...map[string]map[string]string) {
+	var preservedByID map[string]map[string]string
+	if len(preservedValues) > 0 {
+		preservedByID = preservedValues[0]
+	}
 	for i := range workloads {
 		workload := &workloads[i]
 		if workload.status != apis.StatusFailed {
 			continue
 		}
-		result, ok := resourcesResult[workload.resource.GetID()]
+		resID := workload.resource.GetID()
+		result, ok := resourcesResult[resID]
 		if !ok {
 			continue
+		}
+		var preserved map[string]string
+		if preservedByID != nil {
+			preserved = preservedByID[resID]
 		}
 		for j := range result.AssociatedControls {
 			if result.AssociatedControls[j].GetID() != controlID {
@@ -396,9 +409,9 @@ func attachAssistedRemediation(summary *reportsummary.SummaryDetails, workloads 
 			displayed := cautils.EvidenceControl(summary, result.AssociatedControls[j])
 			var paths []string
 			if showEvidence {
-				paths = evidencePathsWithCurrentValues(&displayed, workload.resource, showSecrets)
+				paths = evidencePathsWithCurrentValues(&displayed, workload.resource, showSecrets, preserved)
 			} else {
-				paths = AssistedRemediationPathsWithCurrentValuesFiltered(&displayed, workload.resource, showSecrets)
+				paths = AssistedRemediationPathsWithCurrentValuesFiltered(&displayed, workload.resource, showSecrets, preserved)
 			}
 			if len(paths) > 0 {
 				workload.assistedRemediation = strings.Join(paths, ", ")

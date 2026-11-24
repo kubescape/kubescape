@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
 	"github.com/kubescape/opa-utils/exceptions"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -757,6 +758,8 @@ func getRuleDependencies(ctx context.Context) (map[string]string, error) {
 // cleanProcessedResource strips sensitive and oversized fields (such as managedFields,
 // last-applied-configuration, and sensitive data/env values via removeData) from obj as soon
 // as its OPA rule evaluation is completed, bounding heap footprint during large cluster scans.
+// When ShowSecrets is enabled, it first captures the unredacted values for failing DeletePath
+// and ReviewPath entries so evidence printers can display them while keeping raw resources scrubbed.
 // It is thread-safe and idempotent; each distinct resource object is cleaned at most once.
 func (opap *OPAProcessor) cleanProcessedResource(resourceID string, res workloadinterface.IMetadata) {
 	if res == nil {
@@ -773,6 +776,10 @@ func (opap *OPAProcessor) cleanProcessedResource(resourceID string, res workload
 	opap.cleanedResources[resourceID] = res
 	opap.cleanedResourcesMu.Unlock()
 
+	if opap.ShowSecrets {
+		opap.preserveEvidenceValues(resourceID, res)
+	}
+
 	if refsByContainer := removeData(res); len(refsByContainer) > 0 {
 		opap.mu.Lock()
 		if opap.EnvVarSecretRefs == nil {
@@ -781,6 +788,80 @@ func (opap *OPAProcessor) cleanProcessedResource(resourceID string, res workload
 		opap.EnvVarSecretRefs[resourceID] = refsByContainer
 		opap.mu.Unlock()
 	}
+}
+
+// preserveEvidenceValues extracts and records unredacted string values for the
+// DeletePath and ReviewPath fields of resourceID's evaluated controls before
+// removeData scrubs the resource in place. Metadata identifier and parent paths
+// (such as metadata.name, metadata["name"], metadata) are never scrubbed and are
+// excluded so their values cannot leak past anonymization.
+func (opap *OPAProcessor) preserveEvidenceValues(resourceID string, res workloadinterface.IMetadata) {
+	if opap.OPASessionObj == nil || res == nil {
+		return
+	}
+	opap.mu.Lock()
+	result, ok := opap.ResourcesResult[resourceID]
+	opap.mu.Unlock()
+	if !ok || len(result.AssociatedControls) == 0 {
+		return
+	}
+
+	var paths []string
+	seen := make(map[string]struct{})
+	addPath := func(p string) {
+		if p == "" || pathparse.ClassifyMetadataPath(p) != pathparse.PathKindOther || pathparse.IsEnvVarNamePath(p) {
+			return
+		}
+		if _, exists := seen[p]; exists {
+			return
+		}
+		seen[p] = struct{}{}
+		paths = append(paths, p)
+	}
+	for i := range result.AssociatedControls {
+		ctrl := &result.AssociatedControls[i]
+		for j := range ctrl.ResourceAssociatedRules {
+			rule := &ctrl.ResourceAssociatedRules[j]
+			for k := range rule.Paths {
+				addPath(rule.Paths[k].DeletePath)
+				addPath(rule.Paths[k].ReviewPath)
+			}
+		}
+	}
+	if len(paths) == 0 {
+		return
+	}
+
+	obj := pathparse.NormalizeForPathExtraction(res.GetObject())
+	var captured map[string]string
+	for _, p := range paths {
+		if val, isStructured, found := pathparse.ExtractRawValueResolved(obj, p); found {
+			if isStructured && !pathparse.IsPayloadPath(p) && pathparse.HasObjectMetaIdentifiers(val) {
+				continue
+			}
+			if captured == nil {
+				captured = make(map[string]string, len(paths))
+			}
+			captured[p] = val
+		}
+	}
+	if len(captured) == 0 {
+		return
+	}
+
+	opap.cleanedResourcesMu.Lock()
+	if opap.PreservedEvidenceValues == nil {
+		opap.PreservedEvidenceValues = make(map[string]map[string]string)
+	}
+	existing := opap.PreservedEvidenceValues[resourceID]
+	if existing == nil {
+		opap.PreservedEvidenceValues[resourceID] = captured
+	} else {
+		for k, v := range captured {
+			existing[k] = v
+		}
+	}
+	opap.cleanedResourcesMu.Unlock()
 }
 
 func (opap *OPAProcessor) isResourceCleaned(resourceID string) bool {
@@ -930,10 +1011,9 @@ func removePodData(workload workloadinterface.IWorkload) map[string]map[string]s
 	return refsByContainer
 }
 
-// removeContainersData clears each env var's value and reference, returning,
-// per container name, the names of that container's env vars that had a
-// reference before it was cleared (see removeData's doc comment for why
-// only the name is kept, and why this is scoped per container).
+// removeContainersData clears each env var's value and reference, returning, per
+// container name, the names of that container's env vars that had a reference
+// before it was cleared.
 func removeContainersData(containers []corev1.Container) map[string]map[string]struct{} {
 	var refsByContainer map[string]map[string]struct{}
 	for i := range containers {

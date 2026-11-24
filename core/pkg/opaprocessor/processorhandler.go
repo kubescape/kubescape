@@ -97,6 +97,7 @@ type OPAProcessor struct {
 	excludeNamespaces      []string
 	includeNamespaces      []string
 	printEnabled           bool
+	ShowSecrets            bool
 	compiledModules        map[string]compiledRule
 	compiledMu             sync.RWMutex
 	preparedQueries        map[string]rego.PreparedEvalQuery
@@ -146,7 +147,7 @@ type OPAProcessor struct {
 	wholeClusterPolicy cautils.WholeClusterExecutionPolicy
 	// skippedWholeClusterControls tracks whole-cluster controls skipped by policy
 	skippedWholeClusterControls map[string]string
-	// cleanedResourcesMu guards cleanedResources independently of mu to prevent deadlocks
+	// cleanedResourcesMu guards cleanedResources and PreservedEvidenceValues independently of mu to prevent deadlocks
 	cleanedResourcesMu sync.Mutex
 	// cleanedResources tracks cleaned resources by ID and object reference to bound memory while ensuring replacements are cleaned
 	cleanedResources        map[string]workloadinterface.IMetadata
@@ -166,12 +167,15 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 	}
 
 	initialResourceCount := 0
+	showSecrets := false
 	if sessionObj != nil {
 		initialResourceCount = sessionObj.ResourceCount()
+		showSecrets = sessionObj.ShowSecrets
 	}
 
 	return &OPAProcessor{
 		OPASessionObj:               sessionObj,
+		ShowSecrets:                 showSecrets,
 		regoDependenciesData:        regoDependenciesData,
 		clusterName:                 clusterName,
 		exceptionEventRecorder:      exceptionEventRecorder,
@@ -869,13 +873,17 @@ func (opap *OPAProcessor) SetWholeClusterPolicy(policy cautils.WholeClusterExecu
 }
 
 // SetResource stores or updates a resource in the session's catalog, invalidating
-// any prior early-cleanup record for this resource ID so replacement objects
-// are stripped of sensitive fields before report publication.
+// any prior early-cleanup record and preserved evidence values for this resource ID
+// so replacement objects are stripped of sensitive fields before report publication
+// and do not inherit evidence from the replaced object.
 func (opap *OPAProcessor) SetResource(resource workloadinterface.IMetadata) {
 	if resource != nil {
 		opap.cleanedResourcesMu.Lock()
 		if opap.cleanedResources != nil {
 			delete(opap.cleanedResources, resource.GetID())
+		}
+		if opap.OPASessionObj != nil && opap.PreservedEvidenceValues != nil {
+			delete(opap.PreservedEvidenceValues, resource.GetID())
 		}
 		opap.cleanedResourcesMu.Unlock()
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/kubescape/opa-utils/resources"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -272,4 +273,62 @@ func TestEarlyCleanup_IdempotentAndNilSafe(t *testing.T) {
 		opap.cleanProcessedResource("cm-1", wl)
 	})
 	assert.True(t, opap.isResourceCleaned("cm-1"))
+}
+
+func TestEarlyCleanup_SetResourceClearsPreservedEvidence(t *testing.T) {
+	raw1 := `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cm-replace","namespace":"default"},"data":{"token":"initial-token","setting":"custom-val"}}`
+	obj1, err := workloadinterface.NewWorkload([]byte(raw1))
+	require.NoError(t, err)
+	resID := obj1.GetID()
+
+	session := &cautils.OPASessionObj{
+		ShowSecrets:  true,
+		AllResources: map[string]workloadinterface.IMetadata{resID: obj1},
+		ResourcesResult: map[string]resourcesresults.Result{
+			resID: newResultWithPaths(resID, []string{"data[token]", "data[setting]"}, nil),
+		},
+	}
+	opap := NewOPAProcessor(session, nil, "test", "", "", false, nil)
+	opap.cleanProcessedResource(resID, obj1)
+
+	preserved := session.PreservedValuesForResource(resID)
+	require.NotNil(t, preserved)
+	assert.Equal(t, "initial-token", preserved["data[token]"])
+	assert.Equal(t, "custom-val", preserved["data[setting]"])
+
+	// Case 1: Replacement object with different fields
+	raw2 := `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cm-replace","namespace":"default"},"data":{"other":"replacement-other"}}`
+	obj2, err := workloadinterface.NewWorkload([]byte(raw2))
+	require.NoError(t, err)
+
+	// Replace the catalog resource
+	opap.SetResource(obj2)
+
+	// Preserved evidence must be cleared immediately upon replacement
+	assert.Nil(t, session.PreservedValuesForResource(resID), "preserved evidence must be cleared upon SetResource")
+
+	// Update results for the replacement object and clean
+	session.ResourcesResult[resID] = newResultWithPaths(resID, []string{"data[other]"}, nil)
+	opap.cleanProcessedResource(resID, obj2)
+
+	// Preserved evidence should only contain the replacement's values
+	newPreserved := session.PreservedValuesForResource(resID)
+	require.NotNil(t, newPreserved)
+	assert.Equal(t, "replacement-other", newPreserved["data[other]"])
+	assert.NotContains(t, newPreserved, "data[token]", "replaced object keys must not be inherited")
+	assert.NotContains(t, newPreserved, "data[setting]", "replaced object keys must not be inherited")
+
+	// Case 2: Replacement object with no captured values
+	raw3 := `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cm-replace","namespace":"default"},"data":{"clean":"val"}}`
+	obj3, err := workloadinterface.NewWorkload([]byte(raw3))
+	require.NoError(t, err)
+
+	opap.SetResource(obj3)
+	assert.Nil(t, session.PreservedValuesForResource(resID), "preserved evidence must be cleared upon SetResource")
+
+	// No failing paths for replacement
+	session.ResourcesResult[resID] = newResultWithPaths(resID, nil, nil)
+	opap.cleanProcessedResource(resID, obj3)
+
+	assert.Nil(t, session.PreservedValuesForResource(resID), "replacement yielding no captured values must leave preserved values nil")
 }

@@ -130,10 +130,10 @@ func (sp *SARIFPrinter) addRule(scanRun *sarif.Run, control reportsummary.IContr
 // reviewPathLocations, when non-empty, adds one relatedLocation per resolved ReviewPath so each
 // field that actually caused the failure gets its own precise location in the manifest, distinct
 // from the single primary location (which points at the fix, not necessarily at every failed field).
-func (sp *SARIFPrinter) createResult(ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resourceID string, resource workloadinterface.IMetadata, reviewPathLocations map[string]locationresolver.Location, prioritized *prioritization.PrioritizedResource) *sarif.Result {
+func (sp *SARIFPrinter) createResult(ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resourceID string, resource workloadinterface.IMetadata, reviewPathLocations map[string]locationresolver.Location, prioritized *prioritization.PrioritizedResource, preserved ...map[string]string) *sarif.Result {
 	msg := ctl.GetDescription()
 	if resource != nil {
-		if paths := AssistedRemediationPathsWithCurrentValuesFiltered(ac, resource, sp.showSecrets); len(paths) > 0 {
+		if paths := AssistedRemediationPathsWithCurrentValuesFiltered(ac, resource, sp.showSecrets, preserved...); len(paths) > 0 {
 			addContainerNameToAssistedRemediation(resource, &paths)
 			msg += "\n\nAffected fields:\n" + strings.Join(paths, "\n")
 		}
@@ -763,7 +763,7 @@ func (sp *SARIFPrinter) configurationResult(ctx context.Context, opaSessionObj *
 			prioritized = &pr
 		}
 	}
-	r := sp.createResult(ctl, resource.relPath, location, &ac, resource.resourceID, rsrc, reviewPathLocations, prioritized)
+	r := sp.createResult(ctl, resource.relPath, location, &ac, resource.resourceID, rsrc, reviewPathLocations, prioritized, opaSessionObj.PreservedValuesForResource(resource.resourceID))
 	r.WithRuleIndex(ruleIndexes[ctl.GetID()])
 	// kind stays "" when rsrc is nil (the resource lookup missed) --
 	// collectFixes below treats an unresolved kind as sensitive,
