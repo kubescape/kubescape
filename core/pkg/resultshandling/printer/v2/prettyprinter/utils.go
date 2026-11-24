@@ -38,7 +38,10 @@ var (
 func filterComplianceFrameworks(frameworks []reportsummary.IFrameworkSummary) []reportsummary.IFrameworkSummary {
 	complianceFws := []reportsummary.IFrameworkSummary{}
 	for _, fw := range frameworks {
-		if slices.Contains(complianceFrameworks, strings.ToLower(fw.GetName())) {
+		if fw == nil {
+			continue
+		}
+		if slices.Contains(complianceFrameworks, strings.ToLower(strings.TrimSpace(fw.GetName()))) {
 			complianceFws = append(complianceFws, fw)
 		}
 	}
