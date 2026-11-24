@@ -48,6 +48,7 @@ func (idx *Index) EgressExposure(ep Endpoint) Exposure {
 				Level:         ExposureRestricted,
 				Reason:        "isolated by a policy with no egress rules; admits no destinations",
 				MatchedPolicy: policyName,
+				AdmitsNothing: true,
 			}
 			if shouldReplaceExposure(best, haveBest, candidate) {
 				best = candidate
@@ -57,18 +58,16 @@ func (idx *Index) EgressExposure(ep Endpoint) Exposure {
 		}
 
 		for _, rule := range cp.policy.Spec.Egress {
-			level, reason := classifyPeers(rule.To)
+			level, reason, admitsNothing := classifyPeers(rule.To)
 			candidate := Exposure{
 				Level:         level,
 				Reason:        reason,
 				MatchedPolicy: policyName,
+				AdmitsNothing: admitsNothing,
 			}
 			if shouldReplaceExposure(best, haveBest, candidate) {
 				best = candidate
 				haveBest = true
-				if best.Level == ExposureOpen {
-					return best
-				}
 			}
 		}
 	}
@@ -77,8 +76,9 @@ func (idx *Index) EgressExposure(ep Endpoint) Exposure {
 	// either a policy with no rules or a rule has assigned best.
 	if !haveBest {
 		return Exposure{
-			Level:  ExposureRestricted,
-			Reason: "endpoint is egress-isolated and no matching rule admits a destination",
+			Level:         ExposureRestricted,
+			Reason:        "endpoint is egress-isolated and no matching rule admits a destination",
+			AdmitsNothing: true,
 		}
 	}
 	return best
