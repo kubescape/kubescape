@@ -1067,6 +1067,37 @@ func TestSetSeverityToSummaryMap(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "case insensitive and whitespace trimming canonicalization",
+			cves: []imageprinter.CVE{
+				{
+					ID:         "CVE-2024-0001",
+					Severity:   " critical ",
+					FixedState: string(v5.FixedState),
+				},
+				{
+					ID:         "CVE-2024-0002",
+					Severity:   "CRITICAL",
+					FixedState: string(v5.NotFixedState),
+				},
+				{
+					ID:         "CVE-2024-0003",
+					Severity:   "high",
+					FixedState: string(v5.FixedState),
+				},
+			},
+			originalMap: nil,
+			want: map[string]*imageprinter.SeveritySummary{
+				"Critical": {
+					NumberOfCVEs:        2,
+					NumberOfFixableCVEs: 1,
+				},
+				"High": {
+					NumberOfCVEs:        1,
+					NumberOfFixableCVEs: 1,
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {

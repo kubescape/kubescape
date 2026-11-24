@@ -619,7 +619,7 @@ func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData)
 		severityToKEV := map[string]int{}
 		for _, cve := range cves {
 			if cve.KEV {
-				severityToKEV[cve.Severity]++
+				severityToKEV[canonicalSeverity(cve.Severity)]++
 			}
 		}
 
@@ -638,9 +638,9 @@ func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData)
 				continue
 			}
 			m.listImages = append(m.listImages, mImageVulnerability{
-				image:           imageScanData[i].Image,
-				platform:        imageScanData[i].Platform,
-				severity:        severity,
+				image:           strings.TrimSpace(imageScanData[i].Image),
+				platform:        strings.TrimSpace(imageScanData[i].Platform),
+				severity:        canonicalSeverity(severity),
 				cveCount:        summary.NumberOfCVEs,
 				fixableCVECount: summary.NumberOfFixableCVEs,
 				kevCVECount:     severityToKEV[severity],

@@ -499,16 +499,30 @@ func finalizeResourcesFromCatalog(results []resourcesresults.Result, catalog cau
 	return resources
 }
 
+func canonicalSeverity(severity string) string {
+	trimmed := strings.TrimSpace(severity)
+	for _, canonical := range []string{"Critical", "High", "Medium", "Low", "Negligible", "Unknown"} {
+		if strings.EqualFold(trimmed, canonical) {
+			return canonical
+		}
+	}
+	if trimmed == "" {
+		return "Unknown"
+	}
+	return trimmed
+}
+
 func setSeverityToSummaryMap(cves []imageprinter.CVE, mapSeverityToSummary map[string]*imageprinter.SeveritySummary) {
 	for _, cve := range cves {
-		if _, ok := mapSeverityToSummary[cve.Severity]; !ok {
-			mapSeverityToSummary[cve.Severity] = &imageprinter.SeveritySummary{}
+		sev := canonicalSeverity(cve.Severity)
+		if _, ok := mapSeverityToSummary[sev]; !ok {
+			mapSeverityToSummary[sev] = &imageprinter.SeveritySummary{}
 		}
 
-		mapSeverityToSummary[cve.Severity].NumberOfCVEs += 1
+		mapSeverityToSummary[sev].NumberOfCVEs += 1
 
 		if cve.FixedState == string(v5.FixedState) {
-			mapSeverityToSummary[cve.Severity].NumberOfFixableCVEs = mapSeverityToSummary[cve.Severity].NumberOfFixableCVEs + 1
+			mapSeverityToSummary[sev].NumberOfFixableCVEs = mapSeverityToSummary[sev].NumberOfFixableCVEs + 1
 		}
 	}
 }
