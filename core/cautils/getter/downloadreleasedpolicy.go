@@ -95,6 +95,7 @@ func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 // to a specific regolibrary release tag (e.g. "v2.0.301"). An empty version
 // falls back to the latest release, matching NewDownloadReleasedPolicy.
 func NewDownloadReleasedPolicyWithVersion(version string) *DownloadReleasedPolicy {
+	version = strings.TrimSpace(version)
 	if version == "" {
 		return NewDownloadReleasedPolicy()
 	}
