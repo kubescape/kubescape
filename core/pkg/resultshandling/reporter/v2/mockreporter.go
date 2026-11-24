@@ -31,6 +31,9 @@ func (reportMock *ReportMock) SetTenantConfig(tenantConfig cautils.ITenantConfig
 }
 
 func (reportMock *ReportMock) GetURL() string {
+	if reportMock == nil {
+		return ""
+	}
 	u, err := url.Parse(reportMock.query)
 	if err != nil || u.String() == "" {
 		return ""
@@ -40,13 +43,16 @@ func (reportMock *ReportMock) GetURL() string {
 }
 
 func (reportMock *ReportMock) DisplayMessage() {
+	if reportMock == nil {
+		return
+	}
 	if m := reportMock.strToDisplay(); m != "" {
 		cautils.InfoTextDisplay(os.Stderr, "%s", m)
 	}
 }
 
 func (reportMock *ReportMock) strToDisplay() string {
-	if reportMock.message == "" {
+	if reportMock == nil || reportMock.message == "" {
 		return ""
 	}
 

@@ -547,3 +547,45 @@ func captureStdout(t testing.TB) (*os.File, func()) {
 		mxStdio.Unlock()
 	}
 }
+
+func TestReportEventReceiver_NilSafety(t *testing.T) {
+	var nilReceiver *ReportEventReceiver
+
+	assert.NotPanics(t, func() {
+		assert.Empty(t, nilReceiver.GetAccountID())
+		assert.Empty(t, nilReceiver.GetClusterName())
+		assert.Empty(t, nilReceiver.getReportUrl())
+		assert.Nil(t, nilReceiver.setSubReport(nil))
+		nilReceiver.SetTenantConfig(nil)
+		nilReceiver.setMessage("test")
+		nilReceiver.DisplayMessage()
+
+		err := nilReceiver.Submit(context.Background(), nil)
+		assert.Error(t, err)
+		assert.EqualError(t, err, "failed to submit scan results: reporter is nil")
+
+		err = nilReceiver.Submit(context.Background(), &cautils.OPASessionObj{})
+		assert.Error(t, err)
+		assert.EqualError(t, err, "failed to submit scan results: reporter is nil")
+	})
+
+	t.Run("non-nil receiver with nil dependencies", func(t *testing.T) {
+		receiver := &ReportEventReceiver{}
+		assert.NotPanics(t, func() {
+			assert.Empty(t, receiver.GetAccountID())
+			assert.Empty(t, receiver.GetClusterName())
+			assert.Empty(t, receiver.getReportUrl())
+			assert.Nil(t, receiver.setSubReport(nil))
+			receiver.SetTenantConfig(nil)
+			receiver.DisplayMessage()
+
+			err := receiver.Submit(context.Background(), nil)
+			assert.Error(t, err)
+			assert.EqualError(t, err, "failed to submit scan results: no data provided")
+
+			err = receiver.Submit(context.Background(), &cautils.OPASessionObj{})
+			assert.Error(t, err)
+			assert.EqualError(t, err, "failed to submit scan results: tenant config is nil")
+		})
+	})
+}
