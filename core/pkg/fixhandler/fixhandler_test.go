@@ -117,6 +117,19 @@ func getTestCases() []indentationTestCase {
 			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
 			"inserts/tc-12-01-expected.yaml",
 		},
+		// InitContainers Scenario
+		{
+			"inserts/tc-13-00-input-initcontainers-insert.yaml",
+			"select(di==0).spec.initContainers[0].securityContext.allowPrivilegeEscalation |= false",
+			"inserts/tc-13-01-expected.yaml",
+		},
+		// Multi-container Scenario
+		{
+			"inserts/tc-14-00-input-multicontainer-insert.yaml",
+			`select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false |
+			 select(di==0).spec.containers[1].securityContext.readOnlyRootFilesystem |= true`,
+			"inserts/tc-14-01-expected.yaml",
+		},
 
 		// Removal Scenarios
 		{

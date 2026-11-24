@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multi-container-pod
+
+spec:
+  containers:
+  # Primary application workload
+  - name: app-server
+    image: node:20
+    securityContext:
+      allowPrivilegeEscalation: false
+  # Sidecar logging agent
+  - name: log-collector
+    image: fluent/fluent-bit:latest
+    securityContext:
+      readOnlyRootFilesystem: true
