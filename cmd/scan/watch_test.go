@@ -786,6 +786,46 @@ func TestWatchSecurityScanWatchesANestedKustomizationsDependencies(t *testing.T)
 	require.NoError(t, stop())
 }
 
+// A directory scan renders the Helm charts below it, and a chart's templates
+// read the chart's own files through .Files whatever their extension, so an
+// edit to such a file is an edit to what is scanned and must trigger a rescan.
+func TestWatchSecurityScanWatchesWhatAHelmChartReads(t *testing.T) {
+	dir := t.TempDir()
+	chart := filepath.Join(dir, "app")
+	security := filepath.Join(chart, "files", "security")
+	writeFile(t, filepath.Join(chart, "Chart.yaml"), "apiVersion: v2\nname: app\nversion: 0.1.0\n")
+	writeFile(t, filepath.Join(chart, "templates", "pod.yaml"), "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\n  namespace: default\nspec:\n  containers:\n  - name: c\n    image: nginx\n{{ .Files.Get \"files/security\" | indent 4 }}\n")
+	writeFile(t, security, "securityContext:\n  readOnlyRootFilesystem: true\n")
+	out, stop := startSecurityWatch(t, localWatchScanInfo(t, dir))
+
+	out.waitFor(t, "Initial scan complete: 0 failing control(s) on 0 resource(s)")
+	writeFile(t, security, "securityContext: {}\n")
+	out.waitFor(t, "Change detected, scanning again...")
+	out.waitFor(t, "1 new, 0 resolved")
+
+	require.NoError(t, stop())
+}
+
+func TestInHelmChartBelow(t *testing.T) {
+	root := t.TempDir()
+	chart := filepath.Join(root, "app")
+	writeFile(t, filepath.Join(chart, "Chart.yaml"), "apiVersion: v2\nname: app\nversion: 0.1.0\n")
+	require.NoError(t, os.MkdirAll(filepath.Join(chart, "files"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(chart, "charts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "other"), 0o700))
+
+	assert.True(t, inHelmChartBelow(root, filepath.Join(chart, ".helmignore")), "in a chart's directory")
+	assert.True(t, inHelmChartBelow(root, filepath.Join(chart, "files", "nginx.conf")), "a file the templates read through .Files")
+	assert.True(t, inHelmChartBelow(root, filepath.Join(chart, "charts", "redis-1.2.3.tgz")), "a vendored subchart archive")
+	assert.False(t, inHelmChartBelow(root, filepath.Join(root, "other", "nginx.conf")), "beside a chart")
+	assert.False(t, inHelmChartBelow(root, filepath.Join(root, "nginx.conf")), "above a chart")
+
+	// A chart above the watch root is not rendered by a scan of the root, so it
+	// must not make every file of the root a dependency.
+	inner := filepath.Join(chart, "files")
+	assert.False(t, inHelmChartBelow(inner, filepath.Join(inner, "nginx.conf")), "a chart above the watch root")
+}
+
 func TestInKustomizationBelow(t *testing.T) {
 	root := t.TempDir()
 	app := filepath.Join(root, "app")
