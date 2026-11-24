@@ -606,3 +606,22 @@ func TestActionPrint_Pdf_NilWriterReturnsError(t *testing.T) {
 		assert.Contains(t, err.Error(), "output writer is nil")
 	})
 }
+
+func TestPdfPrinter_NilReceiverSafety(t *testing.T) {
+	var pp *PdfPrinter
+	assert.NotPanics(t, func() {
+		err := pp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+
+		pp.Score(90.0)
+		pp.PrintNextSteps()
+
+		err = pp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+
+		err = pp.CloseWriter()
+		assert.NoError(t, err)
+	})
+}
