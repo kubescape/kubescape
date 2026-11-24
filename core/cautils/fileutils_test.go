@@ -502,6 +502,26 @@ func TestLoadResourcesFromTerraform_DiscoversNestedModuleDirectories(t *testing.
 	assert.Equal(t, "root-config", sourceToWorkloads[nestedFile][0].GetName())
 }
 
+func TestLoadResourcesFromTerraform_DiscoversBracketedModuleDirectory(t *testing.T) {
+	root := resolvedTempDir(t)
+	bracketedModule := filepath.Join(root, "modules", "app[1]")
+	siblingModule := filepath.Join(root, "modules", "app1")
+	writeTerraformFixture(t, bracketedModule, "bracketed-config")
+	writeTerraformFixture(t, siblingModule, "sibling-config")
+	require.NoError(t, os.WriteFile(filepath.Join(bracketedModule, "notes.txt"), []byte("not Terraform"), 0o600))
+
+	workloads, skips, err := LoadResourcesFromTerraformFilteredWithSkips(context.Background(), root, nil, root)
+	require.NoError(t, err)
+	require.Empty(t, skips)
+	bracketedWorkloads := workloads[filepath.Join(bracketedModule, "main.tf")]
+	require.Len(t, bracketedWorkloads, 1)
+	assert.Equal(t, "bracketed-config", bracketedWorkloads[0].GetName())
+	siblingWorkloads := workloads[filepath.Join(siblingModule, "main.tf")]
+	require.Len(t, siblingWorkloads, 1)
+	assert.Equal(t, "sibling-config", siblingWorkloads[0].GetName())
+	assert.Len(t, workloads, 2)
+}
+
 func TestLoadResourcesFromTerraform_MixedSuccessAndFailure(t *testing.T) {
 	root := resolvedTempDir(t)
 	writeTerraformFixture(t, filepath.Join(root, "modules", "good"), "good-config")
