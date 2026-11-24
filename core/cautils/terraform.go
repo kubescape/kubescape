@@ -12,6 +12,7 @@ import (
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclparse"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -255,6 +256,9 @@ func collectVariableDefaults(body hcl.Body, defaults map[string]cty.Value, decla
 
 // extractKubernetesManifests finds resource "kubernetes_manifest" "x" { manifest = {...} }
 // blocks and returns each manifest as a plain Go map, ready for json.Marshal.
+// A resource with count or for_each gives one manifest per known instance. As
+// with an unresolved manifest, a count or for_each that can't be resolved
+// skips only that resource, with a warning.
 func extractKubernetesManifests(body hcl.Body, evalCtx *hcl.EvalContext) ([]map[string]interface{}, []error) {
 	var errs []error
 	schema := &hcl.BodySchema{
@@ -270,26 +274,39 @@ func extractKubernetesManifests(body hcl.Body, evalCtx *hcl.EvalContext) ([]map[
 			continue
 		}
 		attrSchema := &hcl.BodySchema{
-			Attributes: []hcl.AttributeSchema{{Name: "manifest"}},
+			Attributes: []hcl.AttributeSchema{{Name: "manifest"}, {Name: "count"}, {Name: "for_each"}},
 		}
 		attrContent, _, _ := block.Body.PartialContent(attrSchema)
 		attr, ok := attrContent.Attributes["manifest"]
 		if !ok {
 			continue
 		}
-		val, diags := attr.Expr.Value(evalCtx)
-		if diags.HasErrors() {
-			logger.L().Warning("skipping unresolved kubernetes_manifest reference",
-				helpers.String("resource", block.Labels[1]), helpers.Error(diags))
+		var sourceSize int
+		if synBody, ok := block.Body.(*hclsyntax.Body); ok {
+			sourceSize = synBody.SrcRange.End.Byte - synBody.SrcRange.Start.Byte
+		}
+		instances, err := terraformResourceInstances(attrContent.Attributes["count"], attrContent.Attributes["for_each"],
+			evalCtx, terraformReferenceChecker{}, "kubernetes_manifest."+block.Labels[1], sourceSize)
+		if err != nil {
+			logger.L().Warning("skipping kubernetes_manifest with unresolved count or for_each",
+				helpers.String("resource", block.Labels[1]), helpers.Error(err))
 			continue
 		}
-		goVal := ctyToGo(val)
-		m, ok := goVal.(map[string]interface{})
-		if !ok {
-			errs = append(errs, fmt.Errorf("resource %q: manifest is not an object", block.Labels[1]))
-			continue
+		for _, instanceCtx := range instances {
+			val, diags := attr.Expr.Value(instanceCtx)
+			if diags.HasErrors() {
+				logger.L().Warning("skipping unresolved kubernetes_manifest reference",
+					helpers.String("resource", block.Labels[1]), helpers.Error(diags))
+				continue
+			}
+			goVal := ctyToGo(val)
+			m, ok := goVal.(map[string]interface{})
+			if !ok {
+				errs = append(errs, fmt.Errorf("resource %q: manifest is not an object", block.Labels[1]))
+				continue
+			}
+			manifests = append(manifests, m)
 		}
-		manifests = append(manifests, m)
 	}
 	return manifests, errs
 }
