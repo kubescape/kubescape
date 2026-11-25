@@ -525,6 +525,7 @@ func installFakeHelmBinary(t *testing.T) {
 			echoLines = append(echoLines, "echo "+line)
 		}
 		script = "@echo off\r\n" +
+			"if defined KUBESCAPE_TEST_HELM_MARKER (echo %1>>\"%KUBESCAPE_TEST_HELM_MARKER%\")\r\n" +
 			"if \"%1\"==\"version\" (\r\n" +
 			"  echo " + fakeHelmVersionOutput + "\r\n" +
 			"  exit /b 0\r\n" +
@@ -533,6 +534,9 @@ func installFakeHelmBinary(t *testing.T) {
 	} else {
 		name = "helm"
 		script = "#!/bin/sh\n" +
+			"if [ -n \"$KUBESCAPE_TEST_HELM_MARKER\" ]; then\n" +
+			"  echo \"$1\" >> \"$KUBESCAPE_TEST_HELM_MARKER\"\n" +
+			"fi\n" +
 			"if [ \"$1\" = \"version\" ]; then\n" +
 			"  echo '" + fakeHelmVersionOutput + "'\n" +
 			"  exit 0\n" +
@@ -818,6 +822,8 @@ spec:
 	t.Run("oversized local helm chart template rejected before invoking helm", func(t *testing.T) {
 		t.Setenv(MaxFileSizeEnvVar, "256")
 		installFakeHelmBinary(t)
+		marker := filepath.Join(t.TempDir(), "helm-invoked")
+		t.Setenv("KUBESCAPE_TEST_HELM_MARKER", marker)
 
 		dir := resolvedTempDir(t)
 		require.NoError(t, os.MkdirAll(filepath.Join(dir, "charts", "app", "templates"), 0o750))
@@ -830,5 +836,28 @@ spec:
 		assert.Nil(t, workloads)
 		require.NotEmpty(t, errs)
 		assert.ErrorIs(t, errs[0], ErrKustomizationFileTooLarge)
+
+		_, statErr := os.Stat(marker)
+		assert.True(t, os.IsNotExist(statErr), "helm must not be invoked when chart input validation fails; statErr=%v", statErr)
+	})
+
+	t.Run("helmignore excluded oversized file allows valid chart build", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "256")
+		installFakeHelmBinary(t)
+
+		dir := resolvedTempDir(t)
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "charts", "app", "templates"), 0o750))
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "charts", "app", "fixtures"), 0o750))
+		writeManifestFixture(t, dir, "kustomization.yaml", "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nhelmCharts:\n- name: app\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", ".helmignore"), "fixtures/\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "Chart.yaml"), "apiVersion: v2\nname: app\nversion: 0.1.0\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "values.yaml"), "{}\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "templates", "cm.yaml"), "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test-config\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "fixtures", "sample.bin"), strings.Repeat("x", 512))
+
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		require.Empty(t, errs)
+		require.Len(t, workloads[dir], 1)
 	})
 }

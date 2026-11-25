@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
+	helmignore "helm.sh/helm/v3/pkg/ignore"
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/api/provider"
 	"sigs.k8s.io/kustomize/api/resmap"
@@ -710,6 +712,11 @@ func validateKustomizeHelmChartInputs(root string, globals *types.HelmGlobals, c
 		return validateKustomizationFile(chartPath)
 	}
 
+	rules, err := loadHelmIgnoreRules(filepath.Join(chartPath, helmignore.HelmIgnore))
+	if err != nil {
+		return err
+	}
+
 	return filepath.WalkDir(chartPath, func(entryPath string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			if errors.Is(walkErr, os.ErrNotExist) {
@@ -717,7 +724,25 @@ func validateKustomizeHelmChartInputs(root string, globals *types.HelmGlobals, c
 			}
 			return walkErr
 		}
+		rel, relErr := filepath.Rel(chartPath, entryPath)
+		if relErr != nil {
+			return relErr
+		}
+		if rel == "." {
+			return nil
+		}
+		relSlash := filepath.ToSlash(rel)
 		if d.IsDir() {
+			dirInfo, infoErr := d.Info()
+			if errors.Is(infoErr, os.ErrNotExist) {
+				return nil
+			}
+			if infoErr != nil {
+				return infoErr
+			}
+			if rules.Ignore(relSlash, dirInfo) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		entryInfo, statErr := os.Stat(entryPath)
@@ -726,6 +751,9 @@ func validateKustomizeHelmChartInputs(root string, globals *types.HelmGlobals, c
 		}
 		if statErr != nil {
 			return statErr
+		}
+		if rules.Ignore(relSlash, entryInfo) {
+			return nil
 		}
 		if entryInfo.IsDir() {
 			return nil
@@ -736,6 +764,23 @@ func validateKustomizeHelmChartInputs(root string, globals *types.HelmGlobals, c
 		}
 		return err
 	})
+}
+
+func loadHelmIgnoreRules(ignorePath string) (*helmignore.Rules, error) {
+	ignoreBytes, err := readKustomizationFile(ignorePath)
+	var rules *helmignore.Rules
+	if errors.Is(err, os.ErrNotExist) {
+		rules = helmignore.Empty()
+	} else if err != nil {
+		return nil, err
+	} else {
+		rules, err = helmignore.Parse(bytes.NewReader(ignoreBytes))
+		if err != nil {
+			return nil, err
+		}
+	}
+	rules.AddDefaults()
+	return rules, nil
 }
 
 // observeGenerators returns whether contents is a valid inline resource map.
