@@ -63,6 +63,29 @@ posture report in `results.csv` and writes the image vulnerabilities to
 `results-vulnerabilities.csv` next to it. When the report goes to stdout or a
 pipe, only the posture report is written and a warning is logged.
 
+### GitHub Actions Annotations
+
+`--format github-actions` writes Critical and High vulnerabilities as `::error`
+workflow commands, so they show up as annotations on the workflow run and the
+pull request checks:
+
+```yaml
+- name: Scan image
+  run: kubescape scan image "ghcr.io/${{ github.repository }}:${{ github.sha }}" --format github-actions --severity-threshold high
+```
+
+Annotations do not fail the step on their own; `--severity-threshold`,
+`--fail-on-kev` or `--epss-threshold` sets the exit code, as described in
+[failing on exploitable vulnerabilities](#failing-on-exploitable-vulnerabilities).
+
+GitHub shows at most 10 error annotations per step, so findings are ordered by
+severity, then by CISA KEV listing, then by EPSS score, and the 10 most urgent
+are annotated. When the job sets `GITHUB_STEP_SUMMARY`, which GitHub Actions
+does by default, Kubescape also adds a per-image severity table and the full
+Critical and High list to the job summary. Vulnerabilities that VEX marks as
+`not_affected` or `fixed` are counted but not annotated. A posture scan with
+`--scan-images` rejects this format; run `kubescape scan image` as its own step.
+
 ### Exploitability: KEV and EPSS
 
 The vulnerability table in the pretty, HTML, Markdown and PDF outputs has two

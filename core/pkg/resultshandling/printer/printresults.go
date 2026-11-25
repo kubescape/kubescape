@@ -48,7 +48,7 @@ var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, Prometheu
 //
 // CycloneDXFormat and SPDXFormat are the inverse: they encode the SBOM that
 // only exists on image scans, so they are image-scan-only (see ValidatePrinter).
-var ImageFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, GitLabContainerScanningFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat, PolicyReportFormat}
+var ImageFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, GitLabContainerScanningFormat, GitHubActionsFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat, PolicyReportFormat}
 
 const (
 	JsonOutputExt         = ".json"

@@ -65,7 +65,7 @@ func TestWorkloadCommandGitHubActionsRejectsBeforeScanning(t *testing.T) {
 			parent.AddCommand(getWorkloadCmd(ks, info))
 			parent.SetArgs([]string{"workload", "Deployment/nginx", input, "--format", "github-actions", "--output", output})
 
-			require.ErrorContains(t, parent.Execute(), "github-actions cannot carry image vulnerabilities")
+			require.ErrorContains(t, parent.Execute(), "github-actions requires separate posture and image scans")
 			require.Nil(t, ks.scanInfo, "invalid mixed output must not invoke the scanner")
 			require.Equal(t, len("kind: Deployment\n"), stdin.Len(), "validation must precede stdin preparation")
 			raw, err := os.ReadFile(output)

@@ -16,7 +16,7 @@ import (
 
 // ScanFormats and ImageScanFormats are derived from printer.AllFormats and
 // printer.ImageFormats to keep a single source of truth — see printresults.go
-// for why the two lists differ (not every printer supports image scans, e.g. github-actions).
+// for why the two lists differ (not every printer supports image scans, e.g. exceptions).
 var (
 	ScanFormats      = printer.AllFormats
 	ImageScanFormats = printer.ImageFormats
@@ -223,7 +223,7 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 			case printer.GitLabCodeQualityFormat:
 				return fmt.Errorf("gitlab-codequality cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
 			case printer.GitHubActionsFormat:
-				return fmt.Errorf("github-actions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
+				return fmt.Errorf("github-actions requires separate posture and image scans; use json or sarif for a combined scan with --scan-images")
 			case printer.ExceptionsFormat:
 				return fmt.Errorf("exceptions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
 			}

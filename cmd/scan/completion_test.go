@@ -165,8 +165,8 @@ func TestScanFormatCompletion(t *testing.T) {
 		{
 			name:    "image scan suggests only supported formats",
 			args:    []string{"scan", "image", "--format", "g"},
-			want:    []string{"gitlab-container-scanning"},
-			exclude: []string{"github-actions"},
+			want:    []string{"gitlab-container-scanning", "github-actions"},
+			exclude: []string{"gitlab-codequality"},
 		},
 		{
 			name: "image scan suggests JSON and JUnit",
@@ -208,11 +208,11 @@ func TestScanFormatCompletionByCommand(t *testing.T) {
 			wantPresent: true,
 		},
 		{
-			name: "image scan excludes github-actions",
+			name: "image scan excludes gitlab-codequality",
 			args: []string{
 				"__complete", "scan", "image", "--format", "g",
 			},
-			candidate:   "github-actions",
+			candidate:   "gitlab-codequality",
 			wantPresent: false,
 		},
 		{
