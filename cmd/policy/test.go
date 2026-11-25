@@ -150,16 +150,20 @@ func discoverRules(path string, pattern *regexp.Regexp) ([]policytest.RuleUnderT
 	if len(rules) == 0 {
 		return nil, fmt.Errorf("no rule directories (raw.rego + rule.metadata.json) found under %q", path)
 	}
-	if pattern == nil {
-		return rules, nil
+	if pattern != nil {
+		rules = policytest.FilterCases(rules, pattern)
+		if len(rules) == 0 {
+			// Report it rather than printing 0/0 cases passed, so a mistyped
+			// pattern cannot turn a CI run into a silent success.
+			return nil, fmt.Errorf("no test cases under %q match --run %q", path, pattern.String())
+		}
 	}
-	rules = policytest.FilterCases(rules, pattern)
-	if len(rules) == 0 {
-		// Report it rather than printing 0/0 cases passed, so a mistyped
-		// pattern cannot turn a CI run into a silent success.
-		return nil, fmt.Errorf("no test cases under %q match --run %q", path, pattern.String())
+	for _, rule := range rules {
+		if len(rule.Cases) > 0 {
+			return rules, nil
+		}
 	}
-	return rules, nil
+	return nil, fmt.Errorf("no test cases found under %q", path)
 }
 
 func runPolicyTest(cmd *cobra.Command, path string, pattern *regexp.Regexp, junitReport string) error {
