@@ -98,46 +98,48 @@ var typedResourceGVK = map[string]struct{ apiVersion, kind string }{
 // (block "container" -> field "containers"). Anything not listed here just
 // gets its singular name camelCased.
 var pluralOverrides = map[string]string{
-	"container":               "containers",
-	"init_container":          "initContainers",
-	"volume":                  "volumes",
-	"volume_mount":            "volumeMounts",
-	"env_from":                "envFrom",
-	"port":                    "ports",
-	"toleration":              "tolerations",
-	"host_alias":              "hostAliases",
-	"host_aliases":            "hostAliases",
-	"rule":                    "rules",
-	"path":                    "paths",
-	"subject":                 "subjects",
-	"image_pull_secret":       "imagePullSecrets",
-	"image_pull_secrets":      "imagePullSecrets",
-	"match_expressions":       "matchExpressions",
-	"match_expression":        "matchExpressions",
-	"match_fields":            "matchFields",
-	"match_field":             "matchFields",
-	"volume_claim_template":   "volumeClaimTemplates",
-	"http_header":             "httpHeaders",
-	"sysctl":                  "sysctls",
-	"limit":                   "limits",
-	"metric":                  "metrics",
-	"policy":                  "policies",
-	"node_selector_term":      "nodeSelectorTerms",
-	"node_selector_terms":     "nodeSelectorTerms",
-	"webhook":                 "webhooks",
-	"match_condition":         "matchConditions",
-	"match_conditions":        "matchConditions",
-	"match_label_expression":  "matchLabelExpressions",
-	"match_label_expressions": "matchLabelExpressions",
-	"allowed_topology":        "allowedTopologies",
-	"allowed_topologies":      "allowedTopologies",
-	"token_request":           "tokenRequests",
-	"token_requests":          "tokenRequests",
-	"subset":                  "subsets",
-	"endpoint":                "endpoints",
-	"address":                 "addresses",
-	"not_ready_address":       "notReadyAddresses",
-	"condition":               "conditions",
+	"container":                  "containers",
+	"init_container":             "initContainers",
+	"volume":                     "volumes",
+	"volume_mount":               "volumeMounts",
+	"env_from":                   "envFrom",
+	"port":                       "ports",
+	"toleration":                 "tolerations",
+	"host_alias":                 "hostAliases",
+	"host_aliases":               "hostAliases",
+	"rule":                       "rules",
+	"path":                       "paths",
+	"subject":                    "subjects",
+	"image_pull_secret":          "imagePullSecrets",
+	"image_pull_secrets":         "imagePullSecrets",
+	"match_expressions":          "matchExpressions",
+	"match_expression":           "matchExpressions",
+	"match_fields":               "matchFields",
+	"match_field":                "matchFields",
+	"volume_claim_template":      "volumeClaimTemplates",
+	"http_header":                "httpHeaders",
+	"sysctl":                     "sysctls",
+	"limit":                      "limits",
+	"metric":                     "metrics",
+	"policy":                     "policies",
+	"node_selector_term":         "nodeSelectorTerms",
+	"node_selector_terms":        "nodeSelectorTerms",
+	"webhook":                    "webhooks",
+	"match_condition":            "matchConditions",
+	"match_conditions":           "matchConditions",
+	"match_label_expression":     "matchLabelExpressions",
+	"match_label_expressions":    "matchLabelExpressions",
+	"allowed_topology":           "allowedTopologies",
+	"allowed_topologies":         "allowedTopologies",
+	"token_request":              "tokenRequests",
+	"token_requests":             "tokenRequests",
+	"subset":                     "subsets",
+	"endpoint":                   "endpoints",
+	"address":                    "addresses",
+	"not_ready_address":          "notReadyAddresses",
+	"condition":                  "conditions",
+	"readiness_gate":             "readinessGates",
+	"topology_spread_constraint": "topologySpreadConstraints",
 }
 
 // repeatableBlocks lists HCL block labels that always encode as a JSON array,
@@ -161,6 +163,10 @@ var repeatableBlocks = map[string]bool{
 	"token_request": true, "token_requests": true,
 	"subset": true, "endpoint": true,
 	"address": true, "not_ready_address": true,
+	"readiness_gate": true, "topology_spread_constraint": true,
+	"items": true, "sources": true,
+	"preferred_during_scheduling_ignored_during_execution": true,
+	"cluster_role_selectors":                               true,
 }
 
 // resourceMetaAttributes are Terraform meta-argument attributes valid on any
@@ -229,6 +235,8 @@ func attributeNameFor(name string) string {
 		return "diskURI"
 	case "target_ww_ns":
 		return "targetWWNs"
+	case "timezone":
+		return "timeZone"
 	}
 	if name == "storage_provisioner" {
 		return "provisioner"
@@ -385,6 +393,17 @@ func usesHPAV2beta2(obj map[string]interface{}) bool {
 	_, hasMetrics := spec["metrics"]
 	_, hasBehavior := spec["behavior"]
 	return hasMetrics || hasBehavior
+}
+
+// isPodAffinityRequiredBlock reports whether blockType is the
+// required_during_scheduling_ignored_during_execution block of a pod affinity
+// or anti-affinity, which is a list of terms. The node affinity block of the
+// same name is a single NodeSelector.
+func isPodAffinityRequiredBlock(path, blockType string) bool {
+	if blockType != "required_during_scheduling_ignored_during_execution" {
+		return false
+	}
+	return strings.HasSuffix(path, ".pod_affinity") || strings.HasSuffix(path, ".pod_anti_affinity")
 }
 
 func isNestedHPAMetricBlock(path, blockType string) bool {
@@ -562,6 +581,9 @@ func (c *terraformBodyConverter) bodyToMap(body *hclsyntax.Body, evalCtx *hcl.Ev
 		if isNestedHPAMetricBlock(path, blockType) {
 			field = "metric"
 			isRepeatable = false
+		}
+		if isPodAffinityRequiredBlock(path, blockType) {
+			isRepeatable = true
 		}
 
 		if isRepeatable {
