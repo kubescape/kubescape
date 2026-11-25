@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-with-init-container
+
+spec:
+  # Pre-flight init container
+  initContainers:
+  - name: init-service
+    image: busybox:1.36
+  containers:
+  - name: main-app
+    image: nginx:1.25
