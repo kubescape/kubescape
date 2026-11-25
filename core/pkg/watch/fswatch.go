@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -109,6 +110,15 @@ type FileWatcher struct {
 	// Owned by the goroutine once started, like dirs; made on first use.
 	depFiles map[string]struct{}
 
+	// Render dependencies share directory registrations with the input tree.
+	// Only the watcher goroutine reads or changes their selection.
+	dependencyUpdates   chan dependencyUpdate
+	dependencyPlan      dependencyDirectories
+	dependencyDirs      dependencyDirectories
+	dependencyRetry     <-chan time.Time
+	dependencyLinks     map[string]string
+	dependencyLinkCheck <-chan time.Time
+
 	pending map[string]struct{} // directories that appeared, to be registered once settleDelay has passed
 	settle  *time.Timer
 	settleC <-chan time.Time // nil unless the timer is running
@@ -139,7 +149,7 @@ type FileWatcher struct {
 	// before signals are coalesced.
 	signalHook func(path string)
 
-	// addWatch is the backend's Add as rewatchDir calls it. A test replaces it
+	// addWatch is the backend's Add. A test replaces it
 	// to make it fail the way one backend's does.
 	addWatch func(path string) error
 }
@@ -175,17 +185,18 @@ func newFileWatcher(root string, opts FileWatcherOptions) (*FileWatcher, error) 
 		return nil, limitError(abs, err)
 	}
 	w := &FileWatcher{
-		root:      abs,
-		opts:      opts,
-		fs:        backend,
-		dirs:      make(map[string]struct{}),
-		pending:   make(map[string]struct{}),
-		changes:   make(chan struct{}, 1),
-		done:      make(chan struct{}),
-		queued:    make(chan struct{}, 1),
-		pumped:    make(chan struct{}),
-		maxQueued: defaultMaxQueued,
-		addWatch:  backend.Add,
+		root:              abs,
+		opts:              opts,
+		fs:                backend,
+		dirs:              make(map[string]struct{}),
+		pending:           make(map[string]struct{}),
+		changes:           make(chan struct{}, 1),
+		done:              make(chan struct{}),
+		queued:            make(chan struct{}, 1),
+		pumped:            make(chan struct{}),
+		maxQueued:         defaultMaxQueued,
+		addWatch:          backend.Add,
+		dependencyUpdates: make(chan dependencyUpdate),
 	}
 
 	if info.IsDir() {
@@ -199,7 +210,7 @@ func newFileWatcher(root string, opts FileWatcherOptions) (*FileWatcher, error) 
 		err = w.addDir(w.dir)
 	}
 	if err != nil {
-		_ = backend.Close()
+		_ = w.fs.Close()
 		return nil, err
 	}
 	return w, nil
@@ -354,6 +365,19 @@ func (w *FileWatcher) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case update := <-w.dependencyUpdates:
+			linksChanged := false
+			switch runtime.GOOS {
+			case "darwin", "dragonfly", "freebsd", "netbsd", "openbsd":
+				linksChanged = w.watchDependencyLinks(update.dirs)
+			}
+			update.added <- w.syncDependencies(update.dirs, true) || linksChanged
+		case <-w.dependencyRetry:
+			if w.syncDependencies(w.dependencyPlan, false) {
+				w.notify(w.root)
+			}
+		case <-w.dependencyLinkCheck:
+			w.checkDependencyLinks()
 		case <-w.queued:
 			if err = w.drainQueue(ctx); err != nil {
 				return
@@ -370,12 +394,22 @@ func (w *FileWatcher) run(ctx context.Context) {
 // Its error ends the watcher.
 func (w *FileWatcher) handle(event fsnotify.Event) error {
 	name := filepath.Clean(event.Name)
+	if w.dependencyEvent(name, event) {
+		w.notify(name)
+	}
 	if event.Op == fsnotify.Chmod {
-		// A permission change is not a change to what a scan reads, and some
-		// platforms send one with every write.
+		// Selected dependencies may become readable after a permission change.
+		// Some platforms also send these with every write.
 		return nil
 	}
 	gone := event.Has(fsnotify.Remove | fsnotify.Rename)
+
+	if _, dependency := w.dependencyDirs[name]; dependency && gone {
+		if _, primary := w.dirs[name]; !primary {
+			w.unregister(name)
+			w.notify(name)
+		}
+	}
 
 	if w.file != "" {
 		// A single-file scan reads exclusions from its parent directory too.
@@ -402,6 +436,9 @@ func (w *FileWatcher) handle(event fsnotify.Event) error {
 		// (kqueue), which takes it for the one it already had. So what is there
 		// now is looked at, and watched.
 		return w.created(name)
+	}
+	if _, primary := w.dirs[filepath.Dir(name)]; !primary {
+		return nil
 	}
 	if filepath.Base(name) == cautils.IgnoreFileName && filepath.Dir(name) == w.root {
 		// The scan reads its exclusions from this file, so what it excludes may have
@@ -467,6 +504,12 @@ func (w *FileWatcher) handleError(failure error) error {
 // has lost its watch without a Remove event reaching us, which is why what the
 // backend says it watches decides, and not what was recorded.
 func (w *FileWatcher) reconcile() error {
+	for dir := range w.dependencyDirs {
+		if _, primary := w.dirs[dir]; !primary {
+			_ = w.fs.Remove(dir)
+		}
+	}
+	w.dependencyDirs = nil
 	if w.file != "" {
 		// The removal of the file's directory may be among what was lost, and
 		// the backend drops its watch with the directory, so it is watched again
@@ -500,36 +543,51 @@ func (w *FileWatcher) reconcile() error {
 			return err
 		}
 	}
+	if w.dependencyPlan != nil {
+		w.syncDependencies(w.dependencyPlan, true)
+	}
 	w.notify(w.root)
 	return nil
 }
 
-// rewatchAttempts is how many times rewatchDir adds the directory of a single
-// file while it is still there.
+// rewatchAttempts bounds retry when the directory is still there.
 const rewatchAttempts = 5
 
 // rewatchDir watches the single file's directory again from a clean state.
-// fs.ErrNotExist from the backend's Add does not always mean the directory is
-// gone: on kqueue, Add lists the directory and fails with it when an entry goes
-// between the listing and its stat. So it ends the watch, as a seen removal
-// does, only once the directory itself is gone; while the directory is there,
-// the Add is tried again, a bounded number of times. Any other failure ends the
-// watch at once.
 func (w *FileWatcher) rewatchDir() error {
-	var err error
-	for attempt := 0; attempt < rewatchAttempts; attempt++ {
-		_ = w.fs.Remove(w.dir) // absent is fine
-		if err = w.addWatch(w.dir); err == nil {
-			return nil
-		}
-		if !errors.Is(err, fs.ErrNotExist) {
-			return limitError(w.dir, err)
-		}
+	_ = w.fs.Remove(w.dir)
+	err := w.addDirectoryWatch(w.dir)
+	switch {
+	case err == nil:
+		return nil
+	case !errors.Is(err, fs.ErrNotExist):
+		return limitError(w.dir, err)
+	default:
 		if _, statErr := os.Stat(w.dir); errors.Is(statErr, fs.ErrNotExist) {
 			return fmt.Errorf("watch %q: its directory was removed or renamed", w.file)
 		}
+		return fmt.Errorf("watch %q: its directory could not be watched again: %w", w.file, err)
 	}
-	return fmt.Errorf("watch %q: its directory could not be watched again: %w", w.file, err)
+}
+
+// kqueue can register a directory before failing with ErrNotExist when a
+// child disappears during its listing. Discard that partial registration and
+// retry if the directory itself is still there.
+func (w *FileWatcher) addDirectoryWatch(dir string) error {
+	var err error
+	for range rewatchAttempts {
+		if err = w.addWatch(dir); err == nil {
+			return nil
+		}
+		_ = w.fs.Remove(dir)
+		if !errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+		if _, statErr := os.Stat(dir); errors.Is(statErr, fs.ErrNotExist) {
+			break
+		}
+	}
+	return err
 }
 
 // settled registers the directories that appeared since the backend last
@@ -550,7 +608,9 @@ func (w *FileWatcher) settled() error {
 		if err != nil || info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() || w.skipDir(dir) {
 			continue // gone again, or not a directory to watch
 		}
-		if _, registered := w.dirs[dir]; registered {
+		_, primary := w.dirs[dir]
+		_, dependency := w.dependencyDirs[dir]
+		if primary || dependency {
 			if err := w.refresh(dir); err != nil {
 				return err
 			}
@@ -572,7 +632,7 @@ func (w *FileWatcher) settled() error {
 // an error.
 func (w *FileWatcher) refresh(dir string) error {
 	_ = w.fs.Remove(dir) // absent is fine
-	err := w.fs.Add(dir)
+	err := w.addDirectoryWatch(dir)
 	switch {
 	case err == nil:
 		return nil
@@ -647,8 +707,10 @@ func (w *FileWatcher) addDir(dir string) error {
 	if _, ok := w.dirs[dir]; ok {
 		return nil
 	}
-	if err := w.fs.Add(dir); err != nil {
-		return limitError(dir, err)
+	if _, dependency := w.dependencyDirs[dir]; !dependency {
+		if err := w.addDirectoryWatch(dir); err != nil {
+			return limitError(dir, err)
+		}
 	}
 	w.dirs[dir] = struct{}{}
 	return nil
@@ -660,12 +722,27 @@ func (w *FileWatcher) addDir(dir string) error {
 // again under the new name when that appears.
 func (w *FileWatcher) unregister(dir string) {
 	prefix := dir + string(filepath.Separator)
+	for watched := range w.dependencyDirs {
+		if watched == dir || strings.HasPrefix(watched, prefix) {
+			delete(w.dependencyDirs, watched)
+			if _, primary := w.dirs[watched]; !primary {
+				_ = w.fs.Remove(watched)
+			}
+		}
+	}
+	w.unregisterRootDirs(dir)
+}
+
+// Dropping an excluded scan directory preserves any render coverage it shares.
+func (w *FileWatcher) unregisterRootDirs(dir string) {
+	prefix := dir + string(filepath.Separator)
 	for watched := range w.dirs {
 		if watched == dir || strings.HasPrefix(watched, prefix) {
 			delete(w.dirs, watched)
 			delete(w.pending, watched)
-			// Already gone from the backend when the directory was removed.
-			_ = w.fs.Remove(watched)
+			if _, dependency := w.dependencyDirs[watched]; !dependency {
+				_ = w.fs.Remove(watched)
+			}
 		}
 	}
 	for path := range w.depFiles {
@@ -680,7 +757,7 @@ func (w *FileWatcher) unregister(dir string) {
 func (w *FileWatcher) dropExcluded() {
 	for dir := range w.dirs {
 		if dir != w.root && w.skipDir(dir) {
-			w.unregister(dir)
+			w.unregisterRootDirs(dir)
 		}
 	}
 	for dir := range w.pending {

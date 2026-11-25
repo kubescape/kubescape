@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/kustomize/api/resmap"
 	"sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
+	"sigs.k8s.io/yaml"
 )
 
 var (
@@ -100,11 +101,20 @@ func readKustomizationFile(path string) ([]byte, error) {
 }
 
 type KustomizeDirectory struct {
-	path        string
-	helmCommand string
+	path         string
+	helmCommand  string
+	onDependency func(path string, chart bool)
 	// origins maps the ID of each rendered workload to the local file it came
 	// from, as far as Kustomize could tell. It is filled by GetWorkloads.
 	origins map[string]string
+}
+
+type kustomizeDependencyObserverKey struct{}
+
+// WithKustomizeDependencyObserver reports local paths consulted by a Kustomize
+// build, including missing inputs and Helm chart directories.
+func WithKustomizeDependencyObserver(ctx context.Context, observe func(path string, chart bool)) context.Context {
+	return context.WithValue(ctx, kustomizeDependencyObserverKey{}, observe)
 }
 
 // OriginFiles returns, for the workloads the last GetWorkloads call rendered,
@@ -256,26 +266,11 @@ func collectKustomizeInputOwnership(
 	}
 	kustomization.FixKustomization()
 
-	chartHome := types.HelmDefaultHome
-	if kustomization.HelmGlobals != nil && kustomization.HelmGlobals.ChartHome != "" {
-		chartHome = kustomization.HelmGlobals.ChartHome
-	}
-	if !filepath.IsAbs(chartHome) {
-		chartHome = filepath.Join(filepath.Dir(absKustomizationPath), chartHome)
-	}
-
 	for _, chart := range kustomization.HelmCharts {
 		if chart.Name == "" {
 			continue
 		}
-		chartRoot := chartHome
-		// Kustomize isolates a versioned chart fetched from a repository below
-		// <name>-<version> before untarring it. Mirror absChartHome in the Helm
-		// inflator so a chart left there from an earlier build has the same owner.
-		if chart.Repo != "" && chart.Version != "" {
-			chartRoot = filepath.Join(chartRoot, fmt.Sprintf("%s-%s", chart.Name, chart.Version))
-		}
-		directory := filepath.Clean(filepath.Join(chartRoot, chart.Name))
+		directory := kustomizeChartDirectory(filepath.Dir(absKustomizationPath), kustomization.HelmGlobals, chart)
 		chartKey := normalizePath(directory)
 		chartTree, ok := chartTrees[chartKey]
 		if !ok {
@@ -389,6 +384,21 @@ func collectKustomizeInputOwnership(
 	return nil
 }
 
+func kustomizeChartDirectory(loaderRoot string, globals *types.HelmGlobals, chart types.HelmChart) string {
+	home := types.HelmDefaultHome
+	if globals != nil && globals.ChartHome != "" {
+		home = globals.ChartHome
+	}
+	if !filepath.IsAbs(home) {
+		home = filepath.Join(loaderRoot, home)
+	}
+	// The Helm inflator isolates versioned repository charts in this directory.
+	if chart.Repo != "" && chart.Version != "" {
+		home = filepath.Join(home, chart.Name+"-"+chart.Version)
+	}
+	return filepath.Join(home, chart.Name)
+}
+
 func localKustomizeReference(baseDirectory, reference string) (string, bool) {
 	if reference == "" {
 		return "", false
@@ -498,80 +508,118 @@ type kustomizeHelmFileSystem struct {
 	filesys.FileSystem
 	usesHelm           bool
 	kustomizationFiles map[string]string
-	generatorFiles     map[string]struct{}
+	generatorFiles     map[string]string // requested or resolved generator path to loader root
 	generatorFactory   *resmap.Factory
+	dependencies       map[string]bool // true for a Helm chart directory
+	dependencyRoot     string
 }
 
 // Remember the requested file's role before the loader resolves symlinks. The
 // loader root, rather than the symlink target's directory, anchors generators.
 func (fs *kustomizeHelmFileSystem) CleanedAbs(path string) (filesys.ConfirmedDir, string, error) {
 	directory, file, err := fs.FileSystem.CleanedAbs(path)
-	if err == nil && file != "" {
+	if fs.dependencies != nil && path != fs.dependencyRoot {
+		// Keep the requested name so replacing a link or creating a missing
+		// local resource can trigger a new build.
+		fs.observeDependency(lexicalAbsPath(path), false)
+	}
+	if err == nil {
 		resolved := directory.Join(file)
-		if IsKustomizeFile(path) || IsKustomizeFile(resolved) {
+		if file != "" && (IsKustomizeFile(path) || IsKustomizeFile(resolved)) {
 			if fs.kustomizationFiles == nil {
 				fs.kustomizationFiles = map[string]string{}
 			}
 			fs.kustomizationFiles[resolved] = filepath.Dir(path)
 		}
-		if _, generator := fs.generatorFiles[filepath.Clean(path)]; generator {
-			fs.generatorFiles[resolved] = struct{}{}
+		if root, generator := fs.generatorFiles[filepath.Clean(path)]; generator {
+			fs.generatorFiles[resolved] = root
 		}
 	}
 	return directory, file, err
 }
 
+func (fs *kustomizeHelmFileSystem) observeDependency(path string, chart bool) {
+	if fs.dependencies != nil {
+		fs.dependencies[path] = chart || fs.dependencies[path]
+	}
+}
+
+// Kustomize removes its remote checkouts through this filesystem before the
+// build returns. Their contents are not local inputs that can be watched.
+func (fs *kustomizeHelmFileSystem) RemoveAll(path string) error {
+	if fs.dependencies != nil && path != "" {
+		path = filepath.Clean(path)
+		for dependency := range fs.dependencies {
+			if dependency == path || strings.HasPrefix(dependency, path+string(filepath.Separator)) {
+				delete(fs.dependencies, dependency)
+			}
+		}
+	}
+	return fs.FileSystem.RemoveAll(path)
+}
+
 func (fs *kustomizeHelmFileSystem) ReadFile(path string) ([]byte, error) {
+	// The loader has accepted this resolved path under its restrictions.
+	fs.observeDependency(path, false)
 	contents, err := fs.FileSystem.ReadFile(path)
-	if err != nil || fs.usesHelm {
+	if err != nil || (fs.usesHelm && fs.dependencies == nil) {
 		return contents, err
 	}
 	if root, configuration := fs.kustomizationFiles[path]; configuration {
 		var config types.Kustomization
 		if config.Unmarshal(contents) == nil {
 			config.FixKustomization()
-			fs.usesHelm = len(config.HelmCharts) > 0
+			for _, chart := range config.HelmCharts {
+				fs.usesHelm = true
+				fs.observeChart(root, config.HelmGlobals, chart)
+			}
 			for _, generator := range config.Generators {
 				// Use the same inline-vs-file decision and List expansion as
 				// Kustomize's configureExternalGenerators.
-				if fs.observeGenerators([]byte(generator)) {
+				if fs.observeGenerators([]byte(generator), root) {
 					continue
 				}
 				if fs.generatorFiles == nil {
-					fs.generatorFiles = map[string]struct{}{}
+					fs.generatorFiles = map[string]string{}
 				}
 				if !filepath.IsAbs(generator) {
 					generator = filepath.Join(root, generator)
 				}
-				fs.generatorFiles[filepath.Clean(generator)] = struct{}{}
+				fs.generatorFiles[filepath.Clean(generator)] = root
 			}
 		}
 	}
 	// Only inspect files selected as generators; a plain resource with the
 	// same kind does not make the build invoke Helm.
-	if fs.isGeneratorFile(path) {
-		fs.observeGenerators(contents)
+	if root, generator := fs.generatorRoot(path); generator {
+		fs.observeGenerators(contents, root)
 	}
 	return contents, err
 }
 
-func (fs *kustomizeHelmFileSystem) isGeneratorFile(path string) bool {
+func (fs *kustomizeHelmFileSystem) generatorRoot(path string) (string, bool) {
 	cleaned := filepath.Clean(path)
-	if _, ok := fs.generatorFiles[cleaned]; ok {
-		return true
+	if root, ok := fs.generatorFiles[cleaned]; ok {
+		return root, true
 	}
-	for gen := range fs.generatorFiles {
+	for gen, root := range fs.generatorFiles {
 		rel, err := filepath.Rel(gen, cleaned)
 		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return true
+			return root, true
 		}
 	}
-	return false
+	return "", false
+}
+
+func (fs *kustomizeHelmFileSystem) observeChart(root string, globals *types.HelmGlobals, chart types.HelmChart) {
+	if fs.dependencies != nil && chart.Name != "" {
+		fs.observeDependency(kustomizeChartDirectory(root, globals, chart), true)
+	}
 }
 
 // observeGenerators returns whether contents is a valid inline resource map.
 // Failed observation never changes the renderer's own parsing or error handling.
-func (fs *kustomizeHelmFileSystem) observeGenerators(contents []byte) bool {
+func (fs *kustomizeHelmFileSystem) observeGenerators(contents []byte, loaderRoot string) bool {
 	if fs.generatorFactory == nil {
 		fs.generatorFactory = resmap.NewFactory(provider.NewDepProvider().GetResourceFactory())
 	}
@@ -582,6 +630,15 @@ func (fs *kustomizeHelmFileSystem) observeGenerators(contents []byte) bool {
 	for _, generator := range generators.Resources() {
 		if generator.GetApiVersion() == "builtin" && generator.GetKind() == "HelmChartInflationGenerator" {
 			fs.usesHelm = true
+			if fs.dependencies != nil {
+				var config struct {
+					types.HelmGlobals
+					types.HelmChart
+				}
+				if data, err := generator.AsYAML(); err == nil && yaml.Unmarshal(data, &config) == nil {
+					fs.observeChart(loaderRoot, &config.HelmGlobals, config.HelmChart)
+				}
+			}
 		}
 	}
 	return true
@@ -686,6 +743,10 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	kustomizeDirectoryPath = lexicalAbsPath(kustomizeDirectoryPath)
 
 	fSys := &kustomizeHelmFileSystem{FileSystem: kustomizeDisk()}
+	if kd.onDependency != nil {
+		fSys.dependencies = make(map[string]bool)
+		fSys.dependencyRoot = kustomizeDirectoryPath
+	}
 	opts := krusty.MakeDefaultOptions()
 	// Restrict individual files to their Kustomization root. References to base
 	// directories outside that root (e.g. ../base) still get their own loader.
@@ -714,6 +775,9 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	// The plain build is what the scan evaluates, always: it is exactly what the
 	// scanned kustomization renders.
 	resmap, err := newKustomizer().Run(fSys, kustomizeDirectoryPath)
+	for dependency, chart := range fSys.dependencies {
+		kd.onDependency(dependency, chart)
+	}
 	if err != nil {
 		if fSys.usesHelm || isKustomizeHelmError(err, helmCommand) {
 			err = errors.Join(err, validateKustomizeHelmCommand(helmCommand))

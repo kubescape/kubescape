@@ -709,6 +709,271 @@ func TestWatchSecurityScanWatchesWhatAKustomizationInputRenders(t *testing.T) {
 	require.NoError(t, stop())
 }
 
+func TestWatchSecurityScanWatchesSharedKustomizeBase(t *testing.T) {
+	for _, name := range []string{"outside the scan root", "excluded from the scan"} {
+		t.Run(name, func(t *testing.T) {
+			repo := t.TempDir()
+			overlay := filepath.Join(repo, "overlay")
+			base := filepath.Join(repo, "base")
+			pod := filepath.Join(base, "pod.yaml")
+			const kustomization = "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: "
+			writeFile(t, filepath.Join(overlay, "kustomization.yaml"), kustomization+"[../base]\n")
+			writeFile(t, filepath.Join(base, "kustomization.yaml"), kustomization+"[pod.yaml]\n")
+			writeFile(t, pod, podManifest("web", false))
+			root := overlay
+			if name == "excluded from the scan" {
+				root = repo
+				writeFile(t, filepath.Join(repo, cautils.IgnoreFileName), "base/\n")
+			}
+
+			out, stop := startSecurityWatch(t, localWatchScanInfo(t, root))
+			out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+			out.waitFor(t, "No change in findings")
+			writeFile(t, pod, podManifest("web", true))
+			out.waitFor(t, "0 new, 1 resolved")
+			require.NoError(t, stop())
+		})
+	}
+}
+
+func TestWatchSecurityScanFollowsChangedKustomizeBase(t *testing.T) {
+	repo := t.TempDir()
+	overlay := filepath.Join(repo, "overlay", "kustomization.yaml")
+	first := filepath.Join(repo, "first")
+	second := filepath.Join(repo, "second")
+	const kustomization = "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: "
+	writeFile(t, overlay, kustomization+"[../first]\n")
+	writeFile(t, filepath.Join(first, "kustomization.yaml"), kustomization+"[pod.yaml]\n")
+	writeFile(t, filepath.Join(first, "pod.yaml"), podManifest("web", false))
+	writeFile(t, filepath.Join(second, "kustomization.yaml"), kustomization+"[pod.yaml]\n")
+	pod := filepath.Join(second, "pod.yaml")
+	writeFile(t, pod, podManifest("web", true))
+
+	out, stop := startSecurityWatch(t, localWatchScanInfo(t, overlay))
+	out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+	out.waitFor(t, "No change in findings")
+	writeFile(t, overlay, kustomization+"[../second]\n")
+	out.waitFor(t, "0 new, 1 resolved")
+	out.waitFor(t, "No change in findings")
+
+	// Editors often replace the dependency by renaming a temporary file.
+	replacement := filepath.Join(second, "pod.tmp")
+	writeFile(t, replacement, podManifest("web", false))
+	require.NoError(t, os.Rename(replacement, pod))
+	out.waitFor(t, "1 new, 0 resolved")
+	require.NoError(t, stop())
+}
+
+func TestWatchSecurityScanRecoversWhenSharedKustomizeBaseAppears(t *testing.T) {
+	repo := t.TempDir()
+	overlay := filepath.Join(repo, "overlay")
+	base := filepath.Join(repo, "base")
+	const kustomization = "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: "
+	writeFile(t, filepath.Join(overlay, "kustomization.yaml"), kustomization+"[../base]\n")
+
+	out, stop := startSecurityWatchOutput(t, localWatchScanInfo(t, overlay))
+	out.waitFor(t, "the watch waits for a change")
+	out.waitFor(t, "Scan failed")
+	require.NoError(t, os.Mkdir(base, 0o750))
+	out.waitFor(t, "Change detected, scanning again...")
+	writeFile(t, filepath.Join(base, "kustomization.yaml"), kustomization+"[pod.yaml]\n")
+	writeFile(t, filepath.Join(base, "pod.yaml"), podManifest("web", false))
+	out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+	require.NoError(t, stop())
+}
+
+func TestWatchSecurityScanFollowsDirectoryLinksInSharedBase(t *testing.T) {
+	for _, name := range []string{"retargeted link", "chained link", "broken link", "dangling target", "file instead of target directory"} {
+		t.Run(name, func(t *testing.T) {
+			blocked := name == "file instead of target directory"
+			missing := name == "dangling target" || blocked
+			broken := name == "broken link" || missing
+			overlay, base := sharedKustomizeWatchFixture(t, "resources: [current/pod.yaml]\n")
+			writeFile(t, filepath.Join(base, "old", "pod.yaml"), podManifest("web", false))
+			writeFile(t, filepath.Join(base, "new", "pod.yaml"), podManifest("web", !broken))
+			link := filepath.Join(base, "current")
+			target := "old"
+			switch name {
+			case "broken link":
+				target = "current"
+			case "dangling target", "file instead of target directory":
+				target = "missing"
+			}
+			if blocked {
+				writeFile(t, filepath.Join(base, target), "not a directory")
+			}
+			if err := os.Symlink(target, link); err != nil && runtime.GOOS == "windows" {
+				t.Skipf("directory symlink unavailable: %v", err)
+			} else {
+				require.NoError(t, err)
+			}
+			if name == "chained link" {
+				require.NoError(t, os.Rename(link, filepath.Join(base, "slot")))
+				require.NoError(t, os.Symlink("slot", link))
+				link = filepath.Join(base, "slot")
+			}
+
+			out, stop := startSecurityWatchOutput(t, localWatchScanInfo(t, overlay))
+			const initial = "Initial scan complete: 1 failing control(s) on 1 resource(s)"
+			if broken {
+				out.waitFor(t, "the watch waits for a change")
+				out.waitFor(t, "Scan failed")
+			} else {
+				out.waitFor(t, initial)
+				out.waitFor(t, "No change in findings")
+			}
+			if missing {
+				if blocked {
+					require.NoError(t, os.Remove(filepath.Join(base, target)))
+				}
+				writeFile(t, filepath.Join(base, "missing", "pod.yaml"), podManifest("web", false))
+			} else {
+				replacement := filepath.Join(base, "replacement")
+				require.NoError(t, os.Symlink("new", replacement))
+				require.NoError(t, os.Rename(replacement, link))
+			}
+			if broken {
+				out.waitFor(t, initial)
+			} else {
+				out.waitFor(t, "0 new, 1 resolved")
+			}
+			require.NoError(t, stop())
+		})
+	}
+}
+
+func TestWatchSecurityScanKeepsSharedBaseWatchAfterPolicyError(t *testing.T) {
+	overlay, base := sharedKustomizeWatchFixture(t, "resources: [pod.yaml]\n")
+	pod := filepath.Join(base, "pod.yaml")
+	writeFile(t, pod, podManifest("web", false))
+	info := localWatchScanInfo(t, overlay)
+	policy, err := os.ReadFile(info.UseFrom[0])
+	require.NoError(t, err)
+	policyPath := filepath.Join(t.TempDir(), "policy.json")
+	writeFile(t, policyPath, string(policy))
+	info.UseFrom = []string{policyPath}
+
+	out, stop := startSecurityWatchOutput(t, info)
+	out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+	out.waitFor(t, "No change in findings")
+	writeFile(t, policyPath, "invalid policy")
+	config := filepath.Join(overlay, "kustomization.yaml")
+	before, err := os.ReadFile(config)
+	require.NoError(t, err)
+	writeFile(t, config, string(before)+"# trigger a rescan\n")
+	out.waitFor(t, "Scan failed")
+	writeFile(t, policyPath, string(policy))
+	writeFile(t, pod, podManifest("web", true))
+	out.waitFor(t, "0 new, 1 resolved")
+	require.NoError(t, stop())
+}
+
+func TestWatchSecurityScanKeepsDependenciesAcrossFailedRenders(t *testing.T) {
+	overlay, base := sharedKustomizeWatchFixture(t, "resources: [pod.yaml]\n")
+	writeFile(t, filepath.Join(base, "pod.yaml"), podManifest("web", false))
+	repo := filepath.Dir(overlay)
+	second, third := filepath.Join(repo, "second"), filepath.Join(repo, "third")
+	const config = "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: "
+	for _, dir := range []string{second, third} {
+		writeFile(t, filepath.Join(dir, "kustomization.yaml"), config+"[pod.yaml]\n")
+		writeFile(t, filepath.Join(dir, "pod.yaml"), "kind: [broken\n")
+	}
+
+	out, stop := startSecurityWatchOutput(t, localWatchScanInfo(t, overlay))
+	out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+	out.waitFor(t, "No change in findings")
+	for _, resources := range []string{"[../second]", "[../third, ../second]"} {
+		writeFile(t, filepath.Join(overlay, "kustomization.yaml"), config+resources+"\n")
+		out.waitFor(t, "Scan failed:")
+		out.waitFor(t, "Scan failed:") // catch up after adding the new dependency
+	}
+
+	// The last render failed in third before it reached second.
+	writeFile(t, filepath.Join(second, "pod.yaml"), podManifest("web", true))
+	out.waitFor(t, "Scan failed:") // the edit requests a fresh scan
+	require.NoError(t, stop())
+}
+
+func TestWatchSecurityScanWatchesSharedBaseWithDifferentFilenameCase(t *testing.T) {
+	overlay, base := sharedKustomizeWatchFixture(t, "resources: [pod.yaml]\n")
+	pod := filepath.Join(base, "Pod.yaml")
+	writeFile(t, pod, podManifest("web", false))
+	if _, err := os.Stat(filepath.Join(base, "pod.yaml")); errors.Is(err, os.ErrNotExist) {
+		t.Skip("the test filesystem is case-sensitive")
+	} else {
+		require.NoError(t, err)
+	}
+	out, stop := startSecurityWatch(t, localWatchScanInfo(t, overlay))
+	out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+	out.waitFor(t, "No change in findings")
+	writeFile(t, pod, podManifest("web", true))
+	out.waitFor(t, "0 new, 1 resolved")
+	require.NoError(t, stop())
+}
+
+func TestWatchSecurityScanWatchesHelmTemplatesInSharedBase(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the Helm stub uses a POSIX shell")
+	}
+	bin := t.TempDir()
+	helm := filepath.Join(bin, "helm")
+	writeFile(t, helm, "#!/bin/sh\ncase \"$1\" in\n  version) printf '%s\\n' 'v3.19.0' ;;\n  template) /bin/cat \"$3/templates/pod.yaml\" ;;\n  *) exit 1 ;;\nesac\n")
+	require.NoError(t, os.Chmod(helm, 0o700))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	for _, name := range []string{"helmCharts", "builtin generator", "linked kustomization", "broken template"} {
+		t.Run(name, func(t *testing.T) {
+			config := "helmCharts:\n- name: web\n  releaseName: web\n"
+			if name == "builtin generator" {
+				config = "generators: [chart-generator.yaml]\n"
+			}
+			overlay, base := sharedKustomizeWatchFixture(t, config)
+			switch name {
+			case "builtin generator":
+				writeFile(t, filepath.Join(base, "chart-generator.yaml"), "apiVersion: builtin\nkind: HelmChartInflationGenerator\nmetadata:\n  name: web\nname: web\nreleaseName: web\n")
+			case "linked kustomization":
+				require.NoError(t, os.Mkdir(filepath.Join(base, "configs"), 0o750))
+				require.NoError(t, os.Rename(filepath.Join(base, "kustomization.yaml"), filepath.Join(base, "configs", "kustomization.yaml")))
+				require.NoError(t, os.Symlink("configs/kustomization.yaml", filepath.Join(base, "kustomization.yaml")))
+			}
+			chart := filepath.Join(base, "charts", "web")
+			writeFile(t, filepath.Join(chart, "Chart.yaml"), "apiVersion: v2\nname: web\nversion: 0.1.0\n")
+			writeFile(t, filepath.Join(chart, "values.yaml"), "{}\n")
+			template := filepath.Join(chart, "templates", "pod.yaml")
+			broken := name == "broken template"
+			if broken {
+				writeFile(t, template, "kind: [broken\n")
+			} else {
+				writeFile(t, template, podManifest("web", false))
+			}
+			out, stop := startSecurityWatchOutput(t, localWatchScanInfo(t, overlay))
+			const initial = "Initial scan complete: 1 failing control(s) on 1 resource(s)"
+			if broken {
+				out.waitFor(t, "the watch waits for a change")
+				out.waitFor(t, "Scan failed")
+				writeFile(t, template, podManifest("web", false))
+				out.waitFor(t, initial)
+			} else {
+				out.waitFor(t, initial)
+				out.waitFor(t, "No change in findings")
+				writeFile(t, template, podManifest("web", true))
+				out.waitFor(t, "0 new, 1 resolved")
+			}
+			require.NoError(t, stop())
+		})
+	}
+}
+
+func sharedKustomizeWatchFixture(t *testing.T, baseConfig string) (overlay, base string) {
+	t.Helper()
+	repo := t.TempDir()
+	overlay, base = filepath.Join(repo, "overlay"), filepath.Join(repo, "base")
+	const header = "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n"
+	writeFile(t, filepath.Join(overlay, "kustomization.yaml"), header+"resources: [../base]\n")
+	writeFile(t, filepath.Join(base, "kustomization.yaml"), header+baseConfig)
+	return overlay, base
+}
+
 // The kustomization itself is watched as well when its directory is: kustomize
 // also accepts it under the extensionless name Kustomization, and an edit to it
 // is an edit to the input.

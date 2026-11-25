@@ -778,6 +778,7 @@ func loadKustomizeDirectory(ctx context.Context, basePath string) (map[string][]
 
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
 	kustomizeDirectory := NewKustomizeDirectory(basePath)
+	kustomizeDirectory.onDependency, _ = ctx.Value(kustomizeDependencyObserverKey{}).(func(string, bool))
 
 	var newBasePath string
 

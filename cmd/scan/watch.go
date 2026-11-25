@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -184,7 +185,8 @@ func watchSecurityScan(cmd *cobra.Command, ks interface{ Context() context.Conte
 	cmd.SilenceUsage = true
 	timeout := scanInfo.ScanTimeout
 	return runWatch(ks.Context(), watchConfig{
-		Roots: roots,
+		Roots:                      roots,
+		TrackKustomizeDependencies: true,
 		AcceptDependencies: func(root, path string) bool {
 			return isRenderedDirectory(root, scanInfo.InputPatterns) || inKustomizationBelow(root, path) || inHelmChartBelow(root, path)
 		},
@@ -294,6 +296,9 @@ type watchScan struct {
 type watchConfig struct {
 	// Roots are the files and directories scanned, and watched.
 	Roots []string
+	// TrackKustomizeDependencies watches inputs consulted by the render as
+	// well as paths selected for scan discovery.
+	TrackKustomizeDependencies bool
 	// AcceptDependencies reports whether a file at path, in the watch of root,
 	// should be accepted as a dependency regardless of its extension, because
 	// a render reads its directory. It is consulted as files change, so a
@@ -360,16 +365,19 @@ func runWatch(ctx context.Context, cfg watchConfig) error {
 	// into one of capacity one that is sent to without blocking, which is what the
 	// scheduler expects of its channel.
 	changes := make(chan struct{}, 1)
+	signal := func() {
+		select {
+		case changes <- struct{}{}:
+		default:
+		}
+	}
 	var forwarders sync.WaitGroup
 	for _, watcher := range watchers {
 		forwarders.Add(1)
 		go func() {
 			defer forwarders.Done()
 			for range watcher.Changes() {
-				select {
-				case changes <- struct{}{}:
-				default:
-				}
+				signal()
 			}
 			// The channel closes when the watcher ends: with the context, which is
 			// the end of the watch, or on its own, which is a watch that can no
@@ -380,8 +388,46 @@ func runWatch(ctx context.Context, cfg watchConfig) error {
 		}()
 	}
 
+	scan := cfg.Scan
+	if cfg.TrackKustomizeDependencies {
+		var lastFiles, lastCharts map[string]struct{}
+		scan = func(ctx context.Context) (*watchScan, error) {
+			files, charts := make(map[string]struct{}), make(map[string]struct{})
+			result, scanErr := cfg.Scan(cautils.WithKustomizeDependencyObserver(ctx, func(path string, chart bool) {
+				if chart {
+					charts[path] = struct{}{}
+				} else {
+					files[path] = struct{}{}
+				}
+			}))
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if scanErr != nil {
+				// A failed scan can stop before it reads any render inputs.
+				// Keep the prior watches and add paths that could repair it.
+				if len(files) == 0 && len(charts) == 0 {
+					return result, scanErr
+				}
+				maps.Copy(files, lastFiles)
+				maps.Copy(charts, lastCharts)
+			}
+			added, err := watch.ReplaceRenderDependencies(ctx, watchers, files, charts)
+			if err != nil {
+				return nil, err
+			}
+			lastFiles, lastCharts = files, charts
+			if added {
+				// Reread inputs that could have changed before their new
+				// watches were installed, using the normal scan budget.
+				signal()
+			}
+			return result, scanErr
+		}
+	}
+
 	session := &watchSession{
-		scan:     cfg.Scan,
+		scan:     scan,
 		baseline: watch.NewBaseline(),
 		out:      out,
 		errOut:   errOut,
