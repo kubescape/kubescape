@@ -139,6 +139,8 @@ scan_container:
 
 The `KUBESCAPE_REGISTRY_USERNAME` and `KUBESCAPE_REGISTRY_PASSWORD` variables let Kubescape pull the image from the project's private container registry without putting the job token on the command line. The format also works with `kubescape scan --scan-images`, in which case it reports only the image vulnerabilities; write posture findings with `gitlab-sast` or `gitlab-codequality` from a separate scan. Grype's Negligible severity is reported as `Info`, an image without a detectable operating system is reported as `Unknown`, and each vulnerability keeps a stable identifier so dismissals carry over between pipelines. Each finding also lists whether the vulnerability is on the CISA Known Exploited Vulnerabilities catalog and its EPSS exploit probability in the vulnerability details, as do image findings in `gitlab-sast` reports, so the most likely exploited issues can be triaged first.
 
+When the same image is scanned for several platforms, each finding names its platform in the operating system field and in its description. GitLab's vulnerability report, though, tracks a container finding by the image name and the package, with the tag left out unless it is a version, and does not look at the operating system, so it merges the same vulnerability found in the `linux/amd64` and `linux/arm64` variants of one image into a single entry. Writing each platform to its own report keeps the per-platform results in the report files, but GitLab still shows them as one vulnerability.
+
 Troubleshooting
 
 kubescape: command not found

@@ -218,16 +218,22 @@ func TestGitLabContainerScanningPrinter_ImageNamedLikeASchemeKeepsItsTag(t *test
 	assert.Equal(t, "docker:registry:2", report.Vulnerabilities[0].Location.Image)
 }
 
-func TestGitLabContainerScanningPrinter_MultiPlatformDistinctFingerprints(t *testing.T) {
+// GitLab tracks a container finding by its location fingerprint, the image name and the
+// package (container_scanning.rb fingerprint_data), and leaves the operating system out.
+// docker_image_name_without_tag drops the tag only when it is not a version, so the
+// fixture uses a non-version tag and the helper below strips it the same way. The
+// platform still reaches the report, but GitLab merges the variants of one image into
+// one vulnerability, as docs/gitlab-ci.md says.
+func TestGitLabContainerScanningPrinter_MultiPlatformSharesGitLabFingerprint(t *testing.T) {
 	report := printContainerScanning(t, []cautils.ImageScanData{
 		{
-			Image:    "app:1.0",
+			Image:    "app:stable",
 			Platform: "linux/amd64",
 			Context:  grypepkg.Context{Distro: distro.New(distro.Alpine, "3.20.1", "")},
 			Matches:  match.NewMatches(containerScanningMatch("CVE-2024-0001", "High", "openssl", "a")),
 		},
 		{
-			Image:    "app:1.0",
+			Image:    "app:stable",
 			Platform: "linux/arm64",
 			Context:  grypepkg.Context{Distro: distro.New(distro.Alpine, "3.20.1", "")},
 			Matches:  match.NewMatches(containerScanningMatch("CVE-2024-0001", "High", "openssl", "a")),
@@ -240,8 +246,13 @@ func TestGitLabContainerScanningPrinter_MultiPlatformDistinctFingerprints(t *tes
 
 	assert.Equal(t, "alpine 3.20.1 (linux/amd64)", amd.Location.OperatingSystem)
 	assert.Equal(t, "alpine 3.20.1 (linux/arm64)", arm.Location.OperatingSystem)
-	assert.NotEqual(t, amd.Location.OperatingSystem, arm.Location.OperatingSystem, "platform distinguishes GitLab location fingerprint")
-	assert.NotEqual(t, amd.ID, arm.ID)
+	assert.NotEqual(t, amd.ID, arm.ID, "the report keeps one finding per platform")
+
+	gitLabFingerprint := func(v gitLabContainerVulnerability) string {
+		image := v.Location.Image
+		return image[:max(strings.LastIndex(image, ":"), 0)] + ":" + v.Location.Dependency.Package.Name
+	}
+	assert.Equal(t, gitLabFingerprint(amd), gitLabFingerprint(arm), "GitLab does not use the operating system, so the platforms share its fingerprint")
 }
 
 func TestGitLabContainerScanningPrinter_BoundsLongNames(t *testing.T) {
