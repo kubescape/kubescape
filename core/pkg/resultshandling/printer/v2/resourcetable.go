@@ -109,14 +109,14 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 
 		if source, ok := opaSessionObj.ResourceSource[resourceID]; ok {
 			if srcPath := BestSourcePath(source); srcPath != "" {
-				fmt.Fprintf(prettyPrinter.writer, "Source: %s\n", srcPath)
+				fmt.Fprintf(prettyPrinter.writer, "Source: %s\n", sanitizeText(srcPath))
 			}
 		}
-		fmt.Fprintf(prettyPrinter.writer, "ApiVersion: %s\n", resource.GetApiVersion())
-		fmt.Fprintf(prettyPrinter.writer, "Kind: %s\n", resource.GetKind())
-		fmt.Fprintf(prettyPrinter.writer, "Name: %s\n", resource.GetName())
+		fmt.Fprintf(prettyPrinter.writer, "ApiVersion: %s\n", sanitizeText(resource.GetApiVersion()))
+		fmt.Fprintf(prettyPrinter.writer, "Kind: %s\n", sanitizeText(resource.GetKind()))
+		fmt.Fprintf(prettyPrinter.writer, "Name: %s\n", sanitizeText(resource.GetName()))
 		if resource.GetNamespace() != "" {
-			fmt.Fprintf(prettyPrinter.writer, "Namespace: %s\n", resource.GetNamespace())
+			fmt.Fprintf(prettyPrinter.writer, "Namespace: %s\n", sanitizeText(resource.GetNamespace()))
 		}
 		fmt.Fprintf(prettyPrinter.writer, "\n%s\n\n", prettyprinter.ControlCountersForResource(cautils.ControlIDsByStatus(summary, &result)))
 
@@ -480,6 +480,10 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 			}
 			if srcDisplay != "" {
 				paths = append([]string{"@ " + srcDisplay}, paths...)
+			}
+			for j := range paths {
+				// file names, current values and container names come from the scanned files
+				paths[j] = sanitizeText(paths[j])
 			}
 			row[resourceColumnPath] = strings.Join(paths, "\n")
 		}

@@ -470,9 +470,9 @@ func mdStatusLabel(status apis.IStatus) string {
 	}
 }
 
-// mdSanitizeText collapses line breaks to spaces, strips C0 (except tab) and C1
+// sanitizeText collapses line breaks to spaces, strips C0 (except tab) and C1
 // control characters, and trims surrounding whitespace (CWE-150).
-func mdSanitizeText(s string) string {
+func sanitizeText(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", " ")
@@ -490,7 +490,7 @@ func mdSanitizeText(s string) string {
 // cannot break out of Markdown table rows or inject control codes (CWE-150).
 func mdEscapeCell(s string) string {
 	s = strings.ReplaceAll(s, "|", "\\|")
-	return mdSanitizeText(s)
+	return sanitizeText(s)
 }
 
 // mdEscapeCodeCell neutralizes cell boundaries and replaces backticks with single quotes
@@ -516,7 +516,7 @@ func mdBlockquote(s string) string {
 // spans cannot be prematurely terminated (CWE-150 / CWE-116).
 func mdEscapeInline(s string) string {
 	s = strings.ReplaceAll(s, "`", "'")
-	return mdSanitizeText(s)
+	return sanitizeText(s)
 }
 
 func mdWriteCoverageSection(w io.Writer, opaSessionObj *cautils.OPASessionObj) error {
