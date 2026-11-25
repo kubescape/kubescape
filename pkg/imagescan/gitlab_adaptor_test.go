@@ -452,6 +452,60 @@ func TestGitlabAdaptor_GetImagesVulnerabilities(t *testing.T) {
 	assert.Empty(t, reportsMixed[1].Vulnerabilities)
 }
 
+func TestGitlabAdaptor_GetImagesVulnerabilities_SanitizesLinksAndTitles(t *testing.T) {
+	mockAPI := &mockGitlabAPI{
+		responses: map[string][]byte{
+			"sec-group/app-project": []byte(`{
+				"data": {
+					"project": {
+						"vulnerabilities": {
+							"pageInfo": {
+								"hasNextPage": false
+							},
+							"nodes": [
+								{
+									"title": "  CVE-2024-9999  ",
+									"severity": "High",
+									"description": "Vulnerability with whitespace links",
+									"location": {
+										"image": "registry.gitlab.com/sec-group/app-project/web:v1"
+									},
+									"links": [
+										{"url": " https://example.com/advisory "},
+										{"url": ""},
+										{"url": "   "},
+										{"url": "https://example.com/advisory"},
+										{"url": "https://nvd.nist.gov/vuln/detail/CVE-2024-9999"}
+									]
+								}
+							]
+						}
+					}
+				}
+			}`),
+		},
+	}
+
+	adaptor := NewGitlabAdaptor()
+	adaptor.client = mockAPI
+
+	imageIDs := []ContainerImageIdentifier{
+		{Repository: "sec-group/app-project/web", Tag: "v1"},
+	}
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), imageIDs)
+	require.NoError(t, err)
+	require.Len(t, reports, 1)
+	require.Len(t, reports[0].Vulnerabilities, 1)
+
+	vuln := reports[0].Vulnerabilities[0]
+	assert.Equal(t, "CVE-2024-9999", vuln.ID)
+	assert.Equal(t, []string{
+		"https://example.com/advisory",
+		"https://nvd.nist.gov/vuln/detail/CVE-2024-9999",
+	}, vuln.Links)
+}
+
 func TestGitlabAdaptor_GetImagesVulnerabilities_RetrievalErrorDoesNotSetScannerFailure(t *testing.T) {
 	mockAPI := &mockGitlabAPI{
 		errors: map[string]error{
