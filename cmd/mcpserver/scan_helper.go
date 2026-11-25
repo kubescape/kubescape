@@ -264,7 +264,7 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, req scanRequest)
 		}
 	}
 
-	responseJSON, err := json.MarshalIndent(response, "", "  ")
+	responseJSON, err := json.Marshal(response)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal %s scan results: %w", req.label, err)
 	}
