@@ -918,6 +918,11 @@ keeps the bare document shape), while the table, HTML, PDF, markdown, CSV,
 SARIF, GitLab SAST, JUnit and Prometheus outputs report every image in one
 document.
 
+Compare two image JSON reports with `kubescape diff base.json head.json --format junit`.
+JUnit diff testcase names include the package type when known, for example
+`CVE-1 (requests 2.0) [python]`, to distinguish findings in different package
+ecosystems. When the type is missing, the name remains `CVE-1 (requests 2.0)`.
+
 `policyreport` writes one `ClusterPolicyReport` per image, with one result per
 vulnerability. Each report is labeled `kubescape.io/report-type:
 image-vulnerabilities` and annotated with the image reference, so a cluster
