@@ -27,6 +27,8 @@ var (
 	_ IControlsInputsGetter = &KSCloudAPIAdapter{}
 )
 
+const maxHTTPPostErrorDrainBytes = 64 << 10
+
 // KSCloudAPIAdapter adapts v1.KSCloudAPI to the context-aware getter interfaces.
 type KSCloudAPIAdapter struct {
 	*v1.KSCloudAPI
@@ -113,8 +115,9 @@ func HTTPPost(client *http.Client, fullURL string, body []byte, headers map[stri
 			logger.L().Warning("failed to fully read error response body", helpers.Error(readErr))
 		}
 
-		// Fully drain the rest of the response body to ensure the TCP connection can be reused.
-		if _, err := io.Copy(io.Discard, body); err != nil {
+		// Drain a bounded remainder of the response body so small error responses still reuse
+		// the TCP connection while oversized or unbounded error streams cannot stall the client.
+		if _, err := io.Copy(io.Discard, io.LimitReader(body, maxHTTPPostErrorDrainBytes)); err != nil {
 			logger.L().Debug("failed to drain error response body", helpers.Error(err))
 		}
 		if err := resp.Body.Close(); err != nil {

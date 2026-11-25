@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -231,4 +232,93 @@ func TestHTTPPost_ReusesConnectionOnError(t *testing.T) {
 	}
 
 	assert.Equal(t, int32(1), atomic.LoadInt32(&activeConns), "Bug: HTTPPost leaks connections on error by not draining the response body")
+}
+
+type countingReadCloser struct {
+	io.ReadCloser
+	readBytes *atomic.Int64
+}
+
+func (c *countingReadCloser) Read(p []byte) (int, error) {
+	n, err := c.ReadCloser.Read(p)
+	c.readBytes.Add(int64(n))
+	return n, err
+}
+
+type countingRoundTripper struct {
+	base      http.RoundTripper
+	readBytes *atomic.Int64
+}
+
+func (rt *countingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := rt.base.RoundTrip(req)
+	if resp != nil && resp.Body != nil {
+		resp.Body = &countingReadCloser{
+			ReadCloser: resp.Body,
+			readBytes:  rt.readBytes,
+		}
+	}
+	return resp, err
+}
+
+func TestHTTPPost_BoundsErrorResponseDrain(t *testing.T) {
+	const oversizedErrorBytes = 4 << 20 // 4 MiB
+	const maxExpectedReadBytes = int64(1024 + (64 << 10))
+
+	cases := []struct {
+		name         string
+		setLength    bool
+		expectReason bool
+	}{
+		{
+			name:         "oversized fixed-length error body",
+			setLength:    true,
+			expectReason: true,
+		},
+		{
+			name:         "chunked oversized error stream",
+			setLength:    false,
+			expectReason: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.setLength {
+					w.Header().Set("Content-Length", strconv.Itoa(oversizedErrorBytes))
+				}
+				w.WriteHeader(http.StatusInternalServerError)
+				chunk := []byte(strings.Repeat("E", 32<<10))
+				for remaining := oversizedErrorBytes; remaining > 0; remaining -= len(chunk) {
+					toWrite := chunk
+					if remaining < len(toWrite) {
+						toWrite = chunk[:remaining]
+					}
+					if _, err := w.Write(toWrite); err != nil {
+						return
+					}
+					if f, ok := w.(http.Flusher); ok && !tc.setLength {
+						f.Flush()
+					}
+				}
+			}))
+			defer ts.Close()
+
+			var readBytes atomic.Int64
+			client := ts.Client()
+			client.Transport = &countingRoundTripper{
+				base:      client.Transport,
+				readBytes: &readBytes,
+			}
+
+			_, _, err := HTTPPost(client, ts.URL, []byte("test"), nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "500 Internal Server Error")
+			if tc.expectReason {
+				assert.Contains(t, err.Error(), strings.Repeat("E", 1024))
+			}
+			assert.LessOrEqual(t, readBytes.Load(), maxExpectedReadBytes)
+		})
+	}
 }
