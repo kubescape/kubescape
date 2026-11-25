@@ -3,10 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/cmd/completion"
 	"github.com/kubescape/kubescape/v4/cmd/config"
@@ -123,7 +125,20 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 		) ([]string, cobra.ShellCompDirective) {
 			var matches []string
 
+			loggerName := rootInfo.LoggerName
+			if cmd != nil {
+				if flag := cmd.Flag("logger-name"); flag != nil && flag.Value.String() != "" {
+					loggerName = flag.Value.String()
+				}
+			}
+			if loggerName == "" {
+				loggerName = strings.TrimSpace(os.Getenv("KS_LOGGER_NAME"))
+			}
+
 			for _, level := range helpers.SupportedLevels() {
+				if strings.EqualFold(loggerName, zaplogger.LoggerName) && strings.EqualFold(level, "success") {
+					continue
+				}
 				if strings.HasPrefix(
 					strings.ToLower(level),
 					strings.ToLower(toComplete),

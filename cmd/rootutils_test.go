@@ -4,8 +4,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/go-logger/iconlogger"
+	"github.com/kubescape/go-logger/structuredlogger"
 	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/spf13/cobra"
@@ -511,4 +513,75 @@ func TestInitEnvironment(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to create service discovery client")
 	})
+}
+
+// TestInitLoggerLevel_ZapSuccessMappedToInfo verifies that setting 'success' with zap logger
+// maps gracefully to 'info' rather than failing logger initialization.
+func TestInitLoggerLevel_ZapSuccessMappedToInfo(t *testing.T) {
+	prevLogger := rootInfo.Logger
+	prevLoggerName := rootInfo.LoggerName
+	t.Cleanup(func() {
+		rootInfo.Logger = prevLogger
+		rootInfo.LoggerName = prevLoggerName
+	})
+
+	rootInfo.LoggerName = zaplogger.LoggerName
+	initLogger()
+
+	cmd := testCmdWithLoggerFlag(t)
+	rootInfo.Logger = "success"
+	err := initLoggerLevel(cmd)
+	require.NoError(t, err)
+	assert.Equal(t, "info", rootInfo.Logger)
+}
+
+// TestInitLoggerLevel_SlogMixedCaseNormalized verifies that mixed-case levels with slog
+// are normalized to lowercase so they match slog levels instead of falling back to info.
+func TestInitLoggerLevel_SlogMixedCaseNormalized(t *testing.T) {
+	prevLogger := rootInfo.Logger
+	prevLoggerName := rootInfo.LoggerName
+	t.Cleanup(func() {
+		rootInfo.Logger = prevLogger
+		rootInfo.LoggerName = prevLoggerName
+	})
+
+	rootInfo.LoggerName = structuredlogger.LoggerName
+	initLogger()
+
+	t.Run("Warning maps to warning", func(t *testing.T) {
+		cmd := testCmdWithLoggerFlag(t)
+		rootInfo.Logger = "Warning"
+		err := initLoggerLevel(cmd)
+		require.NoError(t, err)
+		assert.Equal(t, "warning", rootInfo.Logger)
+		assert.Equal(t, "warning", logger.L().GetLevel())
+	})
+
+	t.Run("DEBUG maps to debug", func(t *testing.T) {
+		cmd := testCmdWithLoggerFlag(t)
+		rootInfo.Logger = "DEBUG"
+		err := initLoggerLevel(cmd)
+		require.NoError(t, err)
+		assert.Equal(t, "debug", rootInfo.Logger)
+		assert.Equal(t, "debug", logger.L().GetLevel())
+	})
+}
+
+// TestInitLoggerLevel_WhitespaceTrimmed verifies that whitespace around logger level is trimmed.
+func TestInitLoggerLevel_WhitespaceTrimmed(t *testing.T) {
+	prevLogger := rootInfo.Logger
+	prevLoggerName := rootInfo.LoggerName
+	t.Cleanup(func() {
+		rootInfo.Logger = prevLogger
+		rootInfo.LoggerName = prevLoggerName
+	})
+
+	rootInfo.LoggerName = zaplogger.LoggerName
+	initLogger()
+
+	cmd := testCmdWithLoggerFlag(t)
+	rootInfo.Logger = "  warning  "
+	err := initLoggerLevel(cmd)
+	require.NoError(t, err)
+	assert.Equal(t, "warning", rootInfo.Logger)
 }
