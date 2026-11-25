@@ -163,6 +163,9 @@ func sortControlSummaries(controlSummaries []reportsummary.IControlSummary) {
 		if controlSummaries[j] == nil {
 			return true
 		}
+		if controlSummaries[i].GetName() == controlSummaries[j].GetName() {
+			return controlSummaries[i].GetID() < controlSummaries[j].GetID()
+		}
 		return controlSummaries[i].GetName() < controlSummaries[j].GetName()
 	})
 }

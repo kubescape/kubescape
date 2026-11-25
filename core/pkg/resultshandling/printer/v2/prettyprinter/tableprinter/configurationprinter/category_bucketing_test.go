@@ -247,3 +247,12 @@ func TestCategoryPrintersAndHelpers_NilSafety(t *testing.T) {
 		mapCategoryToSummary(mixedControls, map[string]string{"C-1": "cat"})
 	})
 }
+
+func TestSortControlSummaries_DeterministicTieBreaking(t *testing.T) {
+	c1 := failedCtrl("C-0020", "Same Name", "Cat-1", "Cat", "", "")
+	c2 := failedCtrl("C-0010", "Same Name", "Cat-1", "Cat", "", "")
+	ctrls := []reportsummary.IControlSummary{&c1, &c2}
+	sortControlSummaries(ctrls)
+	assert.Equal(t, "C-0010", ctrls[0].GetID())
+	assert.Equal(t, "C-0020", ctrls[1].GetID())
+}

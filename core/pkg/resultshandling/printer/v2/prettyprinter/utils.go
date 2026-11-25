@@ -261,6 +261,22 @@ func printTopComponents(writer *os.File, summary imageprinter.ImageScanSummary) 
 	cautils.SimpleDisplay(writer, "\n")
 }
 
+func getSortedSeverityKeys(mapSeverityTSummary map[string]*imageprinter.SeveritySummary) []string {
+	keys := make([]string, 0, len(mapSeverityTSummary))
+	for k := range mapSeverityTSummary {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		sevI := utils.ImageSeverityToInt(keys[i])
+		sevJ := utils.ImageSeverityToInt(keys[j])
+		if sevI == sevJ {
+			return keys[i] < keys[j]
+		}
+		return sevI > sevJ
+	})
+	return keys
+}
+
 func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSummary, verboseMode bool) {
 	if summary.VulnDBBuilt != nil {
 		age := time.Since(*summary.VulnDBBuilt)
@@ -276,13 +292,7 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 	mapSeverityTSummary := getSeverityToSummaryMap(summary, verboseMode)
 
 	// sort keys by severity
-	keys := make([]string, 0, len(mapSeverityTSummary))
-	for k := range mapSeverityTSummary {
-		keys = append(keys, k)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		return utils.ImageSeverityToInt(keys[i]) > utils.ImageSeverityToInt(keys[j])
-	})
+	keys := getSortedSeverityKeys(mapSeverityTSummary)
 
 	if len(summary.CVEs) == 0 {
 		txt := "No vulnerabilities were found!"

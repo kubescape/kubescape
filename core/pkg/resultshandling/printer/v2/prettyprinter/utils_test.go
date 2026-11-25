@@ -740,6 +740,45 @@ func TestGetSortedCVEsBySeverity(t *testing.T) {
 	}
 }
 
+func TestGetSortedSeverityKeys(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    map[string]*imageprinter.SeveritySummary
+		expected []string
+	}{
+		{
+			name: "Standard severities ordered descending by rank",
+			input: map[string]*imageprinter.SeveritySummary{
+				"Low":      {NumberOfCVEs: 1},
+				"Critical": {NumberOfCVEs: 5},
+				"High":     {NumberOfCVEs: 3},
+				"Medium":   {NumberOfCVEs: 2},
+			},
+			expected: []string{"Critical", "High", "Medium", "Low"},
+		},
+		{
+			name: "Equal rank severities tie-broken alphabetically",
+			input: map[string]*imageprinter.SeveritySummary{
+				"Unknown": {NumberOfCVEs: 1},
+				"Other":   {NumberOfCVEs: 2},
+			},
+			expected: []string{"Other", "Unknown"},
+		},
+		{
+			name:     "Empty map",
+			input:    map[string]*imageprinter.SeveritySummary{},
+			expected: []string{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := getSortedSeverityKeys(tc.input)
+			assert.Equal(t, tc.expected, got)
+		})
+	}
+}
+
 func TestGetFilteredCVEs(t *testing.T) {
 	tests := []struct {
 		name         string
