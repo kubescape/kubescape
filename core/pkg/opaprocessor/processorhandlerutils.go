@@ -59,6 +59,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	opap.Exceptions = filterExpiredExceptions(opap.Exceptions)
 
 	// set exceptions
+	summarized := make([]*resourcesresults.Result, 0, len(opap.ResourcesResult))
 	for i := range opap.ResourcesResult {
 		t := opap.ResourcesResult[i]
 
@@ -89,12 +90,14 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 			opap.emitExceptionMatchEvents(resource, t)
 		}
 
-		// summarize the resources
-		opap.Report.AppendResourceResultToSummary(&t)
+		summarized = append(summarized, &t)
 
 		// save changes
 		opap.ResourcesResult[i] = t
 	}
+
+	// summarize the resources in one batch: appending them one by one recounts every resource each time
+	opap.Report.SummaryDetails.AppendResourceResults(summarized...)
 
 	// manual controls have no resource results, so exceptions must be applied directly on the summary.
 	manualControlMatches := applyExceptionsToManualControls(&opap.Report.SummaryDetails, opap.Exceptions, opap.clusterName, processor)
