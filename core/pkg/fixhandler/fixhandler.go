@@ -2415,6 +2415,12 @@ func readManifestFileFromRoot(root *os.Root, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return readRegularFileFromRoot(root, rel, path)
+}
+
+// readRegularFileFromRoot opens rel under root with O_NONBLOCK, verifies the
+// opened descriptor refers to a regular file, and reads up to getMaxManifestSize() bytes.
+func readRegularFileFromRoot(root *os.Root, rel, displayPath string) ([]byte, error) {
 	file, err := root.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
@@ -2425,19 +2431,22 @@ func readManifestFileFromRoot(root *os.Root, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", displayPath, ErrManifestNotRegular)
+	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%w: %q", ErrManifestNotRegular, path)
+		return nil, fmt.Errorf("%w: %q", ErrManifestNotRegular, displayPath)
 	}
 	limit := getMaxManifestSize()
 	if info.Size() > limit {
-		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrManifestTooLarge, path, limit)
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrManifestTooLarge, displayPath, limit)
 	}
 	data, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
 		return nil, err
 	}
 	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrManifestTooLarge, path, limit)
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrManifestTooLarge, displayPath, limit)
 	}
 	return data, nil
 }
