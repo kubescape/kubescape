@@ -3,6 +3,7 @@ package diff
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/core"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v4/core/mocks"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -564,4 +566,70 @@ func TestGetDiffCmd_RejectsEncryptedReports(t *testing.T) {
 		assert.Contains(t, err.Error(), "cannot diff encrypted report")
 		assert.Contains(t, err.Error(), "decrypt first with 'kubescape decrypt'")
 	})
+}
+
+func TestGetDiffCmd_FlagCompletions(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		expected []string
+		excluded []string
+	}{
+		{
+			name:     "format lists diff formats and excludes scan-only html",
+			args:     []string{"__complete", "diff", "--format", ""},
+			expected: []string{"pretty-printer", "summary-json", "summary-yaml", "summary-csv", "json", "yaml", "sarif", "junit", "gitlab-sast", "markdown"},
+			excluded: []string{"html", "pdf"},
+		},
+		{
+			name:     "format prefix s matches summary and sarif",
+			args:     []string{"__complete", "diff", "--format", "s"},
+			expected: []string{"summary-json", "summary-yaml", "summary-csv", "sarif"},
+			excluded: []string{"json", "markdown"},
+		},
+		{
+			name:     "severity-threshold lists severities",
+			args:     []string{"__complete", "diff", "--severity-threshold", ""},
+			expected: []string{"low", "medium", "high", "critical"},
+		},
+		{
+			name:     "severity-threshold preserves uppercase prefix",
+			args:     []string{"__complete", "diff", "--severity-threshold", "H"},
+			expected: []string{"High"},
+			excluded: []string{"low", "medium", "critical"},
+		},
+		{
+			name:     "granularity lists evidence and control",
+			args:     []string{"__complete", "diff", "--granularity", ""},
+			expected: []string{"evidence", "control"},
+		},
+		{
+			name:     "granularity prefix c matches control",
+			args:     []string{"__complete", "diff", "--granularity", "c"},
+			expected: []string{"control"},
+			excluded: []string{"evidence"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := &cobra.Command{Use: "kubescape"}
+			root.AddCommand(GetDiffCmd(nil))
+
+			var output bytes.Buffer
+			root.SetOut(&output)
+			root.SetErr(io.Discard)
+			root.SetArgs(tt.args)
+
+			require.NoError(t, root.Execute())
+			lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+
+			for _, want := range tt.expected {
+				assert.Contains(t, lines, want)
+			}
+			for _, unwanted := range tt.excluded {
+				assert.NotContains(t, lines, unwanted)
+			}
+		})
+	}
 }
