@@ -402,6 +402,26 @@ func TestUpdateResults_ExceptionAuditKeepsSameNameManualMatchesApart(t *testing.
 	}
 }
 
+// Policies sharing a GUID are one exception, so a manual control they both
+// match is counted once.
+func TestUpdateResults_ExceptionAuditCountsSameGUIDManualMatchOnce(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.AuditExceptions = true
+	session.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{
+		"C-0286": {ControlID: "C-0286", StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusSkipped, SubStatus: apis.SubStatusManualReview}},
+	}
+	first := auditExceptionWithGUID("g", "cloud", "C-0286", nil)
+	second := auditExceptionWithGUID("g", "cloud", "C-0286", nil)
+	second.PosturePolicies = append(second.PosturePolicies, armotypes.PosturePolicy{ControlID: "C-0001"})
+	session.Exceptions = []armotypes.PostureExceptionPolicy{first, second}
+
+	opap := &OPAProcessor{OPASessionObj: session}
+	opap.updateResults(context.Background())
+
+	require.Len(t, opap.ExceptionAudit.Items, 1)
+	assert.Equal(t, 1, opap.ExceptionAudit.Items[0].MatchCount)
+}
+
 func TestBuildExceptionAuditMergesIdenticalExceptions(t *testing.T) {
 	exception := auditException("dup", "C-0001", nil)
 	audit := buildExceptionAudit(
