@@ -483,7 +483,7 @@ func TestDiff_ImageReportsCompareVulnerabilities(t *testing.T) {
 		content, err := os.ReadFile(output)
 		require.NoError(t, err)
 		assert.Contains(t, string(content), `tests="2" failures="2"`)
-		assert.Contains(t, string(content), `name="CVE-NEW-HIGH (curl 1.0)"`)
+		assert.Contains(t, string(content), `name="CVE-NEW-HIGH (curl 1.0) [apk]"`)
 	})
 
 	t.Run("writes sarif for code scanning", func(t *testing.T) {
