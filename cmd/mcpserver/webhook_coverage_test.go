@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -407,21 +408,57 @@ func TestCallTool_WebhookCoverage(t *testing.T) {
 		assert.Contains(t, res.Content[0].(mcp.TextContent).Text, string(ErrCodeScanFailed))
 	})
 
+	// One caller only: this covers a canceled caller returning promptly and the
+	// execution stopping once no caller is left. It does not cover a second
+	// caller keeping a shared execution alive after the first one leaves.
 	t.Run("caller context cancellation stops the wait", func(t *testing.T) {
-		release := make(chan struct{})
+		started := make(chan struct{})
+		finished := make(chan struct{})
 		webhookCoverageScanFn = func(ctx context.Context, _ *KubescapeMcpserver, _ int) ([]byte, error) {
-			select {
-			case <-release:
-			case <-ctx.Done():
-			}
+			defer close(finished)
+			close(started)
+			<-ctx.Done()
 			return nil, ctx.Err()
 		}
 		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		type callOutcome struct {
+			res *mcp.CallToolResult
+			err error
+		}
+		outcome := make(chan callOutcome, 1)
+		go func() {
+			res, err := (&KubescapeMcpserver{}).CallTool(ctx, webhookCoverageToolName, map[string]any{})
+			outcome <- callOutcome{res, err}
+		}()
+
+		select {
+		case <-started:
+		case <-time.After(lifecycleWait):
+			cancel()
+			t.Fatal("the shared scan never started")
+		}
+		// The shared execution has read webhookCoverageScanFn and is running
+		// the stub. Cancel the only caller; it must stop waiting, and the
+		// execution is then cancelled with it.
 		cancel()
-		res, err := (&KubescapeMcpserver{}).CallTool(ctx, webhookCoverageToolName, map[string]any{})
-		close(release)
-		require.NoError(t, err)
-		require.True(t, res.IsError)
+
+		select {
+		case got := <-outcome:
+			require.NoError(t, got.err)
+			require.True(t, got.res.IsError)
+			assert.Contains(t, got.res.Content[0].(mcp.TextContent).Text, string(ErrCodeTimeout))
+		case <-time.After(lifecycleWait):
+			t.Fatal("the canceled caller did not return")
+		}
+		// Wait for the stub to finish so the parent cleanup does not restore
+		// webhookCoverageScanFn while the execution can still use it.
+		select {
+		case <-finished:
+		case <-time.After(lifecycleWait):
+			t.Fatal("the shared scan did not stop after its only caller left")
+		}
 	})
 }
 
