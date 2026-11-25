@@ -611,15 +611,16 @@ func (m *Metrics) setResourcesCountersFromCatalog(
 // setImageVulnerabilities builds per-image, per-severity CVE counters for an image scan (#2782)
 func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData) {
 	for i := range imageScanData {
-		target := imageScanData[i].Target()
-		cves := extractCVEs(imageScanData[i].Matches, target, imageScanData[i].VexStatuses)
+		scanData := &imageScanData[i]
+		target := scanData.Target()
+		cves := extractCVEs(scanData.Matches, target, scanData.VexStatuses)
 
 		severityToSummary := map[string]*imageprinter.SeveritySummary{}
 		setSeverityToSummaryMap(cves, severityToSummary)
 		severityToKEV := map[string]int{}
 		for _, cve := range cves {
 			if cve.KEV {
-				severityToKEV[cve.Severity]++
+				severityToKEV[canonicalSeverity(cve.Severity)]++
 			}
 		}
 
@@ -632,15 +633,18 @@ func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData)
 		}
 		sort.Strings(severities)
 
+		imageName := strings.TrimSpace(scanData.Image)
+		platformName := strings.TrimSpace(scanData.Platform)
+
 		for _, severity := range severities {
 			summary := severityToSummary[severity]
 			if summary == nil {
 				continue
 			}
 			m.listImages = append(m.listImages, mImageVulnerability{
-				image:           imageScanData[i].Image,
-				platform:        imageScanData[i].Platform,
-				severity:        severity,
+				image:           imageName,
+				platform:        platformName,
+				severity:        canonicalSeverity(severity),
 				cveCount:        summary.NumberOfCVEs,
 				fixableCVECount: summary.NumberOfFixableCVEs,
 				kevCVECount:     severityToKEV[severity],

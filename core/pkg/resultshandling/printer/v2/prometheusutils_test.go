@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anchore/grype/grype/match"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -1070,4 +1072,24 @@ func TestSetImageVulnerabilities_NilSummarySafety(t *testing.T) {
 		})
 	})
 	assert.Empty(t, m.listImages)
+}
+
+func TestSetImageVulnerabilities_CanonicalSeverityAndTrimmedLabels(t *testing.T) {
+	m := &Metrics{isImageScan: true}
+	matches := match.NewMatches(
+		mdImageMatch("CVE-2024-0001", " critical ", "openssl", "1.0.0", vulnerability.FixStateFixed),
+		mdImageMatch("CVE-2024-0002", "CRITICAL", "curl", "7.0.0", vulnerability.FixStateNotFixed),
+	)
+	data := cautils.ImageScanData{
+		Image:    "  nginx:latest  ",
+		Platform: " linux/amd64 ",
+		Matches:  matches,
+	}
+	m.setImageVulnerabilities([]cautils.ImageScanData{data})
+	require.Len(t, m.listImages, 1)
+	assert.Equal(t, "nginx:latest", m.listImages[0].image)
+	assert.Equal(t, "linux/amd64", m.listImages[0].platform)
+	assert.Equal(t, "Critical", m.listImages[0].severity)
+	assert.Equal(t, 2, m.listImages[0].cveCount)
+	assert.Equal(t, 1, m.listImages[0].fixableCVECount)
 }
