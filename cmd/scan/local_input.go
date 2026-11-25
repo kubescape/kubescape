@@ -1,13 +1,19 @@
 package scan
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 )
+
+// ErrStdinTooLarge is returned when manifest input read from stdin exceeds the
+// configured per-file size limit.
+var ErrStdinTooLarge = errors.New("stdin input exceeds maximum allowed size")
 
 const (
 	// stdinManifestDirPattern names the private directory that holds the staged
@@ -66,6 +72,11 @@ func prepareScanLocalInput(stdin io.Reader, args []string, scanInfo *cautils.Sca
 		scanInfo.OriginalStdinInfo = stat
 	}
 
+	limit := filesizelimit.GetMaxFileSize()
+	if scanInfo.OriginalStdinInfo != nil && scanInfo.OriginalStdinInfo.Size() > limit {
+		return cleanup, fmt.Errorf("%w: stdin input exceeds the %d byte limit (override with %s)", ErrStdinTooLarge, limit, filesizelimit.MaxFileSizeEnvVar)
+	}
+
 	// The manifest goes into a directory of its own, so it can have a fixed
 	// name that reports show instead of a random temporary one.
 	stagingDir, err := os.MkdirTemp("", stdinManifestDirPattern)
@@ -82,10 +93,16 @@ func prepareScanLocalInput(stdin io.Reader, args []string, scanInfo *cautils.Sca
 		return func() {}, err
 	}
 
-	if _, err := io.Copy(tempFile, stdin); err != nil {
+	n, err := io.Copy(tempFile, io.LimitReader(stdin, limit+1))
+	if err != nil {
 		_ = tempFile.Close()
 		cleanup()
 		return func() {}, err
+	}
+	if n > limit {
+		_ = tempFile.Close()
+		cleanup()
+		return func() {}, fmt.Errorf("%w: stdin input exceeds the %d byte limit (override with %s)", ErrStdinTooLarge, limit, filesizelimit.MaxFileSizeEnvVar)
 	}
 	if err := tempFile.Close(); err != nil {
 		cleanup()
