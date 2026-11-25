@@ -737,3 +737,66 @@ func TestKustomizeInputOwnershipForPath_OversizedFileRejected(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrKustomizationFileTooLarge)
 }
+
+func TestKustomizeDirectory_GetWorkloads_OversizedReferencedFileRejected(t *testing.T) {
+	const deploymentYAML = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo
+  template:
+    metadata:
+      labels:
+        app: demo
+    spec:
+      containers:
+        - name: demo
+          image: nginx:1.25
+`
+
+	t.Run("oversized resource file", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "128")
+
+		dir := resolvedTempDir(t)
+		writeManifestFixture(t, dir, "kustomization.yaml", "resources:\n- deploy.yaml\n")
+		writeManifestFixture(t, dir, "deploy.yaml", deploymentYAML)
+
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		assert.Nil(t, workloads)
+		require.NotEmpty(t, errs)
+		assert.ErrorIs(t, errs[0], ErrKustomizationFileTooLarge)
+	})
+
+	t.Run("oversized patch file", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "300")
+
+		dir := resolvedTempDir(t)
+		writeManifestFixture(t, dir, "kustomization.yaml", "resources:\n- deploy.yaml\npatches:\n- path: patch.yaml\n")
+		writeManifestFixture(t, dir, "deploy.yaml", deploymentYAML)
+		writeManifestFixture(t, dir, "patch.yaml", deploymentYAML+strings.Repeat("# pad\n", 40))
+
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		assert.Nil(t, workloads)
+		require.NotEmpty(t, errs)
+		assert.ErrorIs(t, errs[0], ErrKustomizationFileTooLarge)
+	})
+
+	t.Run("within configured limit builds normally", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "4096")
+
+		dir := resolvedTempDir(t)
+		writeManifestFixture(t, dir, "kustomization.yaml", "resources:\n- deploy.yaml\n")
+		writeManifestFixture(t, dir, "deploy.yaml", deploymentYAML)
+
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		require.Empty(t, errs)
+		require.Len(t, workloads[dir], 1)
+	})
+}

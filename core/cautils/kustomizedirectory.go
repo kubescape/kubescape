@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/kubescape/go-logger"
@@ -714,9 +715,31 @@ func isKustomizeHelmError(err error, helmCommand string) bool {
 	return false
 }
 
+// boundedOnDiskFileSystem wraps an on-disk filesys.FileSystem so that every
+// ReadFile enforces regular-file checks, O_NONBLOCK open, and getMaxFileSize().
+type boundedOnDiskFileSystem struct {
+	filesys.FileSystem
+	mu            sync.Mutex
+	validationErr error
+}
+
+func (fs *boundedOnDiskFileSystem) ReadFile(path string) ([]byte, error) {
+	data, err := readKustomizationFile(path)
+	if errors.Is(err, ErrKustomizationFileTooLarge) || errors.Is(err, ErrKustomizationFileNotRegular) {
+		fs.mu.Lock()
+		if fs.validationErr == nil {
+			fs.validationErr = err
+		}
+		fs.mu.Unlock()
+	}
+	return data, err
+}
+
 // kustomizeDisk is the file system the plain build reads, as a variable so a
 // test can change files while the build is reading them.
-var kustomizeDisk = filesys.MakeFsOnDisk
+var kustomizeDisk = func() filesys.FileSystem {
+	return &boundedOnDiskFileSystem{FileSystem: filesys.MakeFsOnDisk()}
+}
 
 // Get Workloads, creates the yaml files(K8s resources) using Kustomize and
 // renders the workloads from the yaml files (k8s resources)
@@ -779,6 +802,14 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 		kd.onDependency(dependency, chart)
 	}
 	if err != nil {
+		if bfs, ok := fSys.FileSystem.(*boundedOnDiskFileSystem); ok {
+			bfs.mu.Lock()
+			vErr := bfs.validationErr
+			bfs.mu.Unlock()
+			if vErr != nil && !errors.Is(err, vErr) {
+				err = errors.Join(err, vErr)
+			}
+		}
 		if fSys.usesHelm || isKustomizeHelmError(err, helmCommand) {
 			err = errors.Join(err, validateKustomizeHelmCommand(helmCommand))
 		}

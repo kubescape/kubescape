@@ -68,3 +68,30 @@ func TestKustomizeInputOwnershipForPath_FIFOWithoutWriterDoesNotBlock(t *testing
 		t.Fatal("KustomizeInputOwnershipForPath blocked on a FIFO with no writer")
 	}
 }
+
+func TestKustomizeDirectory_GetWorkloads_FIFOWithoutWriterIsRejectedPromptly(t *testing.T) {
+	dir := resolvedTempDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte("resources:\n- fifo.yaml\n"), 0o600))
+	fifo := filepath.Join(dir, "fifo.yaml")
+	require.NoError(t, syscall.Mkfifo(fifo, 0o600))
+	t.Cleanup(func() {
+		if f, err := os.OpenFile(fifo, os.O_RDWR|syscall.O_NONBLOCK, 0); err == nil {
+			_ = f.Close()
+		}
+	})
+
+	done := make(chan []error, 1)
+	go func() {
+		kd := NewKustomizeDirectory(dir)
+		_, errs := kd.GetWorkloads(dir)
+		done <- errs
+	}()
+
+	select {
+	case errs := <-done:
+		require.NotEmpty(t, errs)
+		assert.ErrorIs(t, errs[0], ErrKustomizationFileNotRegular)
+	case <-time.After(5 * time.Second):
+		t.Fatal("GetWorkloads blocked on a referenced FIFO with no writer")
+	}
+}

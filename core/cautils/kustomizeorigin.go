@@ -638,7 +638,7 @@ func renderWithOrigins(newKustomizer func() *krusty.Kustomizer, directory string
 		return nil, "", false
 	}
 
-	resMap, err := newKustomizer().Run(filesys.MakeFsOnDisk(), wrapperDir)
+	resMap, err := newKustomizer().Run(&boundedOnDiskFileSystem{FileSystem: filesys.MakeFsOnDisk()}, wrapperDir)
 	if err != nil {
 		return nil, "", false
 	}
