@@ -42,7 +42,7 @@ func TestContributionPolicyTrustBoundary(t *testing.T) {
 	job := workflow.Jobs["policy"]
 	require.Contains(t, job.If, "vars.CONTRIBUTION_POLICY_START != ''")
 	require.Equal(t, map[string]string{
-		"contents": "read", "issues": "write", "pull-requests": "write", "statuses": "write",
+		"contents": "read", "issues": "write", "pull-requests": "write", "checks": "write",
 	}, job.Permissions)
 	require.Len(t, job.Steps, 1)
 	step := job.Steps[0]
