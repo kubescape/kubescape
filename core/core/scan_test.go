@@ -1677,6 +1677,21 @@ func TestHasKubernetesManifestSignatures_MultiDocumentAndIndentation(t *testing.
 			isJson:   true,
 			expected: false,
 		},
+		{
+			name:     "yaml manifest with line exceeding 64KB bufio.Scanner limit before kind",
+			data:     "apiVersion: v1\n# " + strings.Repeat("a", 70*1024) + "\nkind: ConfigMap\n",
+			expected: true,
+		},
+		{
+			name:     "yaml manifest with CRLF, >64KB line, and no trailing newline",
+			data:     "apiVersion: v1\r\n# " + strings.Repeat("a", 70*1024) + "\r\nkind: ConfigMap",
+			expected: true,
+		},
+		{
+			name:     "non-manifest yaml with >64KB line and only indented keys must not match",
+			data:     "type: postureReport\nblob: " + strings.Repeat("a", 70*1024) + "\n  apiVersion: v1\n  kind: Pod\n",
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {

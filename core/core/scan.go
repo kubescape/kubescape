@@ -1,7 +1,6 @@
 package core
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -509,11 +508,23 @@ func hasKubernetesManifestSignatures(data []byte, isJson bool) bool {
 
 	// For YAML: check if document contains document-level (column-zero, unindented)
 	// apiVersion and kind or items keys.
-	scanner := bufio.NewScanner(bytes.NewReader(data))
+	// Iterate lines directly over data instead of bufio.Scanner so lines longer than
+	// bufio.MaxScanTokenSize (64KB) do not prematurely abort manifest detection.
 	hasAPIVersion := false
 	hasKindOrItems := false
-	for scanner.Scan() {
-		rawLine := scanner.Text()
+	for rest := data; len(rest) > 0; {
+		var lineBytes []byte
+		if idx := bytes.IndexByte(rest, '\n'); idx >= 0 {
+			lineBytes = rest[:idx]
+			rest = rest[idx+1:]
+		} else {
+			lineBytes = rest
+			rest = nil
+		}
+		if len(lineBytes) > 0 && lineBytes[len(lineBytes)-1] == '\r' {
+			lineBytes = lineBytes[:len(lineBytes)-1]
+		}
+		rawLine := string(lineBytes)
 		trimmed := strings.TrimSpace(rawLine)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
