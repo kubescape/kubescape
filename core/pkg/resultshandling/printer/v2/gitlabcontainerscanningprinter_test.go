@@ -218,20 +218,22 @@ func TestGitLabContainerScanningPrinter_ImageNamedLikeASchemeKeepsItsTag(t *test
 	assert.Equal(t, "docker:registry:2", report.Vulnerabilities[0].Location.Image)
 }
 
-// GitLab tracks a container finding by its location fingerprint, the image name without
-// its tag and the package (container_scanning.rb fingerprint_data), and leaves the
-// operating system out. The platform still reaches the report, but GitLab merges the
-// variants of one image into one vulnerability, as docs/gitlab-ci.md says.
+// GitLab tracks a container finding by its location fingerprint, the image name and the
+// package (container_scanning.rb fingerprint_data), and leaves the operating system out.
+// docker_image_name_without_tag drops the tag only when it is not a version, so the
+// fixture uses a non-version tag and the helper below strips it the same way. The
+// platform still reaches the report, but GitLab merges the variants of one image into
+// one vulnerability, as docs/gitlab-ci.md says.
 func TestGitLabContainerScanningPrinter_MultiPlatformSharesGitLabFingerprint(t *testing.T) {
 	report := printContainerScanning(t, []cautils.ImageScanData{
 		{
-			Image:    "app:1.0",
+			Image:    "app:stable",
 			Platform: "linux/amd64",
 			Context:  grypepkg.Context{Distro: distro.New(distro.Alpine, "3.20.1", "")},
 			Matches:  match.NewMatches(containerScanningMatch("CVE-2024-0001", "High", "openssl", "a")),
 		},
 		{
-			Image:    "app:1.0",
+			Image:    "app:stable",
 			Platform: "linux/arm64",
 			Context:  grypepkg.Context{Distro: distro.New(distro.Alpine, "3.20.1", "")},
 			Matches:  match.NewMatches(containerScanningMatch("CVE-2024-0001", "High", "openssl", "a")),
