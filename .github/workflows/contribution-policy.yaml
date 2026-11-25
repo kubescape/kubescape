@@ -35,6 +35,6 @@ jobs:
     steps:
       # The rollout tool replaces this placeholder with a full reviewed commit SHA.
       # No checkout: contributor code is never executed by this privileged job.
-      - uses: kubescape/workflows/.github/actions/contribution-policy@ebfbc6585571c9d32714c404dc5cc8b42d8811f0
+      - uses: kubescape/workflows/.github/actions/contribution-policy@7ef1993c655a31e183d2339599cae98cd21069e4
         with:
           start: ${{ vars.CONTRIBUTION_POLICY_START }}
