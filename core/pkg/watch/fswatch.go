@@ -394,16 +394,16 @@ func (w *FileWatcher) run(ctx context.Context) {
 // Its error ends the watcher.
 func (w *FileWatcher) handle(event fsnotify.Event) error {
 	name := filepath.Clean(event.Name)
+	if w.dependencyEvent(name, event) {
+		w.notify(name)
+	}
 	if event.Op == fsnotify.Chmod {
-		// A permission change is not a change to what a scan reads, and some
-		// platforms send one with every write.
+		// Selected dependencies may become readable after a permission change.
+		// Some platforms also send these with every write.
 		return nil
 	}
 	gone := event.Has(fsnotify.Remove | fsnotify.Rename)
 
-	if w.dependencyEvent(name, event) {
-		w.notify(name)
-	}
 	if _, dependency := w.dependencyDirs[name]; dependency && gone {
 		if _, primary := w.dirs[name]; !primary {
 			w.unregister(name)

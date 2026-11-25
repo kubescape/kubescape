@@ -15,14 +15,40 @@ import (
 )
 
 type dependencyDirectory struct {
-	names map[string]string
-	links map[string]string
-	chart bool
+	names       map[string]string
+	links       map[string]string
+	chart       bool
+	permissions map[string]dependencyPermissions // active selections keyed by entry name
+}
+
+type dependencyPermissions struct {
+	mode       fs.FileMode
+	readable   bool
+	searchable bool
 }
 
 func (d dependencyDirectory) matches(name string) bool {
 	_, exact := d.names[strings.ToLower(name)]
 	return exact || d.chart
+}
+
+// permissionsChanged distinguishes access changes from attribute events caused
+// by a read. An ACL can change read access while leaving the mode unchanged.
+func (d *dependencyDirectory) permissionsChanged(path string) bool {
+	name := filepath.Base(path)
+	previous, known := d.permissions[name]
+	info, err := os.Stat(path)
+	if err != nil {
+		delete(d.permissions, name)
+		return known
+	}
+	if d.permissions == nil {
+		d.permissions = make(map[string]dependencyPermissions)
+	}
+	readable, searchable := dependencyAccess(path, info.IsDir())
+	current := dependencyPermissions{mode: info.Mode(), readable: readable, searchable: searchable}
+	d.permissions[name] = current
+	return !known || current != previous
 }
 
 type dependencyDirectories map[string]dependencyDirectory
@@ -139,21 +165,20 @@ func (d dependencyDirectories) addPath(path string) {
 // Link changes are reported beside the link. Record the link entries the
 // requested name traverses, including links named by other links.
 func (d dependencyDirectories) addLinks(path string, seen map[string]struct{}) {
-	for link := path; filepath.Dir(link) != link && len(seen) < 255; link = filepath.Dir(link) {
-		target, err := os.Readlink(link)
+	for dir, name := splitDependencyPath(path); name != "" && len(seen) < 255; dir, name = splitDependencyPath(dir) {
+		target, err := os.Readlink(dir + name)
 		if err != nil {
 			continue
 		}
-		parent, err := filepath.EvalSymlinks(filepath.Dir(link))
+		parent, err := filepath.EvalSymlinks(dir)
 		if err != nil {
 			continue
 		}
-		physicalLink := filepath.Join(parent, filepath.Base(link))
+		physicalLink := filepath.Join(parent, name)
 		if _, ok := seen[physicalLink]; ok {
 			continue
 		}
 		seen[physicalLink] = struct{}{}
-		name := filepath.Base(link)
 		d.addName(parent, name)
 		selection := d[parent]
 		if selection.links == nil {
@@ -162,7 +187,8 @@ func (d dependencyDirectories) addLinks(path string, seen map[string]struct{}) {
 		selection.links[name] = target
 		d[parent] = selection
 		if !filepath.IsAbs(target) {
-			target = filepath.Join(parent, target)
+			// Resolve the link target before interpreting any parent segments.
+			target = strings.TrimSuffix(parent, string(filepath.Separator)) + string(filepath.Separator) + target
 		}
 		d.addEntry(target)
 		d.addLinks(target, seen)
@@ -200,16 +226,27 @@ func containsInputRoot(dir string, roots []string) bool {
 	return false
 }
 
+// splitDependencyPath preserves parent segments so each symlink is followed
+// before any ".." that comes after it.
+func splitDependencyPath(path string) (dir, name string) {
+	return filepath.Split(strings.TrimRightFunc(path, func(r rune) bool {
+		return r == '/' || r == filepath.Separator
+	}))
+}
+
 func (d dependencyDirectories) addEntry(path string) {
-	for name := path; filepath.Dir(name) != name; name = filepath.Dir(name) {
-		parent, err := filepath.EvalSymlinks(filepath.Dir(name))
+	for dir, name := splitDependencyPath(path); name != ""; dir, name = splitDependencyPath(dir) {
+		parent, err := filepath.EvalSymlinks(dir)
 		if err != nil {
 			continue
 		}
 		if info, err := os.Stat(parent); err != nil || !info.IsDir() {
 			continue
 		}
-		d.addName(parent, filepath.Base(name))
+		entry := filepath.Join(parent, name)
+		if entryDir := filepath.Dir(entry); entryDir != entry {
+			d.addName(entryDir, filepath.Base(entry))
+		}
 		break
 	}
 }
@@ -236,6 +273,7 @@ func (d dependencyDirectories) addChart(ctx context.Context, chart string, visit
 	visited[root] = struct{}{}
 	rules := ignore.Empty()
 	ignorePath := filepath.Join(root, ignore.HelmIgnore)
+	d.addPath(ignorePath) // Helm reads the rules before applying them to chart entries.
 	if info, err := os.Stat(ignorePath); err == nil && info.Mode().IsRegular() {
 		if parsed, err := ignore.ParseFile(ignorePath); err == nil {
 			rules = parsed
@@ -273,7 +311,7 @@ func (d dependencyDirectories) addChartDirectory(ctx context.Context, dir, relat
 			}
 			continue
 		}
-		if rules.Ignore(filepath.ToSlash(child), info) || entry.Name() == vcsDir {
+		if rules.Ignore(filepath.ToSlash(child), info) {
 			continue
 		}
 		if link {
@@ -340,9 +378,19 @@ func (w *FileWatcher) syncDependencies(plan dependencyDirectories, report bool) 
 		if (selection.chart && !previous.chart) || (!primary && !already) {
 			added = true
 		}
+		selection.permissions = previous.permissions
+		for name := range selection.permissions {
+			if !selection.matches(name) {
+				delete(selection.permissions, name)
+			}
+		}
 		for _, name := range selection.names {
-			if !previous.matches(name) && (!primary || !w.primarySignals(filepath.Join(dir, name))) {
+			// Primary watches may have filtered a change before a name was selected.
+			if !previous.matches(name) {
 				added = true
+			}
+			if _, known := selection.permissions[name]; !known {
+				selection.permissionsChanged(filepath.Join(dir, name))
 			}
 		}
 		active[dir] = selection
@@ -409,21 +457,23 @@ func sameDirectory(left, right string) bool {
 	return err == nil && os.SameFile(a, b)
 }
 
-func (w *FileWatcher) primarySignals(path string) bool {
-	if w.file != "" {
-		return path == w.file
-	}
-	_, directory := w.dirs[path]
-	return directory || w.relevantFile(path)
-}
-
-func (w *FileWatcher) dependencyEvent(name string, event fsnotify.Event) bool {
-	if !w.dependencyDirs[filepath.Dir(name)].matches(filepath.Base(name)) {
+func (w *FileWatcher) dependencyEvent(path string, event fsnotify.Event) bool {
+	dir, name := filepath.Dir(path), filepath.Base(path)
+	selection := w.dependencyDirs[dir]
+	if !selection.matches(name) {
 		return false
 	}
 	if event.Has(fsnotify.Create | fsnotify.Remove | fsnotify.Rename) {
+		delete(selection.permissions, name)
 		return true
 	}
-	info, err := os.Lstat(name)
+	if event.Has(fsnotify.Chmod) {
+		changed := selection.permissionsChanged(path)
+		w.dependencyDirs[dir] = selection
+		if changed || event.Op == fsnotify.Chmod {
+			return changed
+		}
+	}
+	info, err := os.Lstat(path)
 	return err != nil || !info.IsDir() // some backends report writes to the containing directory
 }

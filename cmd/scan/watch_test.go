@@ -868,6 +868,32 @@ func TestWatchSecurityScanKeepsSharedBaseWatchAfterPolicyError(t *testing.T) {
 	require.NoError(t, stop())
 }
 
+func TestWatchSecurityScanKeepsDependenciesAcrossFailedRenders(t *testing.T) {
+	overlay, base := sharedKustomizeWatchFixture(t, "resources: [pod.yaml]\n")
+	writeFile(t, filepath.Join(base, "pod.yaml"), podManifest("web", false))
+	repo := filepath.Dir(overlay)
+	second, third := filepath.Join(repo, "second"), filepath.Join(repo, "third")
+	const config = "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: "
+	for _, dir := range []string{second, third} {
+		writeFile(t, filepath.Join(dir, "kustomization.yaml"), config+"[pod.yaml]\n")
+		writeFile(t, filepath.Join(dir, "pod.yaml"), "kind: [broken\n")
+	}
+
+	out, stop := startSecurityWatchOutput(t, localWatchScanInfo(t, overlay))
+	out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+	out.waitFor(t, "No change in findings")
+	for _, resources := range []string{"[../second]", "[../third, ../second]"} {
+		writeFile(t, filepath.Join(overlay, "kustomization.yaml"), config+resources+"\n")
+		out.waitFor(t, "Scan failed:")
+		out.waitFor(t, "Scan failed:") // catch up after adding the new dependency
+	}
+
+	// The last render failed in third before it reached second.
+	writeFile(t, filepath.Join(second, "pod.yaml"), podManifest("web", true))
+	out.waitFor(t, "Scan failed:") // the edit requests a fresh scan
+	require.NoError(t, stop())
+}
+
 func TestWatchSecurityScanWatchesSharedBaseWithDifferentFilenameCase(t *testing.T) {
 	overlay, base := sharedKustomizeWatchFixture(t, "resources: [pod.yaml]\n")
 	pod := filepath.Join(base, "Pod.yaml")

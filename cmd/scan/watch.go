@@ -416,9 +416,7 @@ func runWatch(ctx context.Context, cfg watchConfig) error {
 			if err != nil {
 				return nil, err
 			}
-			if scanErr == nil {
-				lastFiles, lastCharts = files, charts
-			}
+			lastFiles, lastCharts = files, charts
 			if added {
 				// Reread inputs that could have changed before their new
 				// watches were installed, using the normal scan budget.
