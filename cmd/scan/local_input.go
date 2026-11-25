@@ -64,17 +64,19 @@ func prepareScanLocalInput(stdin io.Reader, args []string, scanInfo *cautils.Sca
 		return cleanup, nil
 	}
 
+	var suppliedStdinInfo os.FileInfo
 	if file, ok := stdin.(*os.File); ok && file != nil {
 		if stat, err := file.Stat(); err == nil && stat.Mode().IsRegular() {
 			scanInfo.OriginalStdinInfo = stat
+			suppliedStdinInfo = stat
 		}
 	} else if stat, err := os.Stdin.Stat(); err == nil && stat.Mode().IsRegular() {
 		scanInfo.OriginalStdinInfo = stat
 	}
 
 	limit := filesizelimit.GetMaxFileSize()
-	if scanInfo.OriginalStdinInfo != nil && scanInfo.OriginalStdinInfo.Size() > limit {
-		return cleanup, fmt.Errorf("%w: stdin input exceeds the %d byte limit (override with %s)", ErrStdinTooLarge, limit, filesizelimit.MaxFileSizeEnvVar)
+	if suppliedStdinInfo != nil && suppliedStdinInfo.Size() > limit {
+		return cleanup, stdinTooLargeError(limit)
 	}
 
 	// The manifest goes into a directory of its own, so it can have a fixed
@@ -102,7 +104,7 @@ func prepareScanLocalInput(stdin io.Reader, args []string, scanInfo *cautils.Sca
 	if n > limit {
 		_ = tempFile.Close()
 		cleanup()
-		return func() {}, fmt.Errorf("%w: stdin input exceeds the %d byte limit (override with %s)", ErrStdinTooLarge, limit, filesizelimit.MaxFileSizeEnvVar)
+		return func() {}, stdinTooLargeError(limit)
 	}
 	if err := tempFile.Close(); err != nil {
 		cleanup()
@@ -110,4 +112,8 @@ func prepareScanLocalInput(stdin io.Reader, args []string, scanInfo *cautils.Sca
 	}
 	scanInfo.InputPatterns = []string{tempFile.Name()}
 	return cleanup, nil
+}
+
+func stdinTooLargeError(limit int64) error {
+	return fmt.Errorf("%w: stdin input exceeds the %d byte limit (override with %s)", ErrStdinTooLarge, limit, filesizelimit.MaxFileSizeEnvVar)
 }

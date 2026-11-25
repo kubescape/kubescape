@@ -367,4 +367,31 @@ func TestPrepareScanLocalInput_StdinSizeBounds(t *testing.T) {
 		require.NoError(t, err)
 		assert.Len(t, got, 1024)
 	})
+
+	t.Run("does not reject non-os.File reader when global os.Stdin is an oversized file", func(t *testing.T) {
+		t.Setenv(filesizelimit.MaxFileSizeEnvVar, "1024")
+
+		oversizedPath := filepath.Join(t.TempDir(), "global-stdin.yaml")
+		require.NoError(t, os.WriteFile(oversizedPath, bytes.Repeat([]byte("z"), 1025), 0o600))
+		f, err := os.Open(oversizedPath)
+		require.NoError(t, err)
+		defer f.Close()
+
+		origStdin := os.Stdin
+		os.Stdin = f
+		t.Cleanup(func() { os.Stdin = origStdin })
+
+		payload := bytes.Repeat([]byte("d"), 512)
+		scanInfo := &cautils.ScanInfo{}
+		cleanup, err := prepareScanLocalInput(bytes.NewReader(payload), []string{"nsa", "-"}, scanInfo, scanLocalInputOptions{
+			FirstInputArg:    1,
+			RejectMixedStdin: true,
+		})
+		require.NoError(t, err)
+		defer cleanup()
+
+		got, err := os.ReadFile(scanInfo.InputPatterns[0])
+		require.NoError(t, err)
+		assert.Len(t, got, 512)
+	})
 }
