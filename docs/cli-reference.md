@@ -2055,6 +2055,8 @@ Kubescape respects the following environment variables:
 | `HTTPS_PROXY` | HTTPS proxy URL |
 | `HTTP_PROXY` | HTTP proxy URL |
 | `NO_PROXY` | Hosts to exclude from proxy |
+| `KUBESCAPE_PARTITION_STORE` | Partition store backend: `disk` (default) or `memory`. |
+| `KUBESCAPE_SPILL_DIR` | Base directory for the on-disk partition store (spill files). When unset, the OS temporary directory is used. Must be writable; if the disk store cannot be created, Kubescape logs a warning and falls back to an in-memory store, which can OOM on large clusters. See [Resource Streaming Implementation](STREAMING_IMPLEMENTATION.md). |
 
 ---
 
