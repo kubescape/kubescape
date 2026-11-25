@@ -18,11 +18,14 @@ const (
 	// does not exist in the cluster). From an LLM agent's perspective, the recovery
 	// action for both cases is identical: verify and correct the resource kind, name,
 	// or namespace.
-	ErrCodeResourceNotFound    ErrorCode = "RESOURCE_NOT_FOUND"
-	ErrCodeAmbiguousResource   ErrorCode = "AMBIGUOUS_RESOURCE"
-	ErrCodeRBACDenied          ErrorCode = "RBAC_DENIED"
-	ErrCodeInvalidArgument     ErrorCode = "INVALID_ARGUMENT"
-	ErrCodeScanFailed          ErrorCode = "SCAN_EXECUTION_FAILED"
+	ErrCodeResourceNotFound  ErrorCode = "RESOURCE_NOT_FOUND"
+	ErrCodeAmbiguousResource ErrorCode = "AMBIGUOUS_RESOURCE"
+	ErrCodeRBACDenied        ErrorCode = "RBAC_DENIED"
+	ErrCodeInvalidArgument   ErrorCode = "INVALID_ARGUMENT"
+	ErrCodeScanFailed        ErrorCode = "SCAN_EXECUTION_FAILED"
+	// ErrCodeAnalysisUnavailable: the scan ran but the analysis it feeds could
+	// not be produced. It is not an empty result.
+	ErrCodeAnalysisUnavailable ErrorCode = "ANALYSIS_UNAVAILABLE"
 	ErrCodeK8sClientError      ErrorCode = "K8S_CLIENT_ERROR"
 	ErrCodeMarshalError        ErrorCode = "MARSHAL_ERROR"
 	ErrCodeTimeout             ErrorCode = "TIMEOUT"

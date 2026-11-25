@@ -149,3 +149,38 @@ func TestHandleResults_NoWebhookConfigurationsLeavesCoverageNil(t *testing.T) {
 
 	assert.Nil(t, scan.WebhookCoverage)
 }
+
+func TestBuildWebhookCoverageExported_MatchesInternalBuilder(t *testing.T) {
+	scan := &cautils.OPASessionObj{
+		AllResources:          catalogObjects(),
+		WebhookConfigurations: nsSelectorCollection(),
+		ListedGVRs:            fullyListed(),
+	}
+	info := &cautils.ScanInfo{}
+
+	got := BuildWebhookCoverage(scan, info)
+
+	require.NotNil(t, got)
+	assert.Equal(t, buildWebhookCoverage(scan, info), got)
+	assert.True(t, got.Complete())
+}
+
+func TestBuildWebhookCoverageExported_ScopedScanStaysIncomplete(t *testing.T) {
+	// A scan that listed no workload kind (as a control-scoped scan may) must
+	// still yield an analysis, marked incomplete, not a complete one or none.
+	scan := &cautils.OPASessionObj{
+		AllResources:          catalogObjects(),
+		WebhookConfigurations: nsSelectorCollection(),
+	}
+
+	got := BuildWebhookCoverage(scan, &cautils.ScanInfo{})
+
+	require.NotNil(t, got)
+	assert.False(t, got.SubjectsComplete)
+	assert.False(t, got.Complete())
+}
+
+func TestBuildWebhookCoverageExported_NilWithoutCollection(t *testing.T) {
+	assert.Nil(t, BuildWebhookCoverage(nil, &cautils.ScanInfo{}))
+	assert.Nil(t, BuildWebhookCoverage(&cautils.OPASessionObj{AllResources: catalogObjects()}, &cautils.ScanInfo{}))
+}

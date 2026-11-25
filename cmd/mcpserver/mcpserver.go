@@ -914,6 +914,8 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return mcpToolError(ErrCodeScanFailed, err.Error(), nil), nil
 		}
 		return mcp.NewToolResultText(string(resBytes)), nil
+	case webhookCoverageToolName:
+		return ksServer.callWebhookCoverage(ctx, arguments)
 	case "run_network_security_scan":
 		namespace, err := mcpScanNamespace(arguments)
 		if err != nil {
@@ -1269,6 +1271,7 @@ func registerTools(ksServer *KubescapeMcpserver) {
 	createRBACScanningTools(ksServer)
 	createNetworkScanningTools(ksServer)
 	createNetworkReachabilityTools(ksServer)
+	createWebhookCoverageTools(ksServer)
 	createMutatingAdmissionPolicyTools(ksServer)
 	createVulnerabilityExposureTools(ksServer)
 	createServiceExposureTools(ksServer)
