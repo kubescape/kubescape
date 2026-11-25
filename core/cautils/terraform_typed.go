@@ -602,11 +602,17 @@ func hclResourceBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *
 // blocks for the typed provider resources listed in typedResourceGVK and
 // converts each into a K8s manifest map. Resource types with no entry in the
 // table are left alone (not guessed at); a metadata.name is defaulted from
-// the Terraform resource label when the block doesn't set one explicitly.
+// the Terraform resource label when the block doesn't set one explicitly. A
+// resource with count or for_each becomes one manifest per known instance; a
+// count or for_each that can't be resolved is an error.
 func extractTypedResources(body hcl.Body, evalCtx *hcl.EvalContext, references ...terraformReferenceChecker) ([]map[string]interface{}, []error) {
 	synBody, ok := body.(*hclsyntax.Body)
 	if !ok {
 		return nil, nil
+	}
+	var reference terraformReferenceChecker
+	if len(references) > 0 {
+		reference = references[0]
 	}
 	var errs []error
 	var manifests []map[string]interface{}
@@ -620,29 +626,55 @@ func extractTypedResources(body hcl.Body, evalCtx *hcl.EvalContext, references .
 			continue
 		}
 
-		obj := hclResourceBodyToMap(block.Body, evalCtx, &errs, block.Labels[0]+"."+block.Labels[1], references...)
-		obj["apiVersion"] = gvk.apiVersion
-		if block.Labels[0] == "kubernetes_horizontal_pod_autoscaler" && usesHPAV2beta2(obj) {
-			obj["apiVersion"] = "autoscaling/v2beta2"
+		path := block.Labels[0] + "." + block.Labels[1]
+		instances, err := terraformResourceInstances(
+			syntaxAttribute(block.Body, "count"), syntaxAttribute(block.Body, "for_each"),
+			evalCtx, reference, path, block.Range().End.Byte-block.Range().Start.Byte)
+		if err != nil {
+			errs = append(errs, err)
+			continue
 		}
-		obj["kind"] = gvk.kind
-
-		meta, _ := obj["metadata"].(map[string]interface{})
-		if meta == nil {
-			meta = map[string]interface{}{}
+		// All instances of the resource share one converter, so the values and
+		// dynamic blocks they generate are bounded together, not per instance.
+		converter := terraformBodyConverter{errs: &errs, remaining: maxTerraformLocalSize, references: reference}
+		for _, instanceCtx := range instances {
+			manifests = append(manifests, typedResourceManifest(&converter, block, gvk.apiVersion, gvk.kind, instanceCtx, path))
 		}
-		if _, has := meta["name"]; !has {
-			if block.Labels[0] == "kubernetes_default_service_account" || block.Labels[0] == "kubernetes_default_service_account_v1" {
-				meta["name"] = "default"
-			} else {
-				meta["name"] = block.Labels[1]
-			}
-		}
-		obj["metadata"] = meta
-
-		manifests = append(manifests, obj)
 	}
 	return manifests, errs
+}
+
+// syntaxAttribute returns the named attribute of body, or nil when it isn't set.
+func syntaxAttribute(body *hclsyntax.Body, name string) *hcl.Attribute {
+	if attr, ok := body.Attributes[name]; ok {
+		return attr.AsHCLAttribute()
+	}
+	return nil
+}
+
+// typedResourceManifest converts one instance of a typed resource block,
+// evaluated in evalCtx, into a Kubernetes manifest.
+func typedResourceManifest(converter *terraformBodyConverter, block *hclsyntax.Block, apiVersion, kind string, evalCtx *hcl.EvalContext, path string) map[string]interface{} {
+	obj := converter.bodyToMap(block.Body, evalCtx, path, true, false)
+	obj["apiVersion"] = apiVersion
+	if block.Labels[0] == "kubernetes_horizontal_pod_autoscaler" && usesHPAV2beta2(obj) {
+		obj["apiVersion"] = "autoscaling/v2beta2"
+	}
+	obj["kind"] = kind
+
+	meta, _ := obj["metadata"].(map[string]interface{})
+	if meta == nil {
+		meta = map[string]interface{}{}
+	}
+	if _, has := meta["name"]; !has {
+		if block.Labels[0] == "kubernetes_default_service_account" || block.Labels[0] == "kubernetes_default_service_account_v1" {
+			meta["name"] = "default"
+		} else {
+			meta["name"] = block.Labels[1]
+		}
+	}
+	obj["metadata"] = meta
+	return obj
 }
 
 // podSpecBlockPath is where, below the resource itself, a typed resource of the
