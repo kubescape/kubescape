@@ -14,6 +14,7 @@ on:
 permissions: {}
 
 # The three-assignment limit is per repository. Preserve queued commands.
+# queue: max is supported: https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency#example-queueing-multiple-pending-runs
 concurrency:
   group: contribution-policy
   queue: max
@@ -33,7 +34,7 @@ jobs:
       pull-requests: write
       statuses: write
     steps:
-      # The rollout tool replaces this placeholder with a full reviewed commit SHA.
+      # Before activation, verify this pinned action commit is on kubescape/workflows main.
       # No checkout: contributor code is never executed by this privileged job.
       - uses: kubescape/workflows/.github/actions/contribution-policy@7ef1993c655a31e183d2339599cae98cd21069e4
         with:
