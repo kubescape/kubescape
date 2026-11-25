@@ -481,6 +481,10 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 			if srcDisplay != "" {
 				paths = append([]string{"@ " + srcDisplay}, paths...)
 			}
+			for j := range paths {
+				// file names, current values and container names come from the scanned files
+				paths[j] = sanitizeText(paths[j])
+			}
 			row[resourceColumnPath] = strings.Join(paths, "\n")
 		}
 		row[resourceColumnName] = controls[i].GetName()

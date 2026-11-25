@@ -8,6 +8,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -985,8 +986,9 @@ func TestResourceTable_NilSafety(t *testing.T) {
 	})
 }
 
-// A manifest controls metadata, so its name and namespace must not reach the
-// terminal as escape sequences (OSC 52 clipboard writes, OSC 8 links).
+// A manifest controls metadata and its file name, so neither the header lines
+// nor the --show-evidence cell may pass escape sequences to the terminal (OSC 52
+// clipboard writes, OSC 8 links).
 func TestResourceTableStripsControlCharacters(t *testing.T) {
 	f, err := os.CreateTemp(t.TempDir(), "resource-table-*.txt")
 	assert.NoError(t, err)
@@ -1001,21 +1003,29 @@ func TestResourceTableStripsControlCharacters(t *testing.T) {
 			"namespace": "ns\x1b]8;;https://evil.example/\x07",
 		},
 	})
+	session.ResourceSource = map[string]reporthandling.Source{resourceID: {RelativePath: "evil\x1b]8;;https://evil.example/\x07.yaml"}}
 	session.ResourcesResult[resourceID] = resourcesresults.Result{
 		ResourceID: resourceID,
 		AssociatedControls: []resourcesresults.ResourceAssociatedControl{{
 			ControlID: "C-0001",
 			Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{
+				Name:   "rule-1",
+				Status: "failed",
+				Paths:  []armotypes.PosturePaths{{ReviewPath: "metadata.name"}},
+			}},
 		}},
 	}
 
-	(&PrettyPrinter{writer: f}).resourceTable(session)
+	(&PrettyPrinter{writer: f, showEvidence: true}).resourceTable(session)
 
 	assert.NoError(t, f.Close())
 	out, err := os.ReadFile(f.Name())
 	assert.NoError(t, err)
 	assert.Contains(t, string(out), "Name: a]52;c;ZWNobw==b\n")
 	assert.Contains(t, string(out), "Namespace: ns]8;;https://evil.example/\n")
+	assert.Contains(t, string(out), "@ evil]8;;https://evil.example/.yaml")
+	assert.Contains(t, string(out), "metadata.name (current: a]52;c;ZWNobw==b)")
 	assert.NotContains(t, string(out), "\x1b]")
 	assert.NotContains(t, string(out), "\x07")
 }
