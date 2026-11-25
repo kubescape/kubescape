@@ -127,3 +127,64 @@ func TestPrintAttackTracksOrdersResourcesByScoreThenID(t *testing.T) {
 		}
 	}
 }
+
+func TestPrintAttackTracksOrdersPriorityVectorsDeterministically(t *testing.T) {
+	t.Setenv("ATTACK_TREE_TOP_RESOURCES", "1")
+	t.Setenv("ATTACK_TREE_TOP_VECTORS", "2")
+
+	v1 := prioritization.ControlsVector{
+		AttackTrackName: "kubelet",
+		Score:           5.0,
+		Severity:        2,
+		Vector: []prioritization.PriorityVectorControl{
+			{Category: "Access", ControlID: "C-0001"},
+		},
+	}
+	v2 := prioritization.ControlsVector{
+		AttackTrackName: "container",
+		Score:           5.0,
+		Severity:        3,
+		Vector: []prioritization.PriorityVectorControl{
+			{Category: "Exec", ControlID: "C-0002"},
+		},
+	}
+	v3 := prioritization.ControlsVector{
+		AttackTrackName: "container",
+		Score:           5.0,
+		Severity:        3,
+		Vector: []prioritization.PriorityVectorControl{
+			{Category: "Access", ControlID: "C-0003"},
+		},
+	}
+
+	makeSession := func(vectors []prioritization.ControlsVector) *cautils.OPASessionObj {
+		s := attackTreeSession([]string{"res-1"}, map[string]float64{"res-1": 10})
+		res := s.ResourcesPrioritized["res-1"]
+		res.PriorityVector = vectors
+		s.ResourcesPrioritized["res-1"] = res
+		return s
+	}
+
+	// Permuted input order must produce the exact same top-2 vectors:
+	// v3 (Severity 3/High, container, Access (C-0003)) then v2 (Severity 3/High, container, Exec (C-0002)).
+	// Also verify the caller's PriorityVector slice is not mutated in place.
+	origA := []prioritization.ControlsVector{v1, v2, v3}
+	sessionA := makeSession(origA)
+	outA := captureAttackTreeOutput(t, sessionA)
+	outB := captureAttackTreeOutput(t, makeSession([]prioritization.ControlsVector{v3, v1, v2}))
+	if outA != outB {
+		t.Fatalf("attack vector output depended on input order:\norder A:\n%s\norder B:\n%s", outA, outB)
+	}
+	if !strings.Contains(outA, "1) [5.00] [Severity: High] [Attack Track: container]: Access (C-0003)") {
+		t.Fatalf("expected highest-severity alphabetically-first vector first, got:\n%s", outA)
+	}
+	if !strings.Contains(outA, "2) [5.00] [Severity: High] [Attack Track: container]: Exec (C-0002)") {
+		t.Fatalf("expected second vector to be Exec (C-0002), got:\n%s", outA)
+	}
+	if strings.Contains(outA, "kubelet") {
+		t.Fatalf("expected top-2 truncation to omit third vector (kubelet), got:\n%s", outA)
+	}
+	if sessionA.ResourcesPrioritized["res-1"].PriorityVector[0].AttackTrackName != "kubelet" {
+		t.Fatalf("printAttackTracks mutated caller's PriorityVector slice in place")
+	}
+}

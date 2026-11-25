@@ -130,20 +130,34 @@ func (prettyPrinter *PrettyPrinter) printAttackTracks(opaSessionObj *cautils.OPA
 			prettyPrinter.printResourceAttackGraph(attackTrack)
 		}
 
-		sort.Slice(resource.PriorityVector, func(x, y int) bool {
-			return resource.PriorityVector[x].Score > resource.PriorityVector[y].Score
+		vectors := make([]prioritization.ControlsVector, len(resource.PriorityVector))
+		copy(vectors, resource.PriorityVector)
+		sort.Slice(vectors, func(x, y int) bool {
+			if vectors[x].Score != vectors[y].Score {
+				return vectors[x].Score > vectors[y].Score
+			}
+			if vectors[x].Severity != vectors[y].Severity {
+				return vectors[x].Severity > vectors[y].Severity
+			}
+			if vectors[x].AttackTrackName != vectors[y].AttackTrackName {
+				return vectors[x].AttackTrackName < vectors[y].AttackTrackName
+			}
+			return formatPriorityVectorControls(vectors[x].ListControls()) < formatPriorityVectorControls(vectors[y].ListControls())
 		})
 
-		for j := 0; j < topVectorCount && j < len(resource.PriorityVector); j++ {
-			priorityVector := resource.PriorityVector[j]
+		for j := 0; j < topVectorCount && j < len(vectors); j++ {
+			priorityVector := vectors[j]
 
-			vectorStrings := []string{}
-			for _, controlId := range priorityVector.ListControls() {
-				vectorStrings = append(vectorStrings, fmt.Sprintf("%s (%s)", controlId.Category, controlId.ControlID))
-			}
-
-			fmt.Fprintf(prettyPrinter.writer, "%v) [%.2f] [Severity: %v] [Attack Track: %v]: %v \n", j+1, priorityVector.Score, apis.SeverityNumberToString(priorityVector.Severity), priorityVector.AttackTrackName, strings.Join(vectorStrings, " -> "))
+			fmt.Fprintf(prettyPrinter.writer, "%v) [%.2f] [Severity: %v] [Attack Track: %v]: %v \n", j+1, priorityVector.Score, apis.SeverityNumberToString(priorityVector.Severity), priorityVector.AttackTrackName, formatPriorityVectorControls(priorityVector.ListControls()))
 		}
 		printedCount++
 	}
+}
+
+func formatPriorityVectorControls(controls []prioritization.PriorityVectorControl) string {
+	vectorStrings := make([]string, 0, len(controls))
+	for _, controlId := range controls {
+		vectorStrings = append(vectorStrings, fmt.Sprintf("%s (%s)", controlId.Category, controlId.ControlID))
+	}
+	return strings.Join(vectorStrings, " -> ")
 }
