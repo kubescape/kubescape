@@ -860,4 +860,23 @@ spec:
 		require.Empty(t, errs)
 		require.Len(t, workloads[dir], 1)
 	})
+
+	t.Run("invalid helmignore parse error rejected even when sibling kustomization succeeds", func(t *testing.T) {
+		installFakeHelmBinary(t)
+
+		dir := resolvedTempDir(t)
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "charts", "app", "templates"), 0o750))
+		writeManifestFixture(t, dir, "kustomization.yaml", "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nhelmCharts:\n- name: app\n")
+		writeManifestFixture(t, dir, "kustomization.yml", "resources:\n- ns.yaml\n")
+		writeManifestFixture(t, dir, "ns.yaml", "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: sibling\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", ".helmignore"), "**\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "Chart.yaml"), "apiVersion: v2\nname: app\nversion: 0.1.0\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "values.yaml"), "{}\n")
+
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		assert.Nil(t, workloads)
+		require.NotEmpty(t, errs)
+		assert.Contains(t, errs[0].Error(), "**")
+	})
 }

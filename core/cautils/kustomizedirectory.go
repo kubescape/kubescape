@@ -536,7 +536,7 @@ type kustomizeHelmFileSystem struct {
 }
 
 func (fs *kustomizeHelmFileSystem) recordValidationErr(err error) {
-	if !errors.Is(err, ErrKustomizationFileTooLarge) && !errors.Is(err, ErrKustomizationFileNotRegular) {
+	if err == nil {
 		return
 	}
 	fs.mu.Lock()
