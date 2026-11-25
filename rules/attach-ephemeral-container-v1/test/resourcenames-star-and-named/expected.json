@@ -1,0 +1,78 @@
+[
+    {
+        "alertMessage": "Subject: User-jane can attach ephemeral containers to pods",
+        "failedPaths": [
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "reviewPaths": [
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 8,
+        "alertObject": {
+            "externalObjects": {
+                "apiGroup": "rbac.authorization.k8s.io",
+                "kind": "User",
+                "name": "jane",
+                "relatedObjects": [
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "RoleBinding",
+                        "metadata": {
+                            "name": "debug-one-pod",
+                            "namespace": "default"
+                        },
+                        "roleRef": {
+                            "apiGroup": "rbac.authorization.k8s.io",
+                            "kind": "Role",
+                            "name": "debug-one-pod"
+                        },
+                        "subjects": [
+                            {
+                                "apiGroup": "rbac.authorization.k8s.io",
+                                "kind": "User",
+                                "name": "jane"
+                            }
+                        ]
+                    },
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "Role",
+                        "metadata": {
+                            "name": "debug-one-pod",
+                            "namespace": "default"
+                        },
+                        "rules": [
+                            {
+                                "apiGroups": [
+                                    ""
+                                ],
+                                "resourceNames": [
+                                    "*",
+                                    "payments-api-0"
+                                ],
+                                "resources": [
+                                    "pods/ephemeralcontainers"
+                                ],
+                                "verbs": [
+                                    "patch"
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+]
