@@ -461,9 +461,14 @@ func imageTestCases(cves []imageprinter.CVE, platform string) []JUnitTestCase {
 		if platform != "" {
 			contents += "\nPlatform: " + platform
 		}
+
+		name := xmlSanitize(fmt.Sprintf("%s (%s)", cve.ID, cve.Package))
+		if cve.Version != "" {
+			name += " [" + xmlSanitizeID(cve.Version) + "]"
+		}
 		testCases = append(testCases, JUnitTestCase{
 			Classname: xmlSanitize(cve.Image),
-			Name:      xmlSanitize(fmt.Sprintf("%s (%s)", cve.ID, cve.Package)),
+			Name:      name,
 			Failure: &JUnitFailure{
 				Type:     "Vulnerability",
 				Message:  xmlSanitize(fmt.Sprintf("%s severity vulnerability found in package %s", cve.Severity, cve.Package)),
