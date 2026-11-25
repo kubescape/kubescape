@@ -877,18 +877,20 @@ func TestRunWorkloadScan_LiveClusterPath(t *testing.T) {
 	respBytes, err := ksServer.RunWorkloadScan(context.Background(), "Deployment/nginx", "", "", "nsa")
 	require.NoError(t, err)
 	assert.Contains(t, string(respBytes), `"warning":`)
-	assert.Contains(t, string(respBytes), `"namespace_defaulted": true`)
 
 	var resp struct {
-		FrameworkName   string `json:"framework_name"`
-		TotalControls   int    `json:"total_controls"`
-		TotalFailed     int    `json:"total_failed"`
-		ReturnedFailed  int    `json:"returned_failed"`
-		Truncated       bool   `json:"truncated"`
-		FailedResources []any  `json:"failed_resources"`
+		FrameworkName   string              `json:"framework_name"`
+		TotalControls   int                 `json:"total_controls"`
+		TotalFailed     int                 `json:"total_failed"`
+		ReturnedFailed  int                 `json:"returned_failed"`
+		Truncated       bool                `json:"truncated"`
+		FailedResources []any               `json:"failed_resources"`
+		TargetResource  *TargetResourceInfo `json:"target_resource"`
 	}
 	err = json.Unmarshal(respBytes, &resp)
 	require.NoError(t, err)
+	require.NotNil(t, resp.TargetResource)
+	assert.True(t, resp.TargetResource.NamespaceDefaulted)
 
 	assert.Greater(t, resp.TotalControls, 0)
 	assert.GreaterOrEqual(t, resp.TotalFailed, 0)
