@@ -1181,10 +1181,25 @@ func TestDownloadArtifacts(t *testing.T) {
 		files2, err2 := downloadArtifacts(context.Background(), &metav1.DownloadInfo{Target: TargetArtifacts, Path: dir2})
 		require.NoError(t, err2)
 
-		require.Len(t, files1, len(files2))
-		for i := range files1 {
-			assert.Equal(t, filepath.Base(files1[i]), filepath.Base(files2[i]))
+		expectedBasenames := []string{
+			"controls-inputs.json",
+			"exceptions.json",
+			"nsa.json",
+			"workloadscan.json",
+			"clusterscan.json",
+			"attack-tracks.json",
 		}
+
+		basenames := func(files []string) []string {
+			names := make([]string, len(files))
+			for i, f := range files {
+				names[i] = filepath.Base(f)
+			}
+			return names
+		}
+
+		assert.Equal(t, expectedBasenames, basenames(files1))
+		assert.Equal(t, expectedBasenames, basenames(files2))
 	})
 }
 
