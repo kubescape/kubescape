@@ -59,6 +59,10 @@ var frameworkScanFn = func(s *KubescapeMcpserver, ctx context.Context, namespace
 	return s.RunFrameworkScan(ctx, namespace, frameworkName, filters...)
 }
 
+var controlsScanFn = func(s *KubescapeMcpserver, ctx context.Context, namespace string, controlIDs []string, filters ...scanFilterArgs) ([]byte, error) {
+	return s.ScanControls(ctx, namespace, controlIDs, filters...)
+}
+
 // mcpScanNamespace reads the optional CallTool namespace argument. "*" means
 // cluster-wide, the same as omitting the argument. Like mcpStringArg, it
 // treats a JSON null as an omitted argument and trims the value, so the scan
@@ -603,6 +607,22 @@ func canonicalFrameworkName(framework, defaultName string) string {
 	return strings.ToLower(trimmed)
 }
 
+// scanFrameworkKey builds the coalescing cache key for run_framework_security_scan.
+func scanFrameworkKey(namespace, frameworkName, suffix string) string {
+	if namespace == "*" {
+		namespace = ""
+	}
+	return fmt.Sprintf("framework_scan:%s:%s%s", url.QueryEscape(namespace), url.QueryEscape(strings.ToLower(frameworkName)), suffix)
+}
+
+// scanControlsKey builds the coalescing cache key for scan_controls.
+func scanControlsKey(namespace string, controlIDs []string, suffix string) string {
+	if namespace == "*" {
+		namespace = ""
+	}
+	return fmt.Sprintf("control_scan:%s:%s%s", url.QueryEscape(namespace), canonicalControlKey(controlIDs), suffix)
+}
+
 // parseControlIDs extracts a list of trimmed, non-empty control IDs from an
 // argument value that may be either a comma-separated string or a JSON array
 // of strings. It returns a ToolResultError when the value is absent, has the
@@ -1083,10 +1103,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		if namespace == "*" {
-			namespace = ""
-		}
-		key := fmt.Sprintf("framework_scan:%s:%s%s", namespace, url.QueryEscape(strings.ToLower(frameworkNameStr)), filters.keySuffix())
+		key := scanFrameworkKey(namespace, frameworkNameStr, filters.keySuffix())
 		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
 			return frameworkScanFn(ksServer, scanCtx, namespace, frameworkNameStr, filters)
 		}, filters.limit)
@@ -1098,25 +1115,22 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "scan_controls":
-		namespace, toolErr := mcpStringArg(arguments, "namespace")
-		if toolErr != nil {
-			return toolErr, nil
+		namespace, err := mcpScanNamespace(arguments)
+		if err != nil {
+			return mcpToolError(ErrCodeInvalidArgument, err.Error(), map[string]any{"argument": "namespace"}), nil
 		}
 		filters, toolErr := parseScanFilterArgs(arguments, namespace)
 		if toolErr != nil {
 			return toolErr, nil
-		}
-		if namespace == "*" {
-			namespace = ""
 		}
 		rawControlIDs, hasControlIDs := arguments["control_ids"]
 		controlIDs, toolErr := parseControlIDs(rawControlIDs, hasControlIDs)
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		key := fmt.Sprintf("control_scan:%s:%s%s", namespace, canonicalControlKey(controlIDs), filters.keySuffix())
+		key := scanControlsKey(namespace, controlIDs, filters.keySuffix())
 		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
-			return ksServer.ScanControls(scanCtx, namespace, controlIDs, filters)
+			return controlsScanFn(ksServer, scanCtx, namespace, controlIDs, filters)
 		}, filters.limit)
 		if err != nil {
 			code := classifyScanError(err)
