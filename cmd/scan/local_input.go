@@ -1,13 +1,19 @@
 package scan
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 )
+
+// ErrStdinTooLarge is returned when manifest input read from stdin exceeds the
+// configured per-file size limit.
+var ErrStdinTooLarge = errors.New("stdin input exceeds maximum allowed size")
 
 const (
 	// stdinManifestDirPattern names the private directory that holds the staged
@@ -58,12 +64,19 @@ func prepareScanLocalInput(stdin io.Reader, args []string, scanInfo *cautils.Sca
 		return cleanup, nil
 	}
 
+	var suppliedStdinInfo os.FileInfo
 	if file, ok := stdin.(*os.File); ok && file != nil {
 		if stat, err := file.Stat(); err == nil && stat.Mode().IsRegular() {
 			scanInfo.OriginalStdinInfo = stat
+			suppliedStdinInfo = stat
 		}
 	} else if stat, err := os.Stdin.Stat(); err == nil && stat.Mode().IsRegular() {
 		scanInfo.OriginalStdinInfo = stat
+	}
+
+	limit := filesizelimit.GetMaxFileSize()
+	if suppliedStdinInfo != nil && suppliedStdinInfo.Size() > limit {
+		return cleanup, stdinTooLargeError(limit)
 	}
 
 	// The manifest goes into a directory of its own, so it can have a fixed
@@ -82,10 +95,16 @@ func prepareScanLocalInput(stdin io.Reader, args []string, scanInfo *cautils.Sca
 		return func() {}, err
 	}
 
-	if _, err := io.Copy(tempFile, stdin); err != nil {
+	n, err := io.Copy(tempFile, io.LimitReader(stdin, limit+1))
+	if err != nil {
 		_ = tempFile.Close()
 		cleanup()
 		return func() {}, err
+	}
+	if n > limit {
+		_ = tempFile.Close()
+		cleanup()
+		return func() {}, stdinTooLargeError(limit)
 	}
 	if err := tempFile.Close(); err != nil {
 		cleanup()
@@ -93,4 +112,8 @@ func prepareScanLocalInput(stdin io.Reader, args []string, scanInfo *cautils.Sca
 	}
 	scanInfo.InputPatterns = []string{tempFile.Name()}
 	return cleanup, nil
+}
+
+func stdinTooLargeError(limit int64) error {
+	return fmt.Errorf("%w: stdin input exceeds the %d byte limit (override with %s)", ErrStdinTooLarge, limit, filesizelimit.MaxFileSizeEnvVar)
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/stretchr/testify/assert"
@@ -295,4 +296,102 @@ func TestPrepareScanLocalInput_StdinSourceNameIsStable(t *testing.T) {
 	for _, source := range session.ResourceSource {
 		assert.Equal(t, "stdin.yaml", source.RelativePath)
 	}
+}
+
+func TestPrepareScanLocalInput_StdinSizeBounds(t *testing.T) {
+	t.Run("rejects oversized stdin stream and cleans up staging directory", func(t *testing.T) {
+		tmpRoot := t.TempDir()
+		t.Setenv("TMPDIR", tmpRoot)
+		t.Setenv("TMP", tmpRoot)
+		t.Setenv("TEMP", tmpRoot)
+		t.Setenv(filesizelimit.MaxFileSizeEnvVar, "1024")
+
+		scanInfo := &cautils.ScanInfo{}
+		oversized := bytes.NewReader(bytes.Repeat([]byte("a"), 1025))
+		cleanup, err := prepareScanLocalInput(oversized, []string{"nsa", "-"}, scanInfo, scanLocalInputOptions{
+			FirstInputArg:    1,
+			RejectMixedStdin: true,
+		})
+		defer cleanup()
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrStdinTooLarge)
+		assert.Empty(t, scanInfo.InputPatterns)
+
+		entries, readErr := os.ReadDir(tmpRoot)
+		require.NoError(t, readErr)
+		assert.Empty(t, entries, "staging directory must be removed when stdin exceeds limit")
+	})
+
+	t.Run("rejects oversized regular file redirected via stdin without staging", func(t *testing.T) {
+		tmpRoot := t.TempDir()
+		t.Setenv("TMPDIR", tmpRoot)
+		t.Setenv("TMP", tmpRoot)
+		t.Setenv("TEMP", tmpRoot)
+		t.Setenv(filesizelimit.MaxFileSizeEnvVar, "1024")
+
+		srcPath := filepath.Join(t.TempDir(), "oversized.yaml")
+		require.NoError(t, os.WriteFile(srcPath, bytes.Repeat([]byte("b"), 1025), 0o600))
+		f, err := os.Open(srcPath)
+		require.NoError(t, err)
+		defer f.Close()
+
+		scanInfo := &cautils.ScanInfo{}
+		cleanup, err := prepareScanLocalInput(f, []string{"nsa", "-"}, scanInfo, scanLocalInputOptions{
+			FirstInputArg:    1,
+			RejectMixedStdin: true,
+		})
+		defer cleanup()
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrStdinTooLarge)
+		entries, readErr := os.ReadDir(tmpRoot)
+		require.NoError(t, readErr)
+		assert.Empty(t, entries)
+	})
+
+	t.Run("allows stdin matching exact size limit", func(t *testing.T) {
+		t.Setenv(filesizelimit.MaxFileSizeEnvVar, "1024")
+
+		payload := bytes.Repeat([]byte("c"), 1024)
+		scanInfo := &cautils.ScanInfo{}
+		cleanup, err := prepareScanLocalInput(bytes.NewReader(payload), []string{"nsa", "-"}, scanInfo, scanLocalInputOptions{
+			FirstInputArg:    1,
+			RejectMixedStdin: true,
+		})
+		require.NoError(t, err)
+		defer cleanup()
+
+		require.Len(t, scanInfo.InputPatterns, 1)
+		got, err := os.ReadFile(scanInfo.InputPatterns[0])
+		require.NoError(t, err)
+		assert.Len(t, got, 1024)
+	})
+
+	t.Run("does not reject non-os.File reader when global os.Stdin is an oversized file", func(t *testing.T) {
+		t.Setenv(filesizelimit.MaxFileSizeEnvVar, "1024")
+
+		oversizedPath := filepath.Join(t.TempDir(), "global-stdin.yaml")
+		require.NoError(t, os.WriteFile(oversizedPath, bytes.Repeat([]byte("z"), 1025), 0o600))
+		f, err := os.Open(oversizedPath)
+		require.NoError(t, err)
+		defer f.Close()
+
+		origStdin := os.Stdin
+		os.Stdin = f
+		t.Cleanup(func() { os.Stdin = origStdin })
+
+		payload := bytes.Repeat([]byte("d"), 512)
+		scanInfo := &cautils.ScanInfo{}
+		cleanup, err := prepareScanLocalInput(bytes.NewReader(payload), []string{"nsa", "-"}, scanInfo, scanLocalInputOptions{
+			FirstInputArg:    1,
+			RejectMixedStdin: true,
+		})
+		require.NoError(t, err)
+		defer cleanup()
+
+		got, err := os.ReadFile(scanInfo.InputPatterns[0])
+		require.NoError(t, err)
+		assert.Len(t, got, 512)
+	})
 }
