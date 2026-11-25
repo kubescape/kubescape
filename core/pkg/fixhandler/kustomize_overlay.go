@@ -351,13 +351,7 @@ func tryResolveOriginManifest(fix ResourceFixInfo, kustMeta kustomizationMeta) (
 		if cand == "" {
 			continue
 		}
-		candClean := filepath.Clean(cand)
-		st, err := os.Stat(candClean)
-		if err != nil || st.IsDir() || !st.Mode().IsRegular() {
-			continue
-		}
-
-		data, err := os.ReadFile(candClean)
+		data, err := readManifestFile(cand)
 		if err != nil {
 			continue
 		}
@@ -488,7 +482,7 @@ func planOverlayChanges(overlayDir string, fixes []ResourceFixInfo) (*overlayFix
 		return nil, fmt.Errorf("kustomization file not found in %s", cleanOverlay)
 	}
 
-	kustBytes, err := root.ReadFile(kustFileName)
+	kustBytes, err := readRegularFileFromRoot(root, kustFileName, filepath.Join(cleanOverlay, kustFileName))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read %s in %s: %w", kustFileName, cleanOverlay, err)
 	}
@@ -540,16 +534,13 @@ func planOverlayChanges(overlayDir string, fixes []ResourceFixInfo) (*overlayFix
 		}
 
 		if existingIdx == -1 {
-			existingBytes, err := root.ReadFile(relPatchPath)
+			existingBytes, err := readRegularFileFromRoot(root, relPatchPath, filepath.Join(plan.overlayDir, relPatchPath))
 			if err != nil {
 				if !errors.Is(err, os.ErrNotExist) {
 					return nil, fmt.Errorf("failed to read existing patch %s in %s: %w", relPatchPath, plan.overlayDir, err)
 				}
 			} else {
 				isNewFile = false
-				if st, sErr := root.Stat(relPatchPath); sErr == nil && !st.Mode().IsRegular() {
-					return nil, fmt.Errorf("%w: %q", ErrManifestNotRegular, relPatchPath)
-				}
 				originalContent = string(existingBytes)
 				if err := yaml.Unmarshal(existingBytes, &existingOps); err != nil {
 					return nil, fmt.Errorf("failed to parse existing patch %s in %s: %w", relPatchPath, plan.overlayDir, err)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
@@ -1260,4 +1261,80 @@ resources: []
 	_, err := planOverlayChanges(overlayDir, fixes)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported: cannot resolve resource identity at Kustomize patches stage")
+}
+
+func makeOverlayDeploymentFix(overlayDir, kustPath, name string) ResourceFixInfo {
+	return ResourceFixInfo{
+		Resource: &reporthandling.Resource{
+			Object: map[string]interface{}{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]interface{}{
+					"name": name,
+				},
+			},
+		},
+		isKustomizeOverlay:  true,
+		kustomizeOverlayDir: overlayDir,
+		FilePath:            kustPath,
+		YamlExpressions: map[string]armotypes.FixPath{
+			"spec.template.spec.containers[0].securityContext.privileged": {
+				Path:  "spec.template.spec.containers[0].securityContext.privileged",
+				Value: "false",
+			},
+		},
+	}
+}
+
+func TestPlanOverlayChanges_BoundedFileReads(t *testing.T) {
+	t.Run("rejects oversized kustomization file", func(t *testing.T) {
+		t.Setenv(filesizelimit.MaxFileSizeEnvVar, "128")
+
+		overlayDir := filepath.Join(t.TempDir(), "overlays", "prod")
+		require.NoError(t, os.MkdirAll(overlayDir, 0o755))
+
+		kustPath := filepath.Join(overlayDir, "kustomization.yaml")
+		oversizedKust := "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n# " + strings.Repeat("x", 200) + "\nresources: []\n"
+		require.NoError(t, os.WriteFile(kustPath, []byte(oversizedKust), 0o600))
+
+		_, err := planOverlayChanges(overlayDir, []ResourceFixInfo{makeOverlayDeploymentFix(overlayDir, kustPath, "my-app")})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrManifestTooLarge)
+	})
+
+	t.Run("rejects oversized existing patch file", func(t *testing.T) {
+		t.Setenv(filesizelimit.MaxFileSizeEnvVar, "256")
+
+		overlayDir := filepath.Join(t.TempDir(), "overlays", "prod")
+		patchesDir := filepath.Join(overlayDir, "patches")
+		require.NoError(t, os.MkdirAll(patchesDir, 0o755))
+
+		kustPath := filepath.Join(overlayDir, "kustomization.yaml")
+		require.NoError(t, os.WriteFile(kustPath, []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: []\n"), 0o600))
+
+		fix := makeOverlayDeploymentFix(overlayDir, kustPath, "my-app")
+		patchFile := overlayPatchFileName(fix.Resource, kustomizeTarget{Kind: "Deployment", Name: "my-app"})
+		oversizedPatch := "- op: add\n  path: /spec/paused\n  value: true\n# " + strings.Repeat("y", 300) + "\n"
+		require.NoError(t, os.WriteFile(filepath.Join(patchesDir, patchFile), []byte(oversizedPatch), 0o600))
+
+		_, err := planOverlayChanges(overlayDir, []ResourceFixInfo{fix})
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrManifestTooLarge)
+	})
+
+	t.Run("tryResolveOriginManifest skips oversized origin manifest", func(t *testing.T) {
+		t.Setenv(filesizelimit.MaxFileSizeEnvVar, "128")
+
+		baseDir := filepath.Join(t.TempDir(), "base")
+		require.NoError(t, os.MkdirAll(baseDir, 0o755))
+		originPath := filepath.Join(baseDir, "deployment.yaml")
+		oversizedOrigin := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-app\n# " + strings.Repeat("z", 200) + "\n"
+		require.NoError(t, os.WriteFile(originPath, []byte(oversizedOrigin), 0o600))
+
+		fix := makeOverlayDeploymentFix(baseDir, originPath, "prod-my-app")
+		fix.reportedPath = originPath
+
+		_, _, ok := tryResolveOriginManifest(fix, kustomizationMeta{NamePrefix: "prod-"})
+		assert.False(t, ok, "oversized origin manifest must not be read unboundedly")
+	})
 }
