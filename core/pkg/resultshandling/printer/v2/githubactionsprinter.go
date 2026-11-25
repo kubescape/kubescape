@@ -81,18 +81,21 @@ func (gp *GitHubActionsPrinter) SetWriter(ctx context.Context, outputFile string
 	return nil
 }
 
-// ActionPrint writes failed High/Critical controls as workflow commands. Only
-// configuration scans are supported: image findings have no manifest location
-// to anchor an annotation to.
+// ActionPrint writes failed High/Critical controls, or High/Critical image
+// vulnerabilities for an image scan, as workflow commands. A combined scan is
+// rejected so neither set of findings is silently dropped.
 func (gp *GitHubActionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if err := printer.PrepareOutput(gp.writer); err != nil {
 		return err
 	}
 	if opaSessionObj == nil || opaSessionObj.Report == nil {
-		return fmt.Errorf("github-actions output is only supported for configuration scanning: image findings have no manifest location to annotate")
+		if len(imageScanData) == 0 {
+			return fmt.Errorf("github-actions output requires configuration or image scan results")
+		}
+		return gp.printImageScan(ctx, imageScanData)
 	}
 	if len(imageScanData) > 0 {
-		return fmt.Errorf("github-actions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
+		return fmt.Errorf("github-actions requires separate posture and image scans; use json or sarif for a combined scan with --scan-images")
 	}
 
 	annotations, belowThreshold := gp.collectAnnotations(ctx, opaSessionObj)
@@ -168,7 +171,8 @@ func (gp *GitHubActionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *
 	}
 
 	if summaryPath := gp.stepSummaryPath; summaryPath != "" {
-		if err := writeStepSummary(ctx, summaryPath, opaSessionObj); err != nil {
+		render := func(maxBytes int) string { return generateStepSummaryWithBudget(opaSessionObj, maxBytes) }
+		if err := writeStepSummary(ctx, summaryPath, render); err != nil {
 			logger.L().Ctx(ctx).Warning("failed to write GitHub Actions step summary", helpers.Error(err))
 		}
 	}
@@ -288,20 +292,24 @@ func generateStepSummaryWithBudget(opaSessionObj *cautils.OPASessionObj, maxByte
 		})
 	}
 
+	return renderSummaryWithBudget(base.String(), sections, maxBytes)
+}
+
+func renderSummaryWithBudget(base string, sections []summarySection, maxBytes int) string {
 	totalEntries := 0
 	for _, sec := range sections {
 		totalEntries += len(sec.rows)
 	}
 
 	if totalEntries == 0 {
-		if base.Len() <= maxBytes {
-			return base.String()
+		if len(base) <= maxBytes {
+			return base
 		}
 		return ""
 	}
 
 	// Fast path: if the entire summary fits within maxBytes, return it un-truncated.
-	totalFullLen := base.Len()
+	totalFullLen := len(base)
 	for _, sec := range sections {
 		totalFullLen += len(sec.header)
 		for _, r := range sec.rows {
@@ -310,7 +318,7 @@ func generateStepSummaryWithBudget(opaSessionObj *cautils.OPASessionObj, maxByte
 	}
 	if totalFullLen <= maxBytes {
 		var sb strings.Builder
-		sb.WriteString(base.String())
+		sb.WriteString(base)
 		for _, sec := range sections {
 			sb.WriteString(sec.header)
 			for _, r := range sec.rows {
@@ -321,7 +329,7 @@ func generateStepSummaryWithBudget(opaSessionObj *cautils.OPASessionObj, maxByte
 	}
 
 	// Truncation required.
-	if base.Len()+len(formatTruncationNotice(totalEntries)) > maxBytes {
+	if len(base)+len(formatTruncationNotice(totalEntries)) > maxBytes {
 		notice := formatTruncationNotice(totalEntries)
 		if len(notice) <= maxBytes {
 			return notice
@@ -330,7 +338,7 @@ func generateStepSummaryWithBudget(opaSessionObj *cautils.OPASessionObj, maxByte
 	}
 
 	var sb strings.Builder
-	sb.WriteString(base.String())
+	sb.WriteString(base)
 
 	emittedEntries := 0
 outerLoop:
@@ -405,8 +413,8 @@ func sanitizeMarkdownTableCell(s string) string {
 	})
 }
 
-func writeStepSummary(ctx context.Context, summaryPath string, opaSessionObj *cautils.OPASessionObj) error {
-	if summaryPath == "" || opaSessionObj == nil {
+func writeStepSummary(ctx context.Context, summaryPath string, render func(maxBytes int) string) error {
+	if summaryPath == "" || render == nil {
 		return nil
 	}
 
@@ -431,7 +439,7 @@ func writeStepSummary(ctx context.Context, summaryPath string, opaSessionObj *ca
 			helpers.Int("safetyMarginBytes", githubActionsStepSummarySafetyMargin))
 		return nil
 	}
-	content := generateStepSummaryWithBudget(opaSessionObj, remainingBytes)
+	content := render(remainingBytes)
 	if content == "" {
 		logger.L().Ctx(ctx).Warning("GitHub Actions step summary content could not fit within remaining budget, skipping append",
 			helpers.Int("remainingBytes", remainingBytes))

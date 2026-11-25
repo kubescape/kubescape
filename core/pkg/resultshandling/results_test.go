@@ -658,10 +658,16 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr:   nil,
 		},
 		{
-			name:      "github-actions format for image scan should return error",
+			name:      "github-actions format for image scan should not return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.GitHubActionsFormat,
-			expectErr: errors.New("format \"github-actions\" is not supported for image scanning"),
+			expectErr: nil,
+		},
+		{
+			name:      "gitlab-codequality format for image scan should return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.GitLabCodeQualityFormat,
+			expectErr: errors.New("format \"gitlab-codequality\" is not supported for image scanning"),
 		},
 		{
 			name:      "pdf format for cluster scan should not return error",

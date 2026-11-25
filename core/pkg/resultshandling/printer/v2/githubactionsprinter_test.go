@@ -257,9 +257,7 @@ func TestGitHubActionsPrinter_SkipsResourcesWithoutFilePath(t *testing.T) {
 	assert.Contains(t, output, "0 of 0 High/Critical finding(s) annotated")
 }
 
-// TestGitHubActionsPrinter_RejectsImageScanData pins the config-scan boundary:
-// image findings have no manifest location to anchor an annotation to.
-func TestGitHubActionsPrinter_RejectsImageScanData(t *testing.T) {
+func TestGitHubActionsPrinter_RejectsCombinedScan(t *testing.T) {
 	tmpFile, err := os.CreateTemp(t.TempDir(), "gha-*.txt")
 	require.NoError(t, err)
 	defer tmpFile.Close()
@@ -268,18 +266,14 @@ func TestGitHubActionsPrinter_RejectsImageScanData(t *testing.T) {
 	gp.writer = tmpFile
 	images := []cautils.ImageScanData{{Image: "nginx:1.23"}}
 
-	// Standalone image scan with nil session
-	err = gp.ActionPrint(context.Background(), nil, images)
+	err = gp.ActionPrint(context.Background(), nil, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "only supported for configuration scanning")
+	assert.Contains(t, err.Error(), "requires configuration or image scan results")
 
-	// Standalone image scan with nil report
-	sessionWithNilReport := &cautils.OPASessionObj{Report: nil}
-	err = gp.ActionPrint(context.Background(), sessionWithNilReport, images)
+	err = gp.ActionPrint(context.Background(), &cautils.OPASessionObj{}, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "only supported for configuration scanning")
+	assert.Contains(t, err.Error(), "requires configuration or image scan results")
 
-	// Combined scan: configuration scan + image scan
 	session := ghSessionFixture(t, "C-0057", 9.0)
 	tmp, err := os.CreateTemp("", "github-actions-combined-*.txt")
 	require.NoError(t, err)
@@ -291,7 +285,7 @@ func TestGitHubActionsPrinter_RejectsImageScanData(t *testing.T) {
 
 	err = gp.ActionPrint(context.Background(), session, images)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "github-actions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
+	assert.Contains(t, err.Error(), "github-actions requires separate posture and image scans; use json or sarif for a combined scan with --scan-images")
 
 	raw, err := os.ReadFile(tmp.Name())
 	require.NoError(t, err)

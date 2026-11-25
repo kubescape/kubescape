@@ -169,8 +169,8 @@ func Test_validateImagePatchInfo_PushWithNormalizedOutputMode(t *testing.T) {
 }
 
 // TestPatchCmd_FormatFlagValidation verifies --format accepts every format supported for image
-// scans (shared.ImageScanFormats) and rejects formats that are not (e.g. github-actions, which
-// annotates posture findings that patch's image-only results never populate), plus the empty-value case.
+// scans (shared.ImageScanFormats) and rejects formats that are not (e.g. gitlab-codequality, which
+// anchors posture findings to repository files that patch's image-only results never populate), plus the empty-value case.
 func TestPatchCmd_FormatFlagValidation(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 
@@ -198,18 +198,18 @@ func TestPatchCmd_FormatFlagValidation(t *testing.T) {
 
 	t.Run("rejects_comma_separated_with_invalid_entry", func(t *testing.T) {
 		cmd := GetPatchCmd(mockKubescape)
-		cmd.SetArgs([]string{"--image", "nginx:1.23", "--format", "json,github-actions"})
+		cmd.SetArgs([]string{"--image", "nginx:1.23", "--format", "json,gitlab-codequality"})
 		err := cmd.Execute()
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), `invalid format "github-actions"`)
+		assert.Contains(t, err.Error(), `invalid format "gitlab-codequality"`)
 	})
 
-	t.Run("rejects_github_actions", func(t *testing.T) {
+	t.Run("rejects_gitlab_codequality", func(t *testing.T) {
 		cmd := GetPatchCmd(mockKubescape)
-		cmd.SetArgs([]string{"--image", "nginx:1.23", "--format", "github-actions"})
+		cmd.SetArgs([]string{"--image", "nginx:1.23", "--format", "gitlab-codequality"})
 		err := cmd.Execute()
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), `invalid format "github-actions"`)
+		assert.Contains(t, err.Error(), `invalid format "gitlab-codequality"`)
 		assert.Contains(t, err.Error(), "pretty-printer")
 	})
 

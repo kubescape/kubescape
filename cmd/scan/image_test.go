@@ -118,7 +118,7 @@ func TestGetImageCmd_RunE_FormatFlagInvalid(t *testing.T) {
 	assert.NoError(t, parent.PersistentFlags().Set("format", "xml"))
 
 	err := cmd.RunE(cmd, []string{"nginx"})
-	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, gitlab-container-scanning, yaml, csv, markdown, cyclonedx-json, spdx-json, policyreport`)
+	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, gitlab-container-scanning, github-actions, yaml, csv, markdown, cyclonedx-json, spdx-json, policyreport`)
 }
 
 func TestGetImageCmd_RunE_Success(t *testing.T) {
