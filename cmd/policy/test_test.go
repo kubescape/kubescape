@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,6 +42,68 @@ func TestPolicyTestCmd_AllInTreeRulesPass(t *testing.T) {
 	err = cmd.Execute()
 	require.NoError(t, err, out.String())
 	assert.Regexp(t, `\n[1-9][0-9]*/[1-9][0-9]* cases passed\n`, out.String())
+}
+
+func TestPolicyTest_NoCasesReturnsError(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		rules        []string
+		emptyTestDir bool
+		update       bool
+	}{
+		{name: "missing test directory", rules: []string{"rule"}},
+		{name: "empty test directory", rules: []string{"rule"}, emptyTestDir: true},
+		{name: "multiple rules without cases", rules: []string{"first-rule", "second-rule"}},
+		{name: "update without cases", rules: []string{"rule"}, update: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			for _, name := range tt.rules {
+				dir := filepath.Join(root, name)
+				_, err := runPolicyCmdWithOut(t, "policy", "init", dir)
+				require.NoError(t, err)
+				testDir := filepath.Join(dir, "test")
+				require.NoError(t, os.RemoveAll(testDir))
+				if tt.emptyTestDir {
+					require.NoError(t, os.Mkdir(testDir, 0o755))
+				}
+			}
+
+			path := root
+			if len(tt.rules) == 1 {
+				path = filepath.Join(root, tt.rules[0])
+			}
+			args := []string{path}
+			if tt.update {
+				args = append(args, "--update")
+			}
+			cmd := getPolicyTestCmd()
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetArgs(args)
+			cmd.SilenceErrors = true
+
+			require.ErrorContains(t, cmd.Execute(), "no test cases", out.String())
+		})
+	}
+}
+
+func TestPolicyTest_MixedRulesRunCases(t *testing.T) {
+	root := t.TempDir()
+	withoutCases := filepath.Join(root, "without-cases")
+	_, err := runPolicyCmdWithOut(t, "policy", "init", withoutCases)
+	require.NoError(t, err)
+	require.NoError(t, os.RemoveAll(filepath.Join(withoutCases, "test")))
+	_, err = runPolicyCmdWithOut(t, "policy", "init", filepath.Join(root, "with-cases"))
+	require.NoError(t, err)
+
+	cmd := getPolicyTestCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{root})
+
+	require.NoError(t, cmd.Execute(), out.String())
+	assert.Contains(t, out.String(), "PASS")
 }
 
 func TestPolicyTestCmd_MissingPathReturnsError(t *testing.T) {
