@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -288,7 +289,14 @@ func (a *HarborAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 		}
 
 		var reportErr error
-		for mimeType, mimeTypeData := range harborVulnPayload {
+		mimeTypes := make([]string, 0, len(harborVulnPayload))
+		for m := range harborVulnPayload {
+			mimeTypes = append(mimeTypes, m)
+		}
+		sort.Strings(mimeTypes)
+
+		for _, mimeType := range mimeTypes {
+			mimeTypeData := harborVulnPayload[mimeType]
 			// Harbor emits an explicit empty array for a clean scan. A null
 			// report or missing/null findings is not evidence of completion.
 			if mimeTypeData.Vulnerabilities == nil {
