@@ -3,10 +3,14 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -119,6 +123,80 @@ func TestManifestScan_ValidJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, resp.TotalFailed)
+}
+
+func TestManifestScan_CallToolMatchesFileScope(t *testing.T) {
+	const pod = `apiVersion: v1
+kind: Pod
+metadata:
+  name: sample-web
+  namespace: default
+spec:
+  containers:
+  - name: web
+    image: nginx:1.27
+`
+	manifestRule := reporthandling.PolicyRule{
+		PortalBase:   armotypes.PortalBase{Name: "pod-owner-label"},
+		RuleLanguage: reporthandling.RegoLanguage,
+		Match:        []reporthandling.RuleMatchObjects{{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Pod"}}},
+		Rule: `package armo_builtins
+deny contains alert if {
+    pod := input[_]
+    not pod.metadata.labels.owner
+    alert := {"alertMessage": "Missing owner label", "alertObject": {"k8sApiObjects": [pod]}}
+}`,
+	}
+	clusterRule := manifestRule
+	clusterRule.Name = "cluster-pod-check"
+	clusterRule.Rule = "package armo_builtins\ndeny := []"
+	framework := reporthandling.Framework{
+		PortalBase: armotypes.PortalBase{Name: "manifest-scope-test"},
+		Controls: []reporthandling.Control{
+			{ControlID: "C-0001", BaseScore: 1, Rules: []reporthandling.PolicyRule{manifestRule}},
+			{
+				ControlID: "C-0002",
+				BaseScore: 1,
+				ScanningScope: &reporthandling.ScanningScope{
+					Matches: []reporthandling.ScanningScopeType{reporthandling.ScopeCluster},
+				},
+				Rules: []reporthandling.PolicyRule{clusterRule},
+			},
+		},
+	}
+
+	dir := t.TempDir()
+	policyPath := filepath.Join(dir, "framework.json")
+	require.NoError(t, getter.SaveInFile(framework, policyPath))
+	manifestPath := filepath.Join(dir, "pod.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(pod), 0o600))
+	ksServer := &KubescapeMcpserver{
+		policyGetter: getter.NewLoadPolicy([]string{policyPath}),
+		workspaceDir: dir,
+	}
+	scan := func(tool, inputName, input string) scanResponse {
+		t.Helper()
+		result, err := ksServer.CallTool(context.Background(), tool, map[string]any{
+			inputName:   input,
+			"framework": framework.Name,
+		})
+		require.NoError(t, err)
+		responseText := toolResultText(t, result)
+		require.False(t, result.IsError, responseText)
+		var response scanResponse
+		require.NoError(t, json.Unmarshal([]byte(responseText), &response))
+		return response
+	}
+
+	file := scan("scan_local_iac", "path", manifestPath)
+	require.Equal(t, 1, file.TotalControls)
+	require.Equal(t, 1, file.TotalFailed)
+	require.NotNil(t, file.ComplianceScore)
+	inline := scan("scan_manifest", "manifest", pod)
+	assert.Equal(t, file.TotalControls, inline.TotalControls)
+	assert.Equal(t, file.TotalFailed, inline.TotalFailed)
+	require.NotNil(t, inline.ComplianceScore)
+	assert.Equal(t, *file.ComplianceScore, *inline.ComplianceScore)
 }
 
 func TestManifestScan_CallTool(t *testing.T) {

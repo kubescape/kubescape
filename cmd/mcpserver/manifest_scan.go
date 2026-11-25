@@ -47,6 +47,7 @@ func (ksServer *KubescapeMcpserver) runManifestScan(ctx context.Context, manifes
 		label:               label,
 		wantComplianceScore: true,
 		rsrcHandler:         manifestHandler,
+		inMemoryManifest:    true,
 		workspaceDir:        ksServer.workspaceDir,
 	}
 	if len(filters) > 0 {

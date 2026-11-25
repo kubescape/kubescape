@@ -159,6 +159,7 @@ type ScanInfo struct {
 	WorkspaceDir              string                       // Workspace root directory for containment enforcement
 	MaxParallelResourcePulls  int                          // Maximum parallel resource pulls from the Kubernetes API (defaults to 8, or KUBESCAPE_MAX_PARALLEL_PULLS)
 	InputPatterns             []string                     // Yaml files input patterns
+	InMemoryManifest          bool                         // Manifest content supplied without a filesystem path
 	Silent                    bool                         // Silent mode - Do not print progress logs
 	FailThreshold             float32                      // DEPRECATED - Failure score threshold
 	ComplianceThreshold       float32                      // Compliance score threshold
@@ -883,15 +884,17 @@ func (scanInfo *ScanInfo) GetClusterContextName() string {
 	return k8sinterface.GetContextName()
 }
 
-// getScanningContext classifies the scan target type from the input string.
+// getScanningContext classifies the scan target from the type of input.
 // Remote URL classification (ContextGitRemote) is purely syntactic and performs
 // no network or disk I/O — in particular, it no longer clones the repository.
 // Local-path classification still inspects the filesystem (os.Getwd,
 // NewLocalGitRepository, isFile) to distinguish directories, files, and local
 // git repositories.
 func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
-	//  cluster
 	if input == "" {
+		if scanInfo.InMemoryManifest {
+			return ContextFile
+		}
 		return ContextCluster
 	}
 
@@ -1005,6 +1008,10 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 		}
 
 	case ContextFile:
+		if input == "" {
+			// An in-memory manifest has no file path or repository identity.
+			return
+		}
 		contextMetadata.FileContextMetadata = &reporthandlingv2.FileContextMetadata{
 			FilePath: getAbsPath(input),
 			HostName: getHostname(),

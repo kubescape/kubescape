@@ -68,8 +68,9 @@ type scanRequest struct {
 	// rsrcHandler overrides resource collection. Nil means build a
 	// K8sResourceHandler against the live cluster; a FileResourceHandler here is
 	// what makes the local-manifest scans work.
-	rsrcHandler   resourcehandler.IResourceHandler
-	inputPatterns []string
+	rsrcHandler      resourcehandler.IResourceHandler
+	inputPatterns    []string
+	inMemoryManifest bool
 	// customGetters replaces the policy getters wholesale. Nil means derive them
 	// from the server's own policy getter.
 	customGetters *cautils.Getters
@@ -298,6 +299,7 @@ func buildScanInfo(req scanRequest) *cautils.ScanInfo {
 		ExcludedNamespaces: req.excludedNamespaces,
 		ScanTimeout:        timeout,
 		InputPatterns:      req.inputPatterns,
+		InMemoryManifest:   req.inMemoryManifest,
 		ScanObject:         req.scanObject,
 		WorkspaceDir:       req.workspaceDir,
 		IncludeKinds:       req.includeKinds,

@@ -59,6 +59,15 @@ func TestSetContextMetadata(t *testing.T) {
 		assert.Nil(t, ctx.HelmContextMetadata)
 		assert.Nil(t, ctx.RepoContextMetadata)
 	})
+	t.Run("in-memory manifest uses file scope", func(t *testing.T) {
+		scanInfo := &ScanInfo{InMemoryManifest: true}
+		metadata := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
+
+		assert.Equal(t, reporthandlingv2.File, metadata.ScanMetadata.ScanningTarget)
+		assert.Nil(t, metadata.ContextMetadata.ClusterContextMetadata)
+		assert.Nil(t, metadata.ContextMetadata.FileContextMetadata)
+		assert.Nil(t, metadata.ContextMetadata.RepoContextMetadata)
+	})
 	t.Run("git local repository metadata", func(t *testing.T) {
 		// metadataGitLocal only parses the local repo's configured remote URL,
 		// so a local fixture reproduces the remote metadata without any HTTP calls.
