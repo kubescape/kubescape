@@ -257,6 +257,12 @@ func TestOperatorRemediateCmd_PayloadValidationErrors(t *testing.T) {
 
 // TestOperatorRemediateCmd_ReasonWarning verifies warning output when --reason is omitted for annotate, patch and quarantine.
 func TestOperatorRemediateCmd_ReasonWarning(t *testing.T) {
+	prevCheck := checkOperatorVersion
+	checkOperatorVersion = func(ctx context.Context, namespace string, minVersion string) error {
+		return nil
+	}
+	t.Cleanup(func() { checkOperatorVersion = prevCheck })
+
 	for _, action := range []string{annotateSubCommand, patchSubCommand, quarantineSubCommand} {
 		t.Run(action, func(t *testing.T) {
 			op := newFakeOperator(t, "")
