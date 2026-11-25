@@ -34,40 +34,44 @@ func buildExceptionAudit(
 ) *cautils.ExceptionAudit {
 	items := make(map[string]*cautils.ExceptionAuditItem, len(loadedExceptions))
 	active := make(map[string]struct{}, len(activeExceptions))
-	// sources groups the distinct exceptions sharing an exceptionAuditKey. Exceptions
-	// without a GUID (local files, SecurityException CRDs) are keyed by name, which is
-	// not unique, so each distinct one gets its own item.
-	sources := make(map[string][]exceptionAuditSource, len(loadedExceptions))
+	// sources holds one slot per loaded exception, grouped by exceptionAuditKey.
+	// Exceptions without a GUID (local files, SecurityException CRDs) are keyed by
+	// name, which is not unique, so each distinct one gets its own item; identical
+	// repeats share their item but keep their own slot.
+	sources := make(map[string][]*exceptionAuditSource, len(loadedExceptions))
+	distinct := make(map[string]int, len(loadedExceptions))
 
 	add := func(exception armotypes.PostureExceptionPolicy) string {
 		key := exceptionAuditKey(exception)
 		id := key
-		if n := len(sources[key]); n > 0 {
+		if n := distinct[key]; n > 0 {
 			// "\x00" sorts first, keeping same-named items together.
 			id = key + "\x00" + strconv.Itoa(n)
 		}
-		sources[key] = append(sources[key], exceptionAuditSource{id: id, exception: exception})
+		distinct[key]++
+		sources[key] = append(sources[key], &exceptionAuditSource{id: id, exception: exception})
 		item := exceptionAuditItem(exception, policies, processor)
 		items[id] = &item
 		return id
 	}
 	// resolve returns the item of the loaded exception that exception was derived from.
 	// Exact copies are preferred over narrowed ones. The processor attaches at most one
-	// copy per loaded exception to a rule, in load order, so candidates already in used
-	// are skipped; this keeps narrowed copies of similar same-named exceptions apart.
-	var resolve func(exception armotypes.PostureExceptionPolicy, used map[string]struct{}) string
-	resolve = func(exception armotypes.PostureExceptionPolicy, used map[string]struct{}) string {
-		candidates := sources[exceptionAuditKey(exception)]
-		if len(candidates) == 1 {
+	// copy per loaded exception to a rule, in load order, so slots already in used are
+	// skipped; this keeps narrowed copies of similar same-named exceptions apart.
+	var resolve func(exception armotypes.PostureExceptionPolicy, used map[*exceptionAuditSource]struct{}) string
+	resolve = func(exception armotypes.PostureExceptionPolicy, used map[*exceptionAuditSource]struct{}) string {
+		key := exceptionAuditKey(exception)
+		candidates := sources[key]
+		if distinct[key] == 1 {
 			return candidates[0].id
 		}
 		for _, matches := range []func(match, loaded armotypes.PostureExceptionPolicy) bool{exceptionEqual, exceptionDerivedFrom} {
 			for _, candidate := range candidates {
-				if _, ok := used[candidate.id]; ok || !matches(exception, candidate.exception) {
+				if _, ok := used[candidate]; ok || !matches(exception, candidate.exception) {
 					continue
 				}
 				if used != nil {
-					used[candidate.id] = struct{}{}
+					used[candidate] = struct{}{}
 				}
 				return candidate.id
 			}
@@ -78,13 +82,17 @@ func buildExceptionAudit(
 		return add(exception)
 	}
 
+loaded:
 	for _, exception := range loadedExceptions {
 		key := exceptionAuditKey(exception)
 		if exception.GUID != "" && len(sources[key]) > 0 {
 			continue
 		}
-		if slices.ContainsFunc(sources[key], func(s exceptionAuditSource) bool { return exceptionEqual(exception, s.exception) }) {
-			continue
+		for _, source := range sources[key] {
+			if exceptionEqual(exception, source.exception) {
+				sources[key] = append(sources[key], &exceptionAuditSource{id: source.id, exception: exception})
+				continue loaded
+			}
 		}
 		add(exception)
 	}
@@ -101,7 +109,7 @@ func buildExceptionAudit(
 		for _, control := range result.AssociatedControls {
 			controlID := control.GetID()
 			for _, rule := range control.ResourceAssociatedRules {
-				used := map[string]struct{}{}
+				used := map[*exceptionAuditSource]struct{}{}
 				for _, exception := range rule.Exception {
 					key := resolve(exception, used)
 					// Match with framework context, but retain the original policy's
@@ -119,10 +127,10 @@ func buildExceptionAudit(
 	// Manual controls never appear in results (they have no resourcesresults.Result
 	// entries at all), so without this an exception that only suppresses a manual
 	// control is reported as unused even though it is actively applied.
-	usedByControl := map[string]map[string]struct{}{}
+	usedByControl := map[string]map[*exceptionAuditSource]struct{}{}
 	for _, match := range manualControlMatches {
 		if usedByControl[match.controlID] == nil {
-			usedByControl[match.controlID] = map[string]struct{}{}
+			usedByControl[match.controlID] = map[*exceptionAuditSource]struct{}{}
 		}
 		key := resolve(match.exception, usedByControl[match.controlID])
 		items[key].MatchCount++

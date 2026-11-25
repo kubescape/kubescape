@@ -3,6 +3,7 @@ package opaprocessor
 import (
 	"context"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -167,14 +168,16 @@ func applyExceptionsToManualControls(
 
 	// A partial framework match is still an audit match, but the same exception
 	// applied through multiple frameworks counts only once for each control.
-	seen := make(map[struct{ exception, control string }]bool)
+	// Compare whole exceptions: GUID-less ones share names, so a name key would
+	// drop a distinct same-named exception.
+	seen := make(map[string][]armotypes.PostureExceptionPolicy)
 	unique := matches[:0]
 	for _, match := range matches {
-		key := struct{ exception, control string }{exceptionAuditKey(match.exception), match.controlID}
-		if !seen[key] {
-			seen[key] = true
-			unique = append(unique, match)
+		if slices.ContainsFunc(seen[match.controlID], func(e armotypes.PostureExceptionPolicy) bool { return exceptionEqual(e, match.exception) }) {
+			continue
 		}
+		seen[match.controlID] = append(seen[match.controlID], match.exception)
+		unique = append(unique, match)
 	}
 	return unique
 }
