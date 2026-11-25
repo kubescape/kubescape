@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/pkg/vapreconcile"
+	"github.com/kubescape/kubescape/v4/core/pkg/webhookcoverage"
 	"github.com/kubescape/opa-utils/reporthandling"
 	apis "github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -147,6 +148,17 @@ type OPASessionObj struct {
 	// resultshandling after VAPPolicies/VAPBindings are enriched into the
 	// report, keyed by control ID.
 	VAPCoverage map[string]*vapreconcile.ControlCoverage
+
+	// WebhookConfigurations holds the validating and mutating admission webhook
+	// configurations read from the cluster, with the outcome of listing each
+	// kind. It is nil when they were not collected (not a live-cluster scan, or
+	// the client could not list at all); an empty list is only ever a list that
+	// was read and was empty.
+	WebhookConfigurations *webhookcoverage.Collection
+	// WebhookCoverage is the webhook matching analysis of the collected
+	// workloads, populated by resultshandling. It is neutral analysis data, not
+	// a finding: see core/pkg/webhookcoverage.
+	WebhookCoverage *webhookcoverage.Analysis
 
 	// EnvVarSecretRefs records, per resource ID and then per container name,
 	// which container env var names had a ValueFrom reference

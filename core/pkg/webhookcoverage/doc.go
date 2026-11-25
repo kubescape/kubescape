@@ -108,6 +108,17 @@
 //     policy kinds the API server skips API-defined webhooks only; static
 //     ones may still see them.
 //
+// # Collection and analysis
+//
+// Collect reads the validating and mutating webhook configurations of a
+// cluster, and Analyze runs collected workloads through Index.Matches with a
+// synthetic CREATE request each. Each kind of configuration reports through its
+// Source whether it was read: a list that could not be read is never an empty
+// one, and an Analysis is only Complete when both kinds and the workloads were
+// collected in full. Workload kinds that cannot be analyzed reliably, and
+// every other collected kind, are counted in Analysis.Skipped rather than
+// dropped. Namespace labels that were not collected stay unknown.
+//
 // # NotMatched is not a security conclusion
 //
 // NotMatched only means this particular webhook would not be called for the
