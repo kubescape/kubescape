@@ -1043,6 +1043,11 @@ func resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *
 }
 
 func lookupFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.PathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) (locationresolver.Location, bool) {
+	// Terraform files have no YAML node tree to resolve fix paths in, so point
+	// at the resource block the workload was converted from.
+	if location, ok := terraformResourceLocation(opaSessionObj, resourceID); ok {
+		return location, true
+	}
 	if locationResolver == nil {
 		return locationresolver.Location{}, false
 	}
@@ -1236,6 +1241,28 @@ func collectFixes(ctx context.Context, cache *fixReportCache, result *sarif.Resu
 			addFixRegions(result, filepath, cache.fixRegions(ctx, rsrcAbsPath, yamlExpression))
 		}
 	}
+}
+
+// terraformResourceLocation returns the start of the Terraform resource block
+// a resource was converted from. It reports false for resources that didn't
+// come from a Terraform file.
+func terraformResourceLocation(opaSessionObj *cautils.OPASessionObj, resourceID string) (locationresolver.Location, bool) {
+	if opaSessionObj == nil {
+		return locationresolver.Location{}, false
+	}
+	resource, ok := opaSessionObj.GetResource(resourceID)
+	if !ok || resource == nil {
+		return locationresolver.Location{}, false
+	}
+	lw, ok := resource.(*localworkload.LocalWorkload)
+	if !ok {
+		return locationresolver.Location{}, false
+	}
+	source, ok := cautils.TerraformSourceLocation(lw.GetPath())
+	if !ok {
+		return locationresolver.Location{}, false
+	}
+	return locationresolver.Location{Line: source.Line, Column: source.Column}, true
 }
 
 func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, bool) {

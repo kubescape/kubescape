@@ -606,6 +606,13 @@ func hclResourceBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *
 // resource with count or for_each becomes one manifest per known instance; a
 // count or for_each that can't be resolved is an error.
 func extractTypedResources(body hcl.Body, evalCtx *hcl.EvalContext, references ...terraformReferenceChecker) ([]map[string]interface{}, []error) {
+	manifests, errs := extractTypedResourceManifests(body, evalCtx, references...)
+	return terraformManifestObjects(manifests), errs
+}
+
+// extractTypedResourceManifests is extractTypedResources, keeping the source
+// range of the resource block each manifest was converted from.
+func extractTypedResourceManifests(body hcl.Body, evalCtx *hcl.EvalContext, references ...terraformReferenceChecker) ([]terraformManifest, []error) {
 	synBody, ok := body.(*hclsyntax.Body)
 	if !ok {
 		return nil, nil
@@ -615,7 +622,7 @@ func extractTypedResources(body hcl.Body, evalCtx *hcl.EvalContext, references .
 		reference = references[0]
 	}
 	var errs []error
-	var manifests []map[string]interface{}
+	var manifests []terraformManifest
 
 	for _, block := range synBody.Blocks {
 		if block.Type != "resource" || len(block.Labels) < 2 {
@@ -638,7 +645,10 @@ func extractTypedResources(body hcl.Body, evalCtx *hcl.EvalContext, references .
 		// dynamic blocks they generate are bounded together, not per instance.
 		converter := terraformBodyConverter{errs: &errs, remaining: maxTerraformLocalSize, references: reference}
 		for _, instanceCtx := range instances {
-			manifests = append(manifests, typedResourceManifest(&converter, block, gvk.apiVersion, gvk.kind, instanceCtx, path))
+			manifests = append(manifests, terraformManifest{
+				object: typedResourceManifest(&converter, block, gvk.apiVersion, gvk.kind, instanceCtx, path),
+				source: block.DefRange(),
+			})
 		}
 	}
 	return manifests, errs
