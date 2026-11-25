@@ -588,4 +588,23 @@ func TestReportEventReceiver_NilSafety(t *testing.T) {
 			assert.EqualError(t, err, "failed to submit scan results: tenant config is nil")
 		})
 	})
+
+	t.Run("valid receiver dependencies with nil Report", func(t *testing.T) {
+		receiver := NewReportEventReceiver(
+			&TenantConfigMock{
+				clusterName: "test",
+				accountID:   "1234",
+			},
+			"report-id",
+			SubmitContextScan,
+			getter.GetKSCloudAPIConnector(),
+		)
+		assert.NotPanics(t, func() {
+			err := receiver.Submit(context.Background(), &cautils.OPASessionObj{Report: nil})
+			assert.EqualError(t, err, "failed to submit scan results: report is nil")
+
+			err = receiver.sendReport(context.Background(), nil, 0, true)
+			assert.EqualError(t, err, "failed to send report: report is nil")
+		})
+	})
 }

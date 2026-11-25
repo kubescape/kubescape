@@ -68,6 +68,9 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 	if report.client == nil {
 		return fmt.Errorf("failed to submit scan results: client is nil")
 	}
+	if opaSessionObj.Report == nil {
+		return fmt.Errorf("failed to submit scan results: report is nil")
+	}
 	ctx, span := otel.Tracer("").Start(ctx, "reportEventReceiver.Submit")
 	defer span.End()
 	report.reportTime = time.Now().UTC()
@@ -317,6 +320,9 @@ func (report *ReportEventReceiver) setResourcesFromCatalog(ctx context.Context, 
 }
 
 func (report *ReportEventReceiver) sendReport(ctx context.Context, postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
+	if postureReport == nil {
+		return fmt.Errorf("failed to send report: report is nil")
+	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("scan canceled: %w", err)
 	}
