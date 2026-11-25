@@ -1,6 +1,7 @@
 package fixhandler
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -17,6 +18,8 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
@@ -1681,11 +1684,12 @@ func extractCRDsFromChartDir(chartPath string, allowedBasePath string) map[crdSc
 					return nil
 				}
 			}
-			data, readErr := crdRoot.ReadFile(path)
+			data, readErr := readRegularFileFromRoot(crdRoot, path, filepath.Join(dir, path))
 			if readErr != nil {
+				logger.L().Warning("skipping CRD file in chart crds directory", helpers.String("path", filepath.Join(dir, path)), helpers.Error(readErr))
 				return nil
 			}
-			decoder := yaml.NewDecoder(strings.NewReader(string(data)))
+			decoder := yaml.NewDecoder(bytes.NewReader(data))
 			for {
 				var obj map[string]interface{}
 				if decErr := decoder.Decode(&obj); decErr != nil {

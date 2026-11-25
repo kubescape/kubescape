@@ -14,6 +14,7 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -6271,4 +6272,42 @@ spec:
 	_, err := EmitKustomizePatch(suggestions, outDir, WithOverwrite(true))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ambiguous patch target detected")
+}
+
+func TestExtractCRDsFromChartDir_BoundedReads(t *testing.T) {
+	t.Run("skips oversized CRD file while reading valid CRD within limit", func(t *testing.T) {
+		t.Setenv(filesizelimit.MaxFileSizeEnvVar, "256")
+
+		chartDir := t.TempDir()
+		crdsDir := filepath.Join(chartDir, "crds")
+		require.NoError(t, os.MkdirAll(crdsDir, 0o755))
+
+		smallCRD := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: smalls.example.com
+spec:
+  group: example.com
+  scope: Cluster
+  names:
+    kind: SmallThing
+`
+		require.NoError(t, os.WriteFile(filepath.Join(crdsDir, "small.yaml"), []byte(smallCRD), 0o600))
+
+		oversizedCRD := `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: huges.example.com
+spec:
+  group: example.com
+  scope: Cluster
+  names:
+    kind: HugeThing
+# ` + strings.Repeat("x", 400) + "\n"
+		require.NoError(t, os.WriteFile(filepath.Join(crdsDir, "huge.yaml"), []byte(oversizedCRD), 0o600))
+
+		scopes := extractCRDsFromChartDir(chartDir, chartDir)
+		assert.Contains(t, scopes, crdScopeKey{Group: "example.com", Kind: "SmallThing"})
+		assert.NotContains(t, scopes, crdScopeKey{Group: "example.com", Kind: "HugeThing"})
+	})
 }
