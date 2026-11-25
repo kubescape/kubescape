@@ -55,7 +55,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/jwalton/gchalk v1.3.0
 	github.com/klauspost/compress v1.20.3
-	github.com/kubescape/backend v0.0.53
+	github.com/kubescape/backend v0.0.54
 	github.com/kubescape/go-git-url v0.0.33
 	github.com/kubescape/go-logger v0.0.35
 	github.com/kubescape/k8s-interface v0.0.221
@@ -427,8 +427,6 @@ require (
 	github.com/knqyf263/go-apk-version v0.0.0-20200609155635-041fdbb8563f // indirect
 	github.com/knqyf263/go-deb-version v0.0.0-20241115132648-6f4aee6ccd23 // indirect
 	github.com/knqyf263/go-rpm-version v0.0.0-20220614171824-631e686d1075 // indirect
-	github.com/kubescape/kubescape/v3 v3.0.4 // indirect
-	github.com/kubescape/regolibrary v1.0.317-0.20240320124840-1d84ac7186ea // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.4 // indirect
 	github.com/lestrrat-go/dsig v1.4.0 // indirect
