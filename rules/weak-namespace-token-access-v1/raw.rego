@@ -35,7 +35,7 @@ deny contains msga if {
 	})
 
 	msga := {
-		"alertMessage": sprintf("Subject: %s-%s can access secrets in unprivileged namespace %s and so obtain a service account token that may carry broader permissions over the cluster", [subjectVector.kind, subjectVector.name, rolebinding.metadata.namespace]),
+		"alertMessage": sprintf("Subject: %s-%s can access secrets in %s and so obtain a service account token that may carry broader permissions over the cluster", [subjectVector.kind, subjectVector.name, namespace_phrase(rolebinding)]),
 		"alertScore": 3,
 		"packagename": "armo_builtins",
 		"reviewPaths": finalpath,
@@ -52,10 +52,11 @@ deny contains msga if {
 # named service account without touching a secret at all, which is the same
 # outcome by the supported route.
 #
-# resourceNames is deliberately not consulted here. Unlike a top-level create,
-# a create against a subresource carries the name of its parent object, so a
-# narrowed entry still authorizes the request; it only decides which service
-# account the subject may mint a token for, and minting one at all is the abuse.
+# A narrowed entry is still reported. Unlike a top-level create, a create
+# against a subresource carries the name of its parent object, so a narrowed
+# entry still authorizes the request; it only decides which service account the
+# subject may mint a token for, and minting one at all is the abuse. It does
+# have to name a service account, though (see names_a_service_account).
 deny contains msga if {
 	subjectVector := input[_]
 	role := subjectVector.relatedObjects[i]
@@ -66,6 +67,7 @@ deny contains msga if {
 	core_api_group(rule)
 	targets_subresource(rule, "serviceaccounts/token")
 	rule.verbs[_] in {"create", "*"}
+	names_a_service_account(rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -77,7 +79,7 @@ deny contains msga if {
 	})
 
 	msga := {
-		"alertMessage": sprintf("Subject: %s-%s can mint service account tokens in unprivileged namespace %s and so act as a service account that may carry broader permissions over the cluster", [subjectVector.kind, subjectVector.name, rolebinding.metadata.namespace]),
+		"alertMessage": sprintf("Subject: %s-%s can mint service account tokens in %s and so act as a service account that may carry broader permissions over the cluster", [subjectVector.kind, subjectVector.name, namespace_phrase(rolebinding)]),
 		"alertScore": 3,
 		"packagename": "armo_builtins",
 		"reviewPaths": finalpath,
@@ -122,13 +124,28 @@ token_verbs(rule) := {"get", "list", "watch", "update", "patch", "*"} if {
 token_verbs(rule) := {"list", "watch", "*"} if {
 	not unrestricted_rule(rule)
 	not names_a_secret(rule)
+	"" in resource_names(rule)
 }
 
-# A non-empty resourceNames entry is a real secret. "" is the name a collection
-# request is authorized with, not the name of an object.
+# A resourceNames entry other than "" and "*" can be a real secret. "" is the
+# name a collection request is authorized with, not the name of an object, and
+# "*" is matched literally (RBAC does not expand it), which no secret can be
+# named.
 names_a_secret(rule) if {
 	some name in resource_names(rule)
-	name != ""
+	not name in {"", "*"}
+}
+
+# A TokenRequest is authorized with the name of the service account it is for.
+# That name is never "", and "*" is matched literally (RBAC does not expand it)
+# while no service account can be called "*", as the name has to be a DNS
+# subdomain. An entry narrowed to those two alone therefore reaches no service
+# account. create-serviceaccount-token-v1 skips the same entries.
+names_a_service_account(rule) if unrestricted_rule(rule)
+
+names_a_service_account(rule) if {
+	some name in resource_names(rule)
+	not name in {"", "*"}
 }
 
 targets_secrets(rule) if {
@@ -180,7 +197,8 @@ binds_unprivileged_namespace(role, rolebinding) if {
 	is_same_namespace(role, rolebinding)
 
 	rolebinding.kind == "RoleBinding"
-	not rolebinding.metadata.namespace in {"kube-system"}
+	not in_privileged_namespace(rolebinding)
+	not in_privileged_namespace(role)
 }
 
 matched_paths(rule, i, j, k, p, matches) := finalpath if {
@@ -203,6 +221,42 @@ is_same_namespace(role, _) if {
 is_same_namespace(role, rolebinding) if {
 	role.kind == "Role"
 	role.metadata.namespace == rolebinding.metadata.namespace
+}
+
+# A manifest meant for "kubectl apply -n" may leave out the namespace, and the
+# subject aggregator pairs it with either side; comparing the fields would drop it.
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	not release_namespace(role)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	not has_namespace(rolebinding)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	rolebinding.metadata.namespace == release_namespace(role)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(rolebinding)
+}
+
+has_namespace(obj) if {
+	is_string(obj.metadata.namespace)
+	obj.metadata.namespace != ""
+}
+
+release_namespace(obj) := ns if {
+	is_string(obj.metadata.annotations["meta.helm.sh/release-namespace"])
+	obj.metadata.annotations["meta.helm.sh/release-namespace"] != ""
+	ns := obj.metadata.annotations["meta.helm.sh/release-namespace"]
 }
 
 is_same_subjects(subjectVector, subject) if {
@@ -238,3 +292,15 @@ resource_names(rule) := names if {
 	names := object.get(rule, "resourceNames", [])
 	names != null
 } else := []
+
+# namespace_phrase names where a RoleBinding grants its role in an alert. A
+# manifest without a namespace grants it in whichever namespace it is applied
+# to, which the manifest alone cannot tell.
+namespace_phrase(rolebinding) := sprintf("unprivileged namespace %s", [rolebinding.metadata.namespace]) if {
+	has_namespace(rolebinding)
+} else := "the namespace the RoleBinding is applied to"
+
+# Negating the membership test directly fails for an object without a
+# namespace, because "not" over an undefined value in an "in" expression is
+# false, so it is kept in its own rule.
+in_privileged_namespace(obj) if obj.metadata.namespace in {"kube-system"}

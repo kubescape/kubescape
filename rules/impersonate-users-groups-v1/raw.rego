@@ -135,6 +135,42 @@ is_same_namespace(role, rolebinding) if {
 	role.metadata.namespace == rolebinding.metadata.namespace
 }
 
+# A manifest meant for "kubectl apply -n" may leave out the namespace, and the
+# subject aggregator pairs it with either side; comparing the fields would drop it.
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	not release_namespace(role)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	not has_namespace(rolebinding)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	rolebinding.metadata.namespace == release_namespace(role)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(rolebinding)
+}
+
+has_namespace(obj) if {
+	is_string(obj.metadata.namespace)
+	obj.metadata.namespace != ""
+}
+
+release_namespace(obj) := ns if {
+	is_string(obj.metadata.annotations["meta.helm.sh/release-namespace"])
+	obj.metadata.annotations["meta.helm.sh/release-namespace"] != ""
+	ns := obj.metadata.annotations["meta.helm.sh/release-namespace"]
+}
+
 is_same_subjects(subjectVector, subject) if {
 	subjectVector.kind == subject.kind
 	subjectVector.name == subject.name

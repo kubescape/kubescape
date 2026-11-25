@@ -94,8 +94,31 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			if cmd.Name() == "validate-contract" {
 				return nil
 			}
-			if cmd.Name() == "image" && scanContractPath != "" {
-				return fmt.Errorf("--scan-contract is supported for posture scans, not image scans")
+			if cmd.Name() == "image" {
+				if scanContractPath != "" || commandFlagChanged(cmd, "scan-contract") {
+					return fmt.Errorf("--scan-contract is supported for posture scans, not image scans")
+				}
+				if scanContractName != "" || commandFlagChanged(cmd, "contract") {
+					return fmt.Errorf("--contract is supported for posture scans, not image scans")
+				}
+				if len(scanContractAllow) > 0 || commandFlagChanged(cmd, "contract-allow") {
+					return fmt.Errorf("--contract-allow is supported for posture scans, not image scans")
+				}
+				if fleetConfigPath != "" || commandFlagChanged(cmd, "fleet-config") {
+					return fmt.Errorf("--fleet-config is not supported for image scans: an image scan evaluates vulnerabilities, not multi-cluster fleet configurations")
+				}
+				if scanInfo.FleetReport != "" || commandFlagChanged(cmd, "fleet-report") {
+					return fmt.Errorf("--fleet-report is not supported for image scans: an image scan evaluates vulnerabilities, not multi-cluster fleet reports")
+				}
+				if scanInfo.ReferenceCluster != "" || commandFlagChanged(cmd, "reference-cluster") {
+					return fmt.Errorf("--reference-cluster is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes clusters")
+				}
+				if commandFlagChanged(cmd, "parallel") {
+					return fmt.Errorf("--parallel is not supported for image scans: an image scan evaluates vulnerabilities, not multi-cluster scans (use --image-scan-concurrency instead)")
+				}
+				if commandFlagChanged(cmd, "retries") {
+					return fmt.Errorf("--retries is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes cluster API servers")
+				}
 			}
 			var err error
 			selectedContract, err = loadAndApplyScanContract(cmd, &scanInfo, scanContractPath, scanContractName, scanContractAllow)
@@ -115,6 +138,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			}
 			if scanInfo.ControlTimeout < 0 {
 				return fmt.Errorf("invalid --control-timeout %s: must be zero or positive", scanInfo.ControlTimeout)
+			}
+			if scanInfo.MaxParallelResourcePulls < 0 {
+				return fmt.Errorf("invalid --max-parallel-pulls %d: must be zero or positive", scanInfo.MaxParallelResourcePulls)
 			}
 			if gitCloneDepth < 0 {
 				return fmt.Errorf("invalid --git-clone-depth %d: must be zero or positive", gitCloneDepth)
@@ -219,7 +245,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				if watchMode {
 					return watchSecurityScan(cmd, ks, &scanInfo, policyIdentifiers)
 				}
-				return securityScan(scanInfo, ks, policyIdentifiers)
+				run := runSecurityScanWithCompliance
+				if !scanCommandEnforcesComplianceGate(cmd, scanInfo.View, selectedContract) {
+					run = runSecurityScan
+				}
+				return securityScanWith(scanInfo, ks, policyIdentifiers, run)
 			}
 
 			if scanInfo.View == string(cautils.SecurityViewType) {
@@ -288,12 +318,12 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseExceptions, "exceptions", "", "Path to an exceptions obj. If not set will download exceptions from ARMO management portal")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.AuditExceptions, "audit-exceptions", false, "Include an exception usage audit in supported scan outputs")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseArtifactsFrom, "use-artifacts-from", "", "Load artifacts from local directory. If not used will download them")
-	scanCmd.PersistentFlags().StringVar(&scanInfo.CustomRules, "custom-rules", "", "Path to user-authored custom rules: a ValidatingAdmissionPolicy (.yaml/.yml) file, a rule directory holding raw.rego and rule.metadata.json (the layout used by 'kubescape policy test'), a directory of such rule directories, or a directory of bare *.rego and *.yaml/*.yml files. A rule's declared match selectors or matchConstraints are honoured; a bare .rego file is matched against every resource kind. A custom rule is medium severity unless its source declares '# @baseScore <1-10>'")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.CustomRules, "custom-rules", "", "Path to user-authored custom rules: one or more ValidatingAdmissionPolicy documents in a .yaml/.yml file (separated by ---), a rule directory holding raw.rego and rule.metadata.json (the layout used by 'kubescape policy test'), a directory of such rule directories, or a directory of bare *.rego and *.yaml/*.yml files. A rule's declared match selectors or matchConstraints are honoured; a bare .rego file is matched against every resource kind. A custom rule is medium severity unless its source declares '# @baseScore <1-10>'")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from scanning. e.g: --exclude-namespaces ns-a,ns-b. Cannot be used together with --include-namespaces. Notice, when running with --exclude-namespaces kubescape does not scan cluster-scoped objects.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.MinSeverity, "min-severity", "", "Only include findings at or above this severity (low, medium, high, critical) in the output. Applies to posture controls and image vulnerabilities. Does not affect exit codes, which are computed on the full unfiltered report")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.MaxSeverity, "max-severity", "", "Only include findings at or below this severity (low, medium, high, critical) in the output. Applies to posture controls and image vulnerabilities. Does not affect exit codes, which are computed on the full unfiltered report")
 
-	scanCmd.PersistentFlags().Float32VarP(&scanInfo.ComplianceThreshold, "compliance-threshold", "", 0, "Compliance threshold is the percent below which the command fails and returns exit code 1. Applies to 'scan framework', 'scan control', 'scan workload', and '--view resource|control'")
+	scanCmd.PersistentFlags().Float32VarP(&scanInfo.ComplianceThreshold, "compliance-threshold", "", 0, "Compliance threshold is the percent below which the command fails and returns exit code 1. Applies to 'scan framework', 'scan control', 'scan workload', '--view resource|control', and scans whose --scan-contract selects a policy unless --view security is given explicitly")
 	scanCmd.PersistentFlags().Float32Var(&scanInfo.FailCoverageThreshold, "fail-coverage-below", 0, "Fail (exit code 1) when the scan coverage score drops below this percentage (0 to disable). The score is the ratio of evaluated controls discounted by 3 points per silent failed GVR pull (a resource type that failed to collect entirely but whose dependent controls still evaluated via other resource types), 2 points per partial GVR pull, and 5 points per degraded policy input, so a scan with every control evaluated can still fail on partial resource collection or fallback policy inputs")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.FailOnDegradedConfig, "fail-on-degraded-config", false, "Fail the scan (exit code 1) if control configurations or exceptions could not be loaded from their configured source and bundled defaults were used instead")
 
@@ -407,13 +437,14 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&fleetConfigPath, "fleet-config", "", "Path to a fleet config file (kind FleetConfig) with the contexts to scan and where the reports go: contexts, output, fleetReport, referenceCluster and retries. A flag given on the command line overrides the same setting in the file.")
 
 	scanCmd.PersistentFlags().IntVar(&scanInfo.KubeContextParallel, "parallel", 1, "With --kube-contexts, how many contexts to scan at once. Above 1, each context is scanned in its own kubescape process, since one process can only talk to one cluster at a time.")
+	scanCmd.PersistentFlags().IntVar(&scanInfo.MaxParallelResourcePulls, "max-parallel-pulls", 0, "Maximum number of parallel resource pulls from the Kubernetes API server (defaults to 8, or KUBESCAPE_MAX_PARALLEL_PULLS)")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FleetChildResult, "fleet-child-result", "", "Internal: where a --parallel child process writes its context's result for the parent.")
 	_ = scanCmd.PersistentFlags().MarkHidden("fleet-child-result") // #nosec G104 -- flag defined on this command; MarkHidden only errors for an unknown flag
 	scanCmd.PersistentFlags().IntVar(&scanInfo.KubeContextRetries, "retries", 2, "With --kube-contexts, how many more times to try a cluster whose API server never answered, waiting 2s, then 4s, doubling up to 30s between attempts. A cluster that answered with an error, or whose scan was cancelled, is not retried. 0 disables retries.")
 
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ReferenceCluster, "reference-cluster", "", "With --fleet-report, the kube context whose findings the other clusters are read against, so the combined report shows what that cluster found on every control they disagree on. Must be one of --kube-contexts. Without it the report simply says where the clusters disagree.")
 
-	scanCmd.PersistentFlags().StringVar(&scanInfo.Baseline, "baseline", "", "Path to a saved JSON scan report to diff the fresh scan against.")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.Baseline, "baseline", "", "Path to a saved JSON scan report to diff the fresh scan against. Not supported with --encrypt.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.BaselineFailOnNew, "baseline-fail-on-new", false, "With --baseline, exit with code 1 when new failures are found versus the baseline.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineSeverityThreshold, "baseline-severity-threshold", "", "With --baseline, only count new failures at or above this severity when using --baseline-fail-on-new.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineGranularity, "baseline-granularity", "evidence", "With --baseline, comparison unit: evidence or control.")
@@ -430,7 +461,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	// Wrap after the subcommands are registered so each one is covered.
 	installTelemetry(scanCmd, ks, &scanInfo)
-
+	registerScanFlagCompletions(scanCmd)
 	return scanCmd
 }
 
@@ -457,7 +488,7 @@ func validateCombinedImageScanFlags(scanInfo *cautils.ScanInfo) error {
 		Username:  scanInfo.RegistryUsername,
 		Password:  scanInfo.RegistryPassword,
 		Token:     scanInfo.RegistryToken,
-	})
+	}.Trimmed())
 }
 
 func applyRegistryCredentialsFromEnv(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
@@ -502,20 +533,30 @@ func deriveTimeoutContext(scanInfo *cautils.ScanInfo, ks meta.IKubescape) (conte
 	if ks == nil {
 		return context.Background(), func() {}
 	}
-	if scanInfo.ScanTimeout <= 0 {
-		return ks.Context(), func() {}
+	ctx := ks.Context()
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	return context.WithTimeout(ks.Context(), scanInfo.ScanTimeout)
+	if scanInfo == nil || scanInfo.ScanTimeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, scanInfo.ScanTimeout)
 }
 
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+	return securityScanWith(scanInfo, ks, policyIdentifiers, runSecurityScan)
+}
+
+// securityScanWith runs the bare scan command's policy selection with run,
+// once for a single context or once per context of a fleet scan.
+func securityScanWith(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, run fleetRunner) error {
 	if len(scanInfo.KubeContexts) > 0 {
-		return fleetScan(scanInfo, ks, policyIdentifiers, runSecurityScan)
+		return fleetScan(scanInfo, ks, policyIdentifiers, run)
 	}
 
 	ctx, cancel := deriveTimeoutContext(&scanInfo, ks)
 	defer cancel()
-	_, err := runSecurityScan(ctx, &scanInfo, ks, policyIdentifiers)
+	_, err := run(ctx, &scanInfo, ks, policyIdentifiers)
 	return err
 }
 
@@ -523,8 +564,21 @@ func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifie
 // then every threshold/drift enforcement securityScan performs for the
 // single-context path. It's factored out so fleetScan (cmd/scan/fleetscan.go)
 // can run the exact same per-cluster behavior once per requested context,
-// instead of a parallel, divergent copy of this logic.
+// instead of a parallel, divergent copy of this logic. The security view does
+// not enforce the compliance gate.
 func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return runSecurityScanGates(ctx, scanInfo, ks, policyIdentifiers, false)
+}
+
+// runSecurityScanWithCompliance is runSecurityScan plus the compliance gate. A
+// contract-driven policy scan uses it: the contract's failure.complianceBelow
+// and an explicit --compliance-threshold floor are both resolved into
+// scanInfo.ComplianceThreshold and must be enforced, not only reported.
+func runSecurityScanWithCompliance(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return runSecurityScanGates(ctx, scanInfo, ks, policyIdentifiers, true)
+}
+
+func runSecurityScanGates(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, enforceCompliance bool) (*resultshandling.ResultsHandler, error) {
 	results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
 	if err != nil {
 		return nil, err
@@ -539,7 +593,12 @@ func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IK
 		return results, err
 	}
 
+	var complianceErr error
+	if enforceCompliance {
+		complianceErr = enforceComplianceThreshold(results.GetComplianceScore(), scanInfo)
+	}
 	if err := joinGateErrors(
+		complianceErr,
 		enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo),
 		enforceCombinedImageGates(results, scanInfo),
 	); err != nil {
@@ -640,6 +699,12 @@ func validateBaselineFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo) error
 			return fmt.Errorf("--baseline-granularity requires --baseline")
 		}
 		return nil
+	}
+
+	// Each encrypted scan uses its own data key, so no finding in the new report
+	// can be matched to the baseline and every one would be reported incomparable.
+	if scanInfo.EncryptionEnabled {
+		return fmt.Errorf("--baseline is not supported with --encrypt: each encrypted scan uses its own key, so its findings cannot be matched against the baseline; use --hide for both the baseline and the new scan instead")
 	}
 
 	if strings.TrimSpace(scanInfo.BaselineSeverityThreshold) != "" {

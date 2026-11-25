@@ -566,3 +566,154 @@ func TestGetListCmd_NilKubescape(t *testing.T) {
 	err := cmd.Execute()
 	require.EqualError(t, err, "uninitialized kubescape interface")
 }
+
+func TestGetListCmd_TargetCompletion(t *testing.T) {
+	cmd := GetListCmd(nil)
+
+	require.NotNil(t, cmd.ValidArgsFunction)
+
+	suggestions, directive := cmd.ValidArgsFunction(cmd, nil, "")
+	assert.Equal(t, core.ListSupportActions(), suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "fr")
+	assert.Equal(t, []string{"frameworks"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "Fr")
+	assert.Equal(t, []string{"Frameworks"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "FRAME")
+	assert.Equal(t, []string{"FRAMEworks"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "c")
+	assert.Equal(t, []string{"controls", "controls-config"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "C")
+	assert.Equal(t, []string{"Controls", "Controls-config"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "Controls-")
+	assert.Equal(t, []string{"Controls-config"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "xyz")
+	assert.Empty(t, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+}
+
+func TestGetListCmd_FormatCompletion(t *testing.T) {
+	cmd := GetListCmd(nil)
+
+	completion, ok := cmd.GetFlagCompletionFunc("format")
+	require.True(t, ok)
+
+	suggestions, directive := completion(cmd, nil, "")
+	assert.Equal(t, core.ListSupportFormats(), suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = completion(cmd, nil, "j")
+	assert.Equal(t, []string{"json"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = completion(cmd, nil, "J")
+	assert.Equal(t, []string{"Json"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = completion(cmd, nil, "JSON")
+	assert.Equal(t, []string{"JSON"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = completion(cmd, nil, "Yaml")
+	assert.Equal(t, []string{"Yaml"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = completion(cmd, nil, "Pretty-")
+	assert.Equal(t, []string{"Pretty-print"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = completion(cmd, nil, "xyz")
+	assert.Empty(t, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+}
+
+func TestFlagValidationList_AccountIDTrimming(t *testing.T) {
+	tests := []struct {
+		name          string
+		accountID     string
+		format        string
+		wantAccountID string
+		wantFormat    string
+		wantErr       bool
+		errContains   string
+	}{
+		{
+			name:          "valid account ID with surrounding whitespace",
+			accountID:     "  24e0b04a-8db6-48eb-a912-7815cf15b222  ",
+			format:        "pretty-print",
+			wantAccountID: "24e0b04a-8db6-48eb-a912-7815cf15b222",
+			wantFormat:    "pretty-print",
+			wantErr:       false,
+		},
+		{
+			name:          "whitespace-only account ID trimmed to empty",
+			accountID:     "   ",
+			format:        "json",
+			wantAccountID: "",
+			wantFormat:    "json",
+			wantErr:       false,
+		},
+		{
+			name:          "empty account ID accepted",
+			accountID:     "",
+			format:        "yaml",
+			wantAccountID: "",
+			wantFormat:    "yaml",
+			wantErr:       false,
+		},
+		{
+			name:        "invalid account ID rejected",
+			accountID:   "not-a-uuid",
+			format:      "json",
+			wantErr:     true,
+			errContains: "bad argument: account ID must be a valid UUID",
+		},
+		{
+			name:        "empty format rejected",
+			accountID:   "",
+			format:      "   ",
+			wantErr:     true,
+			errContains: "format cannot be empty",
+		},
+		{
+			name:        "unsupported format rejected",
+			accountID:   "",
+			format:      "xml",
+			wantErr:     true,
+			errContains: "invalid format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			policy := &metav1.ListPolicies{
+				AccountID: tt.accountID,
+				Format:    tt.format,
+			}
+			err := flagValidationList(policy)
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantAccountID, policy.AccountID)
+				assert.Equal(t, tt.wantFormat, policy.Format)
+			}
+		})
+	}
+}

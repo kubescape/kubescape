@@ -157,6 +157,7 @@ type ScanInfo struct {
 	Namespace                 string                       // target namespace for workload scans
 	NamespaceDefaulted        bool                         // true when target namespace for workload scans was defaulted to "default"
 	WorkspaceDir              string                       // Workspace root directory for containment enforcement
+	MaxParallelResourcePulls  int                          // Maximum parallel resource pulls from the Kubernetes API (defaults to 8, or KUBESCAPE_MAX_PARALLEL_PULLS)
 	InputPatterns             []string                     // Yaml files input patterns
 	Silent                    bool                         // Silent mode - Do not print progress logs
 	FailThreshold             float32                      // DEPRECATED - Failure score threshold
@@ -545,14 +546,19 @@ func BuildPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKin
 }
 
 // AppendPolicyIdentifiers appends the given string identifiers to the existing
-// list, adding any new ones that are not already present.
+// list, trimming surrounding whitespace, skipping empty identifiers, and adding
+// any new ones that are not already present.
 func AppendPolicyIdentifiers(existing []PolicyIdentifier, policies []string, kind apisv1.NotificationPolicyKind) []PolicyIdentifier {
 	result := append([]PolicyIdentifier(nil), existing...)
 	for _, policy := range policies {
-		if !containsIdentifier(result, policy) {
+		trimmed := strings.TrimSpace(policy)
+		if trimmed == "" {
+			continue
+		}
+		if !containsIdentifier(result, trimmed) {
 			result = append(result, PolicyIdentifier{
 				Kind:       kind,
-				Identifier: policy,
+				Identifier: trimmed,
 			})
 		}
 	}
@@ -560,14 +566,16 @@ func AppendPolicyIdentifiers(existing []PolicyIdentifier, policies []string, kin
 }
 
 // containsIdentifier reports whether the named identifier is already present.
-// The comparison is case-insensitive because a cache round-trip changes the casing:
-// the downloader lists regolibrary's lower case "nsa" and writes a file whose name
-// field is "NSA", so LoadPolicy.ListFrameworks reads back a name that no longer matches
-// the lower case getter.NativeFrameworks entry. Matching exactly would leave both in the
+// The comparison is case-insensitive and ignores surrounding whitespace because
+// a cache round-trip changes the casing (the downloader lists regolibrary's lower
+// case "nsa" and writes a file whose name field is "NSA", so LoadPolicy.ListFrameworks
+// reads back a name that no longer matches the lower case getter.NativeFrameworks entry)
+// or user input flags may carry padding. Matching exactly would leave both in the
 // list and make downloadScanPolicies fetch and evaluate the same framework twice.
 func containsIdentifier(identifiers []PolicyIdentifier, name string) bool {
+	trimmedName := strings.TrimSpace(name)
 	for _, policy := range identifiers {
-		if strings.EqualFold(policy.Identifier, name) {
+		if strings.EqualFold(strings.TrimSpace(policy.Identifier), trimmedName) {
 			return true
 		}
 	}
@@ -907,8 +915,10 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 		}
 	}
 
-	// local git repo
-	if _, err := NewLocalGitRepository(input); err == nil {
+	// local git repo. A glob is probed through the directory it reads from: on
+	// Windows a path containing '*' cannot be opened, so go-git cannot walk up from it.
+	gitProbe, _ := GlobInputRoot(input)
+	if _, err := NewLocalGitRepository(gitProbe); err == nil {
 		return ContextGitLocal
 	}
 
@@ -982,10 +992,12 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 			BasePath: basePath,
 			HostName: getHostname(),
 		}
-		// add repo context for submitting
+		// add repo context for submitting. A glob is identified by the directory
+		// it reads from, so it shares the identity of a scan of that directory.
+		repoInput, _ := GlobInputRoot(input)
 		contextMetadata.RepoContextMetadata = &reporthandlingv2.RepoContextMetadata{
 			Provider:      "none",
-			Repo:          fmt.Sprintf("path@%s", getAbsPath(input)),
+			Repo:          fmt.Sprintf("path@%s", getAbsPath(repoInput)),
 			Owner:         getHostname(),
 			Branch:        "none",
 			DefaultBranch: "none",
@@ -1008,7 +1020,8 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 		}
 	case ContextGitLocal:
 		// local
-		repoContext, err := metadataGitLocal(input)
+		gitInput, _ := GlobInputRoot(input)
+		repoContext, err := metadataGitLocal(gitInput)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("in setContextMetadata", helpers.Interface("case", ContextGitLocal), helpers.Error(err))
 		}

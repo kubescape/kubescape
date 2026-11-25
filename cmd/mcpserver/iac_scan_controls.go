@@ -37,7 +37,7 @@ func iacControlPolicyIdentifiers(path string, controlIDs []string) ([]cautils.Po
 
 // runIaCScanControls scans local IaC at path against the given control IDs and
 // returns the summarized scanResponse JSON used by the MCP scan tools.
-func (ksServer *KubescapeMcpserver) runIaCScanControls(ctx context.Context, path string, controlIDs []string) ([]byte, error) {
+func (ksServer *KubescapeMcpserver) runIaCScanControls(ctx context.Context, path string, controlIDs []string, filters ...scanFilterArgs) ([]byte, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("path is required")
 	}
@@ -52,13 +52,17 @@ func (ksServer *KubescapeMcpserver) runIaCScanControls(ctx context.Context, path
 		return nil, err
 	}
 	fileHandler := resourcehandler.NewFileResourceHandler()
-	return runScan(ctx, ksServer, scanRequest{
+	req := scanRequest{
 		policyIdentifiers: policyIdentifiers,
 		label:             "Local IaC Control",
 		rsrcHandler:       fileHandler,
 		inputPatterns:     []string{path},
 		workspaceDir:      ksServer.workspaceDir,
-	})
+	}
+	if len(filters) > 0 {
+		filters[0].applyToRequest(&req)
+	}
+	return runScan(ctx, ksServer, req)
 }
 
 // iacScanOutcome carries the PostureReport together with the scan's coverage
@@ -112,6 +116,12 @@ func (ksServer *KubescapeMcpserver) runIaCScanControlsReport(ctx context.Context
 			return nil, err
 		}
 	} else {
+		// With no control IDs requested, scan the "allcontrols" framework to discover
+		// all fixable issues in the manifest. Unlike a cluster-wide framework scan
+		// (RunFrameworkScan, which rejects "allcontrols" as too heavy because it would
+		// pull resources cluster-wide across every control), local IaC scanning uses
+		// FileResourceHandler bounded strictly to path, so evaluation cost remains
+		// proportional to the local file/directory contents.
 		policyIdentifiers = []cautils.PolicyIdentifier{
 			{Kind: apisv1.KindFramework, Identifier: "allcontrols"},
 		}

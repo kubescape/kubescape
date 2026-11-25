@@ -2,6 +2,7 @@ package prettyprinter
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"sort"
@@ -37,7 +38,10 @@ var (
 func filterComplianceFrameworks(frameworks []reportsummary.IFrameworkSummary) []reportsummary.IFrameworkSummary {
 	complianceFws := []reportsummary.IFrameworkSummary{}
 	for _, fw := range frameworks {
-		if slices.Contains(complianceFrameworks, strings.ToLower(fw.GetName())) {
+		if fw == nil {
+			continue
+		}
+		if slices.Contains(complianceFrameworks, strings.ToLower(strings.TrimSpace(fw.GetName()))) {
 			complianceFws = append(complianceFws, fw)
 		}
 	}
@@ -102,6 +106,16 @@ func addEmptySeverities(mapSeverityTSummary map[string]*imageprinter.SeveritySum
 	}
 }
 
+func canonicalSeverity(severity string) string {
+	trimmed := strings.TrimSpace(severity)
+	for _, canonical := range cveSeverities {
+		if strings.EqualFold(trimmed, canonical) {
+			return canonical
+		}
+	}
+	return trimmed
+}
+
 // getFilteredCVEs returns a list of CVEs to show in the table. If there are no vulnerabilities with severity Critical or High, it will return vulnerabilities with severity Medium. Otherwise it will return vulnerabilities with severity Critical or High.
 // Vulnerabilities on the CISA KEV catalog are always returned, whatever their severity.
 func getFilteredCVEs(cves []imageprinter.CVE) []imageprinter.CVE {
@@ -114,12 +128,14 @@ func getFilteredCVEs(cves []imageprinter.CVE) []imageprinter.CVE {
 
 	severityMap := make(map[string]bool, len(severities))
 	for _, severity := range severities {
-		severityMap[severity] = true
+		severityMap[strings.ToLower(strings.TrimSpace(severity))] = true
 	}
 
 	filteredCVEs := []imageprinter.CVE{}
 	for _, cve := range cves {
-		if cve.KEV || severityMap[cve.Severity] {
+		normSev := canonicalSeverity(cve.Severity)
+		if cve.KEV || severityMap[strings.ToLower(normSev)] {
+			cve.Severity = normSev
 			filteredCVEs = append(filteredCVEs, cve)
 		}
 	}
@@ -132,13 +148,15 @@ func filterCVEsBySeverities(cves []imageprinter.CVE, severities []string) []imag
 	// Create a map to efficiently check if a severity is present in the severities slice
 	severityMap := make(map[string]bool)
 	for _, severity := range severities {
-		severityMap[severity] = true
+		severityMap[strings.ToLower(strings.TrimSpace(severity))] = true
 	}
 
 	// Filter CVEs based on the severityMap
 	filteredCVEs := []imageprinter.CVE{}
 	for _, cve := range cves {
-		if severityMap[cve.Severity] {
+		normSev := canonicalSeverity(cve.Severity)
+		if severityMap[strings.ToLower(normSev)] {
+			cve.Severity = normSev
 			filteredCVEs = append(filteredCVEs, cve)
 		}
 	}
@@ -166,6 +184,9 @@ func getSortPackageScores(pkgScores map[string]*imageprinter.PackageScore) []str
 
 	sort.Slice(sortedSlice, func(i, j int) bool {
 		if pkgScores[sortedSlice[i]].Score == pkgScores[sortedSlice[j]].Score {
+			if pkgScores[sortedSlice[i]].Name == pkgScores[sortedSlice[j]].Name {
+				return sortedSlice[i] < sortedSlice[j]
+			}
 			return pkgScores[sortedSlice[i]].Name < pkgScores[sortedSlice[j]].Name
 		}
 		return pkgScores[sortedSlice[i]].Score > pkgScores[sortedSlice[j]].Score
@@ -189,7 +210,12 @@ func getSortedCVEsBySeverity(mapSeverityToCVEsNumber map[string]int) []string {
 
 	// Sort the severity-CVEs count pairs by severity
 	sort.Slice(severityToCVEsCountPairs, func(i, j int) bool {
-		return utils.ImageSeverityToInt(severityToCVEsCountPairs[i][0]) > utils.ImageSeverityToInt(severityToCVEsCountPairs[j][0])
+		sevI := utils.ImageSeverityToInt(severityToCVEsCountPairs[i][0])
+		sevJ := utils.ImageSeverityToInt(severityToCVEsCountPairs[j][0])
+		if sevI == sevJ {
+			return severityToCVEsCountPairs[i][0] < severityToCVEsCountPairs[j][0]
+		}
+		return sevI > sevJ
 	})
 
 	// Extract severities from the sorted slice of pairs
@@ -235,33 +261,43 @@ func printTopComponents(writer *os.File, summary imageprinter.ImageScanSummary) 
 	cautils.SimpleDisplay(writer, "\n")
 }
 
+func getSortedSeverityKeys(mapSeverityTSummary map[string]*imageprinter.SeveritySummary) []string {
+	keys := make([]string, 0, len(mapSeverityTSummary))
+	for k := range mapSeverityTSummary {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		sevI := utils.ImageSeverityToInt(keys[i])
+		sevJ := utils.ImageSeverityToInt(keys[j])
+		if sevI == sevJ {
+			return keys[i] < keys[j]
+		}
+		return sevI > sevJ
+	})
+	return keys
+}
+
 func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSummary, verboseMode bool) {
 	if summary.VulnDBBuilt != nil {
 		age := time.Since(*summary.VulnDBBuilt)
 		days := int(age.Hours() / 24)
 		info := summary.VulnDBBuilt.UTC().Format("2006-01-02")
 		if days < 1 {
-			cautils.InfoDisplay(writer, fmt.Sprintf("Vulnerability DB built: %s\n", info))
+			cautils.InfoDisplay(writer, "Vulnerability DB built: %s\n", info)
 		} else {
-			cautils.InfoDisplay(writer, fmt.Sprintf("Vulnerability DB built: %s (%d days ago)\n", info, days))
+			cautils.InfoDisplay(writer, "Vulnerability DB built: %s (%d days ago)\n", info, days)
 		}
 	}
 
 	mapSeverityTSummary := getSeverityToSummaryMap(summary, verboseMode)
 
 	// sort keys by severity
-	keys := make([]string, 0, len(mapSeverityTSummary))
-	for k := range mapSeverityTSummary {
-		keys = append(keys, k)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		return utils.ImageSeverityToInt(keys[i]) > utils.ImageSeverityToInt(keys[j])
-	})
+	keys := getSortedSeverityKeys(mapSeverityTSummary)
 
 	if len(summary.CVEs) == 0 {
 		txt := "No vulnerabilities were found!"
 
-		cautils.InfoDisplay(writer, txt+"\n")
+		cautils.InfoDisplay(writer, "%s\n", txt)
 		return
 	}
 
@@ -291,7 +327,7 @@ func printImagesCommands(writer *os.File, summary imageprinter.ImageScanSummary)
 		cautils.SimpleDisplay(writer, "Receive a full report by running: kubescape scan image <image>\n")
 	} else {
 		for _, img := range summary.Images {
-			cautils.SimpleDisplay(writer, fmt.Sprintf("Receive a full report by running: %s\n", getCallToActionString(fmt.Sprintf("'$ kubescape scan image %s'", img))))
+			cautils.SimpleDisplay(writer, "Receive a full report by running: %s\n", getCallToActionString(fmt.Sprintf("'$ kubescape scan image %s'", img)))
 		}
 	}
 
@@ -299,24 +335,34 @@ func printImagesCommands(writer *os.File, summary imageprinter.ImageScanSummary)
 }
 
 func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
+	if writer == nil {
+		return
+	}
 	txt := "What now?"
 	cautils.SectionHeadingDisplay(writer, txt)
 
 	for _, ns := range nextSteps {
-		cautils.StarDisplay(writer, ns+"\n")
+		cautils.StarDisplay(writer, "%s\n", ns)
 	}
 	if addLine {
 		cautils.SimpleDisplay(writer, "\n")
 	}
 }
 
-func printComplianceScore(writer *os.File, frameworks []reportsummary.IFrameworkSummary) {
+func printComplianceScore(writer io.Writer, frameworks []reportsummary.IFrameworkSummary) {
+	if writer == nil {
+		return
+	}
 	txt := "Compliance Score"
 	cautils.SectionHeadingDisplay(writer, txt)
 	cautils.SimpleDisplay(writer, "The compliance score is calculated by multiplying control failures by the number of failures against supported compliance frameworks. Remediate controls, or configure your cluster baseline with exceptions, to improve this score.\n\n")
 
 	for _, fw := range frameworks {
-		cautils.StarDisplay(writer, "%s: %s", fw.GetName(), gchalk.WithBrightYellow().Bold(fmt.Sprintf("%s%%\n", cautils.ComplianceScoreToString(fw.GetComplianceScore(), 2))))
+		scoreStr := "N/A"
+		if fw.GetComplianceScore() >= 0 {
+			scoreStr = fmt.Sprintf("%s%%", cautils.ComplianceScoreToString(fw.GetComplianceScore(), 2))
+		}
+		cautils.StarDisplay(writer, "%s: %s\n", fw.GetName(), gchalk.WithBrightYellow().Bold(scoreStr))
 	}
 
 	cautils.SimpleDisplay(writer, fmt.Sprintf("\nView a full compliance report by running %s or %s\n", getCallToActionString("'$ kubescape scan framework nsa'"), getCallToActionString("'$ kubescape scan framework mitre'")))

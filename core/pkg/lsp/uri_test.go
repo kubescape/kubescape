@@ -16,6 +16,7 @@ func TestPathFromURI(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "unix", uri: "file:///home/dev/k8s/pod.yaml", want: "/home/dev/k8s/pod.yaml"},
+		{name: "unix with dot components cleaned", uri: "file:///home/dev/k8s/../k8s/./pod.yaml", want: "/home/dev/k8s/pod.yaml"},
 		{name: "unix percent-encoded", uri: "file:///home/dev/my%20dir/p%C3%B6d.yaml", want: "/home/dev/my dir/pöd.yaml"},
 		{name: "unix localhost", uri: "file://localhost/home/dev/pod.yaml", want: "/home/dev/pod.yaml"},
 		{name: "unix remote host", uri: "file://otherhost/share/pod.yaml", wantErr: true},

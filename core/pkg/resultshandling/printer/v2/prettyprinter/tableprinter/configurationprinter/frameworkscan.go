@@ -31,13 +31,13 @@ func (fp *FrameworkPrinter) getVerboseMode() bool {
 }
 
 func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
-	if summaryDetails.NumberOfControls().All() == 0 {
+	if summaryDetails == nil || summaryDetails.NumberOfControls() == nil || summaryDetails.NumberOfControls().All() == 0 {
 		fmt.Fprintf(writer, "\nKubescape did not scan any resources. Make sure you are scanning valid manifests (Deployments, Pods, etc.)\n")
 		return
 	}
 
 	// When scanning controls the framework list will be empty
-	cautils.SimpleDisplay(writer, utils.FrameworksScoresToString(summaryDetails.ListFrameworks())+"\n")
+	cautils.SimpleDisplay(writer, "%s\n", utils.FrameworksScoresToString(summaryDetails.ListFrameworks()))
 
 	controlCountersTable := table.NewWriter()
 	controlCountersTable.SetOutputMirror(writer)
@@ -73,7 +73,7 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 	summaryTable.Style().Box = table.StyleBoxRounded
 
 	printAll := fp.getVerboseMode()
-	if summaryDetails.NumberOfResources().Failed() == 0 {
+	if numRes := summaryDetails.NumberOfResources(); numRes != nil && numRes.Failed() == 0 {
 		// if there are no failed controls, print the resource table and detailed information
 		printAll = true
 	}
@@ -83,7 +83,11 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 	infoToPrintInfo := utils.MapInfoToPrintInfo(summaryDetails.Controls)
 	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
 		for _, c := range sortedControlID {
-			row := GenerateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c), infoToPrintInfo, printAll)
+			control := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c)
+			if control == nil {
+				continue
+			}
+			row := GenerateRow(control, infoToPrintInfo, printAll)
 			if len(row) > 0 {
 				dataRows = append(dataRows, row)
 			}
@@ -134,6 +138,14 @@ func (fp *FrameworkPrinter) PrintCategoriesTables(_ io.Writer, _ *reportsummary.
 }
 
 func renderSeverityCountersSummary(counters reportsummary.ISeverityCounters) []table.Row {
+	if counters == nil {
+		return []table.Row{
+			{"Critical", utils.GetColorForVulnerabilitySeverity("Critical")("0")},
+			{"High", utils.GetColorForVulnerabilitySeverity("High")("0")},
+			{"Medium", utils.GetColorForVulnerabilitySeverity("Medium")("0")},
+			{"Low", utils.GetColorForVulnerabilitySeverity("Low")("0")},
+		}
+	}
 
 	rows := make([]table.Row, 0, 4)
 	rows = append(rows, table.Row{"Critical", utils.GetColorForVulnerabilitySeverity("Critical")(strconv.Itoa(counters.NumberOfCriticalSeverity()))})

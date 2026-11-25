@@ -28,6 +28,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/scancache"
 	"github.com/kubescape/kubescape/v4/core/pkg/score"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -1834,7 +1835,7 @@ func (opap *OPAProcessor) evaluateRuleOnScope(ctx context.Context, rule *reporth
 		var toEvaluate []workloadinterface.IMetadata
 		cacheHitIDs = make(map[string]struct{})
 		for _, r := range resourceToScan {
-			if opap.skipNamespace(r.GetNamespace()) {
+			if opap.skipObject(r) {
 				continue
 			}
 			hash := scancache.ResourceHash(r.GetObject())
@@ -1907,7 +1908,7 @@ func (opap *OPAProcessor) evaluateRuleOnScope(ctx context.Context, rule *reporth
 		return resources, attribution, fmt.Errorf("enumerator failed for namespace %q: %w", scope.name, err)
 	}
 
-	inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
+	inputResources = opap.policyResources(enumeratedData)
 
 	// enumeratedIDs scopes which failed resources get reported, without
 	// scoping what the rule evaluates against below (that stays
@@ -1947,7 +1948,7 @@ func (opap *OPAProcessor) evaluateRuleOnScope(ctx context.Context, rule *reporth
 
 	var addedResources []workloadinterface.IMetadata
 	for _, inputResource := range inputResources {
-		if opap.skipNamespace(inputResource.GetNamespace()) {
+		if opap.skipObject(inputResource) {
 			continue
 		}
 		addedResources = append(addedResources, inputResource)
@@ -1999,7 +2000,7 @@ func (opap *OPAProcessor) evaluateRuleOnScope(ctx context.Context, rule *reporth
 		}
 	}
 	for _, inputResource := range inputResources {
-		if opap.skipNamespace(inputResource.GetNamespace()) {
+		if opap.skipObject(inputResource) {
 			continue
 		}
 		id := inputResource.GetID()
@@ -2043,11 +2044,12 @@ func (opap *OPAProcessor) evaluateRuleOnScope(ctx context.Context, rule *reporth
 				for _, relatedObject := range ruleResponse.RelatedObjects {
 					wl := objectsenvelopes.NewObject(relatedObject.Object)
 					if wl != nil {
-						if !relatedResourcesSet.Contains(wl.GetID()) {
-							ruleResult.RelatedResourcesIDs = append(ruleResult.RelatedResourcesIDs, wl.GetID())
+						id := opap.resolveSelectedManifest(wl).GetID()
+						if !relatedResourcesSet.Contains(id) {
+							ruleResult.RelatedResourcesIDs = append(ruleResult.RelatedResourcesIDs, id)
 						}
-						relatedResourcesSet.Add(wl.GetID())
-						ruleResult.Paths = appendPaths(ruleResult.Paths, relatedObject.AssistedRemediation, wl.GetID())
+						relatedResourcesSet.Add(id)
+						ruleResult.Paths = appendPaths(ruleResult.Paths, relatedObject.AssistedRemediation, id)
 					}
 				}
 			}
@@ -2121,7 +2123,7 @@ func (opap *OPAProcessor) markResourcesSkipped(out map[string]*resourcesresults.
 		SubStatus:   apis.SubStatusUnknown,
 	}
 	for _, inputResource := range inputResources {
-		if opap.skipNamespace(inputResource.GetNamespace()) {
+		if opap.skipObject(inputResource) {
 			continue
 		}
 		id := inputResource.GetID()
@@ -2316,6 +2318,44 @@ func (opap *OPAProcessor) notEvaluatedReasons() map[string]string {
 	return merged
 }
 
+// policyResources restores the selected workload's manifest identity when
+// policy output uses the Kubernetes object without the loader's source path.
+func (opap *OPAProcessor) policyResources(objects []map[string]any) []workloadinterface.IMetadata {
+	resources := objectsenvelopes.ListMapToMeta(objects)
+	if opap.OPASessionObj != nil && opap.SingleResourceScan != nil && len(opap.ResourceSource) > 0 {
+		for i, resource := range resources {
+			resources[i] = opap.resolveSelectedManifest(resource)
+		}
+	}
+	return resources
+}
+
+func (opap *OPAProcessor) resolveSelectedManifest(resource workloadinterface.IMetadata) workloadinterface.IMetadata {
+	if opap.OPASessionObj == nil || len(opap.ResourceSource) == 0 {
+		return resource
+	}
+	// Synthetic policy results can have an ID that looks like a workload's.
+	switch resource.(type) {
+	case *workloadinterface.Workload, *workloadinterface.BaseObject:
+	default:
+		return resource
+	}
+	selected := opap.SingleResourceScan
+	if selected == nil || resource.GetID() != selected.GetID() {
+		return resource
+	}
+	object := selected.GetObject()
+	if path, ok := object[localworkload.PathKey].(string); !ok || path == "" {
+		return resource
+	}
+	// The policy may return only metadata, so keep the loaded manifest's body.
+	local := localworkload.NewLocalWorkload(object)
+	if _, found := opap.ResourceSource[local.GetID()]; found {
+		return local
+	}
+	return resource
+}
+
 // appendPaths appends the failedPaths, fixPaths and fixCommand to the paths slice with the resourceID
 func appendPaths(paths []armotypes.PosturePaths, assistedRemediation reporthandling.AssistedRemediation, resourceID string) []armotypes.PosturePaths {
 
@@ -2373,6 +2413,23 @@ type skippedCELResource struct {
 	err error
 }
 
+// ruleTextIsRego reports whether rule text is Rego rather than a policy
+// document: its first statement is a package clause. A control downloaded from
+// regolibrary and marked ruleLanguage CEL still carries its Rego in the rule
+// text, so that text selects the bundled policy for the control, as an empty
+// rule does, instead of being parsed as an inline ValidatingAdmissionPolicy.
+func ruleTextIsRego(text string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		return len(fields) > 1 && fields[0] == "package"
+	}
+	return false
+}
+
 // runCELOnK8s evaluates a CEL-based PolicyRule against k8s objects by loading
 // the control's ValidatingAdmissionPolicy from the embedded bundle and running
 // its validations. controlID is threaded down from processControl (not read off
@@ -2403,7 +2460,7 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 	}
 
 	var vap *cel.VAP
-	if rule.Rule != "" {
+	if rule.Rule != "" && !ruleTextIsRego(rule.Rule) {
 		vap, err = cel.ParseVAP([]byte(rule.Rule))
 	} else {
 		vap, err = cel.LoadVAP(controlID)
@@ -2572,7 +2629,7 @@ func (opap *OPAProcessor) seedCELSkips(out map[string]*resourcesresults.Resource
 		if meta == nil {
 			continue
 		}
-		if opap.skipNamespace(meta.GetNamespace()) {
+		if opap.skipObject(meta) {
 			continue
 		}
 		id := meta.GetID()
@@ -2796,6 +2853,19 @@ func (opap *OPAProcessor) celParamObjectFinder() func(apiVersion, kind, namespac
 		return true
 	})
 
+	// Param objects collected from the cluster for binding paramRefs are not
+	// scanned resources, so they live outside the catalog. Index them the same
+	// way so ResolveParamObject finds a cluster-scoped object via the empty
+	// namespace candidate.
+	for i := range opap.VAPParamObjects {
+		obj := &opap.VAPParamObjects[i]
+		if obj.Object == nil {
+			continue
+		}
+		key := obj.GetAPIVersion() + "/" + obj.GetKind() + "/" + obj.GetNamespace() + "/" + obj.GetName()
+		idx[key] = obj.Object
+	}
+
 	return func(apiVersion, kind, namespace, name string) (map[string]any, bool) {
 		obj, ok := idx[apiVersion+"/"+kind+"/"+namespace+"/"+name]
 		return obj, ok
@@ -2934,6 +3004,21 @@ func (opap *OPAProcessor) makeRegoDeps(configInputs []reporthandling.ControlConf
 		DataControlInputs:    dataControlInputs,
 		PostureControlInputs: clonedPostureInputs,
 	}
+}
+
+// skipObject reports whether the namespace selectors leave obj out of the scan.
+// A namespaced object is judged by its namespace. A Namespace object has none in
+// its metadata, so it is judged by its own name, as the cluster collector does
+// with a metadata.name field selector. Any other cluster-scoped object is never
+// filtered.
+func (opap *OPAProcessor) skipObject(obj workloadinterface.IMetadata) bool {
+	if ns := obj.GetNamespace(); ns != "" {
+		return opap.skipNamespace(ns)
+	}
+	if obj.GetKind() == "Namespace" && obj.GetApiVersion() == "v1" {
+		return opap.skipNamespace(obj.GetName())
+	}
+	return false
 }
 
 func (opap *OPAProcessor) skipNamespace(ns string) bool {

@@ -20,11 +20,13 @@ deny contains msga if {
 	# matches nothing.
 	rolebinding.kind == "ClusterRoleBinding"
 
+	# resourceNames does not make this grant safe. The kubelet authorizes every
+	# proxied request (exec, attach, run, portforward...) with a
+	# SubjectAccessReview whose name is the kubelet's own node name, so a rule
+	# narrowed to resourceNames: ["worker-1"] still gives code execution in
+	# every pod on worker-1. Narrowing limits how many nodes are exposed, not
+	# whether one is.
 	rule := role.rules[p]
-
-	# a rule restricted to named nodes cannot be pointed at an arbitrary node's proxy subresource
-	# (an omitted or explicitly empty resourceNames list is unrestricted)
-	count(resource_names(rule)) == 0
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -64,6 +66,42 @@ is_same_namespace(role, rolebinding) if {
 	role.metadata.namespace == rolebinding.metadata.namespace
 }
 
+# A manifest meant for "kubectl apply -n" may leave out the namespace, and the
+# subject aggregator pairs it with either side; comparing the fields would drop it.
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	not release_namespace(role)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	not has_namespace(rolebinding)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	rolebinding.metadata.namespace == release_namespace(role)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(rolebinding)
+}
+
+has_namespace(obj) if {
+	is_string(obj.metadata.namespace)
+	obj.metadata.namespace != ""
+}
+
+release_namespace(obj) := ns if {
+	is_string(obj.metadata.annotations["meta.helm.sh/release-namespace"])
+	obj.metadata.annotations["meta.helm.sh/release-namespace"] != ""
+	ns := obj.metadata.annotations["meta.helm.sh/release-namespace"]
+}
+
 is_same_subjects(subjectVector, subject) if {
 	subjectVector.kind == subject.kind
 	subjectVector.name == subject.name
@@ -88,12 +126,3 @@ is_same_subjects(subjectVector, subject) if {
 	object.get(subjectVector, "namespace", "") == object.get(subject, "namespace", "")
 	object.get(subjectVector, "apiGroup", "") == object.get(subject, "apiGroup", "")
 }
-
-# resource_names is a rule's resourceNames with an absent or null list read as
-# the empty list. Kubernetes treats all three alike: ResourceNameMatches matches
-# as soon as the list is empty, so the rule is not narrowed to named objects.
-# Counting a null list directly is undefined and would drop the rule instead.
-resource_names(rule) := names if {
-	names := object.get(rule, "resourceNames", [])
-	names != null
-} else := []

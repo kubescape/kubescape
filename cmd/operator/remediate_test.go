@@ -56,6 +56,7 @@ func TestGetOperatorRemediateCmd(t *testing.T) {
 
 	// supported actions pass arg validation
 	assert.Nil(t, cmd.Args(&cobra.Command{}, []string{annotateSubCommand}))
+	assert.Nil(t, cmd.Args(&cobra.Command{}, []string{patchSubCommand}))
 	assert.Nil(t, cmd.Args(&cobra.Command{}, []string{quarantineSubCommand}))
 	assert.Nil(t, cmd.Args(&cobra.Command{}, []string{revertSubCommand}))
 
@@ -68,7 +69,7 @@ func TestGetOperatorRemediateCmd(t *testing.T) {
 	assert.Error(t, err)
 
 	// expected flags are registered
-	for _, name := range []string{"namespace", "kind", "target-namespace", "name", "control", "min-severity", "reason", "finding-ref", "confirm"} {
+	for _, name := range []string{"namespace", "kind", "target-namespace", "name", "control", "min-severity", "reason", "finding-ref", "patch", "patch-type", "confirm"} {
 		assert.NotNil(t, cmd.PersistentFlags().Lookup(name), "flag --%s should be registered", name)
 	}
 
@@ -203,6 +204,41 @@ func TestOperatorRemediateCmd_PayloadValidationErrors(t *testing.T) {
 			args:        []string{"annotate", "--kind", "Deployment", "--target-namespace", "default"},
 			errContains: "remediation target requires --kind and --name",
 		},
+		{
+			name:        "patch without patch body",
+			args:        []string{"patch", "--kind", "Deployment", "--name", "api", "--target-namespace", "default"},
+			errContains: "patch remediation requires --patch",
+		},
+		{
+			name:        "patch with invalid json",
+			args:        []string{"patch", "--kind", "Deployment", "--name", "api", "--target-namespace", "default", "--patch", "invalid-json"},
+			errContains: "invalid --patch",
+		},
+		{
+			name:        "patch with null json",
+			args:        []string{"patch", "--kind", "Deployment", "--name", "api", "--target-namespace", "default", "--patch", "null"},
+			errContains: "invalid --patch",
+		},
+		{
+			name:        "patch with non-object json",
+			args:        []string{"patch", "--kind", "Deployment", "--name", "api", "--target-namespace", "default", "--patch", `["array"]`},
+			errContains: "invalid --patch",
+		},
+		{
+			name:        "patch with unsupported patch-type",
+			args:        []string{"patch", "--kind", "Deployment", "--name", "api", "--target-namespace", "default", "--patch", `{"spec":{}}`, "--patch-type", "jsonpatch"},
+			errContains: "unsupported --patch-type",
+		},
+		{
+			name:        "annotate with patch flag",
+			args:        []string{"annotate", "--kind", "Deployment", "--name", "api", "--target-namespace", "default", "--patch", `{"spec":{}}`},
+			errContains: "--patch is only supported with the \"patch\" action",
+		},
+		{
+			name:        "annotate with patch-type flag",
+			args:        []string{"annotate", "--kind", "Deployment", "--name", "api", "--target-namespace", "default", "--patch-type", "merge"},
+			errContains: "--patch-type is only supported with the \"patch\" action",
+		},
 	}
 
 	for _, tt := range tests {
@@ -219,15 +255,25 @@ func TestOperatorRemediateCmd_PayloadValidationErrors(t *testing.T) {
 	}
 }
 
-// TestOperatorRemediateCmd_ReasonWarning verifies warning output when --reason is omitted for annotate and quarantine.
+// TestOperatorRemediateCmd_ReasonWarning verifies warning output when --reason is omitted for annotate, patch and quarantine.
 func TestOperatorRemediateCmd_ReasonWarning(t *testing.T) {
-	for _, action := range []string{annotateSubCommand, quarantineSubCommand} {
+	prevCheck := checkOperatorVersion
+	checkOperatorVersion = func(ctx context.Context, namespace string, minVersion string) error {
+		return nil
+	}
+	t.Cleanup(func() { checkOperatorVersion = prevCheck })
+
+	for _, action := range []string{annotateSubCommand, patchSubCommand, quarantineSubCommand} {
 		t.Run(action, func(t *testing.T) {
 			op := newFakeOperator(t, "")
 			op.install(t)
 
 			cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
-			cmd.SetArgs([]string{action, "--kind", "Deployment", "--name", "api", "--target-namespace", "default"})
+			args := []string{action, "--kind", "Deployment", "--name", "api", "--target-namespace", "default"}
+			if action == patchSubCommand {
+				args = append(args, "--patch", `{"spec":{"replicas":1}}`)
+			}
+			cmd.SetArgs(args)
 			cmd.SetOut(io.Discard)
 			cmd.SetErr(io.Discard)
 
@@ -243,6 +289,85 @@ func TestOperatorRemediateCmd_ReasonWarning(t *testing.T) {
 			assert.Contains(t, output, "kubectl get events -n default --field-selector reason=KubescapeRemediation")
 		})
 	}
+}
+
+// TestOperatorRemediateCmd_PatchSuccess verifies successful execution of patch remediation in dry-run and apply modes.
+func TestOperatorRemediateCmd_PatchSuccess(t *testing.T) {
+	prevCheck := checkOperatorVersion
+	checkOperatorVersion = func(ctx context.Context, namespace string, minVersion string) error {
+		return nil
+	}
+	t.Cleanup(func() { checkOperatorVersion = prevCheck })
+
+	for _, confirm := range []bool{false, true} {
+		name := "dry-run"
+		if confirm {
+			name = "apply"
+		}
+		t.Run(name, func(t *testing.T) {
+			op := newFakeOperator(t, "")
+			op.install(t)
+
+			cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
+			args := []string{"patch", "--kind", "Deployment", "--name", "api", "--target-namespace", "default", "--patch", `{"spec":{"replicas":2}}`, "--patch-type", "merge", "--reason", "scale up"}
+			if confirm {
+				args = append(args, "--confirm")
+			}
+			cmd.SetArgs(args)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+
+			var err error
+			output := captureLog(t, func() {
+				err = cmd.Execute()
+			})
+
+			require.NoError(t, err)
+			if confirm {
+				assert.Contains(t, output, "Applying remediation \"patch\" via Kubescape Operator")
+				assert.Contains(t, output, "Submitted remediation (apply)")
+				assert.Contains(t, output, "patch modifications cannot be automatically reverted via 'revert'")
+			} else {
+				assert.Contains(t, output, "Previewing remediation \"patch\" via Kubescape Operator")
+				assert.Contains(t, output, "Submitted remediation (dry-run)")
+				assert.Contains(t, output, "--- Remediation Plan (dry-run) ---")
+				assert.Contains(t, output, "Target:     Deployment/default/api")
+				assert.Contains(t, output, "Patch Type: merge")
+				assert.Contains(t, output, `"replicas": 2`)
+				assert.NotContains(t, output, "patch modifications cannot be automatically reverted via 'revert'")
+			}
+		})
+	}
+}
+
+// TestOperatorRemediateCmd_PatchDryRun_SelectorRetainsScope verifies that dry-run plan retains the selector scope alongside the sample resolved target.
+func TestOperatorRemediateCmd_PatchDryRun_SelectorRetainsScope(t *testing.T) {
+	prevCheck := checkOperatorVersion
+	checkOperatorVersion = func(ctx context.Context, namespace string, minVersion string) error {
+		return nil
+	}
+	t.Cleanup(func() { checkOperatorVersion = prevCheck })
+
+	op := newFakeOperatorWithPayload(t, `{"target":{"kind":"Deployment","namespace":"prod","name":"web"},"patch":"{\"spec\":{\"replicas\":3}}","patchType":"merge","description":"auto-fix"}`)
+	op.install(t)
+
+	cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
+	cmd.SetArgs([]string{"patch", "--control", "C-0016", "--patch", `{"spec":{"replicas":3}}`, "--patch-type", "merge", "--reason", "fix finding"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	var err error
+	output := captureLog(t, func() {
+		err = cmd.Execute()
+	})
+
+	require.NoError(t, err)
+	assert.Contains(t, output, "Previewing remediation \"patch\" via Kubescape Operator")
+	assert.Contains(t, output, "--- Remediation Plan (dry-run) ---")
+	assert.Contains(t, output, "Target:     selector: control=C-0016 (sample resolved target: Deployment/prod/web)")
+	assert.Contains(t, output, "Summary:    auto-fix")
+	assert.Contains(t, output, "Patch Type: merge")
+	assert.Contains(t, output, `"replicas": 3`)
 }
 
 // TestOperatorRemediateCmd_SelectorClusterWideWarningAndEvents verifies cluster-wide warning and events scope for selectors.
@@ -303,4 +428,37 @@ func TestOperatorRemediateCmd_GenericScanError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed: scan blew up")
 	assert.Contains(t, output, "Failed to submit remediation to Kubescape Operator")
+}
+
+// TestOperatorRemediateCmd_OperatorVersionEnforcement verifies minimum operator version enforcement for patch action.
+func TestOperatorRemediateCmd_OperatorVersionEnforcement(t *testing.T) {
+	prevCheck := checkOperatorVersion
+	t.Cleanup(func() { checkOperatorVersion = prevCheck })
+
+	checkOperatorVersion = func(ctx context.Context, namespace string, minVersion string) error {
+		return fmt.Errorf("operator remediate patch requires Kubescape Operator >= %s (found v0.2.224 in namespace %q)", minVersion, namespace)
+	}
+
+	// 1. Patch action fails when operator version is below minimum.
+	cmd := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
+	cmd.SetArgs([]string{"patch", "--kind", "Deployment", "--name", "api", "--target-namespace", "default", "--patch", `{"spec":{"replicas":1}}`})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "operator remediate patch requires Kubescape Operator >= v0.2.240")
+	assert.Contains(t, err.Error(), "found v0.2.224 in namespace \"kubescape\"")
+
+	// 2. Non-patch actions (e.g. revert) do not invoke or fail on operator version check.
+	op := newFakeOperator(t, "")
+	op.install(t)
+
+	cmdNonPatch := getOperatorRemediateCmd(&mocks.MockIKubescape{}, cautils.OperatorInfo{})
+	cmdNonPatch.SetArgs([]string{"revert", "--kind", "Deployment", "--name", "api", "--target-namespace", "default"})
+	cmdNonPatch.SetOut(io.Discard)
+	cmdNonPatch.SetErr(io.Discard)
+
+	err = cmdNonPatch.Execute()
+	require.NoError(t, err)
 }

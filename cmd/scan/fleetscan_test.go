@@ -29,6 +29,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/fleet"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/spf13/cobra"
@@ -154,6 +155,44 @@ func TestPerContextOutputPath(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+// An --output that names a directory gets the report name a scan of one context
+// writes there, with the context inserted, not a hidden file per context.
+func TestPerContextOutputPaths_DirectoryOutputNamesReportsInsideIt(t *testing.T) {
+	sep := string(filepath.Separator)
+	for _, tt := range []struct {
+		output string
+		dir    string
+	}{
+		{output: ".", dir: "."},
+		{output: "..", dir: ".."},
+		{output: "reports" + sep, dir: "reports"},
+		{output: filepath.Join("reports", "nested") + sep, dir: filepath.Join("reports", "nested")},
+		{output: "reports" + sep + ".", dir: "reports"},
+	} {
+		t.Run(tt.output, func(t *testing.T) {
+			paths, err := perContextOutputPaths(tt.output, []string{"prod", "dev"}, []string{"json"})
+			require.NoError(t, err)
+			for _, kubeContext := range []string{"prod", "dev"} {
+				dest, explicit := printer.ResolveOutputFile("json", paths[kubeContext], printer.DefaultBaseNameForFormat("json"))
+				require.True(t, explicit)
+				assert.Equal(t, filepath.Join(tt.dir, "report."+kubeContext+".json"), filepath.Clean(dest), "--output %q", tt.output)
+			}
+		})
+	}
+}
+
+// A file --output keeps its name, and the format's default name is used for a
+// directory: an SBOM format writes sbom.<context>.
+func TestPerContextOutputPaths_DirectoryOutputUsesTheFormatsDefaultName(t *testing.T) {
+	paths, err := perContextOutputPaths("."+string(filepath.Separator), []string{"prod"}, []string{printer.CycloneDXFormat})
+	require.NoError(t, err)
+	assert.Equal(t, "sbom.prod", filepath.Base(paths["prod"]))
+
+	paths, err = perContextOutputPaths("report.json", []string{"prod"}, []string{"json"})
+	require.NoError(t, err)
+	assert.Equal(t, "report.prod.json", paths["prod"])
 }
 
 // scanContextOnlyRunner is a minimal fleetRunner used by tests that exercise

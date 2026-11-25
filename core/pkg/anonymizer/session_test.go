@@ -206,6 +206,46 @@ func TestTransformSession_NamespaceSummariesRedacted(t *testing.T) {
 	assert.Equal(t, cautils.ClusterScopedNamespace, clusterScoped, "the cluster-scoped marker must not be pseudonymized")
 }
 
+// TestTransformSession_PaddedNamespaceMatchesNamespaceSummary tests that a resource
+// with padded namespace (" prod ") gets the same pseudonym as the trimmed namespace
+// summary ("prod"), preserving the join contract.
+func TestTransformSession_PaddedNamespaceMatchesNamespaceSummary(t *testing.T) {
+	pod := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name":      "padded-pod",
+			"namespace": " prod ",
+		},
+	})
+	oldID := pod.GetID()
+
+	session := &cautils.OPASessionObj{
+		AllResources:         map[string]workloadinterface.IMetadata{oldID: pod},
+		ResourcesResult:      make(map[string]resourcesresults.Result),
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
+		NamespaceSummaries: cautils.NamespaceSummaries{
+			{Namespace: "prod", ComplianceScore: 80},
+		},
+	}
+
+	err := transformSession(session, NewMapping(), NewMappingTransformer())
+	require.NoError(t, err)
+
+	require.Len(t, session.NamespaceSummaries, 1)
+	summaryNs := session.NamespaceSummaries[0].Namespace
+
+	var resourceNs string
+	for _, resource := range session.AllResources {
+		resourceNs = resource.GetNamespace()
+	}
+
+	assert.Equal(t, summaryNs, resourceNs, "padded resource namespace must produce the same pseudonym as the trimmed summary namespace")
+	assert.Contains(t, summaryNs, "ns-")
+}
+
 // TestTransformSession_CollidingNamesKeepDistinctResources covers what a
 // pseudonym collision costs at session level, which is more than a confusing
 // report: transformSession rebuilds AllResources and ResourcesResult keyed by

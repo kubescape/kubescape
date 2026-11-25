@@ -20,6 +20,17 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
+// ErrEncryptedReport is returned when attempting to diff an encrypted scan report.
+// Encrypted reports use randomized ciphertexts and data keys on each run, which
+// makes finding identities incomparable without decrypting them first.
+var ErrEncryptedReport = errors.New("cannot diff encrypted report: decrypt first with 'kubescape decrypt'")
+
+type rawEncryptionMetadata struct {
+	EncryptionMetadata *struct {
+		EncryptedDEK string `json:"encryptedDEK"`
+	} `json:"encryptionMetadata,omitempty"`
+}
+
 // These intentionally small report types parse only fields that affect diff
 // identity, severity, scope, and evaluation completeness. Unknown fields from
 // newer Kubescape versions remain forward compatible.
@@ -189,7 +200,14 @@ func loadReport(path string) (*scanReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parseReport(data)
+	report, err := parseReport(data)
+	if err != nil {
+		if errors.Is(err, ErrEncryptedReport) {
+			return nil, fmt.Errorf("cannot diff encrypted report %q: decrypt first with 'kubescape decrypt': %w", path, ErrEncryptedReport)
+		}
+		return nil, err
+	}
+	return report, nil
 }
 
 // parseReport validates and parses the JSON bytes of one scan report. It is
@@ -207,6 +225,21 @@ func parseReport(data []byte) (*scanReport, error) {
 	}
 	if topLevel == nil {
 		return nil, fmt.Errorf("invalid report: expected a JSON object")
+	}
+
+	if metadataJSON, exists := topLevel["metadata"]; exists && !isJSONNull(metadataJSON) {
+		var encCheck rawEncryptionMetadata
+		if err := json.Unmarshal(metadataJSON, &encCheck); err == nil && encCheck.EncryptionMetadata != nil && strings.TrimSpace(encCheck.EncryptionMetadata.EncryptedDEK) != "" {
+			return nil, ErrEncryptedReport
+		}
+	}
+	if encJSON, exists := topLevel["encryptionMetadata"]; exists && !isJSONNull(encJSON) {
+		var encDek struct {
+			EncryptedDEK string `json:"encryptedDEK"`
+		}
+		if err := json.Unmarshal(encJSON, &encDek); err == nil && strings.TrimSpace(encDek.EncryptedDEK) != "" {
+			return nil, ErrEncryptedReport
+		}
 	}
 
 	summaryJSON, hasSummary := topLevel["summaryDetails"]
@@ -289,6 +322,9 @@ func validateReport(report *scanReport) error {
 	for resultIndex, result := range report.Results {
 		if strings.TrimSpace(result.ResourceID) == "" {
 			return fmt.Errorf("invalid report: results[%d].resourceID is empty", resultIndex)
+		}
+		if strings.Contains(result.ResourceID, "ENC[") {
+			return ErrEncryptedReport
 		}
 		for controlIndex, control := range result.AssociatedControls {
 			if strings.TrimSpace(control.ControlID) == "" {

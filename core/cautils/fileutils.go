@@ -675,6 +675,54 @@ func lexicalAbsPath(path string) string {
 	return filepath.Clean(absPath)
 }
 
+// RelativeToRoot returns path relative to root, the repository root reported
+// paths are anchored on. The repository root comes from go-git, which resolves
+// symlinks, while path keeps the form the scan was given. When the scan reached
+// the repository through a symlink (on macOS, anything under /tmp or /var), the
+// two differ in their leading components and the plain relation climbs out of
+// the root. Only then is the outermost ancestor of path that is the root's own
+// directory looked for, and path is taken relative to it: a repository-local
+// link back to the root (reenter -> .) is another such ancestor, below the one
+// the scan crossed, and keeps its name. Only that prefix is resolved:
+// every name below it, a repository-local symlink included, stays the one the
+// caller selected, as lexicalAbsPath requires, and path itself need not exist
+// (a template inside a packaged Helm dependency does not). If no ancestor is
+// the root, the plain relation is returned as before.
+func RelativeToRoot(root, path string) (string, error) {
+	rel, err := filepath.Rel(root, path)
+	if err == nil && !escapesRoot(rel) {
+		return rel, nil
+	}
+	rootInfo, statErr := os.Stat(root)
+	if statErr != nil {
+		return rel, err
+	}
+	outermost := ""
+	for ancestor := filepath.Clean(path); ; {
+		if info, statErr := os.Stat(ancestor); statErr == nil && os.SameFile(rootInfo, info) {
+			outermost = ancestor
+		}
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			break
+		}
+		ancestor = parent
+	}
+	if outermost == "" {
+		return rel, err
+	}
+	if ancestorRel, relErr := filepath.Rel(outermost, path); relErr == nil {
+		return ancestorRel, nil
+	}
+	return rel, err
+}
+
+// escapesRoot reports whether a filepath.Rel result leaves the directory it was
+// computed against.
+func escapesRoot(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func canonicalPath(path string) (string, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -1105,6 +1153,13 @@ func LoadResourcesFromTerraform(ctx context.Context, basePath string) (map[strin
 // the files and directories filter excludes. When workspace containment is configured via workspaceOpt,
 // files and directories resolving outside the workspace are contained or skipped.
 func LoadResourcesFromTerraformFiltered(ctx context.Context, basePath string, filter *PathFilter, workspaceOpt ...string) (map[string][]workloadinterface.IMetadata, error) {
+	workloads, _, err := LoadResourcesFromTerraformFilteredWithSkips(ctx, basePath, filter, workspaceOpt...)
+	return workloads, err
+}
+
+// LoadResourcesFromTerraformFilteredWithSkips also reports nested modules that
+// failed to render, so best-effort repository scans can mark coverage incomplete.
+func LoadResourcesFromTerraformFilteredWithSkips(ctx context.Context, basePath string, filter *PathFilter, workspaceOpt ...string) (map[string][]workloadinterface.IMetadata, []SkippedManifest, error) {
 	var workspaceDir string
 	if len(workspaceOpt) > 0 {
 		workspaceDir = workspaceOpt[0]
@@ -1112,18 +1167,18 @@ func LoadResourcesFromTerraformFiltered(ctx context.Context, basePath string, fi
 
 	if IsTerraformFile(basePath) {
 		if filter.Excluded(basePath, false) {
-			return nil, nil
+			return nil, nil, nil
 		}
 		if workspaceDir != "" && !pathcontainment.IsPathContained(workspaceDir, basePath) {
-			return nil, fmt.Errorf("%w: Terraform file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, basePath)
+			return nil, nil, fmt.Errorf("%w: Terraform file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, basePath)
 		}
 		dir := filepath.Dir(basePath)
 		td := NewTerraformDirectory(dir, workspaceDir)
 		wls, errs := td.GetWorkloads(dir)
 		if len(errs) > 0 {
-			return wls, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(errs...))
+			return wls, nil, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(errs...))
 		}
-		return wls, nil
+		return wls, nil, nil
 	}
 
 	dirs, discoveryErrs := listTerraformDirs(basePath, filter)
@@ -1131,16 +1186,17 @@ func LoadResourcesFromTerraformFiltered(ctx context.Context, basePath string, fi
 		logger.L().Ctx(ctx).Warning("Skipping path while discovering Terraform directories", helpers.Error(err))
 	}
 	if len(dirs) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	explicitTerraformDir := isTerraformDirectory(basePath)
 
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
+	var skips []SkippedManifest
 	for _, dir := range dirs {
 		if workspaceDir != "" && !pathcontainment.IsPathContained(workspaceDir, dir) {
 			if explicitTerraformDir && dir == basePath {
-				return nil, fmt.Errorf("%w: Terraform directory %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, dir)
+				return nil, skips, fmt.Errorf("%w: Terraform directory %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, dir)
 			}
 			logger.L().Ctx(ctx).Warning("Skipping Terraform directory outside workspace root", helpers.String("path", dir))
 			continue
@@ -1149,14 +1205,17 @@ func LoadResourcesFromTerraformFiltered(ctx context.Context, basePath string, fi
 		wls, dirErrs := td.GetWorkloads(dir)
 		if len(dirErrs) > 0 {
 			if explicitTerraformDir && dir == basePath {
-				return sourceToWorkloads, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(dirErrs...))
+				return sourceToWorkloads, skips, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(dirErrs...))
 			}
 			logger.L().Ctx(ctx).Warning("Skipping nested Terraform configuration that failed to render", helpers.String("path", dir), helpers.Error(errors.Join(dirErrs...)))
+			// HCL diagnostics contain source filenames and resource labels that
+			// report anonymization cannot safely identify; keep them in logs.
+			skips = append(skips, SkippedManifest{Path: dir, Reason: "failed to render Terraform configuration; see scan logs for details"})
 			continue
 		}
 		maps.Copy(sourceToWorkloads, wls)
 	}
-	return sourceToWorkloads, nil
+	return sourceToWorkloads, skips, nil
 }
 
 // LoadResourcesFromFiles globs input for plain YAML/JSON manifests and loads them. renderedCharts
@@ -1298,7 +1357,7 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 			wSlice := workloads[path]
 			for j := range w {
 				lw := localworkload.NewLocalWorkload(w[j].GetObject())
-				if relPath, err := filepath.Rel(rootPath, path); err == nil {
+				if relPath, err := RelativeToRoot(rootPath, path); err == nil {
 					lw.SetPath(fmt.Sprintf("%s:%d", relPath, j))
 				} else {
 					lw.SetPath(fmt.Sprintf("%s:%d", path, j))
@@ -1470,6 +1529,46 @@ func hasGlobMeta(path string) bool {
 	return strings.ContainsAny(path, magicChars)
 }
 
+// WorkloadDocuments maps the workloads read from a YAML file, by the index the
+// loader gives them ("<path>:<n>"), to the documents they come from, numbered
+// as gopkg.in/yaml.v3 decodes the file. The two differ once a document yields
+// no workload, such as an empty or comment-only one or one that isn't a
+// Kubernetes object, or yields several, as a List does. A workload that came
+// out of a List maps to -1: it has no document of its own.
+func WorkloadDocuments(data []byte) ([]int, error) {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	var documents []int
+	for i := 0; ; i++ {
+		var node yaml.Node
+		if err := decoder.Decode(&node); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			return nil, fmt.Errorf("document %d: %w", i, err)
+		}
+		doc, err := yaml.Marshal(&node)
+		if err != nil {
+			return nil, fmt.Errorf("document %d: %w", i, err)
+		}
+		// The loader keeps the workloads of a document that also reports an
+		// error, so they are counted here too.
+		workloads, _ := readYamlFile(doc)
+		document := i
+		if len(workloads) > 0 && isListEnvelope(doc) {
+			document = -1
+		}
+		for range workloads {
+			documents = append(documents, document)
+		}
+	}
+	// The loader splits the file into documents on its own, by lines. Where it
+	// doesn't split as the decoder does, as with lone CR line breaks, it reads
+	// other workloads than the documents hold, and they can't be matched up.
+	if loaded, _ := readYamlFile(data); len(loaded) != len(documents) {
+		return nil, fmt.Errorf("the loader reads %d workloads from the file and its documents hold %d", len(loaded), len(documents))
+	}
+	return documents, nil
+}
+
 func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err error) {
 	yamlObjs = []workloadinterface.IMetadata{}
 	defer func() {
@@ -1494,7 +1593,11 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err 
 			parseErrs = append(parseErrs, fmt.Errorf("document %d: %w", i+1, unmarshalErr))
 			continue
 		}
-		j := convertYamlToJson(t)
+		j, conversionErr := convertYamlToJson(t)
+		if conversionErr != nil {
+			parseErrs = append(parseErrs, fmt.Errorf("document %d: %w", i+1, conversionErr))
+			continue
+		}
 		if j == nil {
 			continue
 		}
@@ -1665,6 +1768,11 @@ func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err
 		}
 	}()
 
+	// A UTF-8 byte order mark is not part of the JSON text. Windows editors and
+	// PowerShell's Out-File -Encoding utf8 write one, the YAML reader skips it,
+	// and fastjson would reject the whole file at the first byte.
+	jsonFile = bytes.TrimPrefix(jsonFile, []byte("\xef\xbb\xbf"))
+
 	var p fastjson.Parser
 	v, err := p.ParseBytes(jsonFile)
 	if err != nil {
@@ -1755,6 +1863,7 @@ func manifestObjectToWorkloads(obj map[string]any) ([]workloadinterface.IMetadat
 		return expandListEnvelope(obj, kind)
 	}
 
+	trimManifestNamespace(obj)
 	if o := objectsenvelopes.NewObject(obj); !isNilEnvelope(o) {
 		return []workloadinterface.IMetadata{o}, nil
 	}
@@ -1769,6 +1878,16 @@ func manifestObjectToWorkloads(obj map[string]any) ([]workloadinterface.IMetadat
 		return nil, fmt.Errorf("not a valid Kubernetes object")
 	}
 	return nil, nil
+}
+
+// trimManifestNamespace trims metadata.namespace once at ingestion so resource
+// IDs, namespace filters, summaries and printers all see the same value. Real
+// namespaces are DNS-1123 labels, so only hand-edited manifests change.
+func trimManifestNamespace(obj map[string]any) {
+	metadata, _ := obj["metadata"].(map[string]any)
+	if ns, ok := metadata["namespace"].(string); ok {
+		metadata["namespace"] = strings.TrimSpace(ns)
+	}
 }
 
 // isNilEnvelope reports whether NewObject returned a nil pointer held in a
@@ -1878,16 +1997,30 @@ func restoreTypedListItemTypeMeta(list *unstructured.UnstructuredList, listKind 
 	}
 }
 
-func convertYamlToJson(i any) any {
+func convertYamlToJson(i any) (any, error) {
 	switch x := i.(type) {
 	case map[any]any:
-		m2 := map[string]any{}
+		m2 := make(map[string]any, len(x))
 		for k, v := range x {
-			if s, ok := k.(string); ok {
-				m2[s] = convertYamlToJson(v)
+			var keyStr string
+			switch s := k.(type) {
+			case string:
+				keyStr = s
+			case nil:
+				keyStr = "null"
+			default:
+				keyStr = fmt.Sprintf("%v", k)
 			}
+			if _, exists := m2[keyStr]; exists {
+				return nil, fmt.Errorf("YAML keys collide after conversion to JSON key %q", keyStr)
+			}
+			converted, err := convertYamlToJson(v)
+			if err != nil {
+				return nil, fmt.Errorf("key %q: %w", keyStr, err)
+			}
+			m2[keyStr] = converted
 		}
-		return m2
+		return m2, nil
 	case map[string]any:
 		// Recurse into values: yaml.v3 decodes a nested mapping with a
 		// non-string key (e.g. `1:` or an unquoted YAML 1.1 `on:`) as
@@ -1895,15 +2028,24 @@ func convertYamlToJson(i any) any {
 		// would otherwise survive and break json.Marshal when OPA builds its
 		// input (issue #2833).
 		for k, v := range x {
-			x[k] = convertYamlToJson(v)
+			converted, err := convertYamlToJson(v)
+			if err != nil {
+				return nil, fmt.Errorf("key %q: %w", k, err)
+			}
+			x[k] = converted
 		}
-		return x
+		return x, nil
 	case []any:
 		for i, v := range x {
-			x[i] = convertYamlToJson(v)
+			converted, err := convertYamlToJson(v)
+			if err != nil {
+				return nil, fmt.Errorf("index %d: %w", i, err)
+			}
+			x[i] = converted
 		}
+		return x, nil
 	}
-	return i
+	return i, nil
 }
 
 // removedButRealKinds are built-in Kubernetes kinds the bundled client-go scheme
@@ -2019,7 +2161,23 @@ func IsJson(filePath string) bool {
 func glob(root, pattern string, onlyDirectories bool, filter *PathFilter) ([]string, error) {
 	var matches []string
 
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	// filepath.Walk does not follow symlinks, the root included, so a scan of a
+	// directory given as a symlink (a linked checkout, say) would list nothing.
+	// Walk its target and report each path under the root as given, which is
+	// the form the rest of the scan keeps.
+	walkRoot := root
+	if info, err := os.Lstat(root); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			walkRoot = resolved
+		}
+	}
+
+	err := filepath.Walk(walkRoot, func(path string, info os.FileInfo, err error) error {
+		if walkRoot != root {
+			if rel, relErr := filepath.Rel(walkRoot, path); relErr == nil {
+				path = filepath.Join(root, rel)
+			}
+		}
 		if err != nil {
 			return err
 		}

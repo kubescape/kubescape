@@ -42,21 +42,28 @@ deny contains msga if {
 
 # workloadPodSpec resolves the pod spec for the supported workload kinds:
 # a Pod carries it at spec, controllers at spec.template.spec, and a
-# CronJob nests it at spec.jobTemplate.spec.template.spec.
+# CronJob nests it at spec.jobTemplate.spec.template.spec. A ReplicaSet or
+# ReplicationController owned by another controller is left to its owner by
+# the resource handler, so listing them only adds the ones created directly.
 workloadPodSpec(wl) := wl.spec if {
 	wl.kind == "Pod"
 } else := wl.spec.template.spec if {
-	wl.kind in {"Deployment", "StatefulSet", "DaemonSet", "Job"}
+	templatedKind(wl.kind)
 } else := wl.spec.jobTemplate.spec.template.spec if {
 	wl.kind == "CronJob"
 }
+
+# templatedKind lists the kinds that carry the pod spec at spec.template.spec.
+# The kinds are listed inline because a package level constant would be
+# evaluated as a rule response by the rego processor.
+templatedKind(kind) if kind in {"Deployment", "ReplicaSet", "ReplicationController", "StatefulSet", "DaemonSet", "Job"}
 
 # specPrefix is the path prefix from the workload root to its pod spec,
 # used for failedPaths so they point at the real manifest location.
 specPrefix(wl) := "spec" if {
 	wl.kind == "Pod"
 } else := "spec.template.spec" if {
-	wl.kind in {"Deployment", "StatefulSet", "DaemonSet", "Job"}
+	templatedKind(wl.kind)
 } else := "spec.jobTemplate.spec.template.spec" if {
 	wl.kind == "CronJob"
 }
@@ -126,11 +133,32 @@ entriesFor(podSpec, fieldName) := entries if {
 # "unset" marks the absent case (an unset field is not the same as false —
 # an explicit false means non-root enforcement is off and the container
 # may run as root).
-effectiveRunAsNonRoot(podSpec, container) := object.get(object.get(container, "securityContext", {}), "runAsNonRoot", object.get(object.get(podSpec, "securityContext", {}), "runAsNonRoot", "unset"))
+effectiveRunAsNonRoot(podSpec, container) := effectiveSecurityValue(podSpec, container, "runAsNonRoot", "unset")
 
 # effectiveRunAsUser follows the same cascade; 0 marks the absent case,
 # which counts as root (image default unknown to static analysis).
-effectiveRunAsUser(podSpec, container) := object.get(object.get(container, "securityContext", {}), "runAsUser", object.get(object.get(podSpec, "securityContext", {}), "runAsUser", 0))
+effectiveRunAsUser(podSpec, container) := effectiveSecurityValue(podSpec, container, "runAsUser", 0)
+
+# effectiveSecurityValue reads a securityContext field from the container,
+# then from the pod, then falls back to the default. A null securityContext
+# or a null field is how Kubernetes and most templating tools spell "unset"
+# (Helm renders `securityContext: {{ toYaml .Values.securityContext }}` as
+# null when the value is not configured), and the API server accepts it as
+# if the field were left out. Reading null as a value instead would make
+# object.get fail on a null securityContext, silencing the container, and
+# would let a null container-level field override the pod-level one.
+effectiveSecurityValue(podSpec, container, field, fallback) := value if {
+	value := securityValue(container, field)
+} else := value if {
+	value := securityValue(podSpec, field)
+} else := fallback
+
+securityValue(obj, field) := value if {
+	context := obj.securityContext
+	is_object(context)
+	value := context[field]
+	value != null
+}
 
 # containerRunsAsRoot is the static root approximation: runAsNonRoot not
 # enforced (unset or explicitly false at the effective level), and either

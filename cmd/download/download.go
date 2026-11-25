@@ -56,6 +56,24 @@ func normalizeDownloadTarget(target string) string {
 	}
 }
 
+// completeWithCasePrefix filters candidates matching toComplete case-insensitively,
+// preserving the typed prefix in returned suggestions so that shells with
+// case-sensitive completion (such as Bash) retain the matches.
+func completeWithCasePrefix(candidates []string, toComplete string) []string {
+	var suggestions []string
+	lowerToComplete := strings.ToLower(toComplete)
+	for _, candidate := range candidates {
+		if strings.HasPrefix(strings.ToLower(candidate), lowerToComplete) {
+			if len(toComplete) <= len(candidate) {
+				suggestions = append(suggestions, toComplete+candidate[len(toComplete):])
+			} else {
+				suggestions = append(suggestions, candidate)
+			}
+		}
+	}
+	return suggestions
+}
+
 // GetDownloadCmd returns the Cobra command for downloading Kubescape policies, frameworks, controls, and artifacts.
 func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 	var downloadInfo = v1.DownloadInfo{}
@@ -65,6 +83,17 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 		Short:   fmt.Sprintf("Download %s", strings.Join(core.DownloadSupportCommands(), ",")),
 		Long:    ``,
 		Example: downloadExample,
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) == 1 && normalizeDownloadTarget(args[0]) == core.TargetControlsInputs {
+				return nil, cobra.ShellCompDirectiveDefault
+			}
+
+			if len(args) > 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+
+			return completeWithCasePrefix(core.DownloadSupportCommands(), toComplete), cobra.ShellCompDirectiveNoFileComp
+		},
 		Args: func(cmd *cobra.Command, args []string) error {
 			supported := strings.Join(core.DownloadSupportCommands(), ",")
 			if len(args) < 1 {
@@ -127,6 +156,8 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 
 // Check if the flag entered are valid
 func flagValidationDownload(downloadInfo *v1.DownloadInfo) error {
+	downloadInfo.AccountID = strings.TrimSpace(downloadInfo.AccountID)
+	downloadInfo.AccessKey = strings.TrimSpace(downloadInfo.AccessKey)
 
 	// Validate the user's credentials
 	return cautils.ValidateAccountID(downloadInfo.AccountID)

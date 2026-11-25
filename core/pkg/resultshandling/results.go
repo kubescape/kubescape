@@ -310,6 +310,10 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 		rh.ScanData.VAPCoverage = vapreconcile.BuildCoverage(rh.ScanData.VAPPolicies, rh.ScanData.VAPBindings, failing, namespaceLabels)
 	}
 
+	if rh.ScanData != nil {
+		rh.ScanData.WebhookCoverage = buildWebhookCoverage(rh.ScanData, scanInfo)
+	}
+
 	// Snapshot Report.SummaryDetails.Controls, every
 	// ResourcesResult[id].AssociatedControls, and the derived summary fields
 	// (compliance score, framework compliance scores, severity counters) before
@@ -482,9 +486,13 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 		return false, fmt.Errorf("format \"%s\" is not supported for image scanning", printFormat)
 	}
 	if printFormat == printer.SARIFFormat || printFormat == printer.GitLabSASTFormat || printFormat == printer.GitLabCodeQualityFormat || printFormat == printer.GitHubActionsFormat {
-		// SARIF, GitLab SAST, GitLab Code Quality and GitHub Actions resolve file locations, so they only apply to local files
-		switch scanContext {
-		case cautils.ContextDir, cautils.ContextFile, cautils.ContextGitLocal, cautils.ContextGitRemote:
+		// These formats anchor findings to file locations. SARIF also covers a
+		// live cluster scan, where the printer gives each resource a virtual
+		// cluster/<namespace>/<kind>/<name>.yaml location instead of a file.
+		switch {
+		case scanContext == cautils.ContextDir, scanContext == cautils.ContextFile, scanContext == cautils.ContextGitLocal, scanContext == cautils.ContextGitRemote:
+			return false, nil
+		case scanContext == cautils.ContextCluster && printFormat == printer.SARIFFormat:
 			return false, nil
 		default:
 			return false, fmt.Errorf("format \"%s\" is only supported when scanning local files", printFormat)

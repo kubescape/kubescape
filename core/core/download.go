@@ -164,9 +164,15 @@ func downloadArtifacts(ctx context.Context, downloadInfo *metav1.DownloadInfo) (
 		TargetFramework:      downloadFramework,
 		TargetAttackTracks:   downloadAttackTracks,
 	}
+	artifactOrder := []string{
+		TargetControlsInputs,
+		TargetExceptions,
+		TargetFramework,
+		TargetAttackTracks,
+	}
 	var files []string
 	var errs []error
-	for artifact := range artifacts {
+	for _, artifact := range artifactOrder {
 		artifactFiles, err := downloadArtifact(ctx, &metav1.DownloadInfo{
 			Target:    artifact,
 			Path:      downloadInfo.Path,
@@ -384,20 +390,24 @@ func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]
 			return nil, err
 		}
 		var files []string
+		var errs []error
 		for _, listEntry := range controls {
 			controlID := strings.Split(listEntry, "|")[0]
 			control, err := g.GetControl(controlID)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("failed to download control", helpers.String("ID", controlID), helpers.Error(err))
+				errs = append(errs, fmt.Errorf("failed to download control ID %q: %w", controlID, err))
 				continue
 			}
 			if control == nil {
 				logger.L().Ctx(ctx).Warning("failed to download control - received empty objects", helpers.String("ID", controlID))
+				errs = append(errs, fmt.Errorf("failed to download control ID %q - received empty objects", controlID))
 				continue
 			}
 			filename, err := getter.PolicyCacheFilename(controlID)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("skipping control with invalid ID", helpers.String("ID", controlID), helpers.Error(err))
+				errs = append(errs, fmt.Errorf("failed to derive filename for control ID %q: %w", controlID, err))
 				continue
 			}
 			downloadTo := filepath.Join(downloadInfo.Path, filename)
@@ -408,7 +418,7 @@ func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]
 			logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("ID", controlID), helpers.String("path", downloadTo))
 			files = append(files, downloadTo)
 		}
-		return files, nil
+		return files, errors.Join(errs...)
 	}
 	if downloadInfo.FileName == "" {
 		filename, err := getter.PolicyCacheFilename(downloadInfo.Identifier)

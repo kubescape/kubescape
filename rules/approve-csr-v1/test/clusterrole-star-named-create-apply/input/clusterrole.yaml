@@ -1,0 +1,18 @@
+# resourceNames: ["*"] names a CSR literally called "*". A CSR's name is not
+# validated as a DNS subdomain, so that CSR can exist, and create and patch on
+# it are enough to create it through server-side apply.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: named-csr-apply
+rules:
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["certificatesigningrequests"]
+  resourceNames: ["*"]
+  verbs: ["create", "patch", "get"]
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["certificatesigningrequests/approval"]
+  verbs: ["update"]
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["signers"]
+  verbs: ["approve"]

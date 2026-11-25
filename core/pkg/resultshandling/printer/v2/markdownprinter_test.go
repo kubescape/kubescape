@@ -407,6 +407,24 @@ func TestMarkdownPrinter_ActionPrint_NegativeScoreRendersNA(t *testing.T) {
 	assert.NotContains(t, out, "**Compliance Score:** -1")
 }
 
+func TestMarkdownPrinter_ActionPrint_FractionalNegativeScoreRendersNA(t *testing.T) {
+	for _, score := range []float32{-0.5, -0.25, -0.1} {
+		session := cautils.NewOPASessionObjMock()
+		session.Report = &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				ComplianceScore: score,
+				Controls:        reportsummary.ControlSummaries{},
+			},
+		}
+
+		out := mdRunActionPrint(t, session)
+
+		assert.Contains(t, out, "# Kubescape Security Report")
+		assert.Contains(t, out, "**Compliance Score:** N/A")
+		assert.NotContains(t, out, "**Compliance Score:** 0%")
+	}
+}
+
 func TestMarkdownPrinter_ActionPrint_PerfectScoreRenders100Percent(t *testing.T) {
 	session := cautils.NewOPASessionObjMock()
 	session.Report = &reporthandlingv2.PostureReport{
@@ -501,11 +519,82 @@ func TestMdEscapeCell(t *testing.T) {
 		{"multi|pipe|in|cell", "multi\\|pipe\\|in\\|cell"},
 		{"", ""},
 		{"no special chars", "no special chars"},
+		{"with\x00null", "withnull"},
+		{"with\x1bescape", "withescape"},
+		{"with\x07bell", "withbell"},
+		{"with\x7fdel", "withdel"},
+		{"with\ttab", "with\ttab"},
+		{"with\u0080pad", "withpad"},
+		{"with\u0085nel", "withnel"},
+		{"with\u009bcsi", "withcsi"},
+		{"with\u009fapc", "withapc"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.input, func(t *testing.T) {
 			assert.Equal(t, tc.want, mdEscapeCell(tc.input))
+		})
+	}
+}
+
+func TestMdSanitizeText(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty", "", ""},
+		{"normal text", "hello world", "hello world"},
+		{"collapses newlines and carriage returns", "line1\r\nline2\nline3\rline4", "line1 line2 line3 line4"},
+		{"trims surrounding whitespace", "   spaced text   \n", "spaced text"},
+		{"strips C0 control characters but preserves tab", "col1\t\x00val\x07\x1b", "col1\tval"},
+		{"strips C1 control characters (0x80-0x9f)", "foo\u0080bar\u0085baz\u009bqux\u009f", "foobarbazqux"},
+		{"preserves printable non-ASCII characters", "latin: \u00a0 café — \u4e16\u754c", "latin: \u00a0 café — \u4e16\u754c"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, mdSanitizeText(tc.input))
+		})
+	}
+}
+
+func TestMdEscapeCodeCell(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"normal", "normal"},
+		{"with|pipe", "with\\|pipe"},
+		{"image`with`backticks", "image'with'backticks"},
+		{"image|with|pipe`and`ticks\r\n", "image\\|with\\|pipe'and'ticks"},
+		{"\x1b[31mimage`tag`\x00", "[31mimage'tag'"},
+		{"image\u0085with\u009bC1`and`pipe|", "imagewithC1'and'pipe\\|"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			assert.Equal(t, tc.want, mdEscapeCodeCell(tc.input))
+		})
+	}
+}
+
+func TestMdEscapeInline(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"image:v1", "image:v1"},
+		{"image`tag", "image'tag"},
+		{"C-0099|local", "C-0099|local"},
+		{"img`with`backtick\nand\r\nnewlines", "img'with'backtick and newlines"},
+		{"\x00bad`inline\x1b", "bad'inline"},
+		{"\u0080bad`inline\u009b", "bad'inline"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			assert.Equal(t, tc.want, mdEscapeInline(tc.input))
 		})
 	}
 }
@@ -986,4 +1075,240 @@ func TestMarkdownPrinter_ActionPrint_NeutralizesNewlinesInControlIDs(t *testing.
 	assert.NotContains(t, out, "C-0088\r\n")
 	assert.Contains(t, out, "C-0099 \\| evil \\|")
 	assert.Contains(t, out, "C-0088 \\| leaked")
+}
+
+func TestMarkdownPrinter_ActionPrint_ImageScanBacktickAndControlSanitization(t *testing.T) {
+	imageScanData := []cautils.ImageScanData{
+		{
+			Image:    "registry.example.com/app`evil`\x1b[31m|pipe:v1",
+			Platform: "linux/amd64",
+			Matches: match.NewMatches(
+				mdImageMatch("CVE-2026-TICK", "High", "pkg`name", "1.0", vulnerability.FixStateFixed, "2.0"),
+			),
+		},
+	}
+
+	out := mdRunImageActionPrint(t, imageScanData)
+
+	// Image targets table: backticks neutralized to single quotes and control characters stripped
+	assert.Contains(t, out, "`registry.example.com/app'evil'[31m\\|pipe:v1 [linux/amd64]`")
+	assert.NotContains(t, out, "`registry.example.com/app`evil`")
+	assert.NotContains(t, out, "\x1b")
+
+	// Vulnerabilities table: scoped to the vulnerabilities section so the Images table cannot satisfy it
+	vulnIdx := strings.Index(out, "## Vulnerabilities")
+	require.True(t, vulnIdx != -1, "expected ## Vulnerabilities section")
+	vulnSection := out[vulnIdx:]
+	assert.Contains(t, vulnSection, "| `registry.example.com/app'evil'[31m\\|pipe:v1 [linux/amd64]` |")
+	assert.NotContains(t, vulnSection, "`evil`")
+	assert.NotContains(t, vulnSection, "\x1b")
+}
+
+func TestMarkdownPrinter_ActionPrint_NeutralizesNewlinesInFailedControlHeading(t *testing.T) {
+	session := mdSessionFixture()
+
+	injectedControlID := "C-0099`hack`"
+	ctrl := reportsummary.ControlSummary{
+		ControlID:   injectedControlID,
+		Name:        "Dangerous Control\n## Rogue Section",
+		ScoreFactor: 9.0,
+		StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+	}
+	failedStatus := &apis.StatusInfo{InnerStatus: apis.StatusFailed}
+	ctrl.Append(failedStatus, mdResourceID1)
+	session.Report.SummaryDetails.Controls[injectedControlID] = ctrl
+
+	out := mdRunActionPrint(t, session)
+
+	assert.NotContains(t, out, "\n## Rogue Section\n", "newline in control name must not produce a rogue heading")
+	assert.Contains(t, out, "### Dangerous Control ## Rogue Section — Critical (`C-0099'hack'`)")
+}
+
+func TestMarkdownPrinter_ActionPrint_FailedControlHeadingPreservesPipeInControlID(t *testing.T) {
+	session := mdSessionFixture()
+
+	controlID := "C-0099|local"
+	ctrl := reportsummary.ControlSummary{
+		ControlID:   controlID,
+		Name:        "Custom Control",
+		ScoreFactor: 9.0,
+		StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+	}
+	failedStatus := &apis.StatusInfo{InnerStatus: apis.StatusFailed}
+	ctrl.Append(failedStatus, mdResourceID1)
+	session.Report.SummaryDetails.Controls[controlID] = ctrl
+
+	out := mdRunActionPrint(t, session)
+
+	// Heading code span outside table must preserve pipe without literal backslash escaping
+	assert.Contains(t, out, "### Custom Control — Critical (`C-0099|local`)")
+	assert.NotContains(t, out, "### Custom Control — Critical (`C-0099\\|local`)")
+
+	// Summary table cell must still escape pipe to preserve table structure
+	assert.Contains(t, out, "| Critical | Custom Control | C-0099\\|local |")
+}
+
+func TestMarkdownActionPrint_NilWriterReturnsError(t *testing.T) {
+	mp := NewMarkdownPrinter()
+	session := mdSessionFixture()
+
+	require.NotPanics(t, func() {
+		err := mp.ActionPrint(context.Background(), session, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	require.NotPanics(t, func() {
+		err := mp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{{Image: "nginx:1.23"}})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestMdWriteSummaryTable_NilResourcesListDoesNotPanic(t *testing.T) {
+	ctrl := reportsummary.ControlSummary{
+		ControlID:   "C-0001",
+		Name:        "Test Control",
+		ScoreFactor: 5.0,
+		StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusPassed},
+	}
+	var buf strings.Builder
+	require.NotPanics(t, func() {
+		err := mdWriteSummaryTable(&buf, []reportsummary.ControlSummary{ctrl})
+		require.NoError(t, err)
+	})
+	assert.Contains(t, buf.String(), "| Medium | Test Control | C-0001 | ✅ Passed | 0 | 0 |")
+}
+
+func TestMdWriteFailedSection_NilSafety(t *testing.T) {
+	t.Run("nil status does not panic", func(t *testing.T) {
+		ctrl := reportsummary.ControlSummary{
+			ControlID:   "C-0001",
+			Name:        "Test Control",
+			ScoreFactor: 5.0,
+		}
+		var buf strings.Builder
+		require.NotPanics(t, func() {
+			err := mdWriteFailedSection(context.Background(), &buf, []reportsummary.ControlSummary{ctrl}, nil)
+			require.NoError(t, err)
+		})
+		assert.Empty(t, buf.String())
+	})
+
+	t.Run("nil resources list with failed status does not panic", func(t *testing.T) {
+		ctrl := reportsummary.ControlSummary{
+			ControlID:   "C-0001",
+			Name:        "Failed Control",
+			ScoreFactor: 9.0,
+			StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		}
+		var buf strings.Builder
+		require.NotPanics(t, func() {
+			err := mdWriteFailedSection(context.Background(), &buf, []reportsummary.ControlSummary{ctrl}, nil)
+			require.NoError(t, err)
+		})
+		assert.Contains(t, buf.String(), "Failed Controls")
+		assert.Contains(t, buf.String(), "### Failed Control — Critical (`C-0001`)")
+	})
+
+	t.Run("nil session does not panic when resolving failed resources", func(t *testing.T) {
+		ctrl := reportsummary.ControlSummary{
+			ControlID:   "C-0001",
+			Name:        "Failed Control",
+			ScoreFactor: 9.0,
+			StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		}
+		ctrl.Append(&apis.StatusInfo{InnerStatus: apis.StatusFailed}, "res-missing")
+		var buf strings.Builder
+		require.NotPanics(t, func() {
+			err := mdWriteFailedSection(context.Background(), &buf, []reportsummary.ControlSummary{ctrl}, nil)
+			require.NoError(t, err)
+		})
+		assert.Contains(t, buf.String(), "| res-missing | — | — |")
+	})
+}
+
+func TestMarkdown_NilReceiverSafety(t *testing.T) {
+	var mp *MarkdownPrinter
+
+	assert.NotPanics(t, func() {
+		err := mp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := mp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := mp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		mp.Score(100)
+		mp.PrintNextSteps()
+	})
+}
+
+func TestMarkdownPrinter_ActionPrint_ClusterScopedAndNamespacedResources(t *testing.T) {
+	clusterRoleID := "rbac.authorization.k8s.io/v1/ClusterRole//cluster-admin"
+	deploymentID := "apps/v1/Deployment/default/nginx"
+
+	clusterRole := localworkload.NewLocalWorkload(map[string]interface{}{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRole",
+		"metadata":   map[string]interface{}{"name": "cluster-admin"},
+		"spec":       map[string]interface{}{},
+	})
+	deployment := localworkload.NewLocalWorkload(map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]interface{}{"name": "nginx", "namespace": "default"},
+		"spec":       map[string]interface{}{},
+	})
+
+	session := cautils.NewOPASessionObjMock()
+	session.AllResources[clusterRoleID] = clusterRole
+	session.AllResources[deploymentID] = deployment
+
+	ctrl := &reportsummary.ControlSummary{
+		ControlID:   "C-0012",
+		Name:        "Cluster admin binding",
+		ScoreFactor: 10.0,
+		StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+	}
+	failedStatus := &apis.StatusInfo{InnerStatus: apis.StatusFailed}
+	ctrl.Append(failedStatus, clusterRoleID, deploymentID)
+
+	session.ResourcesResult[clusterRoleID] = resourcesresults.Result{
+		ResourceID: clusterRoleID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{ControlID: "C-0012", Name: "Cluster admin binding", Status: apis.StatusInfo{InnerStatus: apis.StatusFailed}},
+		},
+	}
+	session.ResourcesResult[deploymentID] = resourcesresults.Result{
+		ResourceID: deploymentID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{ControlID: "C-0012", Name: "Cluster admin binding", Status: apis.StatusInfo{InnerStatus: apis.StatusFailed}},
+		},
+	}
+
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			ComplianceScore: 50,
+			Controls: reportsummary.ControlSummaries{
+				"C-0012": *ctrl,
+			},
+		},
+	}
+
+	out := mdRunActionPrint(t, session)
+
+	assert.Contains(t, out, "| Resource | Kind | Namespace |")
+	assert.Contains(t, out, "| cluster-admin | ClusterRole | \\<cluster-scoped\\> |")
+	assert.Contains(t, out, "| nginx | Deployment | default |")
 }

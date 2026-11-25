@@ -2,11 +2,14 @@ package printer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -113,11 +116,18 @@ func ResolveOutputFile(format, outputFile, defaultBaseName string) (string, bool
 	}
 
 	// A trailing separator names a directory: write the default report name
-	// inside it rather than a hidden file such as "reports/.json". Append
-	// instead of filepath.Join, which would clean "link/../" lexically and
-	// pick a different directory than the filesystem does through a symlink.
-	if defaultBaseName != "" && os.IsPathSeparator(outputFile[len(outputFile)-1]) {
-		outputFile += defaultBaseName
+	// inside it rather than a hidden file such as "reports/.json". A path
+	// whose last element is "." or ".." (--output . or --output reports/..)
+	// names a directory too, so it gets the same treatment instead of the
+	// hidden file "..json". Append instead of filepath.Join, which would
+	// clean "link/../" lexically and pick a different directory than the
+	// filesystem does through a symlink.
+	if defaultBaseName != "" {
+		if os.IsPathSeparator(outputFile[len(outputFile)-1]) {
+			outputFile += defaultBaseName
+		} else if base := filepath.Base(outputFile); base == "." || base == ".." {
+			outputFile += string(filepath.Separator) + defaultBaseName
+		}
 	}
 
 	ext, ok := FormatOutputExt[format]
@@ -203,8 +213,51 @@ var chmodFile = (*os.File).Chmod
 // to 0600 and only then truncated; if tightening is not possible, the file is
 // left as it was and no report is written into it.
 func openFileForWrite(path string) (*os.File, error) {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
-	if err != nil {
+	return openOutputFile(path, false)
+}
+
+// openFileForPrinter is openFileForWrite for the result printers. It opens the
+// file the same way but leaves an existing file's content alone until the
+// printer calls PrepareOutput, right before it writes. A scan that fails
+// before it has a report then leaves the old file as it was, and a file this
+// call created is removed again by CloseOutput if nothing was ever written.
+func openFileForPrinter(path string) (*os.File, error) {
+	return openOutputFile(path, true)
+}
+
+// pendingOutput describes an output file opened by openFileForPrinter that no
+// printer has written to yet.
+type pendingOutput struct {
+	// created is true when the open call created the file, so CloseOutput may
+	// remove it again if the scan never got to write a report into it.
+	created bool
+}
+
+// pendingOutputs maps an *os.File to its pendingOutput until PrepareOutput or
+// CloseOutput settles it.
+var pendingOutputs sync.Map
+
+func openOutputFile(path string, deferTruncate bool) (*os.File, error) {
+	// Reject a dangling symlink up front. O_EXCL returns ErrExist for the
+	// symlink node even when its target does not exist, so the fallback open
+	// below would create the missing target while leaving created=false.
+	// CloseOutput would then skip the removal, leaving an empty target file.
+	if linfo, lerr := os.Lstat(path); lerr == nil && linfo.Mode()&os.ModeSymlink != 0 {
+		if _, serr := os.Stat(path); serr != nil {
+			return nil, fmt.Errorf("output path is a dangling symlink: %s", path)
+		}
+	}
+	created := false
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	switch {
+	case err == nil:
+		created = true
+	case errors.Is(err, fs.ErrExist):
+		f, err = os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+		if err != nil {
+			return nil, err
+		}
+	default:
 		return nil, err
 	}
 	info, err := f.Stat()
@@ -212,17 +265,71 @@ func openFileForWrite(path string) (*os.File, error) {
 		_ = f.Close()
 		return nil, fmt.Errorf("stat output file: %w", err)
 	}
-	if info.Mode().IsRegular() {
-		if err := chmodFile(f, 0o600); err != nil {
-			_ = f.Close()
-			return nil, fmt.Errorf("restrict output file permissions: %w", err)
+	if !info.Mode().IsRegular() {
+		return f, nil
+	}
+	if err := chmodFile(f, 0o600); err != nil {
+		_ = f.Close()
+		if created {
+			_ = os.Remove(path)
 		}
-		if err := f.Truncate(0); err != nil {
-			_ = f.Close()
-			return nil, fmt.Errorf("truncate output file: %w", err)
-		}
+		return nil, fmt.Errorf("restrict output file permissions: %w", err)
+	}
+	if deferTruncate {
+		pendingOutputs.Store(f, pendingOutput{created: created})
+		return f, nil
+	}
+	if err := f.Truncate(0); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("truncate output file: %w", err)
 	}
 	return f, nil
+}
+
+// PrepareOutput clears the previous content of an output file that
+// openFileForPrinter left untouched. Each printer calls it at the top of
+// ActionPrint, once the scan has a report to write. It returns an error
+// if the output writer is nil. It does nothing for stdout, a device, or
+// a file that is already prepared.
+func PrepareOutput(f *os.File) error {
+	if f == nil {
+		return fmt.Errorf("failed to write output: output writer is nil")
+	}
+	if _, pending := pendingOutputs.LoadAndDelete(f); !pending {
+		return nil
+	}
+	if err := f.Truncate(0); err != nil {
+		return fmt.Errorf("truncate output file: %w", err)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("rewind output file: %w", err)
+	}
+	return nil
+}
+
+// CloseOutput closes an output file. If the file was created for this scan and
+// never written to, because the scan failed first, it is removed so no empty
+// report is left behind. A file that existed before the scan is never removed.
+func CloseOutput(f *os.File) error {
+	if f == nil {
+		return nil
+	}
+	value, pending := pendingOutputs.LoadAndDelete(f)
+	if !pending || !value.(pendingOutput).created {
+		return f.Close()
+	}
+	path := f.Name()
+	opened, statErr := f.Stat()
+	closeErr := f.Close()
+	if statErr == nil {
+		// Only remove the path if it still names the file we created and is
+		// still empty. A non-zero size means something wrote to it after we
+		// opened it, so keep the file rather than destroy content.
+		if onDisk, err := os.Stat(path); err == nil && os.SameFile(opened, onDisk) && opened.Size() == 0 {
+			_ = os.Remove(path)
+		}
+	}
+	return closeErr
 }
 
 // GetWriter opens outputFile for writing with owner-only permissions. If outputFile
@@ -237,7 +344,7 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to create directory, reason: %s", err.Error()))
 			return os.Stdout
 		}
-		f, err := openFileForWrite(outputFile)
+		f, err := openFileForPrinter(outputFile)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))
 			return os.Stdout
@@ -252,6 +359,16 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 // legacy helpers, it never redirects an error to stdout or a temporary file:
 // callers can return the setup failure before a scan starts.
 func GetWriterNoFallback(outputFile string) (*os.File, error) {
+	return getWriterNoFallback(outputFile, openFileForWrite)
+}
+
+// GetPrinterWriterNoFallback is GetWriterNoFallback for the result printers:
+// the file's existing content is kept until the printer calls PrepareOutput.
+func GetPrinterWriterNoFallback(outputFile string) (*os.File, error) {
+	return getWriterNoFallback(outputFile, openFileForPrinter)
+}
+
+func getWriterNoFallback(outputFile string, open func(string) (*os.File, error)) (*os.File, error) {
 	// filepath.Dir would clean "link/../" lexically and create a different
 	// directory than the one the file is opened in; keep the path as given.
 	outputDir, _ := filepath.Split(outputFile)
@@ -261,7 +378,7 @@ func GetWriterNoFallback(outputFile string) (*os.File, error) {
 	if err := os.MkdirAll(outputDir, outputDirPerm); err != nil {
 		return nil, fmt.Errorf("create output directory for %q: %w", outputFile, err)
 	}
-	f, err := openFileForWrite(outputFile)
+	f, err := open(outputFile)
 	if err != nil {
 		return nil, fmt.Errorf("open output file %q: %w", outputFile, err)
 	}
@@ -281,7 +398,7 @@ func GetWriterNoStdoutFallback(ctx context.Context, outputFile, tempPattern stri
 			outputDir = "."
 		}
 		if err := os.MkdirAll(outputDir, outputDirPerm); err == nil {
-			if f, err := openFileForWrite(outputFile); err == nil {
+			if f, err := openFileForPrinter(outputFile); err == nil {
 				return f
 			} else {
 				logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))

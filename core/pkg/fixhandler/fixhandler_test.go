@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,7 +16,6 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	gitv5 "github.com/go-git/go-git/v5"
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v4/internal/testutils"
@@ -26,7 +26,6 @@ import (
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/op/go-logging.v1"
 )
 
 type indentationTestCase struct {
@@ -36,9 +35,7 @@ type indentationTestCase struct {
 }
 
 func NewFixHandlerMock() (*FixHandler, error) {
-	backendLoggerLeveled := logging.AddModuleLevel(logging.NewLogBackend(logger.L().GetWriter(), "", 0))
-	backendLoggerLeveled.SetLevel(logging.ERROR, "")
-	yqlib.GetLogger().SetBackend(backendLoggerLeveled)
+	yqlib.GetLogger().SetLevel(slog.LevelError)
 
 	return &FixHandler{
 		fixInfo:       &metav1.FixInfo{},
@@ -120,6 +117,19 @@ func getTestCases() []indentationTestCase {
 			"inserts/tc-12-00-begin-with-document-separator.yaml",
 			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
 			"inserts/tc-12-01-expected.yaml",
+		},
+		// InitContainers Scenario
+		{
+			"inserts/tc-13-00-input-initcontainers-insert.yaml",
+			"select(di==0).spec.initContainers[0].securityContext.allowPrivilegeEscalation |= false",
+			"inserts/tc-13-01-expected.yaml",
+		},
+		// Multi-container Scenario
+		{
+			"inserts/tc-14-00-input-multicontainer-insert.yaml",
+			`select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false |
+			 select(di==0).spec.containers[1].securityContext.readOnlyRootFilesystem |= true`,
+			"inserts/tc-14-01-expected.yaml",
 		},
 
 		// Removal Scenarios
@@ -280,13 +290,112 @@ func Test_fixPathToValidYamlExpression(t *testing.T) {
 		want string
 	}{
 		{
-			name: "fix path with boolean value",
+			name: "fix path with boolean true value",
 			args: args{
 				fixPath:             "spec.template.spec.containers[0].securityContext.privileged",
 				value:               "true",
 				documentIndexInYaml: 2,
 			},
 			want: "select(di==2).spec.template.spec.containers[0].securityContext.privileged |= true",
+		},
+		{
+			name: "fix path with boolean false value",
+			args: args{
+				fixPath:             "spec.template.spec.containers[0].securityContext.privileged",
+				value:               "false",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).spec.template.spec.containers[0].securityContext.privileged |= false",
+		},
+		{
+			name: "fix path with uppercase boolean value",
+			args: args{
+				fixPath:             "spec.template.spec.containers[0].securityContext.privileged",
+				value:               "TRUE",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).spec.template.spec.containers[0].securityContext.privileged |= TRUE",
+		},
+		{
+			name: "fix path with titlecase True boolean value",
+			args: args{
+				fixPath:             "spec.template.spec.containers[0].securityContext.privileged",
+				value:               "True",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).spec.template.spec.containers[0].securityContext.privileged |= True",
+		},
+		{
+			name: "fix path with titlecase False boolean value",
+			args: args{
+				fixPath:             "spec.template.spec.containers[0].securityContext.privileged",
+				value:               "False",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).spec.template.spec.containers[0].securityContext.privileged |= False",
+		},
+		{
+			name: "fix path with uppercase FALSE boolean value",
+			args: args{
+				fixPath:             "spec.template.spec.containers[0].securityContext.privileged",
+				value:               "FALSE",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).spec.template.spec.containers[0].securityContext.privileged |= FALSE",
+		},
+		{
+			name: "fix path with mixed-case tRuE string value",
+			args: args{
+				fixPath:             "metadata.labels.tier",
+				value:               "tRuE",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).metadata.labels.tier |= \"tRuE\"",
+		},
+		{
+			name: "fix path with mixed-case fAlSe string value",
+			args: args{
+				fixPath:             "metadata.labels.tier",
+				value:               "fAlSe",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).metadata.labels.tier |= \"fAlSe\"",
+		},
+		{
+			name: "fix path with single letter t string value",
+			args: args{
+				fixPath:             "metadata.labels.tier",
+				value:               "t",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).metadata.labels.tier |= \"t\"",
+		},
+		{
+			name: "fix path with single letter f string value",
+			args: args{
+				fixPath:             "metadata.labels.tier",
+				value:               "f",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).metadata.labels.tier |= \"f\"",
+		},
+		{
+			name: "fix path with single letter uppercase T string value",
+			args: args{
+				fixPath:             "metadata.labels.tier",
+				value:               "T",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).metadata.labels.tier |= \"T\"",
+		},
+		{
+			name: "fix path with single letter uppercase F string value",
+			args: args{
+				fixPath:             "metadata.labels.tier",
+				value:               "F",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).metadata.labels.tier |= \"F\"",
 		},
 		{
 			name: "fix path with string value",
@@ -1081,6 +1190,16 @@ func TestGetFilePathAndIndex(t *testing.T) {
 			require.Equal(t, tt.expectedIndex, index)
 		})
 	}
+}
+
+func TestNewFixHandler_NilFixInfo(t *testing.T) {
+	_, err := NewFixHandler(nil)
+	assert.Error(t, err)
+	assert.Equal(t, "uninitialized fix parameters", err.Error())
+
+	_, err = NewFixHandlerWithRoot(nil, nil)
+	assert.Error(t, err)
+	assert.Equal(t, "uninitialized fix parameters", err.Error())
 }
 
 func TestNewFixHandler_WrongJSON(t *testing.T) {

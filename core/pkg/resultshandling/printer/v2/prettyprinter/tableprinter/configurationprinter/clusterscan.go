@@ -23,6 +23,9 @@ func (cp *ClusterPrinter) PrintSummaryTable(_ io.Writer, _ *reportsummary.Summar
 }
 
 func (cp *ClusterPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, _ [][]string) {
+	if summaryDetails == nil {
+		return
+	}
 
 	categoriesToCategoryControls := bucketControlsByCategory(summaryDetails.ListControls())
 
@@ -67,12 +70,18 @@ func (cp *ClusterPrinter) renderSingleCategoryTable(categoryName string, categor
 }
 
 func (cp *ClusterPrinter) generateCountingCategoryRow(controlSummary reportsummary.IControlSummary) table.Row {
+	if controlSummary == nil {
+		return table.Row{}
+	}
 
 	row := make(table.Row, 3)
 
 	row[0] = controlSummary.GetName()
 
-	failedResources := controlSummary.NumberOfResources().Failed()
+	failedResources := 0
+	if numRes := controlSummary.NumberOfResources(); numRes != nil {
+		failedResources = numRes.Failed()
+	}
 	if failedResources > 0 {
 		row[1] = gchalk.WithYellow().Bold(fmt.Sprintf("%d", failedResources))
 	} else {
@@ -85,5 +94,8 @@ func (cp *ClusterPrinter) generateCountingCategoryRow(controlSummary reportsumma
 }
 
 func (cp *ClusterPrinter) generateTableNextSteps(controlSummary reportsummary.IControlSummary) string {
+	if controlSummary == nil {
+		return ""
+	}
 	return fmt.Sprintf("%s %s -v", scanControlPrefix, controlSummary.GetID())
 }

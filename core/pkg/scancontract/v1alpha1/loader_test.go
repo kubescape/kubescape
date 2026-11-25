@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -270,6 +271,25 @@ func TestLoadRejectsInvalidContractValues(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsCaseInsensitiveAndPaddedOutputFormats(t *testing.T) {
+	for _, formats := range []string{
+		"formats: [JSON, SARIF]",
+		"formats: [Json, Sarif]",
+		"formats: [Pretty-Printer, JSON]",
+		"formats: [\" json \", \" sarif \"]",
+	} {
+		t.Run(formats, func(t *testing.T) {
+			input := strings.Replace(validContract, "formats: [json, sarif]", formats, 1)
+			options := testOptions()
+			options.ContractName = "ci"
+			selected, err := Load([]byte(input), options)
+			require.NoError(t, err)
+			require.NotNil(t, selected.Contract.Output)
+			require.NotNil(t, selected.Contract.Output.Formats)
+		})
+	}
+}
+
 func TestLoadFile_Valid(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "contract.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(validContract), 0o600))
@@ -279,6 +299,30 @@ func TestLoadFile_Valid(t *testing.T) {
 	require.NotNil(t, selected)
 	assert.Equal(t, "payments-service", selected.Metadata.Name)
 	assert.Equal(t, "developer", selected.ContractName)
+}
+
+func TestLoadFile_PreservesSymlinkParentTraversal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink parent traversal uses different path semantics on Windows")
+	}
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target", "child")
+	require.NoError(t, os.MkdirAll(target, 0o700))
+	link := filepath.Join(dir, "link")
+	require.NoError(t, os.Symlink(target, link))
+
+	// Both paths are valid, but only the symlink's parent selects the CI gates.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "contract.yaml"), []byte(validContract), 0o600))
+	ciContract := strings.Replace(validContract, "defaultContract: developer", "defaultContract: ci", 1)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "target", "contract.yaml"), []byte(ciContract), 0o600))
+
+	selected, err := LoadFile(link+"/../contract.yaml", testOptions())
+	require.NoError(t, err)
+	assert.Equal(t, "ci", selected.ContractName)
+	require.NotNil(t, selected.Contract.Failure)
+	require.NotNil(t, selected.Contract.Failure.ComplianceBelow)
+	assert.Equal(t, float64(80), *selected.Contract.Failure.ComplianceBelow)
 }
 
 func TestLoadFile_EmptyFile(t *testing.T) {

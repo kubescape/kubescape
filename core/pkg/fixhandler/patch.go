@@ -39,14 +39,24 @@ type PatchResult struct {
 // It is all or nothing: if any manifest cannot be fixed, no patch is returned,
 // since one that left a file out would read as complete.
 func (h *FixHandler) BuildPatch(ctx context.Context, resourcesToFix []ResourceFixInfo) (*PatchResult, error) {
+	if h == nil {
+		return nil, errors.New("uninitialized fix handler")
+	}
 	names, err := h.patchNames(resourcesToFix)
 	if err != nil {
 		return nil, err
 	}
+	sharedRoot, err := h.sharedScanRoot()
+	if err != nil {
+		return nil, fmt.Errorf("cannot lay out a patch: %w", err)
+	}
 
 	fixesByFile := make(map[string][]ResourceFixInfo)
+	overlayFixesByDir := make(map[string][]ResourceFixInfo)
 	for _, fix := range resourcesToFix {
-		if !fix.inMemory {
+		if fix.isKustomizeOverlay {
+			overlayFixesByDir[fix.kustomizeOverlayDir] = append(overlayFixesByDir[fix.kustomizeOverlayDir], fix)
+		} else if !fix.inMemory {
 			fixesByFile[fix.FilePath] = append(fixesByFile[fix.FilePath], fix)
 		}
 	}
@@ -85,6 +95,59 @@ func (h *FixHandler) BuildPatch(ctx context.Context, resourcesToFix []ResourceFi
 		patch.WriteString(section)
 		result.Files++
 		result.Resources += changed
+	}
+
+	overlayDirs := make([]string, 0, len(overlayFixesByDir))
+	for dir := range overlayFixesByDir {
+		overlayDirs = append(overlayDirs, dir)
+	}
+	sort.Strings(overlayDirs)
+
+	for _, dir := range overlayDirs {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("patch export cancelled: %w", err)
+		}
+		fixes := overlayFixesByDir[dir]
+		plan, err := planOverlayChanges(dir, fixes)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("failed to plan kustomize overlay fixes in %s: %w", dir, err))
+			continue
+		}
+
+		kustName := names[plan.kustFile]
+		if kustName == "" {
+			if sharedRoot != "" {
+				if rel, err := filepath.Rel(sharedRoot, plan.kustFile); err == nil {
+					kustName = path.Clean(filepath.ToSlash(rel))
+				}
+			}
+			if kustName == "" {
+				kustName = path.Clean(filepath.ToSlash(plan.kustFile))
+			}
+		}
+		kustDir := path.Dir(kustName)
+
+		for _, patchItem := range plan.patches {
+			patchNameInDiff := path.Clean(path.Join(kustDir, "patches", patchItem.fileName))
+			var patchSection string
+			if patchItem.isNewFile {
+				patchSection = unifiedDiffNewFile(patchNameInDiff, patchItem.updatedContent)
+			} else {
+				patchSection = unifiedDiff(patchNameInDiff, patchItem.originalContent, patchItem.updatedContent)
+			}
+			if patchSection != "" {
+				patch.WriteString(patchSection)
+				result.Files++
+				result.Resources++
+			}
+		}
+		if plan.updatedKust != plan.originalKust {
+			kustSection := unifiedDiff(kustName, plan.originalKust, plan.updatedKust)
+			if kustSection != "" {
+				patch.WriteString(kustSection)
+				result.Files++
+			}
+		}
 	}
 	if len(failures) > 0 {
 		return nil, errors.Join(failures...)
@@ -133,6 +196,9 @@ func changedResources(ctx context.Context, source, original string, fixes []Reso
 // PatchNames maps each manifest to the slash-separated path its section of the
 // patch carries.
 func (h *FixHandler) PatchNames(resourcesToFix []ResourceFixInfo) (map[string]string, error) {
+	if h == nil {
+		return nil, errors.New("uninitialized fix handler")
+	}
 	return h.patchNames(resourcesToFix)
 }
 
@@ -191,6 +257,12 @@ func readManifest(source string) (string, error) {
 // exists when overwrite is false, a scanned manifest, or the report being
 // fixed. The last two would destroy an input, which exporting exists to avoid.
 func (h *FixHandler) CheckPatchDestination(destination string, resourcesToFix []ResourceFixInfo, overwrite bool) error {
+	if h == nil {
+		return errors.New("uninitialized fix handler")
+	}
+	if strings.TrimSpace(destination) == "" {
+		return errors.New("patch destination path cannot be empty")
+	}
 	destination = filepath.Clean(destination)
 	if parent, err := os.Stat(filepath.Dir(destination)); err != nil {
 		return fmt.Errorf("cannot write the patch: %w", err)
@@ -235,6 +307,9 @@ func (h *FixHandler) CheckPatchDestination(destination string, resourcesToFix []
 // only, as a patch holds the manifests' content and may carry what they do not
 // intend to share.
 func WritePatch(destination, patch string) (err error) {
+	if strings.TrimSpace(destination) == "" {
+		return errors.New("patch destination path cannot be empty")
+	}
 	destination = filepath.Clean(destination)
 	temp, err := os.CreateTemp(filepath.Dir(destination), "."+filepath.Base(destination)+".*.tmp")
 	if err != nil {

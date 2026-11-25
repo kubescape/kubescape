@@ -314,8 +314,13 @@ func TestPrometheusActionPrint_CombinedScanEmitsBothPostureAndImageMetrics(t *te
 }
 
 func TestPrometheusActionPrint_MissingDataReturnsError(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "prom-*.txt")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	promPrinter := NewPrometheusPrinter(false)
-	err := promPrinter.ActionPrint(context.Background(), nil, nil)
+	promPrinter.writer = tmpFile
+	err = promPrinter.ActionPrint(context.Background(), nil, nil)
 	assert.EqualError(t, err, "failed to print results, missing data")
 }
 
@@ -362,9 +367,14 @@ func TestPrometheusActionPrint_NilReportFallbackToImageScan(t *testing.T) {
 }
 
 func TestPrometheusActionPrint_NilReportNoDataReturnsError(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "prom-*.txt")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	promPrinter := NewPrometheusPrinter(false)
+	promPrinter.writer = tmpFile
 	session := &cautils.OPASessionObj{}
-	err := promPrinter.ActionPrint(context.Background(), session, nil)
+	err = promPrinter.ActionPrint(context.Background(), session, nil)
 	assert.EqualError(t, err, "failed to print results, missing data")
 }
 
@@ -760,4 +770,41 @@ func TestResourceMetrics_SubjectWithSeveralBindingsIsOneSeries(t *testing.T) {
 	// fails two controls and passes none.
 	assert.Contains(t, output, "kubescape_resource_count_controls_failed"+labels+" 2\n")
 	assert.Contains(t, output, "kubescape_resource_count_controls_passed"+labels+" 0\n")
+}
+
+func TestPrometheusScore_NilWriterDoesNotPanic(t *testing.T) {
+	pp := NewPrometheusPrinter(false)
+	require.Nil(t, pp.writer)
+
+	assert.NotPanics(t, func() {
+		pp.Score(85.0)
+	})
+}
+
+func TestPrometheusActionPrint_NilWriterReturnsError(t *testing.T) {
+	ctx := context.Background()
+	pp := NewPrometheusPrinter(false)
+	require.Nil(t, pp.writer)
+
+	// Missing data with a non-nil writer returns missing data error
+	tmpFile, err := os.CreateTemp(t.TempDir(), "prom-*.txt")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+	pp.writer = tmpFile
+	err = pp.ActionPrint(ctx, nil, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to print results, missing data")
+	pp.writer = nil
+
+	// Posture scan data with nil writer returns descriptive error and does not panic
+	session := cautils.NewOPASessionObjMock()
+	err = pp.ActionPrint(ctx, session, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "output writer is nil")
+
+	// Image scan data with nil writer returns descriptive error and does not panic
+	imageData := []cautils.ImageScanData{{Image: "alpine:latest"}}
+	err = pp.ActionPrint(ctx, nil, imageData)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "output writer is nil")
 }

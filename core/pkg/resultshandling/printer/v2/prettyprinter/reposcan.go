@@ -31,6 +31,9 @@ func NewRepoPrinter(writer *os.File, inputPatterns []string, verboseMode bool) *
 var _ MainPrinter = &RepoPrinter{}
 
 func (rp *RepoPrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary) {
+	if rp == nil || rp.writer == nil || summary == nil {
+		return
+	}
 	if rp.verboseMode {
 		rp.imageTablePrinter.PrintImageScanningTable(rp.writer, *summary)
 		cautils.SimpleDisplay(rp.writer, "\n")
@@ -43,15 +46,21 @@ func (rp *RepoPrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary
 }
 
 func (rp *RepoPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, topWorkloadsByScore []reporthandling.IResource) {
+	if rp == nil || rp.writer == nil || summaryDetails == nil {
+		return
+	}
 	rp.categoriesTablePrinter.PrintCategoriesTables(rp.writer, summaryDetails, sortedControlIDs)
 
-	if len(topWorkloadsByScore) > 1 {
+	if len(topWorkloadsByScore) > 0 {
 		rp.printTopWorkloads(topWorkloadsByScore)
 	}
 
 }
 
 func (rp *RepoPrinter) PrintNextSteps() {
+	if rp == nil || rp.writer == nil {
+		return
+	}
 	printNextSteps(rp.writer, rp.getNextSteps(), true)
 }
 
@@ -70,26 +79,41 @@ func (rp *RepoPrinter) printTopWorkloads(topWorkloadsByScore []reporthandling.IR
 	cautils.SimpleDisplay(rp.writer, highStakesWlsText)
 
 	for i, wl := range topWorkloadsByScore {
+		if wl == nil {
+			continue
+		}
 		ns := wl.GetNamespace()
 		name := wl.GetName()
 		kind := wl.GetKind()
 		cmdPrefix := getWorkloadPrefixForCmd(ns, kind, name)
 		cautils.SimpleDisplay(rp.writer, "%d. %s\n", i+1, cmdPrefix)
-		cautils.SimpleDisplay(rp.writer, "   %s\n", getCallToActionString(rp.getWorkloadScanCommand(ns, kind, name, *wl.GetSource())))
+		cautils.SimpleDisplay(rp.writer, "   %s\n", getCallToActionString(rp.getWorkloadScanCommand(ns, kind, name, wl.GetSource())))
 	}
 
 	cautils.SimpleDisplay(rp.writer, "\n")
 }
 
-func (rp *RepoPrinter) getWorkloadScanCommand(ns, kind, name string, source reporthandling.Source) string {
+func (rp *RepoPrinter) getWorkloadScanCommand(ns, kind, name string, source *reporthandling.Source) string {
 	cmd := fmt.Sprintf("$ kubescape scan workload %s/%s --namespace %s", kind, name, ns)
 	if ns == "" {
 		cmd = fmt.Sprintf("$ kubescape scan workload %s/%s", kind, name)
 	}
 
-	if source.FileType == reporthandling.SourceTypeHelmChart {
-		return fmt.Sprintf("%s --chart-path=%s --file-path=%s", cmd, source.HelmPath, filepath.Join(source.Path, source.RelativePath))
-	} else {
-		return fmt.Sprintf("%s --file-path=%s", cmd, filepath.Join(source.Path, source.RelativePath))
+	if source == nil {
+		return cmd
 	}
+
+	filePath := filepath.Join(source.Path, source.RelativePath)
+	if source.FileType == reporthandling.SourceTypeHelmChart {
+		if source.HelmPath != "" && filePath != "" {
+			return fmt.Sprintf("%s --chart-path=%s --file-path=%s", cmd, source.HelmPath, filePath)
+		}
+		if source.HelmPath != "" {
+			return fmt.Sprintf("%s --chart-path=%s", cmd, source.HelmPath)
+		}
+	}
+	if filePath != "" {
+		return fmt.Sprintf("%s --file-path=%s", cmd, filePath)
+	}
+	return cmd
 }

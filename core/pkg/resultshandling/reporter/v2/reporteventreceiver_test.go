@@ -128,6 +128,36 @@ func TestDisplayMessage(t *testing.T) {
 
 		t.Log(string(buf))
 	})
+
+	t.Run("should display a message containing percent format specifiers literally", func(t *testing.T) {
+		reporter := NewReportEventReceiver(
+			&TenantConfigMock{
+				clusterName: "test",
+				accountID:   "1234",
+			},
+			"",
+			SubmitContextScan,
+			getter.GetKSCloudAPIConnector(),
+		)
+		msg := "Compliance score improved by 80% (view details: https://cloud.armosec.io/report?id=100%25&tag=%s&count=%d)"
+		reporter.setMessage(msg)
+
+		capture, clean := captureStdout(t)
+		defer clean()
+
+		reporter.DisplayMessage()
+		require.NoError(t, capture.Close())
+
+		buf, err := os.ReadFile(capture.Name())
+		require.NoError(t, err)
+
+		output := string(buf)
+		require.NotEmpty(t, output)
+		assert.Contains(t, output, msg)
+		assert.NotContains(t, output, "%!(EXTRA")
+		assert.NotContains(t, output, "%!s(MISSING)")
+		assert.NotContains(t, output, "%!d(MISSING)")
+	})
 }
 
 func TestPrepareReport(t *testing.T) {

@@ -326,3 +326,127 @@ func TestBuildScanResponse_FrameworkScopedExceptionKeepsWorkloadOutOfFailedResou
 	assert.Equal(t, 1, nilSummaryResp.ReturnedFailed)
 	require.Len(t, nilSummaryResp.FailedResources, 1)
 }
+
+func TestBuildScanResponse_SeveritySorting(t *testing.T) {
+	summary := &reportsummary.SummaryDetails{
+		Controls: reportsummary.ControlSummaries{
+			"C-CRIT": reportsummary.ControlSummary{ControlID: "C-CRIT", ScoreFactor: 9.0},
+			"C-HIGH": reportsummary.ControlSummary{ControlID: "C-HIGH", ScoreFactor: 7.0},
+			"C-MED":  reportsummary.ControlSummary{ControlID: "C-MED", ScoreFactor: 4.0},
+			"C-LOW":  reportsummary.ControlSummary{ControlID: "C-LOW", ScoreFactor: 1.0},
+		},
+	}
+
+	makeFailingResource := func(id, controlID string) (string, resourcesresults.Result) {
+		return id, resourcesresults.Result{
+			ResourceID: id,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: controlID,
+					Status: apis.StatusInfo{
+						InnerStatus: apis.StatusFailed,
+					},
+				},
+			},
+		}
+	}
+
+	results := make(map[string]resourcesresults.Result)
+	id, res := makeFailingResource("res-low", "C-LOW")
+	results[id] = res
+	id, res = makeFailingResource("res-crit", "C-CRIT")
+	results[id] = res
+	id, res = makeFailingResource("res-med", "C-MED")
+	results[id] = res
+	id, res = makeFailingResource("res-high", "C-HIGH")
+	results[id] = res
+
+	resp := buildScanResponse(summary, results, nil, "test", false, 0, 4)
+	require.Equal(t, 4, resp.TotalFailed)
+	require.Equal(t, 4, resp.ReturnedFailed)
+	require.Len(t, resp.FailedResources, 4)
+
+	assert.Equal(t, "res-crit", resp.FailedResources[0].(resourcesresults.Result).ResourceID)
+	assert.Equal(t, "res-high", resp.FailedResources[1].(resourcesresults.Result).ResourceID)
+	assert.Equal(t, "res-med", resp.FailedResources[2].(resourcesresults.Result).ResourceID)
+	assert.Equal(t, "res-low", resp.FailedResources[3].(resourcesresults.Result).ResourceID)
+}
+
+func TestBuildScanResponse_SeveritySortingTruncation(t *testing.T) {
+	summary := &reportsummary.SummaryDetails{
+		Controls: reportsummary.ControlSummaries{
+			"C-CRIT": reportsummary.ControlSummary{ControlID: "C-CRIT", ScoreFactor: 9.0},
+			"C-LOW":  reportsummary.ControlSummary{ControlID: "C-LOW", ScoreFactor: 1.0},
+		},
+	}
+
+	makeFailingResource := func(id, controlID string) (string, resourcesresults.Result) {
+		return id, resourcesresults.Result{
+			ResourceID: id,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: controlID,
+					Status: apis.StatusInfo{
+						InnerStatus: apis.StatusFailed,
+					},
+				},
+			},
+		}
+	}
+
+	results := make(map[string]resourcesresults.Result)
+	// Low-resource keys sort lexically BEFORE critical-resource keys ("a-low-" < "z-crit-").
+	// This enforces that severity ranking takes precedence over lexical ordering before truncation.
+	for i := 0; i < 50; i++ {
+		id, res := makeFailingResource(fmt.Sprintf("z-crit-%02d", i), "C-CRIT")
+		results[id] = res
+	}
+	for i := 0; i < 70; i++ {
+		id, res := makeFailingResource(fmt.Sprintf("a-low-%02d", i), "C-LOW")
+		results[id] = res
+	}
+
+	resp := buildScanResponse(summary, results, nil, "test", false, 0, 2)
+	assert.Equal(t, 120, resp.TotalFailed)
+	assert.Equal(t, 100, resp.ReturnedFailed)
+	assert.True(t, resp.Truncated)
+	require.Len(t, resp.FailedResources, 100)
+
+	// All 50 critical resources must be retained first, despite lexical disadvantage
+	for i := 0; i < 50; i++ {
+		assert.Equal(t, fmt.Sprintf("z-crit-%02d", i), resp.FailedResources[i].(resourcesresults.Result).ResourceID)
+	}
+	// The next 50 must be low resources
+	for i := 50; i < 100; i++ {
+		assert.Contains(t, resp.FailedResources[i].(resourcesresults.Result).ResourceID, "a-low-")
+	}
+
+	// buildScanResponseWithLimit with custom limit
+	resp50 := buildScanResponseWithLimit(summary, results, nil, "test", false, 0, 2, 50)
+	assert.Equal(t, 120, resp50.TotalFailed)
+	assert.Equal(t, 50, resp50.ReturnedFailed)
+	assert.True(t, resp50.Truncated)
+	require.Len(t, resp50.FailedResources, 50)
+	for i := 0; i < 50; i++ {
+		assert.Equal(t, fmt.Sprintf("z-crit-%02d", i), resp50.FailedResources[i].(resourcesresults.Result).ResourceID)
+	}
+}
+
+func TestBuildScanInfo_Filters(t *testing.T) {
+	req := scanRequest{
+		namespace:          "prod",
+		excludedNamespaces: "kube-system,kube-public",
+		includeKinds:       "Deployment,DaemonSet",
+		excludeKinds:       "Job",
+		labelSelector:      "app=web",
+		excludeControls:    []string{"C-0012", "C-0017"},
+	}
+
+	info := buildScanInfo(req)
+	assert.Equal(t, "prod", info.IncludeNamespaces)
+	assert.Equal(t, "kube-system,kube-public", info.ExcludedNamespaces)
+	assert.Equal(t, "Deployment,DaemonSet", info.IncludeKinds)
+	assert.Equal(t, "Job", info.ExcludeKinds)
+	assert.Equal(t, "app=web", info.LabelSelector)
+	assert.Equal(t, []string{"C-0012", "C-0017"}, info.ExcludeControls)
+}

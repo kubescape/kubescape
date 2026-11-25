@@ -1,11 +1,13 @@
 package scancache
 
 import (
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -211,4 +213,39 @@ func TestPutSkipsEmptyHash(t *testing.T) {
 	s.Put("ctrl", "res", "", resourcesresults.ResourceAssociatedControl{ControlID: "should-not-store"})
 	assert.False(t, s.dirty, "Put with empty hash should not mark store dirty")
 	assert.Empty(t, s.data, "Put with empty hash should not store an entry")
+}
+
+func TestReadCache_OversizedFileRejected(t *testing.T) {
+	t.Setenv(cautils.MaxFileSizeEnvVar, "100")
+	dir := t.TempDir()
+	path := filepath.Join(dir, cacheFileName)
+
+	// Write 150 bytes (exceeds the 100-byte limit)
+	content := []byte(`{"version":"v1","entries":{"ctrl|res":{"hash":"abcd","verdict":{"controlID":"C-0001","status":"passed","name":"test-rule-with-long-content"}}}}`)
+	require.Greater(t, len(content), 100)
+	require.NoError(t, os.WriteFile(path, content, 0o600))
+
+	_, err := readCache(path)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrCacheTooLarge), "expected ErrCacheTooLarge, got %v", err)
+
+	// Load should treat oversized/corrupt cache as empty rather than fail
+	s, err := Load(dir, "v1")
+	require.NoError(t, err)
+	assert.Empty(t, s.data)
+}
+
+func TestReadCache_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	_, err := readCache(dir)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrCacheNotRegular), "expected ErrCacheNotRegular, got %v", err)
+}
+
+func TestReadCache_CustomMaxFileSizeEnv(t *testing.T) {
+	t.Setenv(cautils.MaxFileSizeEnvVar, "invalid")
+	assert.Equal(t, cautils.DefaultMaxFileSize, getMaxCacheSize())
+
+	t.Setenv(cautils.MaxFileSizeEnvVar, "500")
+	assert.Equal(t, int64(500), getMaxCacheSize())
 }

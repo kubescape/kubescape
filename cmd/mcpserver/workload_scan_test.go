@@ -942,7 +942,7 @@ func stubWorkloadScan(t *testing.T) *struct{ workload, namespace, path, framewor
 	got := &struct{ workload, namespace, path, framework string }{}
 	orig := workloadScanFn
 	t.Cleanup(func() { workloadScanFn = orig })
-	workloadScanFn = func(_ *KubescapeMcpserver, _ context.Context, workload, namespace, path, framework string) ([]byte, error) {
+	workloadScanFn = func(_ *KubescapeMcpserver, _ context.Context, workload, namespace, path, framework string, _ ...scanFilterArgs) ([]byte, error) {
 		got.workload, got.namespace, got.path, got.framework = workload, namespace, path, framework
 		return []byte(`{"total_failed":0}`), nil
 	}
@@ -1073,7 +1073,7 @@ func TestCallTool_ScanWorkload_ForwardsArguments(t *testing.T) {
 func TestCallTool_ScanWorkload_ScanFailureIsToolError(t *testing.T) {
 	orig := workloadScanFn
 	t.Cleanup(func() { workloadScanFn = orig })
-	workloadScanFn = func(_ *KubescapeMcpserver, _ context.Context, _, ns, _, _ string) ([]byte, error) {
+	workloadScanFn = func(_ *KubescapeMcpserver, _ context.Context, _, ns, _, _ string, _ ...scanFilterArgs) ([]byte, error) {
 		baseErr := fmt.Errorf("resource nginx was not found: %w", resourcehandler.ErrResourceNotFound)
 		if ns == "" {
 			return nil, &defaultedNamespaceError{err: baseErr, hint: mcpNamespaceDefaultedHint}

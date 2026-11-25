@@ -116,6 +116,54 @@ func TestITenantConfig(t *testing.T) {
 	assert.Equal(t, co.CloudAPIURL, c.GetCloudAPIURL())
 }
 
+func TestTenantConfig_NilReceiverAndNilConfigObj(t *testing.T) {
+	t.Run("nil LocalConfig receiver", func(t *testing.T) {
+		var lc *LocalConfig
+		assert.Nil(t, lc.GetConfigObj())
+		assert.Empty(t, lc.GetAccountID())
+		assert.Empty(t, lc.GetContextName())
+		assert.Empty(t, lc.GetCloudReportURL())
+		assert.Empty(t, lc.GetCloudAPIURL())
+		assert.Empty(t, lc.GetAccessKey())
+		assert.Error(t, lc.UpdateCachedConfig())
+	})
+
+	t.Run("LocalConfig with nil configObj", func(t *testing.T) {
+		lc := &LocalConfig{configObj: nil}
+		assert.Nil(t, lc.GetConfigObj())
+		assert.Empty(t, lc.GetAccountID())
+		assert.Empty(t, lc.GetContextName())
+		assert.Empty(t, lc.GetCloudReportURL())
+		assert.Empty(t, lc.GetCloudAPIURL())
+		assert.Empty(t, lc.GetAccessKey())
+		assert.Error(t, lc.UpdateCachedConfig())
+	})
+
+	t.Run("nil ClusterConfig receiver", func(t *testing.T) {
+		var c *ClusterConfig
+		assert.Nil(t, c.GetConfigObj())
+		assert.Empty(t, c.GetDefaultNS())
+		assert.Empty(t, c.GetAccountID())
+		assert.Empty(t, c.GetContextName())
+		assert.Empty(t, c.GetCloudReportURL())
+		assert.Empty(t, c.GetCloudAPIURL())
+		assert.Empty(t, c.GetAccessKey())
+		assert.Error(t, c.UpdateCachedConfig())
+	})
+
+	t.Run("ClusterConfig with nil configObj", func(t *testing.T) {
+		c := &ClusterConfig{configObj: nil}
+		assert.Nil(t, c.GetConfigObj())
+		assert.Empty(t, c.GetDefaultNS())
+		assert.Empty(t, c.GetAccountID())
+		assert.Empty(t, c.GetContextName())
+		assert.Empty(t, c.GetCloudReportURL())
+		assert.Empty(t, c.GetCloudAPIURL())
+		assert.Empty(t, c.GetAccessKey())
+		assert.Error(t, c.UpdateCachedConfig())
+	})
+}
+
 func TestUpdateConfigData(t *testing.T) {
 	c := mockClusterConfig()
 
@@ -514,6 +562,25 @@ func TestUpdateConfigFile_ClusterNameStripped(t *testing.T) {
 	assert.False(t, present, "clusterName key must be absent from the persisted JSON, not merely empty")
 	assert.Contains(t, raw, "accountID", "accountID must be present in the persisted JSON")
 	assert.Equal(t, "ddd", configObj.ClusterName, "ClusterName must be restored on the in-memory object after write")
+}
+
+func TestUpdateConfigFile_ExplicitClusterNamePersisted(t *testing.T) {
+	originalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	defer func() { getter.DefaultLocalStore = originalStore }()
+
+	configObj := mockConfigObj()
+	configObj.ExplicitClusterName = true
+	require.NoError(t, updateConfigFile(configObj))
+
+	dat, err := os.ReadFile(ConfigFileFullPath())
+	require.NoError(t, err)
+	require.NotEmpty(t, dat, "config file must not be empty after write")
+
+	var raw map[string]string
+	require.NoError(t, json.Unmarshal(dat, &raw))
+	assert.Equal(t, "ddd", raw["clusterName"], "explicit clusterName must be persisted in JSON")
+	assert.Equal(t, "aaa", raw["accountID"], "accountID must be present in the persisted JSON")
 }
 
 func TestUpdateConfigFile_PropagatesMarshalError(t *testing.T) {

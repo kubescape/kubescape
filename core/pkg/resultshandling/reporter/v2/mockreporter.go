@@ -41,7 +41,7 @@ func (reportMock *ReportMock) GetURL() string {
 
 func (reportMock *ReportMock) DisplayMessage() {
 	if m := reportMock.strToDisplay(); m != "" {
-		cautils.InfoTextDisplay(os.Stderr, m)
+		cautils.InfoTextDisplay(os.Stderr, "%s", m)
 	}
 }
 

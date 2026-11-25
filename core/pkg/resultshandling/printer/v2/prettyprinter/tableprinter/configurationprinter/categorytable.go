@@ -56,16 +56,19 @@ func getCountingTypeAlignments() []table.ColumnConfig {
 
 // returns a row for status type table based on the control summary
 func generateCategoryStatusRow(controlSummary reportsummary.IControlSummary) table.Row {
+	if controlSummary == nil {
+		return nil
+	}
 
 	// show only passed, failed and action required controls
 	status := controlSummary.GetStatus()
-	if !status.IsFailed() && !status.IsSkipped() && !status.IsPassed() {
+	if status == nil || (!status.IsFailed() && !status.IsSkipped() && !status.IsPassed()) {
 		return nil
 	}
 
 	rows := make(table.Row, 3)
 
-	rows[0] = utils.GetStatusIcon(controlSummary.GetStatus().Status())
+	rows[0] = utils.GetStatusIcon(status.Status())
 
 	rows[1] = utils.TruncateName(controlSummary.GetName(), utils.MaxControlNameLen)
 
@@ -89,7 +92,7 @@ func getCategoryTableWriter(writer io.Writer, headers table.Row, columnAlignment
 
 func renderSingleCategory(writer io.Writer, categoryName string, tableWriter table.Writer, rows []table.Row, infoToPrintInfo []utils.InfoStars) {
 
-	cautils.InfoDisplay(writer, categoryName+"\n")
+	cautils.InfoDisplay(writer, "%s\n", categoryName)
 
 	tableWriter.ResetRows()
 	tableWriter.AppendRows(rows)

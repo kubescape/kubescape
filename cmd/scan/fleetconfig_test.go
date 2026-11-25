@@ -133,7 +133,7 @@ func TestFleetConfigIsValidatedLikeFlags(t *testing.T) {
 		"negative retries":  {spec: "  contexts: [prod]\n  output: " + output + "\n  retries: -1\n", want: "--retries -1 is negative"},
 		"unknown reference": {spec: "  contexts: [prod]\n  output: " + output + "\n  fleetReport: " + fleetReport + "\n  referenceCluster: dr\n", want: `--reference-cluster "dr" is not one of --kube-contexts`},
 		"misspelt field":    {spec: "  context: [prod]\n", want: "field context not found"},
-		"not a fleet scan":  {spec: "  contexts: [prod]\n  output: " + output + "\n", args: []string{"image", "nginx"}, want: "--kube-contexts is not yet supported for 'scan image'"},
+		"not a fleet scan":  {spec: "  contexts: [prod]\n  output: " + output + "\n", args: []string{"image", "nginx"}, want: "--fleet-config is not supported for image scans"},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -145,6 +145,17 @@ func TestFleetConfigIsValidatedLikeFlags(t *testing.T) {
 
 			require.ErrorContains(t, err, tt.want)
 			assert.Empty(t, seen, "nothing is scanned when the config is rejected")
+		})
+	}
+}
+
+// TestFleetConfigRejectsEmptyOrWhitespace pins that empty or whitespace --fleet-config is rejected.
+func TestFleetConfigRejectsEmptyOrWhitespace(t *testing.T) {
+	for _, val := range []string{"", "   ", "\t\n"} {
+		t.Run(val, func(t *testing.T) {
+			seen, err := runScan(t, "framework", "nsa", "--fleet-config="+val)
+			require.EqualError(t, err, "--fleet-config needs a file path")
+			assert.Empty(t, seen)
 		})
 	}
 }

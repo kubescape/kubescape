@@ -64,7 +64,7 @@ func (l ExposureLevel) String() string {
 	}
 }
 
-// Exposure is the result of classifying one endpoint's ingress exposure.
+// Exposure is the result of classifying one endpoint's network exposure.
 type Exposure struct {
 	Level ExposureLevel
 	// Reason explains what produced Level: which rule shape was found, or
@@ -75,6 +75,19 @@ type Exposure struct {
 	// is ExposureOpen because nothing isolates the endpoint at all -- there
 	// is no specific policy to blame for that.
 	MatchedPolicy string
+	// AdmitsNothing is true when an isolating policy or rule explicitly admits no
+	// traffic (such as an isolating policy with no ingress/egress rules, or an
+	// ipBlock rule whose except ranges completely cover the CIDR).
+	AdmitsNothing bool
+}
+
+// AdmitsTraffic reports whether an Exposure represents actual traffic admission
+// rather than an isolating rule/policy that admits nothing.
+func (e Exposure) AdmitsTraffic() bool {
+	if e.Level > ExposureRestricted {
+		return true
+	}
+	return !e.AdmitsNothing
 }
 
 // IngressExposure classifies the widest ingress source class any
@@ -114,50 +127,97 @@ func (idx *Index) IngressExposure(ep Endpoint) Exposure {
 			// hasIngress is true (Ingress is in this policy's policyTypes)
 			// but it declares no ingress rules at all: it isolates the
 			// endpoint and admits nothing. Still a real, attributable
-			// policy -- record it unless a wider level already applies.
-			if !haveBest {
-				best = Exposure{Level: ExposureRestricted, Reason: "isolated by a policy with no ingress rules; admits nothing", MatchedPolicy: policyName}
+			// policy -- record it unless an admitting rule or wider level
+			// already applies.
+			candidate := Exposure{
+				Level:         ExposureRestricted,
+				Reason:        "isolated by a policy with no ingress rules; admits nothing",
+				MatchedPolicy: policyName,
+				AdmitsNothing: true,
+			}
+			if shouldReplaceExposure(best, haveBest, candidate) {
+				best = candidate
 				haveBest = true
 			}
 			continue
 		}
 
 		for _, rule := range cp.policy.Spec.Ingress {
-			level, reason := classifyPeers(rule.From)
-			if !haveBest || level > best.Level {
-				best = Exposure{Level: level, Reason: reason, MatchedPolicy: policyName}
+			level, reason, admitsNothing := classifyPeers(rule.From)
+			candidate := Exposure{
+				Level:         level,
+				Reason:        reason,
+				MatchedPolicy: policyName,
+				AdmitsNothing: admitsNothing,
+			}
+			if shouldReplaceExposure(best, haveBest, candidate) {
+				best = candidate
 				haveBest = true
-				if best.Level == ExposureOpen {
-					return best
-				}
 			}
 		}
 	}
 	return best
 }
 
-// classifyPeers reports the widest exposure level a single ingress rule's
-// From list admits. An empty/nil From list matches every peer, the same
-// "absent means unrestricted" semantics portVerdict/peerListVerdict already
-// apply elsewhere in this package.
-func classifyPeers(peers []networkingv1.NetworkPolicyPeer) (ExposureLevel, string) {
+// shouldReplaceExposure reports whether candidate represents a wider or more
+// specific admission than current best across additive NetworkPolicies.
+// Rules that admit traffic strictly outrank isolating rules/policies that admit
+// nothing (even at the same ExposureRestricted level). Ties between equal levels
+// and admission status are broken deterministically by policy name.
+func shouldReplaceExposure(best Exposure, haveBest bool, candidate Exposure) bool {
+	if !haveBest {
+		return true
+	}
+	if candidate.Level > best.Level {
+		return true
+	}
+	if candidate.Level < best.Level {
+		return false
+	}
+	candidateAdmits := candidate.AdmitsTraffic()
+	bestAdmits := best.AdmitsTraffic()
+	if candidateAdmits && !bestAdmits {
+		return true
+	}
+	if !candidateAdmits && bestAdmits {
+		return false
+	}
+	return candidate.MatchedPolicy < best.MatchedPolicy
+}
+
+// classifyPeers reports the widest exposure level a NetworkPolicy peer list
+// admits, along with an explanation and whether the peer list explicitly admits
+// no traffic (e.g. all ipBlock peers are fully excluded by their except clauses).
+// An empty/nil list matches every peer, the same "absent means unrestricted"
+// semantics used by both ingress and egress rules.
+func classifyPeers(peers []networkingv1.NetworkPolicyPeer) (ExposureLevel, string, bool) {
 	if len(peers) == 0 {
-		return ExposureOpen, "rule has no source restriction; matches every peer"
+		return ExposureOpen, "rule has no peer restriction; matches every peer", false
+	}
+
+	allExcluded := true
+	for _, peer := range peers {
+		if peer.IPBlock == nil || !ipBlockFullyExcluded(peer.IPBlock) {
+			allExcluded = false
+			break
+		}
+	}
+	if allExcluded {
+		if len(peers) == 1 {
+			return ExposureRestricted, fmt.Sprintf("ipBlock %s admits no addresses: its except entries cover the whole CIDR", peers[0].IPBlock.CIDR), true
+		}
+		return ExposureRestricted, "all ipBlock peers admit no addresses: their except entries cover their whole CIDRs", true
 	}
 
 	best := ExposureRestricted
 	reason := "matches only specific, scoped peers"
-	for i, peer := range peers {
+	for _, peer := range peers {
 		level, r := classifyPeer(peer)
 		if level > best {
 			best, reason = level, r
-		} else if i == 0 && len(peers) == 1 {
-			// A lone peer's own explanation (e.g. a fully excluded
-			// ipBlock) is more specific than the generic default.
-			reason = r
 		}
 	}
-	return best, reason
+	return best, reason, false
 }
 
 // classifyPeer reports the exposure level a single networkingv1.NetworkPolicyPeer

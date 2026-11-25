@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/pkg/vapreconcile"
+	"github.com/kubescape/kubescape/v4/core/pkg/webhookcoverage"
 	"github.com/kubescape/opa-utils/reporthandling"
 	apis "github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -76,6 +77,10 @@ func ImageScanTarget(image, platform string) string {
 type SkippedManifest struct {
 	Path   string `json:"path"`
 	Reason string `json:"reason"`
+	// IgnoreFile is the ignore file the loader read for an input it skipped
+	// because that file could not be used. Reason names it, and --hide and
+	// --encrypt replace it there. It is not part of the report.
+	IgnoreFile string `json:"-"`
 }
 
 type ScanTypes string
@@ -133,6 +138,7 @@ type OPASessionObj struct {
 	IncludeControls       string                      // Comma-separated control IDs to include (all others skipped)
 	VAPPolicies           []unstructured.Unstructured // ValidatingAdmissionPolicy resources collected from the cluster
 	VAPBindings           []unstructured.Unstructured // ValidatingAdmissionPolicyBinding resources collected from the cluster
+	VAPParamObjects       []unstructured.Unstructured // ControlConfiguration resources collected from the cluster for binding paramRefs
 
 	// VAPCoverage refines VAPPolicies/VAPBindings' coarse "is any binding
 	// present" signal (see reportsummary.ControlSummary.VAPEnforcement) with
@@ -142,6 +148,17 @@ type OPASessionObj struct {
 	// resultshandling after VAPPolicies/VAPBindings are enriched into the
 	// report, keyed by control ID.
 	VAPCoverage map[string]*vapreconcile.ControlCoverage
+
+	// WebhookConfigurations holds the validating and mutating admission webhook
+	// configurations read from the cluster, with the outcome of listing each
+	// kind. It is nil when they were not collected (not a live-cluster scan, or
+	// the client could not list at all); an empty list is only ever a list that
+	// was read and was empty.
+	WebhookConfigurations *webhookcoverage.Collection
+	// WebhookCoverage is the webhook matching analysis of the collected
+	// workloads, populated by resultshandling. It is neutral analysis data, not
+	// a finding: see core/pkg/webhookcoverage.
+	WebhookCoverage *webhookcoverage.Analysis
 
 	// EnvVarSecretRefs records, per resource ID and then per container name,
 	// which container env var names had a ValueFrom reference

@@ -143,6 +143,18 @@ func TestApplyHidesExceptionAudit(t *testing.T) {
 	assert.Equal(t, rule.Exception[0].Name, audit.Items[0].Name)
 }
 
+func TestApplyExceptionAudit_PaddedNamespaceNormalized(t *testing.T) {
+	session, _, _ := exceptionAuditFixture(t)
+	session.ExceptionAudit.Items[0].MatchedResources[0].Namespace = " finance-prod "
+	require.NoError(t, Apply(&resultshandling.ResultsHandler{ScanData: session}))
+
+	matches := session.ExceptionAudit.Items[0].MatchedResources
+	deployment, ok := session.GetCatalog().Get(matches[0].ResourceID)
+	require.True(t, ok)
+	assert.Equal(t, deployment.GetNamespace(), matches[0].Namespace, "padded matched-resource namespace must match deployment namespace pseudonym")
+	assert.Contains(t, matches[0].Namespace, "ns-")
+}
+
 func TestApplyEncryptedEncryptsExceptionAudit(t *testing.T) {
 	session, _, _ := exceptionAuditFixture(t)
 	dek := make([]byte, 32)

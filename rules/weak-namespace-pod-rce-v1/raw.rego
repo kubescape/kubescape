@@ -16,7 +16,7 @@ deny contains msga if {
 	binds_unprivileged_namespace(role, rolebinding)
 
 	rule := role.rules[p]
-	unrestricted_rule(rule)
+	names_a_pod(rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -24,7 +24,7 @@ deny contains msga if {
 	finalpath := matched_paths(rule, i, j, k, p, verbs, api_groups, resources)
 
 	msga := {
-		"alertMessage": sprintf("Subject: %s-%s can modify pods in unprivileged namespace %s, gaining code execution on existing pods", [subjectVector.kind, subjectVector.name, rolebinding.metadata.namespace]),
+		"alertMessage": sprintf("Subject: %s-%s can modify pods in %s, gaining code execution on existing pods", [subjectVector.kind, subjectVector.name, namespace_phrase(rolebinding)]),
 		"alertScore": 5,
 		"packagename": "armo_builtins",
 		"reviewPaths": finalpath,
@@ -53,7 +53,7 @@ deny contains msga if {
 	binds_unprivileged_namespace(role, rolebinding)
 
 	rule := role.rules[p]
-	unrestricted_rule(rule)
+	names_a_pod(rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -61,7 +61,7 @@ deny contains msga if {
 	finalpath := matched_paths(rule, i, j, k, p, verbs, api_groups, resources)
 
 	msga := {
-		"alertMessage": sprintf("Subject: %s-%s can exec into pods in unprivileged namespace %s%s", [subjectVector.kind, subjectVector.name, rolebinding.metadata.namespace, exec_alert_suffix(rule)]),
+		"alertMessage": sprintf("Subject: %s-%s can exec into pods in %s%s", [subjectVector.kind, subjectVector.name, namespace_phrase(rolebinding), exec_alert_suffix(rule)]),
 		"alertScore": 5,
 		"packagename": "armo_builtins",
 		"reviewPaths": finalpath,
@@ -100,6 +100,24 @@ unrestricted_rule(rule) if {
 	count(resource_names(rule)) == 0
 }
 
+# Both blocks above act on a pod that already exists, so the request carries
+# that pod's name: an update or patch names the pod it rewrites, and an exec is
+# a subresource request, which carries the name of its parent pod. A narrowed
+# entry therefore still authorizes the attack, and in an unprivileged namespace
+# every pod carries a service account token, so reaching one named pod is
+# already the full harm - there is nothing here that needs an arbitrary target.
+# resourceNames is matched literally, with no wildcard expansion, so "*" only
+# names a pod called "*", which no pod can be, and "" names no object at all.
+# An entry narrowed to those two alone reaches no pod. This is the same call
+# steal-privileged-pods-v1 makes for update/patch on pods and
+# weak-namespace-token-access-v1 makes for a create on a subresource.
+names_a_pod(rule) if unrestricted_rule(rule)
+
+names_a_pod(rule) if {
+	some name in resource_names(rule)
+	not name in {"", "*"}
+}
+
 # Only RoleBindings outside the privileged namespaces are in scope here. A
 # ClusterRoleBinding grants the role in every namespace, and those grants are
 # not yet reported anywhere: modify-privileged-pods-v1 is still an open task in
@@ -117,7 +135,8 @@ binds_unprivileged_namespace(role, rolebinding) if {
 	is_same_namespace(role, rolebinding)
 
 	rolebinding.kind == "RoleBinding"
-	not rolebinding.metadata.namespace in {"kube-system"}
+	not in_privileged_namespace(rolebinding)
+	not in_privileged_namespace(role)
 }
 
 matched_paths(rule, i, j, k, p, verbs, api_groups, resources) := finalpath if {
@@ -147,6 +166,42 @@ is_same_namespace(role, rolebinding) if {
 is_same_namespace(role, rolebinding) if {
 	role.kind == "Role"
 	role.metadata.namespace == rolebinding.metadata.namespace
+}
+
+# A manifest meant for "kubectl apply -n" may leave out the namespace, and the
+# subject aggregator pairs it with either side; comparing the fields would drop it.
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	not release_namespace(role)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	not has_namespace(rolebinding)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	rolebinding.metadata.namespace == release_namespace(role)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(rolebinding)
+}
+
+has_namespace(obj) if {
+	is_string(obj.metadata.namespace)
+	obj.metadata.namespace != ""
+}
+
+release_namespace(obj) := ns if {
+	is_string(obj.metadata.annotations["meta.helm.sh/release-namespace"])
+	obj.metadata.annotations["meta.helm.sh/release-namespace"] != ""
+	ns := obj.metadata.annotations["meta.helm.sh/release-namespace"]
 }
 
 is_same_subjects(subjectVector, subject) if {
@@ -182,3 +237,15 @@ resource_names(rule) := names if {
 	names := object.get(rule, "resourceNames", [])
 	names != null
 } else := []
+
+# namespace_phrase names where a RoleBinding grants its role in an alert. A
+# manifest without a namespace grants it in whichever namespace it is applied
+# to, which the manifest alone cannot tell.
+namespace_phrase(rolebinding) := sprintf("unprivileged namespace %s", [rolebinding.metadata.namespace]) if {
+	has_namespace(rolebinding)
+} else := "the namespace the RoleBinding is applied to"
+
+# Negating the membership test directly fails for an object without a
+# namespace, because "not" over an undefined value in an "in" expression is
+# false, so it is kept in its own rule.
+in_privileged_namespace(obj) if obj.metadata.namespace in {"kube-system"}

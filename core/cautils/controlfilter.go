@@ -40,6 +40,9 @@ func SplitCommaList(value string) []string {
 // --skip-controls and --include-controls accept exactly what
 // --exclude-controls accepts.
 func ControlIdentifiers(control *reporthandling.Control) []string {
+	if control == nil {
+		return []string{}
+	}
 	identifiers := make([]string, 0, 2)
 	for _, identifier := range [2]string{control.ControlID, control.Control_ID} {
 		token := strings.ToLower(strings.TrimSpace(identifier))
@@ -55,6 +58,9 @@ func ControlIdentifiers(control *reporthandling.Control) []string {
 // by appears in set. set is expected to hold normalized (lowercased,
 // trimmed) tokens.
 func ControlMatchesAny(control *reporthandling.Control, set map[string]struct{}) bool {
+	if control == nil || len(set) == 0 {
+		return false
+	}
 	for _, identifier := range ControlIdentifiers(control) {
 		if _, ok := set[identifier]; ok {
 			return true

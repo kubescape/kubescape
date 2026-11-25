@@ -2,6 +2,7 @@ package score
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kubescape/go-logger"
@@ -31,7 +32,16 @@ const (
 )
 
 func (su *ScoreWrapper) Calculate(reportVersion PostureReportVersion) error {
+	if su == nil || su.opaSessionObj == nil {
+		return errors.New("uninitialized score wrapper")
+	}
+	if su.scoreUtil == nil {
+		su.scoreUtil = score.NewScore(su.opaSessionObj.AllResources)
+	}
 	if reportVersion == EPostureReportV2 {
+		if su.opaSessionObj.Report == nil {
+			return errors.New("nil posture report")
+		}
 		return su.scoreUtil.SetPostureReportComplianceScores(su.opaSessionObj.Report)
 	}
 
@@ -41,6 +51,9 @@ func (su *ScoreWrapper) Calculate(reportVersion PostureReportVersion) error {
 // CalculateWithTelemetry dynamically adjusts scores based on eBPF telemetry events.
 // Note: Library code must never write directly to stdout as it would corrupt JSON/SARIF output.
 func (su *ScoreWrapper) CalculateWithTelemetry(ctx context.Context, reportVersion PostureReportVersion, telemetryChan <-chan hostsensorutils.SyscallEvent) error {
+	if su == nil || su.opaSessionObj == nil {
+		return errors.New("uninitialized score wrapper")
+	}
 	// Dynamically adjust scores based on eBPF telemetry
 	// This is a stub implementation
 	for {
@@ -59,6 +72,11 @@ func (su *ScoreWrapper) CalculateWithTelemetry(ctx context.Context, reportVersio
 }
 
 func NewScoreWrapper(opaSessionObj *cautils.OPASessionObj) *ScoreWrapper {
+	if opaSessionObj == nil {
+		return &ScoreWrapper{
+			scoreUtil: score.NewScore(nil),
+		}
+	}
 	return &ScoreWrapper{
 		scoreUtil:     score.NewScore(opaSessionObj.AllResources),
 		opaSessionObj: opaSessionObj,

@@ -3,6 +3,7 @@ package scan
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -256,4 +257,38 @@ func TestFleetParallelKeepsReportsOnlyForFleetReport(t *testing.T) {
 			assert.Equal(t, report != "", outcomes[0].cluster.Report != nil)
 		})
 	}
+}
+
+func TestReadChildCluster_OversizedFileRejected(t *testing.T) {
+	t.Setenv(cautils.MaxFileSizeEnvVar, "50")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "child.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"clusters":[{"context":"alpha"}]}`), 0o600))
+	require.Greater(t, int64(len(`{"clusters":[{"context":"alpha"}]}`)), int64(30))
+
+	t.Setenv(cautils.MaxFileSizeEnvVar, "10")
+	_, err := readChildCluster(path, "alpha")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrFleetFileTooLarge), "expected ErrFleetFileTooLarge, got %v", err)
+}
+
+func TestReadChildCluster_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	_, err := readChildCluster(dir, "alpha")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrFleetFileNotRegular), "expected ErrFleetFileNotRegular, got %v", err)
+}
+
+func TestLastLines_OversizedFile(t *testing.T) {
+	t.Setenv(cautils.MaxFileSizeEnvVar, "10")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "child.log")
+	require.NoError(t, os.WriteFile(path, []byte("line1\nline2\nline3\nline4\nline5\n"), 0o600))
+
+	assert.Empty(t, lastLines(path, 3))
+}
+
+func TestChildFailure_DirectoryRejected(t *testing.T) {
+	dir := t.TempDir()
+	assert.Equal(t, "the scan failed", childFailure(dir, "alpha"))
 }

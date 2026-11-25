@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
 	"github.com/kubescape/go-logger"
@@ -36,6 +37,9 @@ func NewMarkdownPrinter() *MarkdownPrinter {
 }
 
 func (mp *MarkdownPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if mp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.MarkdownFormat, outputFile, markdownOutputFile)
 	if !explicitOutput {
 		outputFile = printer.ResolveDefaultOutputFile(printer.MarkdownFormat, markdownOutputFile)
@@ -44,7 +48,7 @@ func (mp *MarkdownPrinter) SetWriter(ctx context.Context, outputFile string) err
 	}
 	if explicitOutput {
 		var err error
-		mp.writer, err = printer.GetWriterNoFallback(outputFile)
+		mp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	mp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, markdownTempPattern)
@@ -55,6 +59,15 @@ func (mp *MarkdownPrinter) Score(score float32) {
 }
 
 func (mp *MarkdownPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if mp == nil {
+		return fmt.Errorf("failed to write markdown results: printer is nil")
+	}
+	if mp.writer == nil {
+		return fmt.Errorf("failed to write markdown results: output writer is nil")
+	}
+	if err := printer.PrepareOutput(mp.writer); err != nil {
+		return err
+	}
 	hasReport := opaSessionObj != nil && opaSessionObj.Report != nil
 	if !hasReport && len(imageScanData) > 0 {
 		if err := mdWriteImageScanReport(mp.writer, imageScanData); err != nil {
@@ -74,10 +87,10 @@ func (mp *MarkdownPrinter) ActionPrint(ctx context.Context, opaSessionObj *cauti
 
 	ew := &mdErrWriter{w: w}
 	ew.printf("# Kubescape Security Report\n\n")
-	if score := cautils.ComplianceScoreToInt(summaryDetails.ComplianceScore); score < 0 {
+	if summaryDetails.ComplianceScore < 0 {
 		ew.printf("**Compliance Score:** N/A\n\n")
 	} else {
-		ew.printf("**Compliance Score:** %d%%\n\n", score)
+		ew.printf("**Compliance Score:** %d%%\n\n", cautils.ComplianceScoreToInt(summaryDetails.ComplianceScore))
 	}
 	if ew.err != nil {
 		return ew.err
@@ -108,8 +121,8 @@ func (mp *MarkdownPrinter) PrintNextSteps() {}
 
 // CloseWriter closes the Markdown output writer, returning any error from flushing or closing.
 func (mp *MarkdownPrinter) CloseWriter() error {
-	if mp.writer != nil && mp.writer != os.Stdout {
-		return mp.writer.Close()
+	if mp != nil && mp.writer != nil && mp.writer != os.Stdout {
+		return printer.CloseOutput(mp.writer)
 	}
 	return nil
 }
@@ -167,14 +180,18 @@ func mdWriteSummaryTable(w io.Writer, controls []reportsummary.ControlSummary) e
 
 	for i := range controls {
 		ctrl := &controls[i]
-		lists := ctrl.ListResourcesIDs(nil)
+		var failed, passed int
+		if lists := ctrl.ListResourcesIDs(nil); lists != nil {
+			failed = lists.Failed()
+			passed = lists.Passed()
+		}
 		ew.printf("| %s | %s | %s | %s | %d | %d |\n",
 			apis.ControlSeverityToString(ctrl.GetScoreFactor()),
 			mdEscapeCell(ctrl.GetName()),
 			mdEscapeCell(ctrl.GetID()),
 			mdStatusLabel(ctrl.GetStatus()),
-			lists.Failed(),
-			lists.Passed(),
+			failed,
+			passed,
 		)
 	}
 	ew.printf("\n")
@@ -184,7 +201,7 @@ func mdWriteSummaryTable(w io.Writer, controls []reportsummary.ControlSummary) e
 func mdWriteFailedSection(ctx context.Context, w io.Writer, controls []reportsummary.ControlSummary, session *cautils.OPASessionObj) error {
 	hasFailed := false
 	for i := range controls {
-		if controls[i].GetStatus().IsFailed() {
+		if status := controls[i].GetStatus(); status != nil && status.IsFailed() {
 			hasFailed = true
 			break
 		}
@@ -198,12 +215,12 @@ func mdWriteFailedSection(ctx context.Context, w io.Writer, controls []reportsum
 
 	for i := range controls {
 		ctrl := &controls[i]
-		if !ctrl.GetStatus().IsFailed() {
+		if status := ctrl.GetStatus(); status == nil || !status.IsFailed() {
 			continue
 		}
 
 		severity := apis.ControlSeverityToString(ctrl.GetScoreFactor())
-		ew.printf("### %s — %s (`%s`)\n\n", ctrl.GetName(), severity, ctrl.GetID())
+		ew.printf("### %s — %s (`%s`)\n\n", mdEscapeCell(ctrl.GetName()), severity, mdEscapeInline(ctrl.GetID()))
 
 		if rem := strings.TrimSpace(ctrl.GetRemediation()); rem != "" {
 			ew.printf("%s\n\n", mdBlockquote("**Remediation:** "+rem))
@@ -215,7 +232,10 @@ func mdWriteFailedSection(ctx context.Context, w io.Writer, controls []reportsum
 			return ew.err
 		}
 
-		failedIDs := ctrl.ListResourcesIDs(nil).GetItems(apis.StatusFailed)
+		var failedIDs []string
+		if lists := ctrl.ListResourcesIDs(nil); lists != nil {
+			failedIDs = lists.GetItems(apis.StatusFailed)
+		}
 		sort.Strings(failedIDs)
 
 		if len(failedIDs) == 0 {
@@ -226,16 +246,25 @@ func mdWriteFailedSection(ctx context.Context, w io.Writer, controls []reportsum
 		ew.printf("|---|---|---|\n")
 
 		for _, id := range failedIDs {
+			if session == nil {
+				logger.L().Ctx(ctx).Debug("resource missing from AllResources", helpers.String("resourceID", id))
+				ew.printf("| %s | — | — |\n", mdEscapeCell(id))
+				continue
+			}
 			res, ok := session.GetResource(id)
 			if !ok || res == nil {
 				logger.L().Ctx(ctx).Debug("resource missing from AllResources", helpers.String("resourceID", id))
 				ew.printf("| %s | — | — |\n", mdEscapeCell(id))
 				continue
 			}
+			namespace := res.GetNamespace()
+			if namespace == "" {
+				namespace = `\<cluster-scoped\>`
+			}
 			ew.printf("| %s | %s | %s |\n",
 				mdEscapeCell(res.GetName()),
 				mdEscapeCell(res.GetKind()),
-				mdEscapeCell(res.GetNamespace()),
+				mdEscapeCell(namespace),
 			)
 		}
 		ew.printf("\n")
@@ -287,7 +316,7 @@ func mdWriteImageTargets(w io.Writer, images []string) error {
 	ew.printf("| Image |\n")
 	ew.printf("|---|\n")
 	for _, image := range images {
-		ew.printf("| `%s` |\n", mdEscapeCell(image))
+		ew.printf("| `%s` |\n", mdEscapeCodeCell(image))
 	}
 	ew.printf("\n")
 	return ew.err
@@ -356,7 +385,7 @@ func mdWriteImageVulnerabilities(w io.Writer, cves []imageprinter.CVE) error {
 			mdEscapeCell(cve.Package),
 			mdEscapeCell(cve.Version),
 			mdEscapeCell(mdFixedIn(cve)),
-			mdEscapeCell(cve.Image),
+			mdEscapeCodeCell(cve.Image),
 		)
 	}
 	return ew.err
@@ -441,14 +470,33 @@ func mdStatusLabel(status apis.IStatus) string {
 	}
 }
 
-// mdEscapeCell neutralizes pipe delimiters and line breaks (\r\n, \n, \r)
-// so table cell contents cannot break out of Markdown table rows (CWE-150).
-func mdEscapeCell(s string) string {
-	s = strings.ReplaceAll(s, "|", "\\|")
+// mdSanitizeText collapses line breaks to spaces, strips C0 (except tab) and C1
+// control characters, and trims surrounding whitespace (CWE-150).
+func mdSanitizeText(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && r != '\t' {
+			return -1
+		}
+		return r
+	}, s)
 	return strings.TrimSpace(s)
+}
+
+// mdEscapeCell neutralizes pipe delimiters and line breaks (\r\n, \n, \r),
+// and strips control characters (C0 except tab, and C1) so table cell contents
+// cannot break out of Markdown table rows or inject control codes (CWE-150).
+func mdEscapeCell(s string) string {
+	s = strings.ReplaceAll(s, "|", "\\|")
+	return mdSanitizeText(s)
+}
+
+// mdEscapeCodeCell neutralizes cell boundaries and replaces backticks with single quotes
+// so contents cannot break out of backtick-delimited code spans in table cells (CWE-150 / CWE-116).
+func mdEscapeCodeCell(s string) string {
+	return strings.ReplaceAll(mdEscapeCell(s), "`", "'")
 }
 
 func mdBlockquote(s string) string {
@@ -464,8 +512,11 @@ func mdBlockquote(s string) string {
 	return strings.Join(lines, "\n")
 }
 
+// mdEscapeInline neutralizes backticks and control characters so inline code
+// spans cannot be prematurely terminated (CWE-150 / CWE-116).
 func mdEscapeInline(s string) string {
-	return strings.ReplaceAll(s, "`", "\\`")
+	s = strings.ReplaceAll(s, "`", "'")
+	return mdSanitizeText(s)
 }
 
 func mdWriteCoverageSection(w io.Writer, opaSessionObj *cautils.OPASessionObj) error {

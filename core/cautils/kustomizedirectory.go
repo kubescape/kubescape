@@ -118,6 +118,11 @@ func (kd *KustomizeDirectory) OriginFiles() map[string]string {
 // Used for checking if there is "Kustomization" file in the given Directory
 var kustomizationFileMatchers = [3]string{"kustomization.yml", "kustomization.yaml", "Kustomization"}
 
+// IsKustomizeDirectory reports whether path is a directory containing a Kustomization file.
+func IsKustomizeDirectory(path string) bool {
+	return isKustomizeDirectory(path)
+}
+
 func isKustomizeDirectory(path string) bool {
 	if ok := isDir(path); !ok {
 		return false
@@ -503,7 +508,7 @@ func (fs *kustomizeHelmFileSystem) CleanedAbs(path string) (filesys.ConfirmedDir
 	directory, file, err := fs.FileSystem.CleanedAbs(path)
 	if err == nil && file != "" {
 		resolved := directory.Join(file)
-		if IsKustomizeFile(path) {
+		if IsKustomizeFile(path) || IsKustomizeFile(resolved) {
 			if fs.kustomizationFiles == nil {
 				fs.kustomizationFiles = map[string]string{}
 			}
@@ -544,10 +549,24 @@ func (fs *kustomizeHelmFileSystem) ReadFile(path string) ([]byte, error) {
 	}
 	// Only inspect files selected as generators; a plain resource with the
 	// same kind does not make the build invoke Helm.
-	if _, generator := fs.generatorFiles[path]; generator {
+	if fs.isGeneratorFile(path) {
 		fs.observeGenerators(contents)
 	}
 	return contents, err
+}
+
+func (fs *kustomizeHelmFileSystem) isGeneratorFile(path string) bool {
+	cleaned := filepath.Clean(path)
+	if _, ok := fs.generatorFiles[cleaned]; ok {
+		return true
+	}
+	for gen := range fs.generatorFiles {
+		rel, err := filepath.Rel(gen, cleaned)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // observeGenerators returns whether contents is a valid inline resource map.
@@ -585,6 +604,63 @@ func validateKustomizeHelmCommand(command string) error {
 	return nil
 }
 
+func isKustomizeHelmError(err error, helmCommand string) bool {
+	if err == nil {
+		return false
+	}
+	if helmCommand == "" {
+		helmCommand = "helm"
+	}
+	cmdBase := filepath.Base(helmCommand)
+
+	var execErr *exec.Error
+	if errors.As(err, &execErr) && (execErr.Name == helmCommand || filepath.Base(execErr.Name) == cmdBase) {
+		return true
+	}
+	// Only a failure to start the command is Helm's. kustomize reports a missing
+	// resource or base as a path error too, and one named like the command (a
+	// directory called helm, say) is not about Helm.
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) && pathErr.Op == "fork/exec" && (pathErr.Path == helmCommand || filepath.Base(pathErr.Path) == cmdBase) {
+		return true
+	}
+
+	errLower := strings.ToLower(err.Error())
+	cmdLower := strings.ToLower(helmCommand)
+	baseLower := strings.ToLower(cmdBase)
+
+	helmMarkers := []string{
+		"helmchartinflationgenerator",
+		"requires helm v3 or v4",
+		"cannot find version string in",
+		"error reading helm output",
+		"failed to set helm annotation",
+		"cannot create tmp dir to write helm values",
+		"unable to run: '" + cmdLower,
+		"unable to run: \"" + cmdLower,
+		"unable to run: '" + baseLower,
+		"unable to run: \"" + baseLower,
+		"is '" + cmdLower + "' installed?",
+		"is \"" + cmdLower + "\" installed?",
+		"is '" + baseLower + "' installed?",
+		"is \"" + baseLower + "\" installed?",
+		"exec: \"" + cmdLower + "\":",
+		"exec: \"" + baseLower + "\":",
+		"exec: '" + cmdLower + "':",
+		"exec: '" + baseLower + "':",
+	}
+	for _, marker := range helmMarkers {
+		if strings.Contains(errLower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// kustomizeDisk is the file system the plain build reads, as a variable so a
+// test can change files while the build is reading them.
+var kustomizeDisk = filesys.MakeFsOnDisk
+
 // Get Workloads, creates the yaml files(K8s resources) using Kustomize and
 // renders the workloads from the yaml files (k8s resources)
 func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[string][]workloadinterface.IMetadata, []error) {
@@ -609,7 +685,7 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	// right files either way, since the OS follows the symlink itself.
 	kustomizeDirectoryPath = lexicalAbsPath(kustomizeDirectoryPath)
 
-	fSys := &kustomizeHelmFileSystem{FileSystem: filesys.MakeFsOnDisk()}
+	fSys := &kustomizeHelmFileSystem{FileSystem: kustomizeDisk()}
 	opts := krusty.MakeDefaultOptions()
 	// Restrict individual files to their Kustomization root. References to base
 	// directories outside that root (e.g. ../base) still get their own loader.
@@ -629,11 +705,17 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	opts.PluginConfig.HelmConfig.Command = helmCommand
 	newKustomizer := func() *krusty.Kustomizer { return krusty.MakeKustomizer(opts) }
 
+	// The graph is inspected before the plain build and again once the files
+	// are known (see below). The build and the inspection read the disk at
+	// different times, so one inspection alone can describe a graph the build
+	// never read.
+	plan := originModeFor(kustomizeDirectoryPath)
+
 	// The plain build is what the scan evaluates, always: it is exactly what the
 	// scanned kustomization renders.
 	resmap, err := newKustomizer().Run(fSys, kustomizeDirectoryPath)
 	if err != nil {
-		if fSys.usesHelm {
+		if fSys.usesHelm || isKustomizeHelmError(err, helmCommand) {
 			err = errors.Join(err, validateKustomizeHelmCommand(helmCommand))
 		}
 		return nil, []error{err}
@@ -655,9 +737,19 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	// Learn which file each resource came from, so a finding can name it. This
 	// only ever adds information: it never changes a resource, and it must happen
 	// before the workloads are built below, which add to the objects.
+	//
+	// A file that changes during the scan, a base link pointed elsewhere or a
+	// patch rewritten, would otherwise get the resources attributed to a file
+	// the build did not read. So the files are kept only if a second inspection
+	// reaches the same plan as the first: with one change, the build read either
+	// what the first saw or what the second saw. Changes that undo each other
+	// between the two inspections are not caught.
 	var originFiles []string
 	if e == nil {
-		originFiles = originFilesFor(newKustomizer, kustomizeDirectoryPath, originModeFor(kustomizeDirectoryPath), wls)
+		originFiles = originFilesFor(newKustomizer, kustomizeDirectoryPath, plan, wls)
+		if originFiles != nil && !plan.sameAs(originModeFor(kustomizeDirectoryPath)) {
+			originFiles = nil
+		}
 	}
 
 	kd.origins = map[string]string{}

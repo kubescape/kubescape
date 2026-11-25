@@ -226,6 +226,18 @@ func TestFlagValidationDownload_NoError(t *testing.T) {
 	assert.Equal(t, nil, flagValidationDownload(&downloadInfo))
 }
 
+func TestFlagValidationDownload_TrimsWhitespace(t *testing.T) {
+	downloadInfo := v1.DownloadInfo{
+		Path:      "  /tmp/policies ",
+		AccountID: "  24e0b04a-8db6-48eb-a912-7815cf15b222 \t",
+		AccessKey: "  my-secret-access-key  ",
+	}
+	require.NoError(t, flagValidationDownload(&downloadInfo))
+	assert.Equal(t, "  /tmp/policies ", downloadInfo.Path, "output path must be preserved verbatim")
+	assert.Equal(t, "24e0b04a-8db6-48eb-a912-7815cf15b222", downloadInfo.AccountID)
+	assert.Equal(t, "my-secret-access-key", downloadInfo.AccessKey)
+}
+
 func TestFlagValidationDownload_Error(t *testing.T) {
 	tests := []struct {
 		downloadInfo v1.DownloadInfo
@@ -567,4 +579,50 @@ func TestGetDownloadCmd_NilKubescape(t *testing.T) {
 
 	err := cmd.Execute()
 	require.EqualError(t, err, "uninitialized kubescape interface")
+}
+
+func TestGetDownloadCmd_TargetCompletion(t *testing.T) {
+	cmd := GetDownloadCmd(nil)
+
+	require.NotNil(t, cmd.ValidArgsFunction)
+
+	suggestions, directive := cmd.ValidArgsFunction(cmd, nil, "")
+	assert.Equal(t, core.DownloadSupportCommands(), suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "frame")
+	assert.Equal(t, []string{core.TargetFramework}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "Fr")
+	assert.Equal(t, []string{"Framework"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "FRAME")
+	assert.Equal(t, []string{"FRAMEwork"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "Controls-")
+	assert.Equal(t, []string{"Controls-inputs"}, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(cmd, nil, "xyz")
+	assert.Empty(t, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+}
+
+func TestGetDownloadCmd_IdentifierCompletion(t *testing.T) {
+	cmd := GetDownloadCmd(nil)
+
+	suggestions, directive := cmd.ValidArgsFunction(
+		cmd, []string{core.TargetFramework}, "",
+	)
+	assert.Empty(t, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+
+	suggestions, directive = cmd.ValidArgsFunction(
+		cmd, []string{core.TargetControlsInputs}, "",
+	)
+	assert.Empty(t, suggestions)
+	assert.Equal(t, cobra.ShellCompDirectiveDefault, directive)
 }

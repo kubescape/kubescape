@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: empty-pod-updater
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["update"]
+  resourceNames: [""]
+- apiGroups: [""]
+  resources: ["nodes/status"]
+  verbs: ["update"]

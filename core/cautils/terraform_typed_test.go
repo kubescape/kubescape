@@ -47,6 +47,8 @@ func TestSnakeToCamel(t *testing.T) {
 		{"api as first word stays lowercase", "api_groups", "apiGroups"},
 		{"initialism as first word stays lowercase", "ip_families", "ipFamilies"},
 		{"word containing an initialism is not changed", "pid_limit", "pidLimit"},
+		{"target cpu utilization percentage initialism", "target_cpu_utilization_percentage", "targetCPUUtilizationPercentage"},
+		{"cpu as first word stays lowercase", "cpu_limit", "cpuLimit"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -66,6 +68,14 @@ func TestFieldNameFor(t *testing.T) {
 		{"plural override for path", "path", "paths"},
 		{"plural override for sysctl", "sysctl", "sysctls"},
 		{"plural override for http_header", "http_header", "httpHeaders"},
+		{"plural override for limit", "limit", "limits"},
+		{"plural override for metric", "metric", "metrics"},
+		{"plural override for policy", "policy", "policies"},
+		{"plural override for match_expression", "match_expression", "matchExpressions"},
+		{"plural override for match_fields", "match_fields", "matchFields"},
+		{"plural override for match_field", "match_field", "matchFields"},
+		{"plural override for node_selector_term", "node_selector_term", "nodeSelectorTerms"},
+		{"block override for ceph_fs", "ceph_fs", "cephfs"},
 		{"non-overridden label falls back to camelCase", "metadata", "metadata"},
 		{"multi-word fallback", "image_pull_policy", "imagePullPolicy"},
 	}
@@ -80,6 +90,8 @@ func TestAttributeNameFor(t *testing.T) {
 	assert.Equal(t, "port", attributeNameFor("port"))
 	assert.Equal(t, "containerPort", attributeNameFor("container_port"))
 	assert.Equal(t, "protocol", attributeNameFor("protocol"))
+	assert.Equal(t, "diskURI", attributeNameFor("data_disk_uri"))
+	assert.Equal(t, "targetWWNs", attributeNameFor("target_ww_ns"))
 }
 
 func TestAttributeValueFor(t *testing.T) {
@@ -223,6 +235,34 @@ func TestAttributeValueFor(t *testing.T) {
 			in:       "",
 			want:     "",
 		},
+		{
+			name:     "quoted numeric min_available in PDB converts to json.Number",
+			path:     "kubernetes_pod_disruption_budget.pdb.spec",
+			attrName: "min_available",
+			in:       "1",
+			want:     json.Number("1"),
+		},
+		{
+			name:     "percentage string min_available in PDB preserved as string",
+			path:     "kubernetes_pod_disruption_budget_v1.pdb.spec",
+			attrName: "min_available",
+			in:       "50%",
+			want:     "50%",
+		},
+		{
+			name:     "quoted numeric max_unavailable in PDB converts to json.Number",
+			path:     "kubernetes_pod_disruption_budget.pdb.spec",
+			attrName: "max_unavailable",
+			in:       "0",
+			want:     json.Number("0"),
+		},
+		{
+			name:     "percentage string max_unavailable in PDB preserved as string",
+			path:     "kubernetes_pod_disruption_budget_v1.pdb.spec",
+			attrName: "max_unavailable",
+			in:       "25%",
+			want:     "25%",
+		},
 	}
 
 	for _, tc := range cases {
@@ -270,7 +310,7 @@ resource "kubernetes_deployment" "app" {
 	require.Empty(t, errs, "meta-arguments must be stripped before evaluation, not left to fail")
 
 	want := map[string]interface{}{
-		"metadata": map[string]interface{}{"name": "app"},
+		"metadata": map[string]interface{}{"name": "app", "namespace": "default"},
 		"spec":     map[string]interface{}{"replicas": json.Number("2")},
 	}
 	assert.Equal(t, want, out)
@@ -354,6 +394,25 @@ container {
 		}
 		assert.Equal(t, want, out)
 	})
+
+	t.Run("single match_fields block encodes as an array", func(t *testing.T) {
+		src := `
+match_fields {
+  key      = "metadata.name"
+  operator = "In"
+}
+`
+		var errs []error
+		out := hclBodyToMap(parseTypedHCL(t, src), &hcl.EvalContext{}, &errs, "node_selector_term")
+
+		require.Empty(t, errs)
+		want := map[string]interface{}{
+			"matchFields": []interface{}{
+				map[string]interface{}{"key": "metadata.name", "operator": "In"},
+			},
+		}
+		assert.Equal(t, want, out)
+	})
 }
 
 func TestExtractTypedResources(t *testing.T) {
@@ -391,7 +450,7 @@ resource "kubernetes_foo_bar" "unsupported" {
 
 	assert.Equal(t, "v1", manifests[1]["apiVersion"])
 	assert.Equal(t, "Pod", manifests[1]["kind"])
-	assert.Equal(t, map[string]interface{}{"name": "custom-name"}, manifests[1]["metadata"], "explicit metadata.name must be preserved")
+	assert.Equal(t, map[string]interface{}{"name": "custom-name", "namespace": "default"}, manifests[1]["metadata"], "explicit metadata.name must be preserved")
 
 	assert.Equal(t, "rbac.authorization.k8s.io/v1", manifests[2]["apiVersion"])
 	assert.Equal(t, "RoleBinding", manifests[2]["kind"])
@@ -620,7 +679,7 @@ resource "kubernetes_pod_v1" "pod_with_host_aliases" {
 	// 2. kubernetes_default_service_account_v1 maps to v1/ServiceAccount with multiple secrets
 	assert.Equal(t, "v1", manifests[1]["apiVersion"])
 	assert.Equal(t, "ServiceAccount", manifests[1]["kind"])
-	assert.Equal(t, map[string]interface{}{"name": "custom-default"}, manifests[1]["metadata"])
+	assert.Equal(t, map[string]interface{}{"name": "custom-default", "namespace": "default"}, manifests[1]["metadata"])
 	assert.Equal(t, []interface{}{
 		map[string]interface{}{"name": "s1"},
 		map[string]interface{}{"name": "s2"},
@@ -814,11 +873,11 @@ resource "kubernetes_network_policy_v1" "np_v1" {
 
 	assert.Equal(t, "batch/v1", manifests[1]["apiVersion"])
 	assert.Equal(t, "CronJob", manifests[1]["kind"])
-	assert.Equal(t, map[string]interface{}{"name": "backup"}, manifests[1]["metadata"])
+	assert.Equal(t, map[string]interface{}{"name": "backup", "namespace": "default"}, manifests[1]["metadata"])
 
 	assert.Equal(t, "networking.k8s.io/v1beta1", manifests[2]["apiVersion"])
 	assert.Equal(t, "Ingress", manifests[2]["kind"])
-	assert.Equal(t, map[string]interface{}{"name": "web-ingress"}, manifests[2]["metadata"])
+	assert.Equal(t, map[string]interface{}{"name": "web-ingress", "namespace": "default"}, manifests[2]["metadata"])
 
 	ingSpec, ok := manifests[2]["spec"].(map[string]interface{})
 	require.True(t, ok)
@@ -903,7 +962,7 @@ resource "kubernetes_network_policy_v1" "np_v1" {
 
 	assert.Equal(t, "networking.k8s.io/v1", manifests[4]["apiVersion"])
 	assert.Equal(t, "NetworkPolicy", manifests[4]["kind"])
-	assert.Equal(t, map[string]interface{}{"name": "allow-dns"}, manifests[4]["metadata"])
+	assert.Equal(t, map[string]interface{}{"name": "allow-dns", "namespace": "default"}, manifests[4]["metadata"])
 
 	for i, m := range manifests {
 		data, err := json.Marshal(m)
@@ -1148,4 +1207,1045 @@ resource "kubernetes_ingress_v1" "ing_null_path_type" {
 	require.Len(t, typedIng.Spec.Rules[0].HTTP.Paths, 1)
 	require.NotNil(t, typedIng.Spec.Rules[0].HTTP.Paths[0].PathType)
 	assert.Equal(t, networkingv1.PathTypeImplementationSpecific, *typedIng.Spec.Rules[0].HTTP.Paths[0].PathType)
+}
+
+func TestExtractTypedResourcesStorageAndPolicyResources(t *testing.T) {
+	src := `
+resource "kubernetes_persistent_volume_claim" "pvc" {
+  metadata {
+    name = "data-pvc"
+  }
+  spec {
+    access_modes = ["ReadWriteOnce"]
+    storage_class_name = "fast"
+    resources {
+      requests = {
+        storage = "10Gi"
+      }
+    }
+  }
+}
+
+resource "kubernetes_persistent_volume_claim_v1" "pvc_v1" {
+  metadata {
+    name      = "log-pvc"
+    namespace = "monitoring"
+  }
+}
+
+resource "kubernetes_persistent_volume" "pv" {
+  metadata {
+    name = "data-pv"
+  }
+  spec {
+    capacity = {
+      storage = "50Gi"
+    }
+    access_modes                     = ["ReadWriteMany"]
+    persistent_volume_reclaim_policy = "Retain"
+    persistent_volume_source {
+      nfs {
+        path   = "/export"
+        server = "nfs.internal"
+      }
+    }
+    node_affinity {
+      required {
+        node_selector_term {
+          match_expressions {
+            key      = "topology.kubernetes.io/zone"
+            operator = "In"
+            values   = ["us-east-1a"]
+          }
+          match_fields {
+            key      = "metadata.name"
+            operator = "In"
+            values   = ["node-1"]
+          }
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_persistent_volume_v1" "pv_v1" {
+  metadata {
+    name = "log-pv"
+  }
+  spec {
+    persistent_volume_source {
+      azure_disk {
+        caching_mode  = "None"
+        data_disk_uri = "https://example.blob.core.windows.net/vhds/disk.vhd"
+        disk_name     = "disk.vhd"
+      }
+    }
+  }
+}
+
+resource "kubernetes_pod_disruption_budget" "pdb" {
+  metadata {
+    name = "api-pdb"
+  }
+  spec {
+    min_available = "1"
+    selector {
+      match_labels = {
+        app = "api"
+      }
+    }
+  }
+}
+
+resource "kubernetes_pod_disruption_budget_v1" "pdb_v1" {
+  metadata {
+    name      = "worker-pdb"
+    namespace = "workers"
+  }
+  spec {
+    max_unavailable = "30%"
+  }
+}
+
+resource "kubernetes_resource_quota" "quota" {
+  metadata {
+    name = "compute-quota"
+  }
+  spec {
+    hard = {
+      pods = "20"
+    }
+    scope_selector {
+      match_expression {
+        scope_name = "PriorityClass"
+        operator   = "In"
+        values     = ["high"]
+      }
+    }
+  }
+}
+
+resource "kubernetes_resource_quota_v1" "quota_v1" {
+  metadata {
+    name      = "mem-quota"
+    namespace = "apps"
+  }
+}
+
+resource "kubernetes_limit_range" "limits" {
+  metadata {
+    name = "core-limits"
+  }
+  spec {
+    limit {
+      type = "Container"
+      default_request = {
+        cpu = "100m"
+      }
+    }
+  }
+}
+
+resource "kubernetes_limit_range_v1" "limits_v1" {
+  metadata {
+    name      = "pod-limits"
+    namespace = "dev"
+  }
+}
+
+resource "kubernetes_horizontal_pod_autoscaler" "hpa" {
+  metadata {
+    name = "web-hpa"
+  }
+  spec {
+    max_replicas                      = 10
+    target_cpu_utilization_percentage = 80
+    scale_target_ref {
+      kind = "Deployment"
+      name = "web"
+    }
+  }
+}
+
+resource "kubernetes_horizontal_pod_autoscaler_v1" "hpa_v1" {
+  metadata {
+    name      = "api-hpa"
+    namespace = "api"
+  }
+}
+
+resource "kubernetes_horizontal_pod_autoscaler_v2" "hpa_v2" {
+  metadata {
+    name = "v2-hpa"
+  }
+  spec {
+    min_replicas = 2
+    max_replicas = 5
+    scale_target_ref {
+      api_version = "apps/v1"
+      kind        = "Deployment"
+      name        = "v2-app"
+    }
+    metric {
+      type = "Resource"
+      resource {
+        name = "cpu"
+        target {
+          type                = "Utilization"
+          average_utilization = 60
+        }
+      }
+    }
+    metric {
+      type = "External"
+      external {
+        metric {
+          name = "queue_messages"
+        }
+        target {
+          type  = "Value"
+          value = "30"
+        }
+      }
+    }
+    behavior {
+      scale_up {
+        policy {
+          type           = "Percent"
+          value          = 100
+          period_seconds = 15
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_horizontal_pod_autoscaler_v2beta2" "hpa_v2beta2" {
+  metadata {
+    name = "v2beta2-hpa"
+  }
+}
+
+resource "kubernetes_priority_class" "pc" {
+  metadata {
+    name = "high-priority"
+  }
+  value          = 1000000
+  global_default = true
+}
+
+resource "kubernetes_priority_class_v1" "pc_v1" {
+  metadata {
+    name = "critical-priority"
+  }
+  value = 2000000
+}
+
+resource "kubernetes_persistent_volume" "pv_fc" {
+  metadata {
+    name = "fc-pv"
+  }
+  spec {
+    persistent_volume_source {
+      fc {
+        target_ww_ns = ["50060e801049cf00"]
+        lun          = 0
+      }
+    }
+  }
+}
+
+resource "kubernetes_persistent_volume" "pv_cephfs" {
+  metadata {
+    name = "cephfs-pv"
+  }
+  spec {
+    persistent_volume_source {
+      ceph_fs {
+        monitors = ["1.2.3.4:6789"]
+        path     = "/cephfs"
+      }
+    }
+  }
+}
+`
+
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+	require.Empty(t, errs)
+	require.Len(t, manifests, 18)
+
+	// PVC: namespaced, receives provider default namespace "default"
+	pvc := manifests[0]
+	assert.Equal(t, "v1", pvc["apiVersion"])
+	assert.Equal(t, "PersistentVolumeClaim", pvc["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "data-pvc", "namespace": "default"}, pvc["metadata"])
+	pvcSpec := pvc["spec"].(map[string]interface{})
+	assert.Equal(t, []interface{}{"ReadWriteOnce"}, pvcSpec["accessModes"])
+	assert.Equal(t, "fast", pvcSpec["storageClassName"])
+
+	// PVC v1 with explicit namespace
+	pvcV1 := manifests[1]
+	assert.Equal(t, "v1", pvcV1["apiVersion"])
+	assert.Equal(t, "PersistentVolumeClaim", pvcV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "log-pvc", "namespace": "monitoring"}, pvcV1["metadata"])
+
+	// PV: cluster-scoped, NO namespace in metadata; persistent_volume_source is flattened
+	pv := manifests[2]
+	assert.Equal(t, "v1", pv["apiVersion"])
+	assert.Equal(t, "PersistentVolume", pv["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "data-pv"}, pv["metadata"])
+	pvSpec := pv["spec"].(map[string]interface{})
+	assert.Equal(t, "Retain", pvSpec["persistentVolumeReclaimPolicy"])
+	assert.Equal(t, []interface{}{"ReadWriteMany"}, pvSpec["accessModes"])
+	assert.Equal(t, map[string]interface{}{"path": "/export", "server": "nfs.internal"}, pvSpec["nfs"])
+	assert.NotContains(t, pvSpec, "persistentVolumeSource")
+
+	// PV node_affinity node_selector_term encodes as nodeSelectorTerms array
+	nodeAffinity := pvSpec["nodeAffinity"].(map[string]interface{})
+	requiredAffinity := nodeAffinity["required"].(map[string]interface{})
+	nodeSelectorTerms := requiredAffinity["nodeSelectorTerms"].([]interface{})
+	require.Len(t, nodeSelectorTerms, 1)
+	term0 := nodeSelectorTerms[0].(map[string]interface{})
+	matchExprs := term0["matchExpressions"].([]interface{})
+	require.Len(t, matchExprs, 1)
+	expr0 := matchExprs[0].(map[string]interface{})
+	assert.Equal(t, "topology.kubernetes.io/zone", expr0["key"])
+	assert.Equal(t, "In", expr0["operator"])
+	assert.Equal(t, []interface{}{"us-east-1a"}, expr0["values"])
+
+	matchFields := term0["matchFields"].([]interface{})
+	require.Len(t, matchFields, 1)
+	field0 := matchFields[0].(map[string]interface{})
+	assert.Equal(t, "metadata.name", field0["key"])
+	assert.Equal(t, "In", field0["operator"])
+	assert.Equal(t, []interface{}{"node-1"}, field0["values"])
+
+	// PV v1: cluster-scoped, azure_disk with diskURI
+	pvV1 := manifests[3]
+	assert.Equal(t, "v1", pvV1["apiVersion"])
+	assert.Equal(t, "PersistentVolume", pvV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "log-pv"}, pvV1["metadata"])
+	pvV1Spec := pvV1["spec"].(map[string]interface{})
+	azureDisk := pvV1Spec["azureDisk"].(map[string]interface{})
+	assert.Equal(t, "https://example.blob.core.windows.net/vhds/disk.vhd", azureDisk["diskURI"])
+	assert.Equal(t, "disk.vhd", azureDisk["diskName"])
+
+	// PDB: namespaced, numeric minAvailable string converts to json.Number
+	pdb := manifests[4]
+	assert.Equal(t, "policy/v1beta1", pdb["apiVersion"])
+	assert.Equal(t, "PodDisruptionBudget", pdb["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "api-pdb", "namespace": "default"}, pdb["metadata"])
+	pdbSpec := pdb["spec"].(map[string]interface{})
+	assert.Equal(t, json.Number("1"), pdbSpec["minAvailable"])
+
+	// PDB v1: percentage maxUnavailable preserved as string
+	pdbV1 := manifests[5]
+	assert.Equal(t, "policy/v1", pdbV1["apiVersion"])
+	assert.Equal(t, "PodDisruptionBudget", pdbV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "worker-pdb", "namespace": "workers"}, pdbV1["metadata"])
+	pdbV1Spec := pdbV1["spec"].(map[string]interface{})
+	assert.Equal(t, "30%", pdbV1Spec["maxUnavailable"])
+
+	// ResourceQuota: namespaced, scope_selector.match_expression -> matchExpressions array
+	quota := manifests[6]
+	assert.Equal(t, "v1", quota["apiVersion"])
+	assert.Equal(t, "ResourceQuota", quota["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "compute-quota", "namespace": "default"}, quota["metadata"])
+	quotaSpec := quota["spec"].(map[string]interface{})
+	assert.Equal(t, map[string]interface{}{"pods": "20"}, quotaSpec["hard"])
+	scopeSel := quotaSpec["scopeSelector"].(map[string]interface{})
+	quotaMatchExprs := scopeSel["matchExpressions"].([]interface{})
+	require.Len(t, quotaMatchExprs, 1)
+
+	// ResourceQuota v1
+	quotaV1 := manifests[7]
+	assert.Equal(t, "v1", quotaV1["apiVersion"])
+	assert.Equal(t, "ResourceQuota", quotaV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "mem-quota", "namespace": "apps"}, quotaV1["metadata"])
+
+	// LimitRange: namespaced, limit block becomes limits array, default_request -> defaultRequest
+	limits := manifests[8]
+	assert.Equal(t, "v1", limits["apiVersion"])
+	assert.Equal(t, "LimitRange", limits["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "core-limits", "namespace": "default"}, limits["metadata"])
+	limitsSpec := limits["spec"].(map[string]interface{})
+	limitsArr := limitsSpec["limits"].([]interface{})
+	require.Len(t, limitsArr, 1)
+	l0 := limitsArr[0].(map[string]interface{})
+	assert.Equal(t, "Container", l0["type"])
+	assert.Equal(t, map[string]interface{}{"cpu": "100m"}, l0["defaultRequest"])
+
+	// LimitRange v1
+	limitsV1 := manifests[9]
+	assert.Equal(t, "v1", limitsV1["apiVersion"])
+	assert.Equal(t, "LimitRange", limitsV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "pod-limits", "namespace": "dev"}, limitsV1["metadata"])
+
+	// HPA: target_cpu_utilization_percentage -> targetCPUUtilizationPercentage
+	hpa := manifests[10]
+	assert.Equal(t, "autoscaling/v1", hpa["apiVersion"])
+	assert.Equal(t, "HorizontalPodAutoscaler", hpa["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "web-hpa", "namespace": "default"}, hpa["metadata"])
+	hpaSpec := hpa["spec"].(map[string]interface{})
+	assert.Equal(t, json.Number("80"), hpaSpec["targetCPUUtilizationPercentage"])
+
+	// HPA v1
+	hpaV1 := manifests[11]
+	assert.Equal(t, "autoscaling/v1", hpaV1["apiVersion"])
+	assert.Equal(t, "HorizontalPodAutoscaler", hpaV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "api-hpa", "namespace": "api"}, hpaV1["metadata"])
+
+	// HPA v2: metric block -> metrics array, policy block -> policies array
+	hpaV2 := manifests[12]
+	assert.Equal(t, "autoscaling/v2", hpaV2["apiVersion"])
+	assert.Equal(t, "HorizontalPodAutoscaler", hpaV2["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "v2-hpa", "namespace": "default"}, hpaV2["metadata"])
+	hpaV2Spec := hpaV2["spec"].(map[string]interface{})
+	assert.Equal(t, json.Number("2"), hpaV2Spec["minReplicas"])
+	metricsArr := hpaV2Spec["metrics"].([]interface{})
+	require.Len(t, metricsArr, 2)
+	extMetric := metricsArr[1].(map[string]interface{})
+	assert.Equal(t, "External", extMetric["type"])
+	extBlock := extMetric["external"].(map[string]interface{})
+	metricIdent := extBlock["metric"].(map[string]interface{})
+	assert.Equal(t, "queue_messages", metricIdent["name"])
+	assert.NotContains(t, extBlock, "metrics")
+	behavior := hpaV2Spec["behavior"].(map[string]interface{})
+	scaleUp := behavior["scaleUp"].(map[string]interface{})
+	policies := scaleUp["policies"].([]interface{})
+	require.Len(t, policies, 1)
+
+	// HPA v2beta2
+	hpaV2beta2 := manifests[13]
+	assert.Equal(t, "autoscaling/v2beta2", hpaV2beta2["apiVersion"])
+	assert.Equal(t, "HorizontalPodAutoscaler", hpaV2beta2["kind"])
+
+	// PriorityClass: cluster-scoped, NO namespace in metadata
+	pc := manifests[14]
+	assert.Equal(t, "scheduling.k8s.io/v1", pc["apiVersion"])
+	assert.Equal(t, "PriorityClass", pc["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "high-priority"}, pc["metadata"])
+	assert.Equal(t, json.Number("1000000"), pc["value"])
+	assert.Equal(t, true, pc["globalDefault"])
+
+	// PriorityClass v1: cluster-scoped
+	pcV1 := manifests[15]
+	assert.Equal(t, "scheduling.k8s.io/v1", pcV1["apiVersion"])
+	assert.Equal(t, "PriorityClass", pcV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "critical-priority"}, pcV1["metadata"])
+	assert.Equal(t, json.Number("2000000"), pcV1["value"])
+
+	// PV FC: target_ww_ns converts to targetWWNs
+	pvFC := manifests[16]
+	assert.Equal(t, "v1", pvFC["apiVersion"])
+	assert.Equal(t, "PersistentVolume", pvFC["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "fc-pv"}, pvFC["metadata"])
+	pvFCSpec := pvFC["spec"].(map[string]interface{})
+	fc := pvFCSpec["fc"].(map[string]interface{})
+	assert.Equal(t, []interface{}{"50060e801049cf00"}, fc["targetWWNs"])
+	assert.Equal(t, json.Number("0"), fc["lun"])
+
+	// PV CephFS: ceph_fs converts to cephfs
+	pvCephFS := manifests[17]
+	assert.Equal(t, "v1", pvCephFS["apiVersion"])
+	assert.Equal(t, "PersistentVolume", pvCephFS["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "cephfs-pv"}, pvCephFS["metadata"])
+	pvCephFSSpec := pvCephFS["spec"].(map[string]interface{})
+	cephfs := pvCephFSSpec["cephfs"].(map[string]interface{})
+	assert.Equal(t, []interface{}{"1.2.3.4:6789"}, cephfs["monitors"])
+	assert.Equal(t, "/cephfs", cephfs["path"])
+}
+
+func TestExtractTypedResources_AdmissionStorageIngressInfrastructure(t *testing.T) {
+	src := `
+resource "kubernetes_mutating_webhook_configuration" "mwc" {
+  metadata {
+    name = "mutating-webhook"
+  }
+  webhook {
+    name = "mutating.example.com"
+    client_config {
+      service {
+        name      = "webhook-service"
+        namespace = "default"
+        path      = "/mutate"
+        port      = 443
+      }
+      ca_bundle = "LS0tLS1CRUdJTi..."
+    }
+    rule {
+      api_groups   = [""]
+      api_versions = ["v1"]
+      operations   = ["CREATE", "UPDATE"]
+      resources    = ["pods"]
+      scope        = "Namespaced"
+    }
+    admission_review_versions = ["v1", "v1beta1"]
+    side_effects              = "None"
+    timeout_seconds           = 10
+  }
+}
+
+resource "kubernetes_validating_webhook_configuration_v1" "vwc" {
+  metadata {
+    name = "validating-webhook"
+  }
+  webhook {
+    name = "validating.example.com"
+    client_config {
+      url = "https://example.com/validate"
+    }
+    rule {
+      api_groups   = ["apps"]
+      api_versions = ["v1"]
+      operations   = ["CREATE"]
+      resources    = ["deployments"]
+    }
+    match_condition {
+      name       = "exclude-kube-system"
+      expression = "request.namespace != 'kube-system'"
+    }
+    failure_policy = "Fail"
+    side_effects   = "None"
+  }
+}
+
+resource "kubernetes_storage_class" "sc" {
+  metadata {
+    name = "fast-sc"
+  }
+  storage_provisioner = "kubernetes.io/no-provisioner"
+  reclaim_policy      = "Retain"
+  volume_binding_mode = "WaitForFirstConsumer"
+  mount_options       = ["debug"]
+  parameters = {
+    type = "gp3"
+  }
+  allowed_topologies {
+    match_label_expressions {
+      key    = "topology.kubernetes.io/zone"
+      values = ["us-east-1a", "us-east-1b"]
+    }
+  }
+}
+
+resource "kubernetes_storage_class_v1" "sc_v1" {
+  metadata {
+    name = "nfs-sc"
+  }
+  storage_provisioner    = "example.com/nfs"
+  allow_volume_expansion = true
+}
+
+resource "kubernetes_ingress_class" "ic" {
+  metadata {
+    name = "nginx-ic"
+  }
+  spec {
+    controller = "k8s.io/ingress-nginx"
+    parameters {
+      api_group = "k8s.example.com"
+      kind      = "IngressParameters"
+      name      = "external-lb"
+    }
+  }
+}
+
+resource "kubernetes_ingress_class_v1" "ic_v1" {
+  metadata {
+    name = "internal-ic"
+  }
+  spec {
+    controller = "example.com/internal"
+  }
+}
+
+resource "kubernetes_certificate_signing_request" "csr" {
+  metadata {
+    name = "test-csr"
+  }
+  spec {
+    request            = "LS0tLS1CRUdJTi..."
+    signer_name        = "kubernetes.io/kube-apiserver-client"
+    usages             = ["client auth"]
+    expiration_seconds = 86400
+  }
+}
+
+resource "kubernetes_certificate_signing_request_v1" "csr_v1" {
+  metadata {
+    name = "test-csr-v1"
+  }
+  spec {
+    request     = "LS0tLS1CRUdJTi..."
+    signer_name = "kubernetes.io/kubelet-serving"
+    usages      = ["server auth"]
+  }
+}
+
+resource "kubernetes_csi_driver" "csi" {
+  metadata {
+    name = "mycsi.example.com"
+  }
+  spec {
+    attach_required        = true
+    pod_info_on_mount      = true
+    volume_lifecycle_modes = ["Persistent"]
+    fs_group_policy        = "File"
+    token_request {
+      audience           = "gcp"
+      expiration_seconds = 3600
+    }
+  }
+}
+
+resource "kubernetes_csi_driver_v1" "csi_v1" {
+  metadata {
+    name = "ebs.csi.aws.com"
+  }
+  spec {
+    attach_required = false
+  }
+}
+
+resource "kubernetes_runtime_class" "rc" {
+  metadata {
+    name = "gvisor"
+  }
+  handler = "runsc"
+  overhead {
+    pod_fixed = {
+      cpu    = "100m"
+      memory = "120Mi"
+    }
+  }
+  scheduling {
+    node_selector = {
+      "kubernetes.io/arch" = "amd64"
+    }
+  }
+}
+
+resource "kubernetes_runtime_class_v1" "rc_v1" {
+  metadata {
+    name = "kata"
+  }
+  handler = "kata-qemu"
+}
+
+resource "kubernetes_endpoints" "ep" {
+  metadata {
+    name = "my-service-ep"
+  }
+  subset {
+    address {
+      ip = "10.0.0.1"
+    }
+    address {
+      ip = "10.0.0.2"
+    }
+    not_ready_address {
+      ip = "10.0.0.3"
+    }
+    port {
+      name = "http"
+      port = 80
+    }
+  }
+}
+
+resource "kubernetes_endpoints_v1" "ep_v1" {
+  metadata {
+    name      = "custom-ep"
+    namespace = "monitoring"
+  }
+}
+
+resource "kubernetes_endpoint_slice" "eps" {
+  metadata {
+    name = "my-eps"
+  }
+  address_type = "IPv4"
+  endpoint {
+    addresses = ["10.0.0.1"]
+    condition {
+      ready = false
+    }
+  }
+  port {
+    name     = "http"
+    port     = "80"
+    protocol = "TCP"
+  }
+}
+
+resource "kubernetes_endpoint_slice_v1" "eps_v1" {
+  metadata {
+    name      = "custom-eps"
+    namespace = "networking"
+  }
+  address_type = "IPv4"
+  port {
+    name = "https"
+    port = 443
+  }
+}
+`
+
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+	require.Empty(t, errs)
+	require.Len(t, manifests, 16)
+
+	// MutatingWebhookConfiguration: cluster-scoped (NO namespace in metadata)
+	mwc := manifests[0]
+	assert.Equal(t, "admissionregistration.k8s.io/v1", mwc["apiVersion"])
+	assert.Equal(t, "MutatingWebhookConfiguration", mwc["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "mutating-webhook"}, mwc["metadata"])
+	webhooks := mwc["webhooks"].([]interface{})
+	require.Len(t, webhooks, 1)
+	wh0 := webhooks[0].(map[string]interface{})
+	assert.Equal(t, "mutating.example.com", wh0["name"])
+	assert.Equal(t, "LS0tLS1CRUdJTi...", wh0["clientConfig"].(map[string]interface{})["caBundle"])
+	svc := wh0["clientConfig"].(map[string]interface{})["service"].(map[string]interface{})
+	assert.Equal(t, "webhook-service", svc["name"])
+	rules := wh0["rules"].([]interface{})
+	require.Len(t, rules, 1)
+	assert.Equal(t, []interface{}{"CREATE", "UPDATE"}, rules[0].(map[string]interface{})["operations"])
+
+	// ValidatingWebhookConfiguration: cluster-scoped, match_condition -> matchConditions
+	vwc := manifests[1]
+	assert.Equal(t, "admissionregistration.k8s.io/v1", vwc["apiVersion"])
+	assert.Equal(t, "ValidatingWebhookConfiguration", vwc["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "validating-webhook"}, vwc["metadata"])
+	vWh := vwc["webhooks"].([]interface{})[0].(map[string]interface{})
+	assert.Equal(t, "https://example.com/validate", vWh["clientConfig"].(map[string]interface{})["url"])
+	matchConds := vWh["matchConditions"].([]interface{})
+	require.Len(t, matchConds, 1)
+	assert.Equal(t, "exclude-kube-system", matchConds[0].(map[string]interface{})["name"])
+
+	// StorageClass: cluster-scoped, storage_provisioner -> provisioner, allowed_topologies -> allowedTopologies
+	sc := manifests[2]
+	assert.Equal(t, "storage.k8s.io/v1", sc["apiVersion"])
+	assert.Equal(t, "StorageClass", sc["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "fast-sc"}, sc["metadata"])
+	assert.Equal(t, "kubernetes.io/no-provisioner", sc["provisioner"])
+	assert.Equal(t, "Retain", sc["reclaimPolicy"])
+	assert.Equal(t, "WaitForFirstConsumer", sc["volumeBindingMode"])
+	assert.Equal(t, []interface{}{"debug"}, sc["mountOptions"])
+	assert.Equal(t, map[string]interface{}{"type": "gp3"}, sc["parameters"])
+	topologies := sc["allowedTopologies"].([]interface{})
+	require.Len(t, topologies, 1)
+	term := topologies[0].(map[string]interface{})
+	exprs := term["matchLabelExpressions"].([]interface{})
+	require.Len(t, exprs, 1)
+	assert.Equal(t, "topology.kubernetes.io/zone", exprs[0].(map[string]interface{})["key"])
+
+	// StorageClass v1: cluster-scoped
+	scV1 := manifests[3]
+	assert.Equal(t, "storage.k8s.io/v1", scV1["apiVersion"])
+	assert.Equal(t, "StorageClass", scV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "nfs-sc"}, scV1["metadata"])
+	assert.Equal(t, "example.com/nfs", scV1["provisioner"])
+	assert.Equal(t, true, scV1["allowVolumeExpansion"])
+
+	// IngressClass: cluster-scoped
+	ic := manifests[4]
+	assert.Equal(t, "networking.k8s.io/v1", ic["apiVersion"])
+	assert.Equal(t, "IngressClass", ic["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "nginx-ic"}, ic["metadata"])
+	icSpec := ic["spec"].(map[string]interface{})
+	assert.Equal(t, "k8s.io/ingress-nginx", icSpec["controller"])
+	assert.Equal(t, map[string]interface{}{"apiGroup": "k8s.example.com", "kind": "IngressParameters", "name": "external-lb"}, icSpec["parameters"])
+
+	// IngressClass v1: cluster-scoped
+	icV1 := manifests[5]
+	assert.Equal(t, "networking.k8s.io/v1", icV1["apiVersion"])
+	assert.Equal(t, "IngressClass", icV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "internal-ic"}, icV1["metadata"])
+
+	// CertificateSigningRequest: cluster-scoped
+	csr := manifests[6]
+	assert.Equal(t, "certificates.k8s.io/v1", csr["apiVersion"])
+	assert.Equal(t, "CertificateSigningRequest", csr["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "test-csr"}, csr["metadata"])
+	csrSpec := csr["spec"].(map[string]interface{})
+	assert.Equal(t, "kubernetes.io/kube-apiserver-client", csrSpec["signerName"])
+	assert.Equal(t, []interface{}{"client auth"}, csrSpec["usages"])
+
+	// CertificateSigningRequest v1: cluster-scoped
+	csrV1 := manifests[7]
+	assert.Equal(t, "certificates.k8s.io/v1", csrV1["apiVersion"])
+	assert.Equal(t, "CertificateSigningRequest", csrV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "test-csr-v1"}, csrV1["metadata"])
+
+	// CSIDriver: cluster-scoped, token_request -> tokenRequests
+	csi := manifests[8]
+	assert.Equal(t, "storage.k8s.io/v1", csi["apiVersion"])
+	assert.Equal(t, "CSIDriver", csi["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "mycsi.example.com"}, csi["metadata"])
+	csiSpec := csi["spec"].(map[string]interface{})
+	assert.Equal(t, true, csiSpec["attachRequired"])
+	assert.Equal(t, true, csiSpec["podInfoOnMount"])
+	assert.Equal(t, "File", csiSpec["fsGroupPolicy"])
+	tokenRequests := csiSpec["tokenRequests"].([]interface{})
+	require.Len(t, tokenRequests, 1)
+	assert.Equal(t, "gcp", tokenRequests[0].(map[string]interface{})["audience"])
+
+	// CSIDriver v1: cluster-scoped
+	csiV1 := manifests[9]
+	assert.Equal(t, "storage.k8s.io/v1", csiV1["apiVersion"])
+	assert.Equal(t, "CSIDriver", csiV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "ebs.csi.aws.com"}, csiV1["metadata"])
+
+	// RuntimeClass: cluster-scoped
+	rc := manifests[10]
+	assert.Equal(t, "node.k8s.io/v1", rc["apiVersion"])
+	assert.Equal(t, "RuntimeClass", rc["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "gvisor"}, rc["metadata"])
+	assert.Equal(t, "runsc", rc["handler"])
+	overhead := rc["overhead"].(map[string]interface{})
+	assert.Equal(t, map[string]interface{}{"cpu": "100m", "memory": "120Mi"}, overhead["podFixed"])
+
+	// RuntimeClass v1: cluster-scoped
+	rcV1 := manifests[11]
+	assert.Equal(t, "node.k8s.io/v1", rcV1["apiVersion"])
+	assert.Equal(t, "RuntimeClass", rcV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "kata"}, rcV1["metadata"])
+	assert.Equal(t, "kata-qemu", rcV1["handler"])
+
+	// Endpoints: namespaced, defaults to "default" namespace
+	ep := manifests[12]
+	assert.Equal(t, "v1", ep["apiVersion"])
+	assert.Equal(t, "Endpoints", ep["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "my-service-ep", "namespace": "default"}, ep["metadata"])
+	subsets := ep["subsets"].([]interface{})
+	require.Len(t, subsets, 1)
+	sub0 := subsets[0].(map[string]interface{})
+	addresses := sub0["addresses"].([]interface{})
+	require.Len(t, addresses, 2)
+	assert.Equal(t, "10.0.0.1", addresses[0].(map[string]interface{})["ip"])
+	assert.Equal(t, "10.0.0.2", addresses[1].(map[string]interface{})["ip"])
+	notReady := sub0["notReadyAddresses"].([]interface{})
+	require.Len(t, notReady, 1)
+	assert.Equal(t, "10.0.0.3", notReady[0].(map[string]interface{})["ip"])
+	epPorts := sub0["ports"].([]interface{})
+	require.Len(t, epPorts, 1)
+	assert.Equal(t, "http", epPorts[0].(map[string]interface{})["name"])
+	assert.Equal(t, json.Number("80"), epPorts[0].(map[string]interface{})["port"])
+
+	// Endpoints v1: explicit namespace
+	epV1 := manifests[13]
+	assert.Equal(t, "v1", epV1["apiVersion"])
+	assert.Equal(t, "Endpoints", epV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "custom-ep", "namespace": "monitoring"}, epV1["metadata"])
+
+	// EndpointSlice: namespaced, defaults to "default" namespace, condition -> conditions, quoted port -> numeric
+	eps := manifests[14]
+	assert.Equal(t, "discovery.k8s.io/v1", eps["apiVersion"])
+	assert.Equal(t, "EndpointSlice", eps["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "my-eps", "namespace": "default"}, eps["metadata"])
+	assert.Equal(t, "IPv4", eps["addressType"])
+	endpoints := eps["endpoints"].([]interface{})
+	require.Len(t, endpoints, 1)
+	ep0 := endpoints[0].(map[string]interface{})
+	assert.Equal(t, []interface{}{"10.0.0.1"}, ep0["addresses"])
+	conditions := ep0["conditions"].(map[string]interface{})
+	assert.Equal(t, false, conditions["ready"])
+	epsPorts := eps["ports"].([]interface{})
+	require.Len(t, epsPorts, 1)
+	assert.Equal(t, json.Number("80"), epsPorts[0].(map[string]interface{})["port"])
+
+	// EndpointSlice v1: explicit namespace, numeric port
+	epsV1 := manifests[15]
+	assert.Equal(t, "discovery.k8s.io/v1", epsV1["apiVersion"])
+	assert.Equal(t, "EndpointSlice", epsV1["kind"])
+	assert.Equal(t, map[string]interface{}{"name": "custom-eps", "namespace": "networking"}, epsV1["metadata"])
+	epsV1Ports := epsV1["ports"].([]interface{})
+	require.Len(t, epsV1Ports, 1)
+	assert.Equal(t, json.Number("443"), epsV1Ports[0].(map[string]interface{})["port"])
+}
+
+func TestExtractTypedResourcesUnversionedHPAAPIVersion(t *testing.T) {
+	tests := []struct {
+		name       string
+		spec       string
+		apiVersion string
+	}{
+		{
+			name: "no metric or behavior stays on autoscaling/v1",
+			spec: `
+    max_replicas                      = 10
+    target_cpu_utilization_percentage = 80`,
+			apiVersion: "autoscaling/v1",
+		},
+		{
+			name: "metric block uses autoscaling/v2beta2",
+			spec: `
+    max_replicas = 10
+    metric {
+      type = "Resource"
+      resource {
+        name = "cpu"
+        target {
+          type                = "Utilization"
+          average_utilization = 60
+        }
+      }
+    }`,
+			apiVersion: "autoscaling/v2beta2",
+		},
+		{
+			name: "behavior block alone uses autoscaling/v2beta2",
+			spec: `
+    max_replicas = 10
+    behavior {
+      scale_down {
+        stabilization_window_seconds = 300
+      }
+    }`,
+			apiVersion: "autoscaling/v2beta2",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := `
+resource "kubernetes_horizontal_pod_autoscaler" "hpa" {
+  spec {` + tt.spec + `
+    scale_target_ref {
+      kind = "Deployment"
+      name = "web"
+    }
+  }
+}
+`
+			manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+			require.Empty(t, errs)
+			require.Len(t, manifests, 1)
+			assert.Equal(t, tt.apiVersion, manifests[0]["apiVersion"])
+			assert.Equal(t, "HorizontalPodAutoscaler", manifests[0]["kind"])
+		})
+	}
+}
+
+func TestExtractTypedResourcesRBDAttributeNames(t *testing.T) {
+	src := `
+resource "kubernetes_persistent_volume" "pv_rbd" {
+  spec {
+    capacity = {
+      storage = "10Gi"
+    }
+    access_modes = ["ReadWriteOnce"]
+    persistent_volume_source {
+      rbd {
+        ceph_monitors = ["10.0.0.1:6789"]
+        rbd_image     = "data"
+        rbd_pool      = "kube"
+        rados_user    = "kube-user"
+        fs_type       = "ext4"
+        keyring       = "/etc/ceph/keyring"
+        read_only     = true
+      }
+    }
+  }
+}
+
+resource "kubernetes_pod" "rbd_pod" {
+  spec {
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+    volume {
+      name = "data"
+      rbd {
+        ceph_monitors = ["10.0.0.1:6789"]
+        rbd_image     = "data"
+        rbd_pool      = "kube"
+        rados_user    = "kube-user"
+      }
+    }
+  }
+}
+`
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+	require.Empty(t, errs)
+	require.Len(t, manifests, 2)
+
+	pvRBD := manifests[0]["spec"].(map[string]interface{})["rbd"].(map[string]interface{})
+	assert.Equal(t, map[string]interface{}{
+		"monitors": []interface{}{"10.0.0.1:6789"},
+		"image":    "data",
+		"pool":     "kube",
+		"user":     "kube-user",
+		"fsType":   "ext4",
+		"keyring":  "/etc/ceph/keyring",
+		"readOnly": true,
+	}, pvRBD)
+
+	volumes := manifests[1]["spec"].(map[string]interface{})["volumes"].([]interface{})
+	require.Len(t, volumes, 1)
+	podRBD := volumes[0].(map[string]interface{})["rbd"].(map[string]interface{})
+	assert.Equal(t, map[string]interface{}{
+		"monitors": []interface{}{"10.0.0.1:6789"},
+		"image":    "data",
+		"pool":     "kube",
+		"user":     "kube-user",
+	}, podRBD)
+}
+
+func TestExtractTypedResourcesPersistentVolumeClaimRefNamespace(t *testing.T) {
+	tests := []struct {
+		name      string
+		resource  string
+		claimRef  string
+		namespace string
+	}{
+		{
+			name:      "unset namespace defaults to default",
+			resource:  "kubernetes_persistent_volume",
+			claimRef:  `name = "data-claim"`,
+			namespace: "default",
+		},
+		{
+			name:      "unset namespace defaults to default on the v1 resource",
+			resource:  "kubernetes_persistent_volume_v1",
+			claimRef:  `name = "data-claim"`,
+			namespace: "default",
+		},
+		{
+			name:     "explicit namespace is kept",
+			resource: "kubernetes_persistent_volume",
+			claimRef: `name      = "data-claim"
+        namespace = "apps"`,
+			namespace: "apps",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := `
+resource "` + tt.resource + `" "pv" {
+  spec {
+    capacity = {
+      storage = "10Gi"
+    }
+    access_modes = ["ReadWriteOnce"]
+    claim_ref {
+        ` + tt.claimRef + `
+    }
+    persistent_volume_source {
+      host_path {
+        path = "/data"
+      }
+    }
+  }
+}
+`
+			manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+			require.Empty(t, errs)
+			require.Len(t, manifests, 1)
+			claimRef := manifests[0]["spec"].(map[string]interface{})["claimRef"].(map[string]interface{})
+			assert.Equal(t, "data-claim", claimRef["name"])
+			assert.Equal(t, tt.namespace, claimRef["namespace"])
+		})
+	}
 }

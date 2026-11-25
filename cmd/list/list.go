@@ -54,6 +54,24 @@ func normalizeListTarget(target string) string {
 	}
 }
 
+// completeWithCasePrefix filters candidates matching toComplete case-insensitively,
+// preserving the typed prefix in returned suggestions so that shells with
+// case-sensitive completion (such as Bash) retain the matches.
+func completeWithCasePrefix(candidates []string, toComplete string) []string {
+	var suggestions []string
+	lowerToComplete := strings.ToLower(toComplete)
+	for _, candidate := range candidates {
+		if strings.HasPrefix(strings.ToLower(candidate), lowerToComplete) {
+			if len(toComplete) <= len(candidate) {
+				suggestions = append(suggestions, toComplete+candidate[len(toComplete):])
+			} else {
+				suggestions = append(suggestions, candidate)
+			}
+		}
+	}
+	return suggestions
+}
+
 func GetListCmd(ks meta.IKubescape) *cobra.Command {
 	var listPolicies = v1.ListPolicies{}
 
@@ -62,6 +80,13 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 		Short:   "List the supported frameworks, controls and control configuration",
 		Long:    ``,
 		Example: listExample,
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) > 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+
+			return completeWithCasePrefix(core.ListSupportActions(), toComplete), cobra.ShellCompDirectiveNoFileComp
+		},
 		Args: func(cmd *cobra.Command, args []string) error {
 			supported := strings.Join(core.ListSupportActions(), ",")
 
@@ -107,6 +132,12 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 	listCmd.PersistentFlags().StringVarP(&listPolicies.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
 	listCmd.PersistentFlags().StringVarP(&listPolicies.AccessKey, "access-key", "", "", "Kubescape SaaS access key. Default will load access key from cache")
 	listCmd.PersistentFlags().StringVarP(&listPolicies.Format, "format", "f", "pretty-print", "output format. supported: 'pretty-print'/'json'/'yaml'/'csv'")
+
+	_ = listCmd.RegisterFlagCompletionFunc("format",
+		func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			return completeWithCasePrefix(core.ListSupportFormats(), toComplete), cobra.ShellCompDirectiveNoFileComp
+		},
+	)
 	listCmd.PersistentFlags().StringVar(&listPolicies.ControlsInputs, "controls-config", "", "Path to a controls-config file, to show the inputs a scan would use with it. Only applies to 'controls-config'")
 	listCmd.PersistentFlags().StringVar(&listPolicies.ControlFilters.Framework, "framework", "", "Only applies to 'controls'. Return controls that belong to this framework")
 	listCmd.PersistentFlags().StringVar(&listPolicies.ControlFilters.Search, "search", "", "Only applies to 'controls'. Case-insensitive match against control ID, name, or framework")
@@ -124,6 +155,7 @@ const listSupportedFormatsDisplay = "'pretty-print'/'json'/'yaml'/'csv'"
 
 // Check if the flag entered are valid
 func flagValidationList(listPolicies *v1.ListPolicies) error {
+	listPolicies.AccountID = strings.TrimSpace(listPolicies.AccountID)
 	if err := cautils.ValidateAccountID(listPolicies.AccountID); err != nil {
 		return err
 	}

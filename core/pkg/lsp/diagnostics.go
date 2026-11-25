@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -58,12 +59,12 @@ func findingsOf(session *cautils.OPASessionObj, coverage cautils.ScanCoverage) s
 	out := scanFindings{
 		byFile:     make(map[string][]protocol.Diagnostic),
 		unreliable: make(map[string]struct{}),
-		complete:   !coverage.Degraded,
+		complete:   !degradedBeyondSkippedManifests(coverage),
 	}
 	for _, skipped := range coverage.SkippedManifests {
 		out.unreliable[pathKey(skipped.Path)] = struct{}{}
 	}
-	if session == nil {
+	if session == nil || session.Report == nil {
 		return out
 	}
 
@@ -110,6 +111,16 @@ func findingsOf(session *cautils.OPASessionObj, coverage cautils.ScanCoverage) s
 		sortDiagnostics(out.byFile[path])
 	}
 	return out
+}
+
+// degradedBeyondSkippedManifests is coverage.Degraded without the manifests the
+// scan skipped. Each of those is unreliable on its own, and what is known of it
+// is kept, so one file that doesn't parse leaves the rest of the scan complete
+// rather than holding back the diagnostics of every other file.
+func degradedBeyondSkippedManifests(coverage cautils.ScanCoverage) bool {
+	coverage.SkippedManifests = nil
+	coverage.ComputeCoverageScore(coverage.TotalControls)
+	return coverage.Degraded
 }
 
 func diagnosticFor(ctl reportsummary.IControlSummary, resource workloadinterface.IMetadata, pos protocol.Position) protocol.Diagnostic {
@@ -179,12 +190,13 @@ func loadManifest(path string) *manifest {
 	m := &manifest{lines: splitLines(string(data))}
 	// A resolver that cannot be made leaves the diagnostics at the fallback
 	// position: the findings are still real.
-	m.resolver, _ = locationresolver.NewPathLocationResolver(path)
+	m.resolver, _ = locationresolver.NewPathLocationResolver(path, locationresolver.IndexedByWorkload(cautils.WorkloadDocuments))
 	return m
 }
 
 func readBounded(path string) ([]byte, error) {
-	f, err := os.Open(filepath.Clean(path))
+	// Open nonblocking so a FIFO reaches the regular-file check below.
+	f, err := os.OpenFile(filepath.Clean(path), os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -235,6 +247,9 @@ func (m *manifest) position(evidence *resourcesresults.ResourceAssociatedControl
 // uses unless another is negotiated (none is). A location past the end of the
 // file or line is clamped to it.
 func (m *manifest) toPosition(loc locationresolver.Location) protocol.Position {
+	if len(m.lines) == 0 {
+		return protocol.Position{}
+	}
 	line := max(loc.Line-1, 0)
 	if line >= len(m.lines) {
 		line = len(m.lines) - 1

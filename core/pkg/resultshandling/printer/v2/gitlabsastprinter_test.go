@@ -784,3 +784,108 @@ func TestGitLabImageScan_ExploitDetails(t *testing.T) {
 	}, byID["CVE-2026-0002"].Details)
 	assert.Nil(t, byID["GHSA-aaaa-bbbb-cccc"].Details, "unknown KEV status must not be reported as false")
 }
+
+func TestGitLabSASTActionPrint_NilWriterReturnsError(t *testing.T) {
+	ctx := context.Background()
+	gp := NewGitLabSASTPrinter(false)
+	require.Nil(t, gp.writer)
+
+	// Posture scan data with nil writer returns descriptive error and does not panic
+	session := gitLabSessionFixture(t, "C-0057", 8.0)
+	err := gp.ActionPrint(ctx, session, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "output writer is nil")
+
+	// Image scan data with nil writer returns descriptive error and does not panic
+	imageData := []cautils.ImageScanData{{Image: "alpine:latest"}}
+	err = gp.ActionPrint(ctx, nil, imageData)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "output writer is nil")
+}
+
+func TestGitLabSAST_NilReceiverSafety(t *testing.T) {
+	var gp *GitLabSASTPrinter
+
+	assert.NotPanics(t, func() {
+		err := gp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := gp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := gp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		gp.Score(100)
+		gp.PrintNextSteps()
+	})
+}
+
+func TestGitLabAdvisoryIdentifier(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantType string
+		wantName string
+		wantURL  string
+	}{
+		{
+			name:     "clean CVE ID",
+			input:    "CVE-2024-1234",
+			wantType: "cve",
+			wantName: "CVE-2024-1234",
+			wantURL:  "https://nvd.nist.gov/vuln/detail/CVE-2024-1234",
+		},
+		{
+			name:     "whitespace-padded CVE ID",
+			input:    "  CVE-2024-1234  ",
+			wantType: "cve",
+			wantName: "CVE-2024-1234",
+			wantURL:  "https://nvd.nist.gov/vuln/detail/CVE-2024-1234",
+		},
+		{
+			name:     "whitespace-padded GHSA ID",
+			input:    " GHSA-xxxx-yyyy-zzzz ",
+			wantType: "ghsa",
+			wantName: "GHSA-xxxx-yyyy-zzzz",
+			wantURL:  "https://github.com/advisories/GHSA-xxxx-yyyy-zzzz",
+		},
+		{
+			name:     "whitespace-padded distro advisory ID",
+			input:    " ALAS2-2024-001 ",
+			wantType: "alas2",
+			wantName: "ALAS2-2024-001",
+			wantURL:  "",
+		},
+		{
+			name:     "whitespace-only ID",
+			input:    "   ",
+			wantType: "advisory",
+			wantName: "unknown",
+			wantURL:  "",
+		},
+		{
+			name:     "empty ID",
+			input:    "",
+			wantType: "advisory",
+			wantName: "unknown",
+			wantURL:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := gitLabAdvisoryIdentifier(tt.input)
+			assert.Equal(t, tt.wantType, got.Type)
+			assert.Equal(t, tt.wantName, got.Name)
+			assert.Equal(t, tt.wantName, got.Value)
+			assert.Equal(t, tt.wantURL, got.URL)
+		})
+	}
+}

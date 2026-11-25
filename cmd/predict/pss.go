@@ -144,6 +144,7 @@ func runPSS(ctx context.Context, flags *pssFlags, args []string) error {
 
 	// Determine mode: cluster vs. local
 	isClusterMode := len(args) == 0
+	flags.workload = strings.TrimSpace(flags.workload)
 
 	var result pss.NamespaceResult
 
@@ -291,7 +292,7 @@ func workloadMatches(w *unstructured.Unstructured, filter string) bool {
 		filterKind = strings.TrimSpace(parts[0])
 		filterName = strings.TrimSpace(parts[1])
 	} else {
-		filterName = filter
+		filterName = strings.TrimSpace(filter)
 	}
 
 	nameMatches := w.GetName() == filterName

@@ -7,6 +7,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/fixhandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
 	"github.com/sergi/go-diff/diffmatchpatch"
@@ -57,6 +58,8 @@ type scannedResource struct {
 	relPath string
 	// absPath is the native filesystem path used to read the manifest.
 	absPath string
+	// isVirtual marks resources synthesized without a local manifest file (e.g. cluster scans).
+	isVirtual bool
 }
 
 // groupByManifest orders failed resources so every resource of one manifest is
@@ -124,7 +127,7 @@ func (c *fixReportCache) locationResolver(path, format string) *locationresolver
 		return resolver
 	}
 
-	resolver, err := locationresolver.NewPathLocationResolver(path)
+	resolver, err := locationresolver.NewPathLocationResolver(path, locationresolver.IndexedByWorkload(cautils.WorkloadDocuments))
 	if err != nil {
 		logger.L().Warning("failed to create location resolver, "+format+" locations will default to line 1", helpers.Error(err))
 		resolver = nil

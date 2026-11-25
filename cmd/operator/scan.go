@@ -32,6 +32,9 @@ var operatorScanExamples = fmt.Sprintf(`
 var newOperatorAdapter = core.NewOperatorAdapter
 
 func getOperatorScanCmd(ks meta.IKubescape, operatorInfo *cautils.OperatorInfo) *cobra.Command {
+	if operatorInfo == nil {
+		operatorInfo = &cautils.OperatorInfo{}
+	}
 	operatorCmd := &cobra.Command{
 		Use:     "scan",
 		Short:   "Scan your cluster using the Kubescape-operator within the cluster components",

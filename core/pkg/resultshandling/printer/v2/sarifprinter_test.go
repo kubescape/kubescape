@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
@@ -978,6 +979,170 @@ func TestPrintConfigurationScan_SkipsResourcesWithoutRelativePath(t *testing.T) 
 	}
 }
 
+// TestPrintConfigurationScan_ClusterScanSynthesizesVirtualLocation verifies that
+// during a live cluster scan (where resources have no local manifest file or RelativePath),
+// findings are not dropped, and canonical virtual paths like
+// cluster/<namespace>/<kind>/<name>.yaml are synthesized.
+func TestPrintConfigurationScan_ClusterScanSynthesizesVirtualLocation(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.Metadata = &reporthandlingv2.Metadata{
+		ScanMetadata: reporthandlingv2.ScanMetadata{
+			ScanningTarget: reporthandlingv2.Cluster,
+		},
+	}
+	// Mimic a live cluster scan where ResourceSource is empty (no local files)
+	session.ResourceSource = map[string]reporthandling.Source{}
+
+	// 1. Namespaced workload
+	deployObj := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "my-app",
+			"namespace": "production",
+		},
+	})
+	deployID := deployObj.GetID()
+	session.SetResource(deployObj)
+
+	// 2. Cluster-scoped workload (no namespace)
+	clusterRoleObj := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRole",
+		"metadata": map[string]any{
+			"name": "cluster-admin-role",
+		},
+	})
+	clusterRoleID := clusterRoleObj.GetID()
+	session.SetResource(clusterRoleObj)
+
+	// 3. Workload with mixed-case and reserved characters (#) in name
+	specialObj := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRole",
+		"metadata": map[string]any{
+			"name": "Audit#Ops",
+		},
+	})
+	specialID := specialObj.GetID()
+	session.SetResource(specialObj)
+
+	// 4. Fallback: resourceID not in catalog (with reserved character)
+	fallbackID := "custom.io/v1/unknown#resource"
+
+	const control1 = "C-0057"
+	const control2 = "C-0012"
+	const control3 = "C-0001"
+	const control4 = "C-0002"
+
+	session.ResourcesResult[deployID] = resourcesresults.Result{
+		ResourceID: deployID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: control1,
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			},
+		},
+	}
+	session.ResourcesResult[clusterRoleID] = resourcesresults.Result{
+		ResourceID: clusterRoleID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: control2,
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			},
+		},
+	}
+	session.ResourcesResult[specialID] = resourcesresults.Result{
+		ResourceID: specialID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: control3,
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			},
+		},
+	}
+	session.ResourcesResult[fallbackID] = resourcesresults.Result{
+		ResourceID: fallbackID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: control4,
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			},
+		},
+	}
+
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				control1: reportsummary.ControlSummary{
+					ControlID:   control1,
+					Name:        "Privileged container",
+					Description: "Do not run privileged containers",
+					ScoreFactor: 8.0,
+				},
+				control2: reportsummary.ControlSummary{
+					ControlID:   control2,
+					Name:        "Cluster-admin binding",
+					Description: "Minimize cluster-admin permissions",
+					ScoreFactor: 9.0,
+				},
+				control3: reportsummary.ControlSummary{
+					ControlID:   control3,
+					Name:        "Audit role permissions",
+					Description: "Check audit role permissions",
+					ScoreFactor: 7.0,
+				},
+				control4: reportsummary.ControlSummary{
+					ControlID:   control4,
+					Name:        "Generic rule",
+					Description: "Generic rule description",
+					ScoreFactor: 5.0,
+				},
+			},
+		},
+	}
+
+	tmp, err := os.CreateTemp("", "sarif-cluster-*.sarif")
+	require.NoError(t, err)
+	defer func() {
+		assert.NoError(t, os.Remove(tmp.Name()))
+	}()
+
+	sp := NewSARIFPrinter(false)
+	sp.writer = tmp
+	require.NoError(t, sp.printConfigurationScan(context.Background(), session))
+	require.NoError(t, tmp.Close())
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Runs, 1)
+
+	// Findings must NOT be dropped! All 4 findings must be present.
+	results := report.Runs[0].Results
+	require.Len(t, results, 4, "cluster scan findings must not be dropped from SARIF report")
+
+	uriByRule := make(map[string]string)
+	for _, res := range results {
+		require.NotEmpty(t, res.Locations)
+		require.NotNil(t, res.Locations[0].PhysicalLocation)
+		require.NotNil(t, res.Locations[0].PhysicalLocation.ArtifactLocation)
+		require.NotNil(t, res.Locations[0].PhysicalLocation.Region)
+		assert.Equal(t, 1, *res.Locations[0].PhysicalLocation.Region.StartLine, "virtual locations must default to line 1")
+		assert.Equal(t, 1, *res.Locations[0].PhysicalLocation.Region.StartColumn, "virtual locations must default to column 1")
+		uri := *res.Locations[0].PhysicalLocation.ArtifactLocation.URI
+		uriByRule[*res.RuleID] = uri
+	}
+
+	assert.Equal(t, "cluster/production/deployment/my-app.yaml", uriByRule[control1])
+	assert.Equal(t, "cluster/_cluster/clusterrole/cluster-admin-role.yaml", uriByRule[control2])
+	assert.Equal(t, "cluster/_cluster/clusterrole/Audit%23Ops.yaml", uriByRule[control3], "case preserved and # percent-encoded")
+	assert.Equal(t, "cluster/resources/custom.io/v1/unknown%23resource.yaml", uriByRule[control4], "fallback ID percent-encoded")
+}
+
 // TestPrintConfigurationScan_PopulatesInvocations is the regression test for
 // the SARIF half of kubescape/kubescape#2325: runs[].invocations was absent
 // from every SARIF report, so GitHub code-scanning ingestion collapsed every
@@ -1195,6 +1360,17 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 				Metadata: &reporthandlingv2.Metadata{
 					ScanMetadata: reporthandlingv2.ScanMetadata{
 						ScanningTarget: reporthandlingv2.File,
+					},
+				},
+			},
+			want: "",
+		},
+		{
+			name: "Directory without metadata",
+			session: &cautils.OPASessionObj{
+				Metadata: &reporthandlingv2.Metadata{
+					ScanMetadata: reporthandlingv2.ScanMetadata{
+						ScanningTarget: reporthandlingv2.Directory,
 					},
 				},
 			},
@@ -1825,11 +2001,13 @@ func TestSARIFMultipleImageRunsHaveDistinctCategories(t *testing.T) {
 	cases := []struct {
 		name    string
 		session *cautils.OPASessionObj
+		images  []cautils.ImageScanData
 		// imageRuns is the part of the report the images occupy.
 		firstImageRun int
 	}{
-		{name: "image scan"},
-		{name: "combined scan", session: configurationOutputFixture(t, 1), firstImageRun: 1},
+		{name: "image scan", images: []cautils.ImageScanData{imageA, imageB}},
+		{name: "combined scan", session: configurationOutputFixture(t, 1), images: []cautils.ImageScanData{imageA, imageB}, firstImageRun: 1},
+		{name: "combined scan with single image", session: configurationOutputFixture(t, 1), images: []cautils.ImageScanData{imageA}, firstImageRun: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1837,7 +2015,7 @@ func TestSARIFMultipleImageRunsHaveDistinctCategories(t *testing.T) {
 			require.NoError(t, err)
 			sp := NewSARIFPrinter(false)
 			sp.writer = tmp
-			require.NoError(t, sp.ActionPrint(context.Background(), tc.session, []cautils.ImageScanData{imageA, imageB}))
+			require.NoError(t, sp.ActionPrint(context.Background(), tc.session, tc.images))
 			require.NoError(t, tmp.Close())
 
 			raw, err := os.ReadFile(tmp.Name())
@@ -1846,7 +2024,7 @@ func TestSARIFMultipleImageRunsHaveDistinctCategories(t *testing.T) {
 
 			var report sarif.Report
 			require.NoError(t, json.Unmarshal(raw, &report))
-			require.Len(t, report.Runs, tc.firstImageRun+2)
+			require.Len(t, report.Runs, tc.firstImageRun+len(tc.images))
 
 			seen := map[string]bool{}
 			for _, run := range report.Runs[tc.firstImageRun:] {
@@ -1856,6 +2034,15 @@ func TestSARIFMultipleImageRunsHaveDistinctCategories(t *testing.T) {
 				assert.True(t, strings.HasSuffix(id, "/"), "id %q would be split into a category and a run ID", id)
 				assert.False(t, seen[id], "two runs share category %q", id)
 				seen[id] = true
+			}
+			if tc.firstImageRun > 0 {
+				configCategory := ""
+				if report.Runs[0].AutomationDetails != nil && report.Runs[0].AutomationDetails.ID != nil {
+					configCategory = *report.Runs[0].AutomationDetails.ID
+				}
+				for _, run := range report.Runs[tc.firstImageRun:] {
+					assert.NotEqual(t, configCategory, *run.AutomationDetails.ID, "image run category collides with configuration run")
+				}
 			}
 		})
 	}
@@ -2181,8 +2368,55 @@ func TestSARIFActionPrint_CombinedScanAggregatesPostureAndImageRuns(t *testing.T
 // TestSARIFActionPrint_NoDataReturnsError asserts that ActionPrint returns a clear error
 // when neither an OPA session object nor image scan data is provided.
 func TestSARIFActionPrint_NoDataReturnsError(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "sarif-*.sarif")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	sp := NewSARIFPrinter(false)
-	err := sp.ActionPrint(context.Background(), nil, nil)
+	sp.writer = tmpFile
+	err = sp.ActionPrint(context.Background(), nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no data provided")
+}
+
+func TestSARIFActionPrint_NilWriterReturnsError(t *testing.T) {
+	ctx := context.Background()
+	sp := NewSARIFPrinter(false)
+	require.Nil(t, sp.writer)
+
+	// Posture scan data with nil writer returns descriptive error and does not panic
+	session := configurationOutputFixture(t, 1)
+	err := sp.ActionPrint(ctx, session, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "output writer is nil")
+
+	// Image scan data with nil writer returns descriptive error and does not panic
+	imageScan := buildSeverityExceptionImageScanData()
+	err = sp.ActionPrint(ctx, nil, []cautils.ImageScanData{imageScan})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "output writer is nil")
+}
+
+func TestSARIF_NilReceiverSafety(t *testing.T) {
+	var sp *SARIFPrinter
+
+	assert.NotPanics(t, func() {
+		err := sp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := sp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := sp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		sp.Score(100)
+		sp.PrintNextSteps()
+	})
 }

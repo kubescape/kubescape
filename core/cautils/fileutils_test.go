@@ -502,6 +502,26 @@ func TestLoadResourcesFromTerraform_DiscoversNestedModuleDirectories(t *testing.
 	assert.Equal(t, "root-config", sourceToWorkloads[nestedFile][0].GetName())
 }
 
+func TestLoadResourcesFromTerraform_DiscoversBracketedModuleDirectory(t *testing.T) {
+	root := resolvedTempDir(t)
+	bracketedModule := filepath.Join(root, "modules", "app[1]")
+	siblingModule := filepath.Join(root, "modules", "app1")
+	writeTerraformFixture(t, bracketedModule, "bracketed-config")
+	writeTerraformFixture(t, siblingModule, "sibling-config")
+	require.NoError(t, os.WriteFile(filepath.Join(bracketedModule, "notes.txt"), []byte("not Terraform"), 0o600))
+
+	workloads, skips, err := LoadResourcesFromTerraformFilteredWithSkips(context.Background(), root, nil, root)
+	require.NoError(t, err)
+	require.Empty(t, skips)
+	bracketedWorkloads := workloads[filepath.Join(bracketedModule, "main.tf")]
+	require.Len(t, bracketedWorkloads, 1)
+	assert.Equal(t, "bracketed-config", bracketedWorkloads[0].GetName())
+	siblingWorkloads := workloads[filepath.Join(siblingModule, "main.tf")]
+	require.Len(t, siblingWorkloads, 1)
+	assert.Equal(t, "sibling-config", siblingWorkloads[0].GetName())
+	assert.Len(t, workloads, 2)
+}
+
 func TestLoadResourcesFromTerraform_MixedSuccessAndFailure(t *testing.T) {
 	root := resolvedTempDir(t)
 	writeTerraformFixture(t, filepath.Join(root, "modules", "good"), "good-config")
@@ -697,10 +717,12 @@ func getRelativePath(p string) string {
 // Converts a YAML object to a JSON object
 func TestConvertYamlToJson(t *testing.T) {
 	tests := []struct {
-		yamlObj map[any]any
-		jsonObj map[string]any
+		name    string
+		yamlObj any
+		jsonObj any
 	}{
 		{
+			name: "string keys",
 			yamlObj: map[any]any{
 				"name": "John",
 				"age":  30,
@@ -712,11 +734,71 @@ func TestConvertYamlToJson(t *testing.T) {
 				"city": "New York",
 			},
 		},
+		{
+			name: "integer keys",
+			yamlObj: map[any]any{
+				80:  "http",
+				443: "https",
+				-1:  "negative",
+			},
+			jsonObj: map[string]any{
+				"80":  "http",
+				"443": "https",
+				"-1":  "negative",
+			},
+		},
+		{
+			name: "boolean keys",
+			yamlObj: map[any]any{
+				true:  "enabled",
+				false: "disabled",
+			},
+			jsonObj: map[string]any{
+				"true":  "enabled",
+				"false": "disabled",
+			},
+		},
+		{
+			name: "float and nil keys",
+			yamlObj: map[any]any{
+				3.14: "pi",
+				nil:  "empty",
+			},
+			jsonObj: map[string]any{
+				"3.14": "pi",
+				"null": "empty",
+			},
+		},
+		{
+			name: "nested maps and slices with non-string keys",
+			yamlObj: map[string]any{
+				"endpoints": map[any]any{
+					8080: "app",
+				},
+				"list": []any{
+					map[any]any{
+						200: "ok",
+					},
+				},
+			},
+			jsonObj: map[string]any{
+				"endpoints": map[string]any{
+					"8080": "app",
+				},
+				"list": []any{
+					map[string]any{
+						"200": "ok",
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
-		t.Run("", func(t *testing.T) {
-			assert.Equal(t, tt.jsonObj, convertYamlToJson(tt.yamlObj))
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := convertYamlToJson(tt.yamlObj)
+			require.NoError(t, err)
+			assert.Equal(t, tt.jsonObj, got)
 		})
 	}
 }
@@ -727,10 +809,11 @@ func TestConvertYamlToJson(t *testing.T) {
 // convertYamlToJson must recurse into map[string]any values so the result
 // stays json.Marshal-able (issue #2833).
 func TestConvertYamlToJson_NestedNonStringKey(t *testing.T) {
-	input := map[string]any{"spec": map[any]any{"1": "enabled"}}
+	input := map[string]any{"spec": map[any]any{1: "enabled"}}
 
-	got := convertYamlToJson(input)
-	_, err := json.Marshal(got)
+	got, err := convertYamlToJson(input)
+	require.NoError(t, err)
+	_, err = json.Marshal(got)
 	require.NoError(t, err)
 
 	spec, ok := got.(map[string]any)["spec"].(map[string]any)
@@ -741,7 +824,8 @@ func TestConvertYamlToJson_NestedNonStringKey(t *testing.T) {
 // TestReadYamlFile_NestedNonStringKeyIsJSONMarshalable exercises the same bug
 // through readYamlFile: a manifest with a nested non-string key must produce a
 // workload whose object is JSON-serializable (OPA marshals these to build its
-// input, so an unconverted map[interface{}]interface{} breaks evaluation).
+// input, so an unconverted map[interface{}]interface{} breaks evaluation) and
+// must preserve the key as a string (issue #5095).
 func TestReadYamlFile_NestedNonStringKeyIsJSONMarshalable(t *testing.T) {
 	manifest := []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\ndata:\n  1: enabled\n")
 
@@ -751,6 +835,84 @@ func TestReadYamlFile_NestedNonStringKeyIsJSONMarshalable(t *testing.T) {
 
 	_, err = json.Marshal(workloads[0].GetObject())
 	assert.NoError(t, err)
+
+	data, ok := workloads[0].GetObject()["data"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "enabled", data["1"])
+}
+
+func TestReadYamlFile_NonStringKeysInConfigMapPreserved(t *testing.T) {
+	manifest := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: status-codes
+data:
+  200: OK
+  404: Not Found
+  server: nginx
+`)
+
+	workloads, err := readYamlFile(manifest)
+	require.NoError(t, err)
+	require.Len(t, workloads, 1)
+
+	data, ok := workloads[0].GetObject()["data"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "OK", data["200"])
+	assert.Equal(t, "Not Found", data["404"])
+	assert.Equal(t, "nginx", data["server"])
+
+	_, err = json.Marshal(workloads[0].GetObject())
+	assert.NoError(t, err)
+}
+
+func TestConvertYamlToJson_KeyCollisions(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		input any
+		key   string
+	}{
+		{"integer and string", map[any]any{1: "numeric", "1": "string"}, "1"},
+		{"nil and string", map[any]any{nil: "nil", "null": "string"}, "null"},
+		{"boolean and string", map[any]any{true: "boolean", "true": "string"}, "true"},
+		{"nested string map", map[string]any{"data": map[any]any{1: "numeric", "1": "string"}}, "1"},
+		{"nested mixed map", map[any]any{"data": map[any]any{1: "numeric", "1": "string"}}, "1"},
+		{"nested slice", []any{map[any]any{1: "numeric", "1": "string"}}, "1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := convertYamlToJson(tc.input)
+			require.ErrorContains(t, err, "YAML keys collide after conversion to JSON key")
+			assert.Contains(t, err.Error(), strconv.Quote(tc.key))
+			assert.Nil(t, got)
+		})
+	}
+}
+
+func TestReadYamlFile_KeyCollisionSkipsDocument(t *testing.T) {
+	manifest := []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: collision
+data:
+  0x1: numeric
+  "1": string
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: valid
+data:
+  2: retained
+`)
+	workloads, err := readYamlFile(manifest)
+	require.ErrorContains(t, err, `document 1: key "data": YAML keys collide after conversion to JSON key "1"`)
+	require.Len(t, workloads, 1)
+	assert.Equal(t, "valid", workloads[0].GetName())
+	assert.Equal(t, map[string]any{"2": "retained"}, workloads[0].GetObject()["data"])
+}
+
+func TestIsListEnvelope_KeyCollisionWithholdsAttribution(t *testing.T) {
+	assert.True(t, isListEnvelope([]byte("apiVersion: v1\nkind: ConfigMap\ndata:\n  0x1: numeric\n  \"1\": string\n")))
 }
 
 func TestIsYaml(t *testing.T) {
@@ -1644,4 +1806,158 @@ spec:
 			b.Fatal("no workloads loaded")
 		}
 	}
+}
+
+// WorkloadDocuments numbers documents as gopkg.in/yaml.v3 does, so a workload
+// after a document that yields none still names its own document.
+func TestWorkloadDocuments(t *testing.T) {
+	pod := func(name string) string {
+		return "apiVersion: v1\nkind: Pod\nmetadata:\n  name: " + name + "\nspec:\n  containers:\n  - name: c\n    image: nginx\n"
+	}
+	list := "apiVersion: v1\nkind: List\nitems:\n- " + strings.ReplaceAll(strings.TrimSuffix(pod("x"), "\n"), "\n", "\n  ") + "\n- " + strings.ReplaceAll(strings.TrimSuffix(pod("y"), "\n"), "\n", "\n  ") + "\n"
+	tests := []struct {
+		name    string
+		content string
+		want    []int
+	}{
+		{name: "one workload per document", content: pod("a") + "---\n" + pod("b"), want: []int{0, 1}},
+		{name: "an empty document", content: pod("a") + "---\n---\n" + pod("b"), want: []int{0, 2}},
+		{name: "a comment-only document", content: pod("a") + "---\n# disabled\n---\n" + pod("b"), want: []int{0, 2}},
+		{name: "a document that isn't a Kubernetes object", content: "replicaCount: 1\n---\n" + pod("a"), want: []int{1}},
+		{name: "a List", content: list + "---\n" + pod("a"), want: []int{-1, -1, 1}},
+		{name: "no workloads", content: "a: 1\n---\nb: 2\n", want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := WorkloadDocuments([]byte(tt.content))
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+
+			// The loader's own count of workloads is what the indexes run over.
+			workloads, _ := readYamlFile([]byte(tt.content))
+			assert.Len(t, got, len(workloads))
+		})
+	}
+
+	// The loader splits documents by lines and doesn't take a lone CR for one,
+	// so it reads other workloads than the documents hold: the mapping refuses
+	// rather than match them up wrongly.
+	loneCR := "values: true\r---\rapiVersion: v1\rkind: Pod\rmetadata:\r  name: a\n---\napiVersion: v1\nkind: Pod\nmetadata:\n  name: b\n"
+	_, err := WorkloadDocuments([]byte(loneCR))
+	assert.ErrorContains(t, err, "the loader reads")
+}
+
+func TestRelativeToRoot(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "k8s"), 0o750))
+	manifest := filepath.Join(root, "k8s", "pod.yaml")
+	require.NoError(t, os.WriteFile(manifest, []byte("kind: Pod\n"), 0o600))
+
+	linkedRoot := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(root, linkedRoot); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	// a symlink inside the repository to another file in it
+	inRepoLink := filepath.Join(root, "k8s", "alias.yaml")
+	require.NoError(t, os.Symlink(manifest, inRepoLink))
+	outside := filepath.Join(t.TempDir(), "outside.yaml")
+	require.NoError(t, os.WriteFile(outside, []byte("kind: Pod\n"), 0o600))
+	// a symlink to a differently named file, and a directory symlink, both
+	// reached through the linked root: only the root's link may be resolved
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "shared"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "shared", "pod.tpl"), []byte("kind: Pod\n"), 0o600))
+	require.NoError(t, os.Symlink(filepath.Join("..", "shared", "pod.tpl"), filepath.Join(root, "k8s", "linked.yaml")))
+	require.NoError(t, os.Symlink("shared", filepath.Join(root, "aliased")))
+	// a repository-local link back to the root itself
+	require.NoError(t, os.Symlink(".", filepath.Join(root, "reenter")))
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "path inside the root", path: manifest, want: filepath.Join("k8s", "pod.yaml")},
+		{name: "root reached through a symlink", path: filepath.Join(linkedRoot, "k8s", "pod.yaml"), want: filepath.Join("k8s", "pod.yaml")},
+		// the plain relation stays inside the root, so the link keeps the name the caller selected
+		{name: "repository-local symlink keeps its own path", path: inRepoLink, want: filepath.Join("k8s", "alias.yaml")},
+		{name: "path outside the root is unchanged", path: outside, want: mustRel(t, root, outside)},
+		{name: "file symlink under a linked root keeps its own name", path: filepath.Join(linkedRoot, "k8s", "linked.yaml"), want: filepath.Join("k8s", "linked.yaml")},
+		{name: "directory symlink under a linked root keeps its own name", path: filepath.Join(linkedRoot, "aliased", "pod.tpl"), want: filepath.Join("aliased", "pod.tpl")},
+		{name: "link back to the root under a linked root keeps its own name", path: filepath.Join(linkedRoot, "reenter", "k8s", "pod.yaml"), want: filepath.Join("reenter", "k8s", "pod.yaml")},
+		// Helm names a template of a packaged dependency (charts/dep-1.0.0.tgz)
+		// <chart>/charts/dep/templates/..., a directory that is not on disk
+		{name: "missing file under a linked root", path: filepath.Join(linkedRoot, "chart", "charts", "dep", "templates", "deployment.yaml"), want: filepath.Join("chart", "charts", "dep", "templates", "deployment.yaml")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := RelativeToRoot(root, tt.path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestListFilesAndDirsUnderSymlinkedRoot(t *testing.T) {
+	target := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(target, "k8s"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(target, "k8s", "pod.yaml"), []byte("kind: Pod\n"), 0o600))
+	link := filepath.Join(t.TempDir(), "linked")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	// filepath.Walk alone reports the link itself and does not descend, so
+	// a scan of the link found no manifests.
+	files, errs := listFiles(link, nil)
+	assert.Empty(t, errs)
+	assert.Equal(t, []string{filepath.Join(link, "k8s", "pod.yaml")}, files, "paths stay under the link the scan was given")
+
+	dirs, errs := listDirs(link, nil)
+	assert.Empty(t, errs)
+	assert.Equal(t, []string{link, filepath.Join(link, "k8s")}, dirs)
+
+	filter, err := NewPathFilter(link, []string{"k8s/"})
+	require.NoError(t, err)
+	files, _ = listFiles(link, filter)
+	assert.Empty(t, files, "exclusions anchored at the link still apply")
+}
+
+func mustRel(t *testing.T, base, target string) string {
+	t.Helper()
+	rel, err := filepath.Rel(base, target)
+	require.NoError(t, err)
+	return rel
+}
+
+func TestReadFile_TrimsPaddedNamespace(t *testing.T) {
+	yamlDoc := []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-padded
+  namespace: " prod "
+---
+apiVersion: v1
+kind: List
+items:
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: cm
+    namespace: "  prod"
+`)
+	jsonDoc := []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cm","namespace":"prod\t"}}`)
+
+	yamlObjs, err := ReadFile(yamlDoc, YAML_FILE_FORMAT)
+	require.NoError(t, err)
+	jsonObjs, err := ReadFile(jsonDoc, JSON_FILE_FORMAT)
+	require.NoError(t, err)
+
+	all := append(yamlObjs, jsonObjs...)
+	require.Len(t, all, 3)
+	for _, obj := range all {
+		assert.Equal(t, "prod", obj.GetNamespace())
+		assert.NotContains(t, obj.GetID(), " ")
+	}
+	assert.Equal(t, "apps/v1/prod/Deployment/web-padded", all[0].GetID())
 }

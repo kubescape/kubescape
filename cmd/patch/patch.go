@@ -149,11 +149,16 @@ func applyRegistryCredentialsFromEnv(cmd *cobra.Command, patchInfo *metav1.Patch
 
 // validateImagePatchInfo validates the image patch info for the `patch` command
 func validateImagePatchInfo(patchInfo *metav1.PatchInfo) error {
+	if patchInfo == nil {
+		return errors.New("nil patch info")
+	}
 
 	patchInfo.Image = strings.TrimSpace(patchInfo.Image)
 	if patchInfo.Image == "" {
 		return errors.New("image tag is required")
 	}
+
+	patchInfo.OutputMode = strings.ToLower(strings.TrimSpace(patchInfo.OutputMode))
 
 	if patchInfo.Push {
 		if patchInfo.OutputMode != "" && patchInfo.OutputMode != "docker" && patchInfo.OutputMode != "image" {

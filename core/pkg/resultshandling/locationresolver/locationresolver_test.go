@@ -3,8 +3,10 @@ package locationresolver
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -257,4 +259,179 @@ func TestGetMaxFileSize_InvalidFallback(t *testing.T) {
 		t.Setenv(maxFileSizeEnvVar, "0")
 		assert.Equal(t, int64(defaultMaxFileSize), getMaxFileSize())
 	})
+}
+
+// The scanner numbers a file's workloads ("<path>:<n>"), skipping documents that
+// yield none, so the location of a workload after an empty or comment-only
+// document is in its own document, not the one before it.
+func TestResolveLocationOfAWorkloadAfterADocumentWithout(t *testing.T) {
+	pod := func(name, image string) string {
+		return "apiVersion: v1\nkind: Pod\nmetadata:\n  name: " + name + "\nspec:\n  containers:\n  - name: c\n    image: " + image + "\n"
+	}
+	for name, between := range map[string]string{
+		"an empty document":       "---\n---\n",
+		"a comment-only document": "---\n# disabled\n---\n",
+		"a values-style document": "---\nreplicaCount: 1\n---\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			content := pod("a", "a-image") + between + pod("b", "b-image")
+			resolver := newWorkloadResolverFor(t, content)
+
+			location, err := resolver.ResolveLocation("spec.containers[0].image", 1)
+
+			require.NoError(t, err)
+			require.Positive(t, location.Line)
+			lines := strings.Split(content, "\n")
+			assert.Equal(t, "    image: b-image", lines[location.Line-1], "line %d", location.Line)
+		})
+	}
+}
+
+// A file without workloads is still indexed by document, and a workload inside
+// a List has no document of its own to point into.
+func TestResolveLocationWithoutWorkloadsAndInAList(t *testing.T) {
+	location, err := newWorkloadResolverFor(t, "a: 1\n---\nb: 2\n").ResolveLocation("b", 1)
+	require.NoError(t, err)
+	assert.Equal(t, 3, location.Line)
+
+	list := "apiVersion: v1\nkind: List\nitems:\n- apiVersion: v1\n  kind: Pod\n  metadata:\n    name: x\n"
+	_, err = newWorkloadResolverFor(t, list).ResolveLocation("metadata.name", 0)
+	assert.ErrorContains(t, err, "inside a List")
+
+	// Nor has a workload of a file the loader splits differently from the
+	// decoder, here at lone CR line breaks.
+	loneCR := "values: true\r---\rapiVersion: v1\rkind: Pod\rmetadata:\r  name: a\n---\napiVersion: v1\nkind: Pod\nmetadata:\n  name: b\n"
+	_, err = newWorkloadResolverFor(t, loneCR).ResolveLocation("metadata.name", 0)
+	assert.ErrorContains(t, err, "the loader reads")
+}
+
+// newWorkloadResolverFor is newResolverFor indexed by workload, as the
+// consumers of scan results make it.
+func newWorkloadResolverFor(t *testing.T, manifest string) *PathLocationResolver {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "d.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(manifest), 0o600))
+	resolver, err := NewPathLocationResolver(path, IndexedByWorkload(cautils.WorkloadDocuments))
+	require.NoError(t, err)
+	return resolver
+}
+
+func TestFindDocumentIndexAndRawDocument(t *testing.T) {
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  namespace: prod
+spec:
+  replicas: 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo
+  namespace: prod
+spec:
+  ports:
+  - port: 80
+`
+	path := filepath.Join(t.TempDir(), "multi.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(manifest), 0o600))
+
+	resolver, err := NewPathLocationResolver(path)
+	require.NoError(t, err)
+	assert.Equal(t, 2, resolver.DocumentCount())
+
+	// Exact match on Deployment demo
+	idx, ok := resolver.FindDocumentIndex("Deployment", "demo", "prod")
+	assert.True(t, ok)
+	assert.Equal(t, 0, idx)
+
+	// Exact match on Service demo
+	idx, ok = resolver.FindDocumentIndex("Service", "demo", "prod")
+	assert.True(t, ok)
+	assert.Equal(t, 1, idx)
+
+	// Non-matching kind
+	_, ok = resolver.FindDocumentIndex("ConfigMap", "demo", "prod")
+	assert.False(t, ok)
+
+	// Non-matching name
+	_, ok = resolver.FindDocumentIndex("Deployment", "other", "prod")
+	assert.False(t, ok)
+
+	// RawDocument on valid doc
+	raw, err := resolver.RawDocument(0)
+	require.NoError(t, err)
+	assert.Equal(t, "Deployment", raw["kind"])
+	spec, ok := raw["spec"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, 1, spec["replicas"])
+
+	// RawDocument out of range
+	_, err = resolver.RawDocument(5)
+	assert.Error(t, err)
+}
+
+func TestResolveDocumentLocation_LeadingCommentDocument(t *testing.T) {
+	for name, manifest := range map[string]string{
+		"leading non-workload document": `values: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  namespace: prod
+spec:
+  replicas: 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo
+  namespace: prod
+spec:
+  ports:
+  - port: 80
+`,
+		"preceding comment document between workloads": `apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: prod
+---
+# comment-only document
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  namespace: prod
+spec:
+  replicas: 1
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "manifest.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(manifest), 0o600))
+
+			resolver, err := NewPathLocationResolver(path, IndexedByWorkload(cautils.WorkloadDocuments))
+			require.NoError(t, err)
+
+			idx, ok := resolver.FindDocumentIndex("Deployment", "demo", "prod")
+			require.True(t, ok)
+			// Target is at document index 1 in the first case, and 2 in the second case.
+			// Because a document without a workload precedes it, document index != workload index.
+			require.Greater(t, idx, 0)
+
+			// ResolveDocumentLocation resolves directly by docIndex without remapping through workloadDocuments
+			loc, err := resolver.ResolveDocumentLocation("spec.replicas", idx)
+			require.NoError(t, err)
+			assert.Positive(t, loc.Line)
+
+			// ResolveLocation called with docIndex would misattribute or fail because docIndex != workload index.
+			// ResolveDocumentLocation must resolve the exact line of spec.replicas.
+			lines := strings.Split(manifest, "\n")
+			assert.Equal(t, "  replicas: 1", lines[loc.Line-1])
+		})
+	}
 }

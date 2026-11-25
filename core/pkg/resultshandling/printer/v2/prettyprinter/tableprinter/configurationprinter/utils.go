@@ -21,6 +21,9 @@ func bucketControlsByCategory(controlSummaries []reportsummary.IControlSummary) 
 	mapCategoryIDToName := make(map[string]string)
 
 	for i := range controlSummaries {
+		if controlSummaries[i] == nil {
+			continue
+		}
 		cat := controlSummaries[i].GetCategory()
 		if cat == nil {
 			continue
@@ -71,6 +74,9 @@ func mapCategoryToSummary(controlSummaries []reportsummary.IControlSummary, mapD
 	mapCategoryIDToName := make(map[string]string)
 
 	for i := range controlSummaries {
+		if controlSummaries[i] == nil {
+			continue
+		}
 		// check if we need to print this control
 		category, ok := mapDisplayCtrlIDToCategory[controlSummaries[i].GetID()]
 		if !ok {
@@ -117,7 +123,7 @@ func buildCategoryToControlsMap(mapCategoriesToCtrlSummary map[string][]reportsu
 	for categoryID, ctrls := range mapCategoriesToCtrlSummary {
 		status := apis.StatusPassed
 		for _, ctrl := range ctrls {
-			if ctrl.GetStatus().Status() == apis.StatusFailed {
+			if ctrl != nil && ctrl.GetStatus() != nil && ctrl.GetStatus().Status() == apis.StatusFailed {
 				status = apis.StatusFailed
 				break
 			}
@@ -135,22 +141,37 @@ func buildCategoryToControlsMap(mapCategoriesToCtrlSummary map[string][]reportsu
 
 // returns doc link for control
 func getDocsForControl(controlSummary reportsummary.IControlSummary) string {
-	return fmt.Sprintf("%s/%s", docsPrefix, strings.ToLower(controlSummary.GetID()))
+	if controlSummary == nil || strings.TrimSpace(controlSummary.GetID()) == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s/%s", docsPrefix, strings.ToLower(strings.TrimSpace(controlSummary.GetID())))
 }
 
 // returns run command with verbose for control
 func getRunCommandForControl(controlSummary reportsummary.IControlSummary) string {
-	return fmt.Sprintf("%s %s -v", scanControlPrefix, controlSummary.GetID())
+	if controlSummary == nil || strings.TrimSpace(controlSummary.GetID()) == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s %s -v", scanControlPrefix, strings.TrimSpace(controlSummary.GetID()))
 }
 
 func sortControlSummaries(controlSummaries []reportsummary.IControlSummary) {
 	sort.Slice(controlSummaries, func(i, j int) bool {
+		if controlSummaries[i] == nil {
+			return false
+		}
+		if controlSummaries[j] == nil {
+			return true
+		}
+		if controlSummaries[i].GetName() == controlSummaries[j].GetName() {
+			return controlSummaries[i].GetID() < controlSummaries[j].GetID()
+		}
 		return controlSummaries[i].GetName() < controlSummaries[j].GetName()
 	})
 }
 
 func printCategoryInfo(writer io.Writer, infoToPrintInfo []utils.InfoStars) {
 	for i := range infoToPrintInfo {
-		cautils.InfoDisplay(writer, fmt.Sprintf("%s %s\n", infoToPrintInfo[i].Stars, infoToPrintInfo[i].Info))
+		cautils.InfoDisplay(writer, "%s %s\n", infoToPrintInfo[i].Stars, infoToPrintInfo[i].Info)
 	}
 }

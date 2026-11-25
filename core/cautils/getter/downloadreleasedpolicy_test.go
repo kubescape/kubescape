@@ -185,6 +185,24 @@ func TestNewDownloadReleasedPolicyWithVersion(t *testing.T) {
 		p := NewDownloadReleasedPolicyWithVersion("v2.0.301")
 		require.Contains(t, p.gs.URL, "download/v2.0.301")
 	})
+
+	t.Run("whitespace-only version falls back to latest release", func(t *testing.T) {
+		t.Parallel()
+
+		pinned := NewDownloadReleasedPolicyWithVersion("   ")
+		latest := NewDownloadReleasedPolicy()
+		require.Equal(t, latest.gs.URL, pinned.gs.URL)
+		require.False(t, pinned.IsVersionPinned())
+	})
+
+	t.Run("whitespace-padded version is trimmed", func(t *testing.T) {
+		t.Parallel()
+
+		p := NewDownloadReleasedPolicyWithVersion("  v2.0.301  ")
+		require.Contains(t, p.gs.URL, "download/v2.0.301")
+		require.True(t, p.IsVersionPinned())
+		require.Equal(t, "v2.0.301", p.version)
+	})
 }
 
 func TestDownloadReleasedPolicyArtifactPersistence(t *testing.T) {

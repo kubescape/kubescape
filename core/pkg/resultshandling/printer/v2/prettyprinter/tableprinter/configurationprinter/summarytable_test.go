@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
@@ -19,6 +20,14 @@ func (m mockCounters) Skipped() int  { return m.skipped }
 func (m mockCounters) Passed() int   { return m.passed }
 func (m mockCounters) Excluded() int { return m.excluded }
 func (m mockCounters) All() int      { return m.failed + m.skipped + m.passed }
+
+type mockNilResourcesControlSummary struct {
+	reportsummary.ControlSummary
+}
+
+func (m *mockNilResourcesControlSummary) NumberOfResources() reportsummary.ICounters {
+	return nil
+}
 
 func TestControlCountersForSummary(t *testing.T) {
 	tests := []struct {
@@ -183,6 +192,11 @@ func TestGenerateFooter_Short(t *testing.T) {
 			complianceScore: 50,
 			wantContains:    []string{"Resource Summary", "Failed Resources", "All Resources"},
 		},
+		{
+			name:            "unscored sentinel score renders N/A",
+			complianceScore: -1.0,
+			wantContains:    []string{"Compliance-Score", "N/A"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -223,6 +237,11 @@ func TestGenerateFooter_Full(t *testing.T) {
 			complianceScore:     99.996,
 			wantComplianceScore: "99.99%",
 		},
+		{
+			name:                "unscored sentinel score renders N/A",
+			complianceScore:     -1.0,
+			wantComplianceScore: "N/A",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -246,12 +265,51 @@ func TestGetComplianceScoreColumnDoesNotRoundFractionalScoreToPerfect(t *testing
 }
 
 func TestGetComplianceScoreColumnHandlesUnscoredSentinel(t *testing.T) {
-	score := float32(-1.0)
-	controlSummary := &reportsummary.ControlSummary{
-		ComplianceScore: &score,
+	tests := []struct {
+		name     string
+		score    float32
+		expected string
+	}{
+		{
+			name:     "sentinel -1.0 renders N/A",
+			score:    -1.0,
+			expected: "N/A",
+		},
+		{
+			name:     "fractional negative -0.5 renders N/A",
+			score:    -0.5,
+			expected: "N/A",
+		},
+		{
+			name:     "near-zero negative -0.25 renders N/A",
+			score:    -0.25,
+			expected: "N/A",
+		},
+		{
+			name:     "near-zero negative -0.1 renders N/A",
+			score:    -0.1,
+			expected: "N/A",
+		},
+		{
+			name:     "genuine zero renders 0%",
+			score:    0.0,
+			expected: "0%",
+		},
+		{
+			name:     "valid positive score renders percentage",
+			score:    85.0,
+			expected: "85%",
+		},
 	}
 
-	assert.Equal(t, "N/A", GetComplianceScoreColumn(controlSummary, nil))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := &reportsummary.ControlSummary{
+				ComplianceScore: &tt.score,
+			}
+			assert.Equal(t, tt.expected, GetComplianceScoreColumn(ctrl, nil))
+		})
+	}
 }
 
 func TestGenerateFooter_ShortVsFullDiffer(t *testing.T) {
@@ -259,4 +317,83 @@ func TestGenerateFooter_ShortVsFullDiffer(t *testing.T) {
 	short := GenerateFooter(&sd, true)
 	full := GenerateFooter(&sd, false)
 	assert.NotEqual(t, len(short), len(full), "short and full footers should have different column counts")
+}
+
+func TestControlCountersForSummary_Nil(t *testing.T) {
+	rows := ControlCountersForSummary(nil)
+	require.Len(t, rows, 4)
+	assert.Equal(t, table.Row{"Controls", "0"}, rows[0])
+	assert.Equal(t, table.Row{"Passed", "0"}, rows[1])
+	assert.Equal(t, table.Row{"Failed", "0"}, rows[2])
+	assert.Equal(t, table.Row{"Action Required", "0"}, rows[3])
+}
+
+func TestSummaryTableHelpers_NilSafety(t *testing.T) {
+	assert.NotPanics(t, func() {
+		row := GenerateRow(nil, nil, false)
+		assert.Equal(t, table.Row{}, row)
+	})
+
+	assert.NotPanics(t, func() {
+		footer := GenerateFooter(nil, false)
+		assert.Equal(t, table.Row{}, footer)
+	})
+
+	assert.NotPanics(t, func() {
+		footerShort := GenerateFooter(nil, true)
+		assert.Equal(t, table.Row{}, footerShort)
+	})
+
+	assert.NotPanics(t, func() {
+		sev := GetSeverityColumn(nil)
+		assert.Equal(t, "", sev)
+	})
+
+	assert.NotPanics(t, func() {
+		score := GetComplianceScoreColumn(nil, nil)
+		assert.Equal(t, "", score)
+	})
+
+	assert.NotPanics(t, func() {
+		info := GetInfoColumn(nil, nil)
+		assert.Equal(t, "", info)
+	})
+
+	// Uninitialized ControlSummary with nil status
+	ctrlWithNilStatusAndResources := &reportsummary.ControlSummary{}
+	assert.NotPanics(t, func() {
+		row := GenerateRow(ctrlWithNilStatusAndResources, nil, false)
+		assert.Equal(t, "0", row[summaryColumnCounterFailed])
+		assert.Equal(t, "0", row[summaryColumnCounterAll])
+	})
+
+	// ControlSummary with nil NumberOfResources
+	ctrlWithNilResources := &mockNilResourcesControlSummary{}
+	assert.NotPanics(t, func() {
+		row := GenerateRow(ctrlWithNilResources, nil, false)
+		assert.Equal(t, "", row[summaryColumnCounterFailed])
+		assert.Equal(t, "", row[summaryColumnCounterAll])
+	})
+
+	assert.NotPanics(t, func() {
+		score := GetComplianceScoreColumn(ctrlWithNilStatusAndResources, nil)
+		assert.Equal(t, "N/A", score)
+	})
+
+	assert.NotPanics(t, func() {
+		info := GetInfoColumn(ctrlWithNilStatusAndResources, nil)
+		assert.Equal(t, "", info)
+	})
+
+	// SummaryDetails with nil NumberOfResources
+	sdWithNilResources := &reportsummary.SummaryDetails{}
+	assert.NotPanics(t, func() {
+		footer := GenerateFooter(sdWithNilResources, false)
+		assert.Equal(t, "0", footer[summaryColumnCounterFailed])
+		assert.Equal(t, "0", footer[summaryColumnCounterAll])
+	})
+	assert.NotPanics(t, func() {
+		footerShort := GenerateFooter(sdWithNilResources, true)
+		assert.NotEmpty(t, footerShort)
+	})
 }

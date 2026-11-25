@@ -217,7 +217,12 @@ func TestGitLabCodeQuality_SkipsControlMissingFromSummary(t *testing.T) {
 }
 
 func TestGitLabCodeQuality_RejectsImageScans(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "gl-*.json")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	cp := NewGitLabCodeQualityPrinter(false)
+	cp.writer = tmpFile
 	images := []cautils.ImageScanData{{Image: "nginx:1.23"}}
 
 	assert.ErrorContains(t, cp.ActionPrint(context.Background(), nil, images), "only supported for configuration scanning")
@@ -228,7 +233,12 @@ func TestGitLabCodeQuality_NilReportDoesNotPanic(t *testing.T) {
 	session := gitLabSessionFixture(t, "C-0057", 8.0)
 	session.Report = nil
 
+	tmpFile, err := os.CreateTemp(t.TempDir(), "gl-*.json")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	cp := NewGitLabCodeQualityPrinter(false)
+	cp.writer = tmpFile
 	require.NotPanics(t, func() {
 		err := cp.ActionPrint(context.Background(), session, nil)
 		assert.ErrorContains(t, err, "only supported for configuration scanning")
@@ -329,4 +339,39 @@ func TestToCodeQualityIssue_RedactsSecretValuesUnlessShowSecrets(t *testing.T) {
 
 	revealed := toCodeQualityIssue(control, ac, resource, "v1/Secret/default/demo", "secret.yaml", 1, true)
 	assert.Contains(t, revealed.Content.Body, "s3cr3t-plaintext-password")
+}
+
+func TestGitLabCodeQualityActionPrint_NilWriterReturnsError(t *testing.T) {
+	ctx := context.Background()
+	cp := NewGitLabCodeQualityPrinter(false)
+	require.Nil(t, cp.writer)
+
+	session := gitLabSessionFixture(t, "C-0057", 8.0)
+	err := cp.ActionPrint(ctx, session, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "output writer is nil")
+}
+
+func TestGitLabCodeQuality_NilReceiverSafety(t *testing.T) {
+	var cp *GitLabCodeQualityPrinter
+
+	assert.NotPanics(t, func() {
+		err := cp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := cp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := cp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		cp.Score(100)
+		cp.PrintNextSteps()
+	})
 }

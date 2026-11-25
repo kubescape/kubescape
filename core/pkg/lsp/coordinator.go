@@ -17,6 +17,13 @@ import (
 // defaultDebounce is how long after the last save a scan starts.
 const defaultDebounce = 500 * time.Millisecond
 
+// docTarget tracks the version and open lifecycle generation of a document at the
+// time a scan is scheduled.
+type docTarget struct {
+	version int32
+	openID  uint64
+}
+
 // coordinator turns saves into scans, and scans into published diagnostics.
 //
 // One goroutine owns all of it: it waits for a save, waits for the saves to stop
@@ -34,15 +41,22 @@ type coordinator struct {
 	scan     func(ctx context.Context, paths []string) (scanFindings, error)
 	docs     *documentStore
 	publish  func(ctx context.Context, params *protocol.PublishDiagnosticsParams) error
+	// notify shows the user a message; nil shows nothing. A failed scan is
+	// reported through it, so that an editor showing no findings is not taken
+	// for a clean scan.
+	notify func(ctx context.Context, params *protocol.ShowMessageParams) error
+	// lastFailure is the error last reported, so the same failure is shown once,
+	// not on every save, until a scan succeeds. Only the run goroutine uses it.
+	lastFailure string
 	// roots are the workspace folders, with none contained in another. With none
 	// at all, the open documents are what is scanned.
 	roots []string
 
 	mu         sync.Mutex
 	generation uint64
-	cancelScan context.CancelFunc // of the scan in progress, if any
-	saves      map[string]int32   // version of each document at its latest save, by pathKey
-	wake       chan struct{}      // capacity one: a save signals without blocking
+	cancelScan context.CancelFunc   // of the scan in progress, if any
+	saves      map[string]docTarget // version and lifecycle at each document's latest save, by pathKey
+	wake       chan struct{}        // capacity one: a save signals without blocking
 
 	// pubMu orders publishing with a document's close: nothing is published for a
 	// document after the empty list that closed it.
@@ -59,7 +73,7 @@ func newCoordinator(docs *documentStore, roots []string, scan func(context.Conte
 		docs:      docs,
 		publish:   publish,
 		roots:     dedupeRoots(roots),
-		saves:     make(map[string]int32),
+		saves:     make(map[string]docTarget),
 		wake:      make(chan struct{}, 1),
 		published: make(map[string]struct{}),
 	}
@@ -77,12 +91,11 @@ func (c *coordinator) start(ctx context.Context) {
 // stop waits for the coordinator to end, after the context given to start has.
 func (c *coordinator) stop() { c.wg.Wait() }
 
-// saved records a save of a document that is open at version, and schedules a
-// scan.
-func (c *coordinator) saved(path string, version int32) {
+// saved records the document as it was at save time and schedules a scan.
+func (c *coordinator) saved(d document) {
 	c.mu.Lock()
 	c.generation++
-	c.saves[pathKey(path)] = version
+	c.saves[pathKey(d.path)] = docTarget{version: d.version, openID: d.openID}
 	if c.cancelScan != nil {
 		c.cancelScan() // obsolete: its result will not be published
 	}
@@ -144,19 +157,20 @@ func (c *coordinator) scanOnce(ctx context.Context) {
 	generation := c.generation
 	c.cancelScan = cancel
 	saves := c.saves
-	c.saves = make(map[string]int32)
+	c.saves = make(map[string]docTarget)
 	c.mu.Unlock()
 
 	// The versions the result will be for: a clean document's, as of the scan's
 	// scheduling. A document with unsaved changes is not what is on disk, so it
-	// is left as it is.
-	versions := make(map[string]int32)
+	// is left as it is. Keyed by pathKey so multiple open documents pointing to
+	// the same file (such as symlinks) do not collide.
+	expected := make(map[string]docTarget)
 	var paths []string
 	for _, d := range c.docs.snapshot() {
-		if v, ok := saves[pathKey(d.path)]; ok {
-			versions[canonicalKey(d.path)] = v
+		if saved, ok := saves[pathKey(d.path)]; ok && saved.openID == d.openID {
+			expected[pathKey(d.path)] = saved
 		} else if !d.dirty {
-			versions[canonicalKey(d.path)] = d.version
+			expected[pathKey(d.path)] = docTarget{version: d.version, openID: d.openID}
 		}
 		paths = append(paths, d.path)
 	}
@@ -177,17 +191,19 @@ func (c *coordinator) scanOnce(ctx context.Context) {
 	if err != nil {
 		if scanCtx.Err() == nil { // not a cancellation, which is routine
 			logger.L().Ctx(ctx).Warning("the scan failed; the diagnostics are left as they were", helpers.Error(err))
+			c.reportFailure(ctx, err)
 		}
 		return
 	}
+	c.lastFailure = ""
 	if !current || !findings.complete {
 		return
 	}
-	c.apply(ctx, generation, findings, versions)
+	c.apply(ctx, generation, findings, expected)
 }
 
 // apply publishes the findings for the open documents in scope.
-func (c *coordinator) apply(ctx context.Context, generation uint64, findings scanFindings, versions map[string]int32) {
+func (c *coordinator) apply(ctx context.Context, generation uint64, findings scanFindings, expected map[string]docTarget) {
 	byFile := make(map[string][]protocol.Diagnostic, len(findings.byFile))
 	for path, ds := range findings.byFile {
 		byFile[canonicalKey(path)] = ds
@@ -200,12 +216,12 @@ func (c *coordinator) apply(ctx context.Context, generation uint64, findings sca
 	c.pubMu.Lock()
 	defer c.pubMu.Unlock()
 	for _, d := range c.docs.snapshot() {
-		key := canonicalKey(d.path)
-		version, scanned := versions[key]
+		exp, scanned := expected[pathKey(d.path)]
 		if !scanned || !c.inScope(d.path) {
 			continue
 		}
-		if _, skip := unreliable[key]; skip {
+		canonical := canonicalKey(d.path)
+		if _, skip := unreliable[canonical]; skip || insideAny(findings.unreliable, d.path) {
 			continue
 		}
 		// Re-checked for each document, under the publishing lock: a save, or the
@@ -216,10 +232,10 @@ func (c *coordinator) apply(ctx context.Context, generation uint64, findings sca
 		if !current {
 			return
 		}
-		if now, open := c.docs.get(d.path); !open || now.version != version {
+		if now, open := c.docs.get(d.path); !open || now.openID != exp.openID || now.version != exp.version {
 			continue
 		}
-		diagnostics := byFile[key]
+		diagnostics := byFile[canonical]
 		_, had := c.published[pathKey(d.path)]
 		if len(diagnostics) == 0 && !had {
 			continue
@@ -234,7 +250,7 @@ func (c *coordinator) apply(ctx context.Context, generation uint64, findings sca
 		}
 		c.send(ctx, &protocol.PublishDiagnosticsParams{
 			URI:         uri.URI(d.uri),
-			Version:     protocol.NewOptional(version),
+			Version:     protocol.NewOptional(exp.version),
 			Diagnostics: diagnostics,
 		})
 	}
@@ -255,9 +271,29 @@ func (c *coordinator) inScope(path string) bool {
 	return slices.ContainsFunc(c.roots, func(root string) bool { return within(root, path) })
 }
 
+// insideAny reports whether path is inside one of paths. A scan can skip a
+// whole input, such as a workspace folder whose Kustomize build fails, and then
+// nothing is known of any file in it. paths are keys (pathKey), lowercased on
+// a case-insensitive file system, so both sides are compared as keys: made
+// canonical first, so that symlinks resolve on the real spelling, then keyed.
+func insideAny(paths map[string]struct{}, path string) bool {
+	key := pathKey(canonical(path))
+	for p := range paths {
+		if below(pathKey(canonical(p)), key) {
+			return true
+		}
+	}
+	return false
+}
+
 // within reports whether path is root or below it.
 func within(root, path string) bool {
-	rel, err := filepath.Rel(canonical(root), canonical(path))
+	return below(canonical(root), canonical(path))
+}
+
+// below reports whether path is root or below it, as they are spelled.
+func below(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return false
 	}
@@ -301,3 +337,24 @@ func canonical(path string) string {
 }
 
 func canonicalKey(path string) string { return pathKey(canonical(path)) }
+
+// reportFailure tells the user that a scan failed, unless that failure was the
+// last one reported.
+func (c *coordinator) reportFailure(ctx context.Context, err error) {
+	msg := err.Error()
+	if c.notify == nil || msg == c.lastFailure {
+		return
+	}
+	params := &protocol.ShowMessageParams{
+		Type:    protocol.MessageTypeWarning,
+		Message: "Kubescape could not scan the workspace, so the findings shown may be out of date: " + msg,
+	}
+	if nerr := c.notify(ctx, params); nerr != nil {
+		// Not recorded as shown, so the next failed scan tries again.
+		if ctx.Err() == nil {
+			logger.L().Ctx(ctx).Warning("could not show the scan failure", helpers.Error(nerr))
+		}
+		return
+	}
+	c.lastFailure = msg
+}

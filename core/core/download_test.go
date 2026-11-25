@@ -1002,6 +1002,66 @@ func TestDownloadControl(t *testing.T) {
 		assert.Equal(t, wantControl.ControlID, got.ControlID)
 	})
 
+	t.Run("returns error when all control downloads fail", func(t *testing.T) {
+		withTenantConfig(t, &fakeTenantConfig{})
+		fetchErr := errors.New("fetch failed")
+		withPolicyGetter(t, &fakePolicyGetter{
+			controlsList: []string{"C-0001", "C-0002"},
+			controlErr:   fetchErr,
+		}, nil)
+
+		files, err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir()})
+		require.ErrorIs(t, err, fetchErr)
+		assert.ErrorContains(t, err, "C-0001")
+		assert.ErrorContains(t, err, "C-0002")
+		assert.Empty(t, files)
+	})
+
+	t.Run("saves successful control and returns error when one download fails", func(t *testing.T) {
+		withTenantConfig(t, &fakeTenantConfig{})
+		wantControl := &reporthandling.Control{ControlID: "C-0002"}
+		withPolicyGetter(t, &fakePolicyGetter{
+			controlsList: []string{"C-0001", "C-0002"},
+			control:      wantControl,
+		}, nil)
+
+		dir := t.TempDir()
+		info := &metav1.DownloadInfo{Target: TargetControl, Path: dir}
+		files, err := downloadControl(context.Background(), info)
+		assert.ErrorContains(t, err, "C-0001")
+		assert.Equal(t, []string{filepath.Join(dir, "c-0002.json")}, files)
+		assert.Equal(t, []string{"c-0002.json"}, dirEntryNames(t, dir))
+
+		var got reporthandling.Control
+		readJSONFile(t, filepath.Join(dir, "c-0002.json"), &got)
+		assert.Equal(t, wantControl.ControlID, got.ControlID)
+	})
+
+	t.Run("returns error when a bulk download receives a nil control", func(t *testing.T) {
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, &fakePolicyGetter{controlsList: []string{"C-0001"}}, nil)
+
+		files, err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir()})
+		require.ErrorContains(t, err, "C-0001")
+		assert.ErrorContains(t, err, "received empty objects")
+		assert.Empty(t, files)
+	})
+
+	t.Run("returns error when a bulk download cannot derive a filename", func(t *testing.T) {
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, &fakePolicyGetter{
+			controlsList: []string{"a/b"},
+			control:      &reporthandling.Control{ControlID: "a/b"},
+		}, nil)
+
+		dir := t.TempDir()
+		files, err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: dir})
+		require.ErrorContains(t, err, "a/b")
+		assert.ErrorContains(t, err, "path separators")
+		assert.Empty(t, files)
+		assert.Empty(t, dirEntryNames(t, dir))
+	})
+
 	t.Run("returns error from PolicyCacheFilename", func(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withPolicyGetter(t, &fakePolicyGetter{}, nil)
@@ -1104,6 +1164,27 @@ func TestDownloadArtifacts(t *testing.T) {
 		assert.True(t, os.IsNotExist(statErr), "exceptions.json should not have been written")
 		_, statErr = os.Stat(filepath.Join(dir, "nsa.json"))
 		assert.NoError(t, statErr, "nsa.json should still have been written")
+	})
+
+	t.Run("downloads artifacts in deterministic order", func(t *testing.T) {
+		withTenantConfig(t, &fakeTenantConfig{})
+		withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: map[string][]string{"a": {"1"}}}, nil)
+		withExceptionsGetter(t, &fakeExceptionsGetter{exceptions: []armotypes.PostureExceptionPolicy{{}}}, nil)
+		withAttackTracksGetter(t, &fakeAttackTracksGetter{tracks: []v1alpha1.AttackTrack{{}}}, nil)
+		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{{PortalBase: armotypes.PortalBase{Name: "nsa"}}}, named: fakeSecurityViewFrameworks()}, nil)
+
+		dir1 := t.TempDir()
+		files1, err1 := downloadArtifacts(context.Background(), &metav1.DownloadInfo{Target: TargetArtifacts, Path: dir1})
+		require.NoError(t, err1)
+
+		dir2 := t.TempDir()
+		files2, err2 := downloadArtifacts(context.Background(), &metav1.DownloadInfo{Target: TargetArtifacts, Path: dir2})
+		require.NoError(t, err2)
+
+		require.Len(t, files1, len(files2))
+		for i := range files1 {
+			assert.Equal(t, filepath.Base(files1[i]), filepath.Base(files2[i]))
+		}
 	})
 }
 

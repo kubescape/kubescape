@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
@@ -247,4 +248,102 @@ func TestBoundedTerraformFunctions_CheckConvertedArguments(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, got.RawEquals(cty.NumberIntVal(12)))
 	assert.Equal(t, 1, calls)
+}
+
+func TestBoundedTerraformFunctions_CoalesceNestedDepthPerformance(t *testing.T) {
+	// Construct 30 levels of nested coalesce calls:
+	// coalesce(coalesce(...coalesce("prod", "")..., ""), "")
+	expr := `"prod"`
+	for i := 0; i < 30; i++ {
+		expr = fmt.Sprintf(`coalesce(%s, "")`, expr)
+	}
+
+	start := time.Now()
+	got, diags := evalBoundedTerraformExpr(t, expr, map[string]cty.Value{})
+	elapsed := time.Since(start)
+
+	require.False(t, diags.HasErrors(), diags.Error())
+	assert.True(t, got.RawEquals(cty.StringVal("prod")), "got %#v", got)
+	assert.Less(t, elapsed, 100*time.Millisecond, "30-level nested coalesce took %s, expected < 100ms", elapsed)
+}
+
+func TestBoundedTerraformFunctions_CoalesceMixedTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		expr string
+		want cty.Value
+	}{
+		{
+			name: "number to string conversion with fallback",
+			expr: `coalesce(123, "fallback")`,
+			want: cty.StringVal("123"),
+		},
+		{
+			name: "bool to string conversion with fallback",
+			expr: `coalesce(true, "fallback")`,
+			want: cty.StringVal("true"),
+		},
+		{
+			name: "string with number fallback remains string",
+			expr: `coalesce("prod", 123)`,
+			want: cty.StringVal("prod"),
+		},
+		{
+			name: "null then number with string fallback unifies to string",
+			expr: `coalesce(null, 123, "fallback")`,
+			want: cty.StringVal("123"),
+		},
+		{
+			name: "number with unresolvable fallback keeps number",
+			expr: `coalesce(123, local.missing)`,
+			want: cty.NumberIntVal(123),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, diags := evalBoundedTerraformExpr(t, tt.expr, map[string]cty.Value{})
+			require.False(t, diags.HasErrors(), diags.Error())
+			assert.True(t, got.RawEquals(tt.want), "got %#v, want %#v", got, tt.want)
+		})
+	}
+}
+
+func TestBoundedTerraformFunctions_CoalesceOversizedNumberConversion(t *testing.T) {
+	_, diags := evalBoundedTerraformExpr(t, `coalesce(1e500000000, "fallback")`, map[string]cty.Value{})
+	require.True(t, diags.HasErrors(), "coalesce with huge number converted to string should produce error")
+	assert.Contains(t, diags.Error(), "argument exceeds the size limit")
+}
+
+func TestBoundedTerraformFunctions_CoalesceOversizedString(t *testing.T) {
+	big := strings.Repeat("x", maxTerraformFunctionSize+1)
+	_, diags := evalBoundedTerraformExpr(t, fmt.Sprintf(`coalesce(%q, "")`, big), map[string]cty.Value{})
+	require.True(t, diags.HasErrors(), "coalesce with oversized string should produce error")
+	assert.Contains(t, diags.Error(), "argument exceeds the size limit")
+}
+
+func TestBoundedTerraformFunctions_CoalesceIncompatibleTypes(t *testing.T) {
+	_, diags := evalBoundedTerraformExpr(t, `coalesce("prod", [1, 2])`, map[string]cty.Value{})
+	require.True(t, diags.HasErrors(), "coalesce with incompatible string and list arguments must fail")
+	assert.Contains(t, diags.Error(), "all arguments must have the same type")
+
+	got, diags := evalBoundedTerraformExpr(t, `try(coalesce("prod", [1, 2]), "fallback")`, map[string]cty.Value{})
+	require.False(t, diags.HasErrors(), diags.Error())
+	assert.True(t, got.RawEquals(cty.StringVal("fallback")), "try should catch type error and return fallback")
+}
+
+func TestBoundedTerraformFunctions_CoalesceOversizedConvertedResult(t *testing.T) {
+	// A collection of booleans measures ~262 KB before conversion, but ~1.3 MB
+	// when converted to list(string), exceeding maxTerraformFunctionSize.
+	numBools := 262144
+	boolElems := make([]cty.Value, numBools)
+	for i := range boolElems {
+		boolElems[i] = cty.True
+	}
+	locals := map[string]cty.Value{
+		"bools": cty.ListVal(boolElems),
+	}
+	_, diags := evalBoundedTerraformExpr(t, `coalesce(local.bools, tolist(["x"]))`, locals)
+	require.True(t, diags.HasErrors(), "coalesce with converted result exceeding size limit should produce error")
+	assert.Contains(t, diags.Error(), "argument exceeds the size limit")
 }

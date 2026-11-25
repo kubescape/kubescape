@@ -15,6 +15,7 @@ func TestParseRange(t *testing.T) {
 		wantFail bool
 	}{
 		{in: "<= v1.27.12", inside: []string{"0.9.0", "1.0.0", "1.27.12"}, outside: []string{"1.27.13", "2.0.0"}},
+		{in: "<= V1.27.12", inside: []string{"0.9.0", "1.0.0", "1.27.12"}, outside: []string{"1.27.13", "2.0.0"}},
 		{in: "< v1.15.10", inside: []string{"1.15.9"}, outside: []string{"1.15.10"}},
 		{in: "<=1.16.10", inside: []string{"1.16.10"}, outside: []string{"1.16.11"}},
 		{in: "<= v1.30", inside: []string{"1.30.99"}, outside: []string{"1.31.0"}},
@@ -24,11 +25,14 @@ func TestParseRange(t *testing.T) {
 		{in: "> v1.2.3", inside: []string{"1.2.4"}, outside: []string{"1.2.3"}},
 		{in: "> v1.2", inside: []string{"1.3.0"}, outside: []string{"1.2.9"}},
 		{in: "= v1.37.0", inside: []string{"1.37.0"}, outside: []string{"1.37.1", "1.36.9"}},
+		{in: "= V1.37.0", inside: []string{"1.37.0"}, outside: []string{"1.37.1", "1.36.9"}},
 		{in: "v1.25.0", inside: []string{"1.25.0"}, outside: []string{"1.25.1"}},
 		{in: "v1.25", inside: []string{"1.25.0", "1.25.7"}, outside: []string{"1.24.9", "1.26.0"}},
 		{in: "v1.29.0 - v1.29.3", inside: []string{"1.29.0", "1.29.3"}, outside: []string{"1.28.9", "1.29.4"}},
 		{in: "v1.18.0-1.18.5", inside: []string{"1.18.5"}, outside: []string{"1.18.6"}},
 		{in: "v1.32.0 to v1.32.1", inside: []string{"1.32.1"}, outside: []string{"1.32.2"}},
+		{in: "V1.32.0 TO V1.32.1", inside: []string{"1.32.1"}, outside: []string{"1.32.2"}},
+		{in: "v1.32.0 To v1.32.1", inside: []string{"1.32.1"}, outside: []string{"1.32.2"}},
 		{in: `v1.11.0 \- 1.11.4`, inside: []string{"1.11.4"}, outside: []string{"1.11.5"}},
 		{in: "v1.20 - v1.21", inside: []string{"1.20.0", "1.21.9"}, outside: []string{"1.19.9", "1.22.0"}},
 		{in: "v2.0.0-alpha.0", wantFail: true},
@@ -111,6 +115,20 @@ func TestParseAffected(t *testing.T) {
 		assert.Len(t, affected["kube-proxy"], 1)
 	})
 
+	t.Run("case-insensitive components and normalized names", func(t *testing.T) {
+		affected, err := parseAffected([]string{
+			"* Kubelet v1.13.6",
+			"* KUBELET v1.14.2",
+			"- Kube-APIServer <= V1.25.3",
+			"- Kubelet/Kube-Proxy V1.18.0-1.18.3",
+		})
+		require.NoError(t, err)
+		assert.ElementsMatch(t, []string{"kube-apiserver", "kubelet", "kube-proxy"}, keys(affected))
+		assert.Len(t, affected["kubelet"], 3)
+		assert.Len(t, affected["kube-proxy"], 1)
+		assert.Len(t, affected["kube-apiserver"], 1)
+	})
+
 	t.Run("one upper bound per minor is scoped to that minor", func(t *testing.T) {
 		affected, err := parseAffected([]string{
 			"kubelet: <= v1.34.11",
@@ -170,14 +188,15 @@ func TestParseAffected(t *testing.T) {
 	})
 
 	for name, lines := range map[string][]string{
-		"no lines":               nil,
-		"no component":           {"v1.22.0 - v1.22.1"},
-		"bare bound":             {"- < v1.11.0"},
-		"generic kubernetes":     {"kubernetes v1.19.0 - v1.19.2"},
-		"prose next to versions": {"The feature gate is enabled by default starting on version v1.31.", "- kube-controller-manager: <= v1.30.14"},
-		"unparseable range":      {"- kubernetes-csi-proxy <= v2.0.0-alpha.0"},
-		"unscopable major bound": {"- kubelet < v2.0.0", "- kubelet <= v1.5.3"},
-		"reversed range":         {"- kube-apiserver v1.29.3 - v1.29.0"},
+		"no lines":                       nil,
+		"no component":                   {"v1.22.0 - v1.22.1"},
+		"bare bound":                     {"- < v1.11.0"},
+		"generic kubernetes":             {"kubernetes v1.19.0 - v1.19.2"},
+		"capitalized generic kubernetes": {"Kubernetes v1.19.0 - v1.19.2"},
+		"prose next to versions":         {"The feature gate is enabled by default starting on version v1.31.", "- kube-controller-manager: <= v1.30.14"},
+		"unparseable range":              {"- kubernetes-csi-proxy <= v2.0.0-alpha.0"},
+		"unscopable major bound":         {"- kubelet < v2.0.0", "- kubelet <= v1.5.3"},
+		"reversed range":                 {"- kube-apiserver v1.29.3 - v1.29.0"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			affected, err := parseAffected(lines)
@@ -190,11 +209,11 @@ func TestParseAffected(t *testing.T) {
 func TestParseFixed(t *testing.T) {
 	fixed := parseFixed([]string{
 		"- kubelet master - fixed by #121881",
-		"- kubelet v1.28.4 - fixed by #121882",
+		"- Kubelet v1.28.4 - fixed by #121882",
 		"* kubelet master/v1.31.0  - fixed by #124531",
-		"kube-apiserver: >= v1.31.12",
+		"Kube-APIServer: >= V1.31.12",
 		"- Kubernetes kube-apiserver v1.25.4",
-		"- kubelet/kube-proxy v1.18.4+ - fixed by #92038",
+		"- Kubelet/KUBE-PROXY v1.18.4+ - fixed by #92038",
 		"- kubernetes-csi-proxy v2.0.0-alpha.1 - fixed by #307",
 		"- Kubernetes v1.14+ - Fixed by default in #72552",
 		"kubernetes v1.20.0",

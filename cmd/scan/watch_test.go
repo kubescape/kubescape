@@ -727,6 +727,155 @@ func TestWatchSecurityScanWatchesAnExtensionlessKustomization(t *testing.T) {
 	require.NoError(t, stop())
 }
 
+// A directory that gains a kustomization is rendered with the files it lists,
+// even extensionless ones, so an edit to such a dependency made after the
+// kustomization appeared must trigger a rescan.
+func TestWatchSecurityScanFollowsAKustomizationThatAppears(t *testing.T) {
+	dir := t.TempDir()
+	kustomization := filepath.Join(dir, "kustomization.yaml")
+	patch := filepath.Join(dir, "security")
+	writeFile(t, filepath.Join(dir, "pod.yaml"), podManifest("web", false))
+	writeFile(t, patch, "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\nspec:\n  containers:\n  - name: c\n    image: nginx\n    securityContext:\n      readOnlyRootFilesystem: true\n")
+	out, stop := startSecurityWatch(t, localWatchScanInfo(t, dir))
+
+	out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+	writeFile(t, kustomization, "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- pod.yaml\npatches:\n- path: security\n  target:\n    kind: Pod\n    name: web\n")
+	out.waitFor(t, "0 new, 1 resolved")
+
+	writeFile(t, patch, "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\nspec:\n  containers:\n  - name: c\n    image: nginx\n")
+	out.waitFor(t, "1 new, 0 resolved")
+
+	require.NoError(t, stop())
+}
+
+// A kustomization input is also rendered with the patch files it lists (e.g.
+// patches/security.patch), and an edit to a patch file must trigger a rescan.
+func TestWatchSecurityScanWatchesWhatAKustomizationPatchRenders(t *testing.T) {
+	dir := t.TempDir()
+	kustomization := filepath.Join(dir, "kustomization.yaml")
+	patch := filepath.Join(dir, "security.patch")
+	writeFile(t, kustomization, "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- pod.yaml\npatches:\n- path: security.patch\n  target:\n    kind: Pod\n    name: web\n")
+	writeFile(t, filepath.Join(dir, "pod.yaml"), podManifest("web", false))
+	writeFile(t, patch, "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\nspec:\n  containers:\n  - name: c\n    image: nginx\n")
+	out, stop := startSecurityWatch(t, localWatchScanInfo(t, kustomization))
+
+	out.waitFor(t, "Initial scan complete: 1 failing control(s) on 1 resource(s)")
+	writeFile(t, patch, "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\nspec:\n  containers:\n  - name: c\n    image: nginx\n    securityContext:\n      readOnlyRootFilesystem: true\n")
+	out.waitFor(t, "0 new, 1 resolved")
+
+	require.NoError(t, stop())
+}
+
+// A directory scan renders the kustomizations below it as well, so the files
+// such a kustomization reads, an extensionless patch among them, are watched
+// as dependencies, not only those of a kustomization at the root.
+func TestWatchSecurityScanWatchesANestedKustomizationsDependencies(t *testing.T) {
+	dir := t.TempDir()
+	app := filepath.Join(dir, "app")
+	patch := filepath.Join(app, "security")
+	writeFile(t, filepath.Join(app, "pod.yaml"), podManifest("web", false))
+	writeFile(t, patch, "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\nspec:\n  containers:\n  - name: c\n    image: nginx\n    securityContext:\n      readOnlyRootFilesystem: true\n")
+	writeFile(t, filepath.Join(app, "kustomization.yaml"), "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- pod.yaml\npatches:\n- path: security\n  target:\n    kind: Pod\n    name: web\n")
+	out, stop := startSecurityWatch(t, localWatchScanInfo(t, dir))
+
+	out.waitFor(t, "Initial scan complete: 0 failing control(s) on 0 resource(s)")
+	writeFile(t, patch, "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\nspec:\n  containers:\n  - name: c\n    image: nginx\n")
+	out.waitFor(t, "Change detected, scanning again...")
+	out.waitFor(t, "1 new, 0 resolved")
+
+	require.NoError(t, stop())
+}
+
+// A directory scan renders the Helm charts below it, and a chart's templates
+// read the chart's own files through .Files whatever their extension, so an
+// edit to such a file is an edit to what is scanned and must trigger a rescan.
+func TestWatchSecurityScanWatchesWhatAHelmChartReads(t *testing.T) {
+	dir := t.TempDir()
+	chart := filepath.Join(dir, "app")
+	security := filepath.Join(chart, "files", "security")
+	writeFile(t, filepath.Join(chart, "Chart.yaml"), "apiVersion: v2\nname: app\nversion: 0.1.0\n")
+	writeFile(t, filepath.Join(chart, "templates", "pod.yaml"), "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\n  namespace: default\nspec:\n  containers:\n  - name: c\n    image: nginx\n{{ .Files.Get \"files/security\" | indent 4 }}\n")
+	writeFile(t, security, "securityContext:\n  readOnlyRootFilesystem: true\n")
+	out, stop := startSecurityWatch(t, localWatchScanInfo(t, dir))
+
+	out.waitFor(t, "Initial scan complete: 0 failing control(s) on 0 resource(s)")
+	writeFile(t, security, "securityContext: {}\n")
+	out.waitFor(t, "Change detected, scanning again...")
+	out.waitFor(t, "1 new, 0 resolved")
+
+	require.NoError(t, stop())
+}
+
+func TestInHelmChartBelow(t *testing.T) {
+	root := t.TempDir()
+	chart := filepath.Join(root, "app")
+	writeFile(t, filepath.Join(chart, "Chart.yaml"), "apiVersion: v2\nname: app\nversion: 0.1.0\n")
+	require.NoError(t, os.MkdirAll(filepath.Join(chart, "files"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(chart, "charts"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "other"), 0o700))
+
+	assert.True(t, inHelmChartBelow(root, filepath.Join(chart, ".helmignore")), "in a chart's directory")
+	assert.True(t, inHelmChartBelow(root, filepath.Join(chart, "files", "nginx.conf")), "a file the templates read through .Files")
+	assert.True(t, inHelmChartBelow(root, filepath.Join(chart, "charts", "redis-1.2.3.tgz")), "a vendored subchart archive")
+	assert.False(t, inHelmChartBelow(root, filepath.Join(root, "other", "nginx.conf")), "beside a chart")
+	assert.False(t, inHelmChartBelow(root, filepath.Join(root, "nginx.conf")), "above a chart")
+
+	// A chart above the watch root is not rendered by a scan of the root, so it
+	// must not make every file of the root a dependency.
+	inner := filepath.Join(chart, "files")
+	assert.False(t, inHelmChartBelow(inner, filepath.Join(inner, "nginx.conf")), "a chart above the watch root")
+}
+
+func TestInKustomizationBelow(t *testing.T) {
+	root := t.TempDir()
+	app := filepath.Join(root, "app")
+	writeFile(t, filepath.Join(app, "kustomization.yaml"), "resources: []\n")
+	require.NoError(t, os.MkdirAll(filepath.Join(app, "patches"), 0o700))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "other"), 0o700))
+
+	assert.True(t, inKustomizationBelow(root, filepath.Join(app, "security")), "in a kustomization's directory")
+	assert.True(t, inKustomizationBelow(root, filepath.Join(app, "patches", "security")), "below one")
+	assert.False(t, inKustomizationBelow(root, filepath.Join(root, "other", "security")), "beside one")
+	assert.False(t, inKustomizationBelow(root, filepath.Join(root, "security")), "above one")
+}
+func TestInKustomizationBelowWithRelativeRoot(t *testing.T) {
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	base, err := os.MkdirTemp(cwd, "kustomization-watch-test-*")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, os.RemoveAll(base))
+	})
+
+	root := filepath.Join(base, "manifests")
+	app := filepath.Join(root, "app")
+
+	require.NoError(t, os.MkdirAll(app, 0o700))
+
+	// This Kustomization is above the watched root and must not
+	// cause unrelated files inside the watched root to be accepted.
+	writeFile(t, filepath.Join(base, "kustomization.yaml"), "resources: []\n")
+
+	// A Kustomization inside the watched root must still be accepted.
+	writeFile(t, filepath.Join(app, "kustomization.yaml"), "resources: []\n")
+
+	relativeRoot, err := filepath.Rel(cwd, root)
+	require.NoError(t, err)
+
+	assert.False(
+		t,
+		inKustomizationBelow(relativeRoot, filepath.Join(root, "notes.txt")),
+		"a kustomization above the relative watch root must not be accepted",
+	)
+
+	assert.True(
+		t,
+		inKustomizationBelow(relativeRoot, filepath.Join(app, "security")),
+		"a kustomization inside the relative watch root must still be accepted",
+	)
+}
+
 func TestWatchRoots(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "pod.yaml")
@@ -840,4 +989,51 @@ func startSecurityWatchOutput(t *testing.T, info *cautils.ScanInfo) (out *lines,
 	}
 	t.Cleanup(func() { cancel() })
 	return out, stop
+}
+
+func TestReloadingFilterDetectsContentChangeWithUnchangedMetadata(t *testing.T) {
+	dir := t.TempDir()
+	ignoreFile := filepath.Join(dir, cautils.IgnoreFileName)
+	writeFile(t, ignoreFile, "first/\n")
+	info, err := os.Stat(ignoreFile)
+	require.NoError(t, err)
+	filter, err := newReloadingFilter(dir, nil, true)
+	require.NoError(t, err)
+	first := filepath.Join(dir, "first")
+	other := filepath.Join(dir, "other")
+	require.True(t, filter.Excluded(first, true))
+	require.False(t, filter.Excluded(other, true))
+
+	writeFile(t, ignoreFile, "other/\n")
+	require.NoError(t, os.Chtimes(ignoreFile, info.ModTime(), info.ModTime()))
+	updated, err := os.Stat(ignoreFile)
+	require.NoError(t, err)
+	require.Equal(t, info.Size(), updated.Size())
+	require.True(t, info.ModTime().Equal(updated.ModTime()))
+
+	assert.False(t, filter.Excluded(first, true), "a newly included directory must be watched")
+	assert.True(t, filter.Excluded(other, true), "the new exclusion must replace the previous one")
+}
+
+func TestReloadingFilterRetainsRulesOnReadErrorAndRecovers(t *testing.T) {
+	dir := t.TempDir()
+	ignoreFile := filepath.Join(dir, cautils.IgnoreFileName)
+	writeFile(t, ignoreFile, "first/\n")
+	filter, err := newReloadingFilter(dir, nil, true)
+	require.NoError(t, err)
+	first := filepath.Join(dir, "first")
+	require.True(t, filter.Excluded(first, true))
+
+	// An unreadable ignore file must not clear the previous exclusions.
+	require.NoError(t, os.Remove(ignoreFile))
+	require.NoError(t, os.Mkdir(ignoreFile, 0o700))
+	assert.True(t, filter.Excluded(first, true))
+	require.NoError(t, os.Remove(ignoreFile))
+	writeFile(t, ignoreFile, "other/\n")
+	assert.False(t, filter.Excluded(first, true))
+	assert.True(t, filter.Excluded(filepath.Join(dir, "other"), true))
+
+	// Removing the ignore file restores the empty rule set.
+	require.NoError(t, os.Remove(ignoreFile))
+	assert.False(t, filter.Excluded(filepath.Join(dir, "other"), true))
 }

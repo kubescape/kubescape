@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -44,7 +45,7 @@ func pathFromURIFor(uri string, windows bool) (string, error) {
 	if u.Host != "" && u.Host != "localhost" {
 		return "", fmt.Errorf("document URI names a remote host %q", u.Host)
 	}
-	return filepath.Clean(p), nil
+	return path.Clean(p), nil
 }
 
 // uriFromPath is the inverse of pathFromURI for an absolute path.

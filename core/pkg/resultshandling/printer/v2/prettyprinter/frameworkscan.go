@@ -29,6 +29,9 @@ func NewSummaryPrinter(writer *os.File, verboseMode bool) *SummaryPrinter {
 }
 
 func (sp *SummaryPrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary) {
+	if sp == nil || sp.writer == nil || summary == nil {
+		return
+	}
 	if sp.verboseMode {
 		sp.imageTablePrinter.PrintImageScanningTable(sp.writer, *summary)
 		cautils.SimpleDisplay(sp.writer, "\n")
@@ -43,9 +46,15 @@ func (sp *SummaryPrinter) PrintImageScanning(summary *imageprinter.ImageScanSumm
 func (sp *SummaryPrinter) PrintNextSteps() {}
 
 func (sp *SummaryPrinter) getVerboseMode() bool {
+	if sp == nil {
+		return false
+	}
 	return sp.verboseMode
 }
 
 func (sp *SummaryPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, topWorkloadsByScore []reporthandling.IResource) {
+	if sp == nil || sp.writer == nil || summaryDetails == nil {
+		return
+	}
 	sp.summaryTablePrinter.PrintSummaryTable(sp.writer, summaryDetails, sortedControlIDs)
 }

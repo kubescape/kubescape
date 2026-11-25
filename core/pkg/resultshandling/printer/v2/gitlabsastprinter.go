@@ -147,10 +147,13 @@ func (gp *GitLabSASTPrinter) Score(score float32) {
 
 // SetWriter opens outputFile for writing, defaulting the name and forcing a .json extension
 func (gp *GitLabSASTPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if gp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.GitLabSASTFormat, outputFile, gitLabSASTOutputFile)
 	if explicitOutput {
 		var err error
-		gp.writer, err = printer.GetWriterNoFallback(outputFile)
+		gp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	gp.writer = printer.GetWriter(ctx, outputFile)
@@ -164,6 +167,12 @@ func (gp *GitLabSASTPrinter) PrintNextSteps() {
 // ActionPrint writes a GitLab SAST report for a configuration scan, or a GitLab Dependency Scanning
 // report for an image scan (#2782)
 func (gp *GitLabSASTPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if gp == nil {
+		return fmt.Errorf("failed to write gitlab-sast results: printer is nil")
+	}
+	if err := printer.PrepareOutput(gp.writer); err != nil {
+		return err
+	}
 	// GitLab expects SAST and dependency scanning in separate artifacts. A
 	// successful SAST report must not silently discard image vulnerabilities.
 	if opaSessionObj != nil && opaSessionObj.Report != nil && len(imageScanData) > 0 {
@@ -173,12 +182,19 @@ func (gp *GitLabSASTPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 		if len(imageScanData) == 0 {
 			return fmt.Errorf("failed to write results in GitLab SAST format: no data provided")
 		}
+		if gp.writer == nil {
+			return fmt.Errorf("failed to write gitlab-sast results: output writer is nil")
+		}
 		if err := gp.printImageScan(imageScanData); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in GitLab dependency scanning format", helpers.Error(err))
 			return fmt.Errorf("failed to write results in GitLab dependency scanning format: %w", err)
 		}
 		printer.LogOutputFile(gp.writer.Name())
 		return nil
+	}
+
+	if gp.writer == nil {
+		return fmt.Errorf("failed to write gitlab-sast results: output writer is nil")
 	}
 
 	if err := gp.printConfigurationScan(ctx, opaSessionObj); err != nil {
@@ -306,6 +322,15 @@ func gitLabExploitDetails(cve imageprinter.CVE) map[string]gitLabDetail {
 // has no CVE for a match, and GitLab shows the identifier type and links its URL,
 // so only a CVE ID is typed "cve" and linked to NVD.
 func gitLabAdvisoryIdentifier(id string) gitLabIdentifier {
+	trimmed := strings.TrimSpace(id)
+	if trimmed == "" {
+		return gitLabIdentifier{
+			Type:  "advisory",
+			Name:  "unknown",
+			Value: "unknown",
+		}
+	}
+	id = trimmed
 	identifier := gitLabIdentifier{Type: gitLabCVEIDType, Name: id, Value: id}
 	prefix, _, found := strings.Cut(id, "-")
 	switch {
@@ -515,8 +540,8 @@ func kubescapeVersion() string {
 
 // CloseWriter closes the GitLab SAST output writer, returning any error from flushing or closing.
 func (gp *GitLabSASTPrinter) CloseWriter() error {
-	if gp.writer != nil && gp.writer != os.Stdout {
-		return gp.writer.Close()
+	if gp != nil && gp.writer != nil && gp.writer != os.Stdout {
+		return printer.CloseOutput(gp.writer)
 	}
 	return nil
 }

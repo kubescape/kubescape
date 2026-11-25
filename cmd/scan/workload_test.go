@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -280,6 +279,32 @@ func TestGetWorkloadCmd_ChartPathAndFilePathEmpty(t *testing.T) {
 	err = cmd.Args(&cobra.Command{}, []string{"nginx"})
 	expectedErrorMessage = "usage: --chart-path <chart path> --file-path <file path>"
 	assert.Equal(t, expectedErrorMessage, err.Error())
+
+	scanInfo.FilePath = "   "
+	err = cmd.Args(&cobra.Command{}, []string{"Deployment/nginx"})
+	assert.Equal(t, expectedErrorMessage, err.Error())
+}
+
+func TestGetWorkloadCmd_RejectsWhitespaceFilePath(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getWorkloadCmd(mockKubescape, &scanInfo)
+	cmd.SetArgs([]string{"Deployment/nginx", "--file-path", "   "})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.EqualError(t, err, "--file-path needs a file path")
+}
+
+func TestGetWorkloadCmd_RejectsWhitespaceChartPath(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getWorkloadCmd(mockKubescape, &scanInfo)
+	cmd.SetArgs([]string{"Deployment/nginx", "--chart-path", "   ", "--file-path", "manifests/app.yaml"})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.EqualError(t, err, "--chart-path needs a path")
 }
 
 func TestGetWorkloadCmd_FilePathWithoutChartPath(t *testing.T) {
@@ -375,7 +400,7 @@ func TestPrepareWorkloadInput(t *testing.T) {
 		cleanup, err := prepareWorkloadInput(stdin, []string{"Pod/nginx", "-"}, &scanInfo)
 		require.NoError(t, err)
 		require.Len(t, scanInfo.InputPatterns, 1)
-		assert.Equal(t, filepath.Clean(os.TempDir()), filepath.Dir(scanInfo.InputPatterns[0]))
+		requireStagedStdinPath(t, scanInfo.InputPatterns[0])
 
 		got, err := os.ReadFile(scanInfo.InputPatterns[0])
 		require.NoError(t, err)

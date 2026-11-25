@@ -56,7 +56,7 @@ func GetDiffCmd(ks meta.IKubescape) *cobra.Command {
 		Short: "Compare two Kubescape scan JSON reports and show what changed",
 		Long: `Compare a base scan report against a head scan report to surface new failures, resolved issues, unchanged evidence, and results that cannot be compared safely. By default, failed rules and paths are compared so regressions inside an already-failing control are detected.
 
-Image scan reports ("scan image --format json") are compared by vulnerability instead: a CVE is identified by its ID, package and package type, so upgrading a package that still carries the same CVE counts as unchanged. Findings from a multi-image report are pooled across all its images, so --fail-on-new does not flag a CVE that spreads to another image when any base image already had it. Image reports support the pretty-printer, json, yaml, markdown, junit and sarif formats; markdown, junit and sarif list the new vulnerabilities that meet --severity-threshold, and both reports must be of the same kind.`,
+Image scan reports ("scan image --format json") are compared by vulnerability instead: a CVE is identified by its ID, package and package type, so upgrading a package that still carries the same CVE counts as unchanged. Findings from a multi-image report are pooled across all its images, so --fail-on-new does not flag a CVE that spreads to another image when any base image already had it. Image reports support the pretty-printer, json, yaml, markdown, junit, sarif, summary-json, summary-yaml and summary-csv formats; markdown, junit and sarif list the new vulnerabilities that meet --severity-threshold, the summary formats count new, resolved and unchanged vulnerabilities by severity and package, and both reports must be of the same kind.`,
 		Example: diffCmdExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
@@ -123,21 +123,30 @@ Image scan reports ("scan image --format json") are compared by vulnerability in
 			}
 
 			if diffInfo.FailOnNew && newFailures > 0 {
-				return fmt.Errorf("found %d new or incomparable failure(s) at or above severity threshold %q",
-					newFailures, severityLabel(diffInfo.SeverityThreshold))
+				findings := "new or incomparable failure(s)"
+				if isVulnerabilityDiff(diffInfo.BaseFile, diffInfo.HeadFile) {
+					findings = "new vulnerability(ies)"
+				}
+				return fmt.Errorf("found %d %s at or above severity threshold %q",
+					newFailures, findings, severityLabel(diffInfo.SeverityThreshold))
 			}
 
 			return nil
 		},
 	}
 
-	diffCmd.Flags().BoolVar(&diffInfo.FailOnNew, "fail-on-new", false, "Exit with code 1 when new or incomparable failures are found (combine with --severity-threshold to limit the gate)")
+	diffCmd.Flags().BoolVar(&diffInfo.FailOnNew, "fail-on-new", false, "Exit with code 1 when new or incomparable failures, or new vulnerabilities for image reports, are found (combine with --severity-threshold to limit the gate)")
 	diffCmd.Flags().StringVar(&diffInfo.SeverityThreshold, "severity-threshold", "", "Only count new and incomparable failures at or above this severity when using --fail-on-new (low, medium, high, critical)")
 	diffCmd.Flags().StringVarP(&diffInfo.Format, "format", "f", "pretty-printer", fmt.Sprintf(`Output format: "%s"`, strings.Join(diffFormats(), `", "`)))
 	diffCmd.Flags().StringVarP(&diffInfo.Output, "output", "o", "", "Output file; defaults to stdout")
-	diffCmd.Flags().StringVar(&diffInfo.Granularity, "granularity", string(resultsdiff.GranularityEvidence), `Comparison unit: "evidence" or "control"`)
+	diffCmd.Flags().StringVar(&diffInfo.Granularity, "granularity", string(resultsdiff.GranularityEvidence), `Comparison unit for posture reports: "evidence" or "control"`)
 
 	return diffCmd
+}
+
+func isVulnerabilityDiff(base, head string) bool {
+	return resultsdiff.ReportKindOf(base) == resultsdiff.VulnerabilityReport ||
+		resultsdiff.ReportKindOf(head) == resultsdiff.VulnerabilityReport
 }
 
 func severityLabel(s string) string {

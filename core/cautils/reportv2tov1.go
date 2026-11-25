@@ -52,7 +52,19 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
 	// setup counters and score
 	for f := range frameworks {
 		// set counters
+		// Counter calculation compacts rule input IDs in place; preserve the
+		// complete, ordered lists that will be exported.
+		inputIDs := make(map[*reporthandling.RuleReport][]string)
+		for c := range frameworks[f].ControlReports {
+			for r := range frameworks[f].ControlReports[c].RuleReports {
+				rule := &frameworks[f].ControlReports[c].RuleReports[r]
+				inputIDs[rule] = slices.Clone(rule.ListInputKinds)
+			}
+		}
 		reporthandling.SetUniqueResourcesCounter(&frameworks[f])
+		for rule, ids := range inputIDs {
+			rule.ListInputKinds = ids
+		}
 
 		// apply the summary-derived control counters after the helper recomputation
 		var controls map[string]reportsummary.ControlSummary
@@ -110,7 +122,7 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 		crv1.WarningResources = crv2.StatusCounters.SkippedResources + crv2.StatusCounters.ExcludedResources
 		rulesv1 := map[string]reporthandling.RuleReport{}
 		l := helpersv1.GetAllListsFromPool()
-		for resourceID := range crv2.ListResourcesIDs(l).All() {
+		for _, resourceID := range slices.Sorted(maps.Keys(crv2.ListResourcesIDs(l).All())) {
 			if result, ok := opaSessionObj.ResourcesResult[resourceID]; ok {
 				for _, rulev2 := range result.ListRulesOfControl(crv2.GetID(), "") {
 

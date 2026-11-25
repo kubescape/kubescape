@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -56,6 +57,19 @@ func TestToPositionConvertsToZeroBasedUTF16(t *testing.T) {
 			assert.Equal(t, tt.want, m.toPosition(tt.loc))
 		})
 	}
+}
+
+func TestToPosition_EmptyLinesDoesNotPanic(t *testing.T) {
+	m := &manifest{lines: []string{}}
+	pos := m.toPosition(locationresolver.Location{Line: 1, Column: 1})
+	assert.Equal(t, protocol.Position{}, pos)
+}
+
+func TestFindingsOf_NilReportDoesNotPanic(t *testing.T) {
+	session := &cautils.OPASessionObj{}
+	findings := findingsOf(session, cautils.ScanCoverage{})
+	assert.Empty(t, findings.byFile)
+	assert.Empty(t, findings.unreliable)
 }
 
 func TestUTF16Offset(t *testing.T) {
@@ -152,6 +166,7 @@ func TestFindingsOfAMalformedManifestAreUnreliableNotResolved(t *testing.T) {
 	findings := scanForTest(t, dir)
 	assert.Contains(t, findings.unreliable, pathKey(bad), "a manifest the scan could not load is not a clean one")
 	assert.Len(t, findings.byFile[good], 1, "the other manifests are still reported")
+	assert.True(t, findings.complete, "a skipped manifest is unreliable on its own; it doesn't make the rest of the scan incomplete")
 }
 
 // podManifest is a pod that fails C-0017 unless it sets a read-only root filesystem.
@@ -190,4 +205,27 @@ func scanForTest(t *testing.T, dir string) scanFindings {
 	findings, err := scanWith(realScanner(t))(context.Background(), []string{dir})
 	require.NoError(t, err)
 	return findings
+}
+
+// A finding after an empty or comment-only document in the same file is put on
+// its own resource, not on the one before it.
+func TestAFindingAfterAnEmptyDocumentIsOnItsOwnResource(t *testing.T) {
+	for name, between := range map[string]string{
+		"an empty document":       "---\n---\n",
+		"a comment-only document": "---\n# disabled\n---\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "pods.yaml")
+			content := podManifest("a", true) + between + podManifest("b", true) + "---\n" + podManifest("c", false)
+			require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+			podC := strings.Count(content[:strings.LastIndex(content, "apiVersion: v1")], "\n") // Pod/c's first line
+
+			ds := scanForTest(t, dir).byFile[path]
+
+			require.Len(t, ds, 1)
+			assert.Contains(t, ds[0].Message, "(Pod/c)")
+			assert.GreaterOrEqual(t, int(ds[0].Range.Start.Line), podC, "the finding is on Pod/c's lines")
+		})
+	}
 }

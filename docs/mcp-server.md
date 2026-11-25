@@ -68,6 +68,50 @@ kubescape mcpserver --transport sse --port 8080 --workspace /path/to/project
 
 The MCP server exposes the following tools to AI assistants:
 
+### Paging completed scan results
+
+`run_framework_security_scan`, `run_rbac_security_scan`,
+`run_network_security_scan`, `scan_controls`, `scan_workload`,
+`scan_local_iac`, and `scan_local_iac_controls` return at most 100 failed
+resources in their initial response. When more findings exist, the server
+retains the completed result and adds `scan_id`, `next_offset`, and
+`expires_at`. Findings are ordered by highest failed control severity, with resource ID breaking ties.
+
+Call `get_scan_results` in the **same MCP session** to retrieve subsequent
+pages without rescanning:
+
+```json
+{"scan_id": "<scan_id from the initial response>", "offset": 100, "limit": 100}
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scan_id` | string | Yes | Identifier returned by a scan |
+| `offset` | integer | No | Previous response's `next_offset`; default 0 |
+| `limit` | integer | No | Page size from 1 to 100; default 100 |
+
+Every page preserves the original `total_failed`, compliance score, framework,
+coverage metadata, and workload warnings. `returned_failed` counts entries on
+the current page. `truncated` indicates that the page contains only part of the
+complete scan, including on the final page. Follow `next_offset` until it is
+absent; do not use `truncated` to decide whether another page exists. An offset
+equal to `total_failed` returns an empty page; larger offsets are rejected.
+
+Snapshots expire after 10 minutes. Storage is process-local, limited to 16
+snapshots and 32 MiB of serialized scan JSON across sessions; older snapshots
+can be evicted before expiry. Restarting the server also removes snapshots.
+Expired, evicted, unknown, and other-session IDs all return
+`SCAN_RESULTS_UNAVAILABLE`; run the scan again to obtain a new snapshot.
+
+If a result exceeds the retention budget, or a client session is unavailable,
+the initial response still returns the first 100 failed resources and a
+`pagination_warning`, without continuation fields. Narrow the scan scope in
+that case. Scans with at most 100 failures do not create snapshots.
+
+Retention limits bound stored JSON, not peak scan memory or individual resource
+size. Reading a snapshot does not refresh its expiry. Snapshot results describe
+the completed scan and do not reflect later cluster or manifest changes.
+
 ### Vulnerability Tools
 
 #### `list_vulnerability_manifests`
@@ -157,6 +201,10 @@ Get detailed information about a specific CVE in a manifest, including affected 
 #### `analyze_vulnerability_exposure`
 
 Correlate known image vulnerabilities (from already-scanned `VulnerabilityManifest` objects) with how reachable each workload is: its NetworkPolicy ingress exposure and its external exposure through a Service, Ingress, or Gateway API route. With `include_identity` it also reports the ServiceAccount each vulnerable workload runs as and what the existing RBAC escalation analysis finds for it.
+
+StatefulSets with at least one CVE meeting `min_severity` use the labels of live Pods matched by controller UID. Pods in the `Failed` or `Succeeded` phase are excluded; nonterminal Pods with a deletion timestamp remain included during scale-down. If the Pod list contains a different controller UID for the same StatefulSet name and namespace, the response warns that the controller may have changed during analysis and qualifies the finding's exposure reason as unconfirmed for the current controller. Pods with a different controller UID remain excluded. This requires permission to **list Pods** in the requested namespace, or cluster-wide when no namespace is supplied; a failed Pod list returns a tool error. StatefulSets whose CVEs are all below the threshold do not require that read.
+
+If no owned nonterminal Pods are present, analysis uses the pod template and generated identity labels. When NetworkPolicy exposure depends on Pod index generation, it reports the widest result with an uncertainty warning. Fallback external exposure keeps the union of paths with and without index generation and warns if those path sets differ. Observed Pod labels determine Service matches directly, without an index-generation warning.
 
 **Parameters:**
 | Parameter | Type | Required | Description |
@@ -346,16 +394,22 @@ List configuration scan results per resource: the failed controls, most severe f
 
 #### `list_frameworks`
 
-List the names of the frameworks available for scanning (for example `NSA`, `MITRE`, `cis-v1.12.0`).
+List the names of the frameworks available for scanning in natural numerical order (for example `NSA`, `MITRE`, `cis-v1.2.0`, `cis-v1.12.0`).
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `search` | string | No | Optional case-insensitive substring to filter framework names (e.g. `cis`) |
 
 #### `list_controls`
 
-List the security controls with their IDs, names and the frameworks they belong to. Results are paginated to keep responses manageable. Use `framework` to filter to one framework.
+List the security controls with their IDs, names and the frameworks they belong to, naturally sorted by ID. Results are paginated to keep responses manageable. Use `framework` to filter to one framework, or `search` to match keywords across control IDs, names, and frameworks.
 
 **Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `framework` | string | No | Only controls of this framework, case-insensitive (see `list_frameworks`). An unknown name returns an error listing the valid ones |
+| `search` | string | No | Substring to search for in control IDs, names, or frameworks, case-insensitive (e.g. `"privileged"`, `"container"`, `"CIS-1.1"`) |
 | `limit` | number | No | Maximum number of controls per page (default 100, maximum 500) |
 | `offset` | number | No | Number of controls to skip (default 0); use the previous response's `next_offset` to fetch the next page |
 
@@ -368,6 +422,102 @@ List the security controls with their IDs, names and the frameworks they belong 
   "controls": [
     {"id": "C-0002", "name": "Prevent containers from allowing command execution", "frameworks": ["MITRE", "ArmoBest", "NSA", "AllControls", "ClusterScan"]},
     {"id": "C-0005", "name": "API server insecure port is enabled", "frameworks": ["ArmoBest", "NSA", "AllControls", "ClusterScan", "security"]}
+  ]
+}
+```
+
+#### `list_controls_config`
+
+List configurable control parameters, their resolved values (from cluster CRDs or policy defaults), descriptions, and the security controls that consume them. Useful for discovering which settings govern a failed control (e.g. `C-0016`) or inspecting active configuration values.
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `control_id` | string | No | Optional control ID (e.g. `C-0016`) to only list configuration inputs read by that control |
+| `search` | string | No | Optional case-insensitive keyword to filter configuration entries by name, title, description, or control ID |
+
+**Response Fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Configuration key name (as used in controls-config files and CRDs) |
+| `title` | string | Human-readable label declared by the controls |
+| `description` | string | Description of the configurable parameter and its effect |
+| `values` | array of strings | Current resolved values for the parameter |
+| `controls` | array of strings | Control IDs that evaluate this configuration parameter |
+
+**Example Response** (`control_id: "C-0016"`):
+```json
+[
+  {
+    "name": "imageRepositoryAllowList",
+    "title": "Allowed image repositories",
+    "description": "Repositories images may come from.",
+    "values": ["docker.io", "quay.io"],
+    "controls": ["C-0016", "C-0048"]
+  }
+]
+```
+
+#### `explain_control`
+
+Explain a Kubescape security control by ID, returning its metadata (name, description, severity, remediation guidance, and whether it has an auto-fix available through `kubescape fix`) and optionally including failing resources and specific failed paths from a local manifest (`path`) or an existing posture report JSON (`report_path`).
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `control_id` | string | Yes | The control ID to explain (e.g. `C-0017`) |
+| `path` | string | No | Path to a local YAML manifest file or directory to scan for control failures. Mutually exclusive with `report_path` |
+| `report_path` | string | No | Path to an existing Kubescape posture report JSON file to extract control failures from. Mutually exclusive with `path` |
+| `base_path` | string | No | Optional base directory that files referenced in `report_path` must stay inside |
+
+**Response Fields:**
+| Field | Type | Description |
+|-------|------|-------------|
+| `control_id` | string | Canonical ID of the control |
+| `name` | string | Control name |
+| `severity` | string | Control severity (`Low`, `Medium`, `High`, `Critical`) |
+| `description` | string | Detailed explanation of what the control checks |
+| `remediation` | string | Actionable guidance on how to fix failures |
+| `auto_fix_available` | boolean | Whether Kubescape provides automatic remediation via `kubescape fix` |
+| `failing_resources` | array | Present when scan context is provided (`path` or `report_path`). Lists failing resources and specific failed paths |
+| `degraded` | boolean | Present only when true: indicates the scan did not fully complete or rule processing partially failed |
+| `not_evaluated` | boolean | Present only when true: indicates this control could not be evaluated during the scan or falls outside the report's scope; check `not_evaluated_reason` for details (rerunning the same selection will not help when the control is outside report scope) |
+| `not_evaluated_reason` | string | Diagnostic reason why the control was not evaluated |
+| `excluded_resources` | integer | Present only when positive: count of failing resources excluded because their file paths fall outside `base_path` |
+| `warning` | string | Informational warning message (e.g., when failures were excluded by `base_path`) |
+
+**Example Response** (`control_id: "C-0017"`):
+```json
+{
+  "control_id": "C-0017",
+  "name": "Immutable container filesystem",
+  "severity": "Low",
+  "description": "Mutable container filesystem can be abused to inject malicious code or data into containers. Use immutable (read-only) filesystem to limit potential attacks.",
+  "remediation": "Set the filesystem of the container to read-only when possible (pod securityContext, readOnlyRootFilesystem: true). If containers application needs to write into the filesystem, it is recommended to mount secondary filesystems for specific directories where application require write access.",
+  "auto_fix_available": true
+}
+```
+
+**Example Response with scan context** (`control_id: "C-0017", path: "deployment.yaml"`):
+```json
+{
+  "control_id": "C-0017",
+  "name": "Immutable container filesystem",
+  "severity": "Low",
+  "description": "Mutable container filesystem can be abused to inject malicious code or data into containers. Use immutable (read-only) filesystem to limit potential attacks.",
+  "remediation": "Set the filesystem of the container to read-only when possible (pod securityContext, readOnlyRootFilesystem: true). If containers application needs to write into the filesystem, it is recommended to mount secondary filesystems for specific directories where application require write access.",
+  "auto_fix_available": true,
+  "failing_resources": [
+    {
+      "resource_id": "path=4057414033/api=apps/v1/default/Deployment/nginx",
+      "kind": "Deployment",
+      "name": "nginx",
+      "namespace": "default",
+      "file_path": "deployment.yaml",
+      "failed_paths": [
+        "spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem"
+      ]
+    }
   ]
 }
 ```
@@ -421,6 +571,12 @@ Scan local Infrastructure-as-Code (Helm charts, Kustomize directories, YAML mani
 |-----------|------|----------|-------------|
 | `path` | string | Yes | Absolute or relative path to the local directory or file |
 | `framework` | string | No | Security framework to scan against (optional, e.g., `'nsa'` (default) or `'mitre'`) |
+| `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"Deployment,DaemonSet"`) |
+| `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. `"Job,CronJob"`) |
+| `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
+| `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
 
 #### `scan_local_iac_controls`
 
@@ -432,12 +588,40 @@ Scan local Infrastructure-as-Code files against specific control IDs rather than
 |-----------|------|----------|-------------|
 | `path` | string | Yes | Path to local directory or manifest file |
 | `control_ids` | string or array of strings | Yes | Control IDs to check, as a comma-separated string or an array, e.g. `"C-0012,C-0057"` or `["C-0012", "C-0057"]` |
+| `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"Deployment,DaemonSet"`) |
+| `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. `"Job,CronJob"`) |
+| `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
+| `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
+
+#### `scan_manifest`
+
+Scan a Kubernetes YAML or JSON manifest string in memory for security misconfigurations, without requiring a file path on disk. Supports multi-document YAML manifests separated by `---`.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `manifest` | string | Yes | Raw YAML or JSON Kubernetes manifest content (capped at 2 MiB) |
+| `framework` | string | No | Security framework to scan against (optional, e.g., `'nsa'` (default) or `'mitre'`) |
+| `control_ids` | string or array of strings | No | Specific control IDs to check, as a comma-separated string or an array (e.g. `"C-0012,C-0057"` or `["C-0012", "C-0057"]`). Overrides `framework` when provided |
+| `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"Deployment,DaemonSet"`) |
+| `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. `"Job,CronJob"`) |
+| `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
+| `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
 
 ### Live Scanning Tools
 
+The live scanning tools run on-demand scans against the cluster or local files.
+Live scan tools (`run_framework_security_scan`, `scan_controls`, `run_rbac_security_scan`, `run_network_security_scan`) support optional filtering parameters (`min_severity`, `max_severity`, `include_kinds`, `exclude_kinds`, `label_selector`, `exclude_namespaces`, `exclude_controls`) and an optional initial page size (`limit`). `scan_workload` supports severity filters (`min_severity`, `max_severity`), `exclude_controls`, and `limit` (resource kind, label selector, and namespace exclusion filters are not applicable to single-workload scans). Omitting `exclude_controls` or passing `null` leaves all controls eligible for the scan.
+Returned `failed_resources` are prioritized by severity rank descending (`Critical` > `High` > `Medium` > `Low`, with alphabetical resource ID as tie-breaker) before truncation. When more results remain, `truncated` is `true`, and `scan_id` and `next_offset` are returned. Subsequent pages should be fetched using `get_scan_results` with `scan_id` and `offset` set to `next_offset`.
+
 #### `run_framework_security_scan`
 
-Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the failed resources along with the compliance score. Check the `degraded` flag in the response to ensure the scan fully completed (e.g. no control timeouts). Note that `compliance_score` is optional and may be omitted if the scan produces no framework summary. The `failed_resources` array is truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
+Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the failed resources along with the compliance score. Check the `degraded` flag in the response to ensure the scan fully completed (e.g. no control timeouts). Note that `compliance_score` is optional and may be omitted if the scan produces no framework summary. The `failed_resources` array is sorted by severity and capped at `limit` (default 100 entries); check `truncated`, `total_failed`, `returned_failed`, and `next_offset` to understand if the list is partial and use `get_scan_results` to fetch subsequent pages.
 
 **Parameters:**
 
@@ -445,6 +629,14 @@ Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the 
 |-----------|------|----------|-------------|
 | `framework_name` | string | Yes | Name of the framework to scan (e.g. nsa, mitre, cis-v1.23-t1.0.1) |
 | `namespace` | string | No | Namespace to scope the Framework scan (optional, defaults to cluster-wide if omitted) |
+| `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"Deployment,DaemonSet"`) |
+| `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. `"Job,CronJob"`) |
+| `label_selector` | string | No | Kubernetes label selector to filter collected resources (optional, e.g. `"app=web,env!=dev"`) |
+| `exclude_namespaces` | string | No | Comma-separated namespaces to exclude from scan (optional; mutually exclusive with `namespace`) |
+| `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional, e.g. `"C-0012,C-0017"`) |
+| `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
 
 **Example Response:**
 ```json
@@ -461,15 +653,42 @@ Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the 
 }
 ```
 
+#### `scan_controls`
+
+Run an on-demand, live security scan restricted to a given set of controls by control ID (e.g. C-0012, C-0017) and return the failed resources. Use `list_controls` to discover valid IDs first.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `control_ids` | string or array of strings | Yes | Control IDs to scan: comma-separated string (e.g. `"C-0012,C-0017"`) or array of strings |
+| `namespace` | string | No | Namespace to scope the scan (optional, defaults to cluster-wide if omitted) |
+| `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"Deployment,DaemonSet"`) |
+| `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive; e.g. `"Job,CronJob"`) |
+| `label_selector` | string | No | Kubernetes label selector to filter collected resources (optional, e.g. `"app=web,env!=dev"`) |
+| `exclude_namespaces` | string | No | Comma-separated namespaces to exclude from scan (optional; mutually exclusive with `namespace`) |
+| `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
+| `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
+
 #### `run_rbac_security_scan`
 
-Run an on-demand, live RBAC security scan (evaluating RBAC-related controls) and return the failed resources. The `failed_resources` array is truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
+Run an on-demand, live RBAC security scan (evaluating RBAC-related controls) and return the failed resources. The `failed_resources` array is sorted by severity and capped at `limit` (default 100 entries); check `truncated`, `total_failed`, `returned_failed`, and `next_offset` to understand if the list is partial and use `get_scan_results` to paginate.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `namespace` | string | No | Namespace to scope the RBAC scan (optional, defaults to cluster-wide if omitted) |
+| `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"ClusterRole,RoleBinding"`) |
+| `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive) |
+| `label_selector` | string | No | Kubernetes label selector to filter collected resources (optional) |
+| `exclude_namespaces` | string | No | Comma-separated namespaces to exclude from scan (optional; mutually exclusive with `namespace`) |
+| `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
+| `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
 
 **Example Response:**
 ```json
@@ -486,13 +705,21 @@ Run an on-demand, live RBAC security scan (evaluating RBAC-related controls) and
 
 #### `run_network_security_scan`
 
-Run an on-demand, live Network security scan (evaluating network-related controls) and return the failed resources. The `failed_resources` array is truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
+Run an on-demand, live Network security scan (evaluating network-related controls) and return the failed resources. The `failed_resources` array is sorted by severity and capped at `limit` (default 100 entries); check `truncated`, `total_failed`, `returned_failed`, and `next_offset` to understand if the list is partial and use `get_scan_results` to paginate.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `namespace` | string | No | Namespace to scope the Network scan (optional, defaults to cluster-wide if omitted) |
+| `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `include_kinds` | string | No | Comma-separated Kubernetes resource kinds to include (optional, case-insensitive; e.g. `"NetworkPolicy,Pod"`) |
+| `exclude_kinds` | string | No | Comma-separated Kubernetes resource kinds to exclude (optional, case-insensitive) |
+| `label_selector` | string | No | Kubernetes label selector to filter collected resources (optional) |
+| `exclude_namespaces` | string | No | Comma-separated namespaces to exclude from scan (optional; mutually exclusive with `namespace`) |
+| `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
+| `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
 
 **Example Response:**
 ```json
@@ -526,6 +753,10 @@ A workload that is owned by another resource — a Pod belonging to a ReplicaSet
 | `namespace` | string | No | Namespace of the workload (optional; defaults to `'default'` for live-cluster scans, or unconstrained when `path` is given). Pass `"*"` to search across all namespaces in a live cluster (requires cluster-wide list permissions). Must not conflict with a namespace prefix in the workload identifier |
 | `path` | string | No | Path to local YAML manifests. When set, the workload is resolved from those files instead of the live cluster (must resolve within `--workspace` if configured) |
 | `framework` | string | No | Framework to scan against (optional, defaults to the full workload control set) |
+| `min_severity` | string | No | Minimum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `max_severity` | string | No | Maximum control severity to include: Critical, High, Medium, Low (optional, case-insensitive) |
+| `exclude_controls` | string, array of strings, or `null` | No | Control IDs to exclude from scan, as comma-separated string or array (optional) |
+| `limit` | number | No | Maximum number of failed resources to return on the initial page, 1–100 (optional, default 100). Use `get_scan_results` to retrieve subsequent pages |
 
 **Example Response:**
 ```json

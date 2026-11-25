@@ -46,7 +46,7 @@ func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) error {
 	}
 	if explicitOutput {
 		var err error
-		pp.writer, err = printer.GetWriterNoFallback(outputFile)
+		pp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	// The implicit PDF destination must never fall back to stdout. Preserve
@@ -74,16 +74,24 @@ func (pp *PdfPrinter) PrintNextSteps() {
 // A combined scan has both posture results and image CVEs. Both sections go
 // into one PDF. Image-only scans keep the image-scan header.
 func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if err := printer.PrepareOutput(pp.writer); err != nil {
+		return err
+	}
+	hasPosture := opaSessionObj != nil && opaSessionObj.Report != nil
+	if !hasPosture && len(imageScanData) == 0 {
+		return fmt.Errorf("failed to print results, missing data")
+	}
+	if pp.writer == nil {
+		return fmt.Errorf("failed to write PDF results: output writer is nil")
+	}
 	var outBuff []byte
 	var err error
 
 	switch {
-	case opaSessionObj != nil && opaSessionObj.Report != nil:
+	case hasPosture:
 		outBuff, err = pp.generatePdf(&opaSessionObj.Report.SummaryDetails, opaSessionObj, imageScanData)
 	case len(imageScanData) > 0:
 		outBuff, err = pp.generateImagePdf(imageScanData)
-	default:
-		return fmt.Errorf("failed to print results, missing data")
 	}
 
 	if err != nil {
@@ -178,8 +186,13 @@ func (pp *PdfPrinter) generatePdfAt(summaryDetails *reportsummary.SummaryDetails
 
 	template := pdf.NewReportTemplate()
 	template.GenerateHeader(utils.FrameworksScoresToString(summaryDetails.ListFrameworks()), reportTime.Format(time.DateTime))
+	var failedCount, allCount int
+	if numRes := summaryDetails.NumberOfResources(); numRes != nil {
+		failedCount = numRes.Failed()
+		allCount = numRes.All()
+	}
 	err := template.GenerateTable(pp.getTableObjects(summaryDetails, sortedControlIDs, infoToPrintInfo),
-		summaryDetails.NumberOfResources().Failed(), summaryDetails.NumberOfResources().All(), summaryDetails.ComplianceScore)
+		failedCount, allCount, summaryDetails.ComplianceScore)
 
 	if err != nil {
 		return nil, err
@@ -254,9 +267,19 @@ func (pp *PdfPrinter) getFormattedInformation(infoMap []infoStars) []string {
 // The markers are taken from the caller so the table and the legend share one list.
 func (pp *PdfPrinter) getTableObjects(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, infoToPrintInfoMap []infoStars) *[]pdf.TableObject {
 	var controls []pdf.TableObject
+	if summaryDetails == nil {
+		return &controls
+	}
 	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
 		for _, c := range sortedControlID {
-			row := generateTableRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c), infoToPrintInfoMap)
+			ctrl := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c)
+			if ctrl == nil {
+				continue
+			}
+			row := generateTableRow(ctrl, infoToPrintInfoMap)
+			if row == nil {
+				continue
+			}
 			controls = append(controls, *pdf.NewTableRow(
 				row.ref, row.name, row.counterFailed, row.counterAll, row.severity, row.complianceScore, getSeverityColor,
 			))
@@ -280,7 +303,7 @@ func getSeverityColor(severity string) *props.Color {
 // CloseWriter closes the PDF output writer, returning any error from flushing or closing.
 func (p *PdfPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		return p.writer.Close()
+		return printer.CloseOutput(p.writer)
 	}
 	return nil
 }

@@ -1,0 +1,11 @@
+# "" next to "*" still authorizes a list across the collection.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: named-secret-lister
+  namespace: build
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["", "*"]
+  verbs: ["list"]

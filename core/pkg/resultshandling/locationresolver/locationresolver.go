@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -12,12 +13,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
-	"gopkg.in/op/go-logging.v1"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -85,7 +83,27 @@ func openManifestFile(path string) (*os.File, error) {
 type PathLocationResolver struct {
 	yqlibEvaluator yqlib.Evaluator
 	yamlPath       string
-	yamlNodes      []*yaml.Node
+	yamlNodes      []*yqlib.CandidateNode
+	// workloadDocuments maps the index the scanner gives a workload to its
+	// document in yamlNodes, -1 for one in a List; see IndexedByWorkload.
+	workloadDocuments []int
+	// unmatched is why an indexed file's workloads couldn't be matched to its
+	// documents. Its workloads then have no location rather than another's.
+	unmatched error
+}
+
+// Option configures a PathLocationResolver.
+type Option func(l *PathLocationResolver, data []byte)
+
+// IndexedByWorkload makes ResolveLocation take the index the scanner gives a
+// workload ("<path>:<n>") rather than a document's position in the file. The two
+// differ once a document yields no workload, such as an empty or comment-only
+// one, or several, as a List does. workloadDocuments maps one to the other for
+// the file's content; cautils.WorkloadDocuments is the scanner's own mapping.
+func IndexedByWorkload(workloadDocuments func(data []byte) ([]int, error)) Option {
+	return func(l *PathLocationResolver, data []byte) {
+		l.workloadDocuments, l.unmatched = workloadDocuments(data)
+	}
 }
 
 // FixPathLocationResolver is the resolver's previous name, kept so code
@@ -106,7 +124,7 @@ type Location struct {
 	Column int
 }
 
-func NewPathLocationResolver(yamlPath string) (*PathLocationResolver, error) {
+func NewPathLocationResolver(yamlPath string, opts ...Option) (*PathLocationResolver, error) {
 	file, err := openManifestFile(yamlPath)
 	if err != nil {
 		return nil, err
@@ -132,31 +150,39 @@ func NewPathLocationResolver(yamlPath string) (*PathLocationResolver, error) {
 		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrManifestTooLarge, yamlPath, limit)
 	}
 
-	yamlNodes := make([]*yaml.Node, 0)
+	yamlNodes := make([]*yqlib.CandidateNode, 0)
 
-	yamlDecoder := yaml.NewDecoder(bytes.NewReader(data))
+	// Leading-content preprocessing swallows leading "---" markers, which would
+	// renumber the documents relative to the raw file.
+	prefs := yqlib.ConfiguredYamlPreferences
+	prefs.LeadingContentPreProcessing = false
+	yamlDecoder := yqlib.NewYamlDecoder(prefs)
+	if err = yamlDecoder.Init(bytes.NewReader(data)); err != nil {
+		return nil, err
+	}
 	for {
-		var yamlNode yaml.Node
-		err = yamlDecoder.Decode(&yamlNode)
+		yamlNode, err := yamlDecoder.Decode()
 		if errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
 			return nil, err
-		} else {
-			yamlNodes = append(yamlNodes, &yamlNode)
 		}
+		yamlNode.EvaluateTogether = true
+		yamlNodes = append(yamlNodes, yamlNode)
 	}
 
 	evaluator := yqlib.NewAllAtOnceEvaluator()
-	backendLoggerLeveled := logging.AddModuleLevel(logging.NewLogBackend(logger.L().GetWriter(), "", 0))
-	backendLoggerLeveled.SetLevel(logging.ERROR, "")
-	yqlib.GetLogger().SetBackend(backendLoggerLeveled)
+	yqlib.GetLogger().SetLevel(slog.LevelError)
 
-	return &PathLocationResolver{
+	resolver := &PathLocationResolver{
 		yamlPath:       yamlPath,
 		yqlibEvaluator: evaluator,
 		yamlNodes:      yamlNodes,
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(resolver, data)
+	}
+	return resolver, nil
 }
 
 // ResolveLocation returns where in the manifest the given path points.
@@ -166,9 +192,36 @@ func NewPathLocationResolver(yamlPath string) (*PathLocationResolver, error) {
 // back up a segment at a time until something exists, so the caller is pointed
 // at the enclosing block. A path that resolves to nothing at all yields the
 // zero Location, which callers read as "no line".
+//
+// With IndexedByWorkload, nodeIndex is the index the scanner gives the workload
+// ("<path>:<n>"), and names its document even when an empty, comment-only or
+// non-Kubernetes document comes before it; a workload inside a List has no
+// document of its own and no location, and neither has one of a file whose
+// workloads can't be matched to its documents. Otherwise, and in a file without
+// workloads, nodeIndex is the document's position in the file.
 func (l *PathLocationResolver) ResolveLocation(path string, nodeIndex int) (Location, error) {
+	if l.unmatched != nil {
+		return Location{}, l.unmatched
+	}
+	if nodeIndex >= 0 && nodeIndex < len(l.workloadDocuments) {
+		document := l.workloadDocuments[nodeIndex]
+		if document < 0 {
+			return Location{}, fmt.Errorf("workload [%d] is inside a List and has no document of its own", nodeIndex)
+		}
+		nodeIndex = document
+	}
 	if nodeIndex < 0 || nodeIndex >= len(l.yamlNodes) {
 		return Location{}, fmt.Errorf("node index [%d] out of range [%d]", nodeIndex, len(l.yamlNodes))
+	}
+	return l.ResolveDocumentLocation(path, nodeIndex)
+}
+
+// ResolveDocumentLocation resolves path in the document at docIndex (its position
+// in yamlNodes, as returned by FindDocumentIndex) directly, without remapping through
+// workloadDocuments.
+func (l *PathLocationResolver) ResolveDocumentLocation(path string, docIndex int) (Location, error) {
+	if docIndex < 0 || docIndex >= len(l.yamlNodes) {
+		return Location{}, fmt.Errorf("document index [%d] out of range [%d]", docIndex, len(l.yamlNodes))
 	}
 
 	// A malformed path is rejected before any walking up. Walking up exists for
@@ -188,13 +241,13 @@ func (l *PathLocationResolver) ResolveLocation(path string, nodeIndex int) (Loca
 	for len(segments) > 0 {
 		yamlExpression := segmentsToYamlExpression(segments)
 
-		candidateNodes, err := l.yqlibEvaluator.EvaluateNodes(yamlExpression, l.yamlNodes[nodeIndex])
+		candidateNodes, err := l.yqlibEvaluator.EvaluateNodes(yamlExpression, l.yamlNodes[docIndex])
 		if err != nil {
 			return Location{}, fmt.Errorf("failed to evaluate yaml expression %q: %w", yamlExpression, err)
 		}
 
 		if backElement := candidateNodes.Back(); backElement != nil {
-			candidateNode := backElement.Value.(*yqlib.CandidateNode).Node
+			candidateNode := backElement.Value.(*yqlib.CandidateNode)
 			if candidateNode.Line != 0 {
 				return Location{Line: candidateNode.Line, Column: candidateNode.Column}, nil
 			}
@@ -251,4 +304,62 @@ func FixPathToValidYamlExpression(fixPath string) string {
 		return ""
 	}
 	return segmentsToYamlExpression(segments)
+}
+
+// DocumentCount returns the number of YAML documents in the resolved file.
+func (l *PathLocationResolver) DocumentCount() int {
+	return len(l.yamlNodes)
+}
+
+// FindDocumentIndex returns the index of the document matching the given kind,
+// name, and optional namespace. It returns ok=true only when exactly one document
+// in the manifest matches. If zero or multiple documents match, it returns false.
+func (l *PathLocationResolver) FindDocumentIndex(kind, name, namespace string) (int, bool) {
+	if len(l.yamlNodes) == 0 || kind == "" || name == "" {
+		return 0, false
+	}
+	matched := -1
+	count := 0
+	for i, node := range l.yamlNodes {
+		var doc struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name      string `yaml:"name"`
+				Namespace string `yaml:"namespace"`
+			} `yaml:"metadata"`
+		}
+		if err := decodeCandidateNode(node, &doc); err != nil {
+			continue
+		}
+		if doc.Kind == kind && doc.Metadata.Name == name {
+			if namespace == "" || doc.Metadata.Namespace == "" || doc.Metadata.Namespace == namespace {
+				matched = i
+				count++
+			}
+		}
+	}
+	if count == 1 {
+		return matched, true
+	}
+	return 0, false
+}
+
+// RawDocument decodes and returns the document at docIndex as a map.
+func (l *PathLocationResolver) RawDocument(docIndex int) (map[string]any, error) {
+	if docIndex < 0 || docIndex >= len(l.yamlNodes) {
+		return nil, fmt.Errorf("document index [%d] out of range [%d]", docIndex, len(l.yamlNodes))
+	}
+	var doc map[string]any
+	if err := decodeCandidateNode(l.yamlNodes[docIndex], &doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+func decodeCandidateNode(node *yqlib.CandidateNode, out any) error {
+	yamlNode, err := node.MarshalYAML()
+	if err != nil {
+		return err
+	}
+	return yamlNode.Decode(out)
 }

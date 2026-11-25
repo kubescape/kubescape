@@ -641,3 +641,121 @@ metadata:
 	assert.Nil(t, vap)
 	assert.Contains(t, err.Error(), "expected admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy")
 }
+
+func TestParseVAP_RejectsNoMetadataName(t *testing.T) {
+	doc := []byte(`apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+spec:
+  validations:
+    - expression: "true"
+`)
+	vap, err := ParseVAP(doc)
+	require.Error(t, err)
+	assert.Nil(t, vap)
+	assert.Contains(t, err.Error(), "declares no metadata.name")
+}
+
+func TestParseVAPDocuments_MultiplePolicies(t *testing.T) {
+	doc := []byte(`apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: test-policy-1
+spec:
+  validations:
+    - expression: "true"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: test-policy-2
+spec:
+  validations:
+    - expression: "false"
+`)
+	documents, err := ParseVAPDocuments(doc)
+	require.NoError(t, err)
+	require.Len(t, documents, 2)
+	assert.Equal(t, "test-policy-1", documents[0].VAP.PolicyName)
+	assert.Equal(t, "test-policy-2", documents[1].VAP.PolicyName)
+	assert.Contains(t, string(documents[0].Raw), "test-policy-1")
+	assert.NotContains(t, string(documents[0].Raw), "test-policy-2")
+	assert.Contains(t, string(documents[1].Raw), "test-policy-2")
+}
+
+func TestParseVAPDocuments_ErrorNamesFailingDocument(t *testing.T) {
+	doc := []byte(`apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: test-policy
+spec:
+  validations:
+    - expression: "true"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: not-a-policy
+`)
+	documents, err := ParseVAPDocuments(doc)
+	require.Error(t, err)
+	assert.Nil(t, documents)
+	assert.Contains(t, err.Error(), "document 2:")
+	assert.Contains(t, err.Error(), "expected admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy")
+}
+
+// A stream may start with `---` (yamllint's document-start rule asks for it).
+// A comment-only preamble or an empty document after it is still not a
+// document, as it isn't without the leading separator.
+func TestParseVAPDocuments_LeadingSeparatorBeforePreambleOrEmptyDocument(t *testing.T) {
+	policy := `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: test-policy
+spec:
+  validations:
+    - expression: "true"
+`
+	for name, tc := range map[string]struct {
+		prefix   string
+		preamble []string
+	}{
+		"preamble":                        {prefix: "---\n# @baseScore 9\n---\n", preamble: []string{"# @baseScore 9"}},
+		"empty document":                  {prefix: "---\n---\n"},
+		"separator with a comment":        {prefix: "--- # rules\n# @baseScore 9\n---\n", preamble: []string{"# rules", "# @baseScore 9"}},
+		"preamble between two separators": {prefix: "---\n# one\n---\n# two\n---\n", preamble: []string{"# one", "# two"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			documents, err := ParseVAPDocuments([]byte(tc.prefix + policy))
+			require.NoError(t, err)
+			require.Len(t, documents, 1)
+			assert.Equal(t, "test-policy", documents[0].VAP.PolicyName)
+			for _, comment := range tc.preamble {
+				assert.Contains(t, string(documents[0].Raw), comment)
+			}
+		})
+	}
+}
+
+// A document that starts with `---` is kept byte for byte.
+func TestParseVAPDocuments_KeepsADocumentsLeadingSeparator(t *testing.T) {
+	doc := `---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: test-policy
+spec:
+  validations:
+    - expression: "true"
+`
+	documents, err := ParseVAPDocuments([]byte(doc))
+	require.NoError(t, err)
+	require.Len(t, documents, 1)
+	assert.Equal(t, doc, string(documents[0].Raw))
+}
+
+func TestParseVAPDocuments_EmptyStreamRejected(t *testing.T) {
+	documents, err := ParseVAPDocuments([]byte("\n---\n   \n"))
+	require.Error(t, err)
+	assert.Nil(t, documents)
+	assert.Contains(t, err.Error(), "empty document")
+}

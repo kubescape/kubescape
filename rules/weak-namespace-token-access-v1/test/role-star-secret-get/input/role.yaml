@@ -1,0 +1,11 @@
+# resourceNames: ["*"] names a secret literally called "*", which cannot exist, so get reads nothing.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: named-secret-reader
+  namespace: build
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["*"]
+  verbs: ["get"]

@@ -1,6 +1,7 @@
 package shared
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -157,16 +158,25 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 		if err := ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
 			return err
 		}
+		scanInfo.FailThresholdSeverity = strings.ToLower(strings.TrimSpace(scanInfo.FailThresholdSeverity))
+	} else if commandFlagChanged(cmd, "severity-threshold") {
+		return ErrUnknownSeverity
 	}
 	if scanInfo.MinSeverity != "" {
 		if err := ValidateSeverity(scanInfo.MinSeverity); err != nil {
 			return err
 		}
+		scanInfo.MinSeverity = strings.ToLower(strings.TrimSpace(scanInfo.MinSeverity))
+	} else if commandFlagChanged(cmd, "min-severity") {
+		return ErrUnknownSeverity
 	}
 	if scanInfo.MaxSeverity != "" {
 		if err := ValidateSeverity(scanInfo.MaxSeverity); err != nil {
 			return err
 		}
+		scanInfo.MaxSeverity = strings.ToLower(strings.TrimSpace(scanInfo.MaxSeverity))
+	} else if commandFlagChanged(cmd, "max-severity") {
+		return ErrUnknownSeverity
 	}
 	if scanInfo.MinSeverity != "" && scanInfo.MaxSeverity != "" {
 		if err := ValidateSeverityRange(scanInfo.MinSeverity, scanInfo.MaxSeverity); err != nil {
@@ -214,6 +224,8 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 				return fmt.Errorf("gitlab-codequality cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
 			case printer.GitHubActionsFormat:
 				return fmt.Errorf("github-actions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
+			case printer.ExceptionsFormat:
+				return fmt.Errorf("exceptions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
 			}
 		}
 	}
@@ -227,6 +239,11 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	}
 	if err := ValidateKindFilters(scanInfo); err != nil {
 		return err
+	}
+	if scanInfo.ScanType != cautils.ScanTypeWorkload && scanInfo.ScanType != cautils.ScanTypeImage {
+		if err := ValidateNamespaceFiltersWithCommand(cmd, scanInfo); err != nil {
+			return err
+		}
 	}
 	if err := ValidateExcludePaths(scanInfo); err != nil {
 		return err
@@ -242,6 +259,21 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := ValidateExcludeControls(scanInfo); err != nil {
 		return err
 	}
+	for _, selection := range []struct {
+		name string
+		flag string
+		val  string
+	}{
+		{"include-controls", "--include-controls", scanInfo.IncludeControls},
+		{"skip-controls", "--skip-controls", scanInfo.SkipControls},
+	} {
+		if commandFlagChanged(cmd, selection.name) && strings.TrimSpace(selection.val) == "" {
+			return fmt.Errorf("%s contains an empty control identifier", selection.flag)
+		}
+	}
+	if err := ValidateControlFilters(scanInfo); err != nil {
+		return err
+	}
 	if scanInfo.MaxDBAge < 0 {
 		return fmt.Errorf("invalid --max-db-age %q: must be a positive duration (e.g. 120h) or 0 for the default", scanInfo.MaxDBAge)
 	}
@@ -251,6 +283,33 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := validateImageRiskGateScope(scanInfo); err != nil {
 		return err
 	}
+	for _, flag := range []struct {
+		name string
+		val  *string
+		err  string
+	}{
+		{"output", &scanInfo.Output, "output file path cannot be empty"},
+		{"controls-config", &scanInfo.ControlsInputs, "--controls-config needs a file path"},
+		{"exceptions", &scanInfo.UseExceptions, "--exceptions needs a file path"},
+		{"use-artifacts-from", &scanInfo.UseArtifactsFrom, "--use-artifacts-from needs a directory path"},
+		{"custom-rules", &scanInfo.CustomRules, "--custom-rules needs a path"},
+		{"file-path", &scanInfo.FilePath, "--file-path needs a file path"},
+		{"chart-path", &scanInfo.ChartPath, "--chart-path needs a path"},
+	} {
+		if scanInfo.ScanType == cautils.ScanTypeImage && (flag.name == "file-path" || flag.name == "chart-path") {
+			continue
+		}
+		if commandFlagChanged(cmd, flag.name) {
+			trimmed := strings.TrimSpace(*flag.val)
+			if trimmed == "" {
+				return errors.New(flag.err)
+			}
+			*flag.val = trimmed
+		} else if *flag.val != "" {
+			*flag.val = strings.TrimSpace(*flag.val)
+		}
+	}
+
 	ApplyDBAgeGatePresence(cmd, scanInfo)
 	return nil
 }
@@ -307,10 +366,44 @@ func ApplyDBAgeGatePresence(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
 	}
 }
 
+func commandFlagChanged(cmd *cobra.Command, name string) bool {
+	if cmd == nil {
+		return false
+	}
+	if f := cmd.Flags().Lookup(name); f != nil {
+		return f.Changed
+	}
+	if f := cmd.InheritedFlags().Lookup(name); f != nil {
+		return f.Changed
+	}
+	return false
+}
+
 func ValidateExcludeControls(scanInfo *cautils.ScanInfo) error {
 	for _, control := range scanInfo.ExcludeControls {
 		if strings.TrimSpace(control) == "" {
 			return fmt.Errorf("--exclude-controls contains an empty control identifier")
+		}
+	}
+	return nil
+}
+
+// ValidateControlFilters rejects empty or whitespace-only control identifiers in --include-controls and --skip-controls.
+func ValidateControlFilters(scanInfo *cautils.ScanInfo) error {
+	for _, selection := range []struct {
+		flag  string
+		value string
+	}{
+		{"--include-controls", scanInfo.IncludeControls},
+		{"--skip-controls", scanInfo.SkipControls},
+	} {
+		if selection.value == "" {
+			continue
+		}
+		for _, token := range strings.Split(selection.value, ",") {
+			if strings.TrimSpace(token) == "" {
+				return fmt.Errorf("%s contains an empty control identifier", selection.flag)
+			}
 		}
 	}
 	return nil
@@ -343,4 +436,34 @@ func validateKindList(flag, value string) error {
 		}
 	}
 	return fmt.Errorf("%s value %q contains no valid kind names", flag, value)
+}
+
+// ValidateNamespaceFilters returns an error when --include-namespaces or --exclude-namespaces
+// contain only whitespace or separator tokens, which would silently result in invalid or empty filtering.
+func ValidateNamespaceFilters(scanInfo *cautils.ScanInfo) error {
+	return ValidateNamespaceFiltersWithCommand(nil, scanInfo)
+}
+
+// ValidateNamespaceFiltersWithCommand validates namespace filter flags, rejecting empty or whitespace-only
+// values when explicitly set via command flags or scanInfo.
+func ValidateNamespaceFiltersWithCommand(cmd *cobra.Command, scanInfo *cautils.ScanInfo) error {
+	if err := validateNamespaceList(cmd, "include-namespaces", "--include-namespaces", scanInfo.IncludeNamespaces); err != nil {
+		return err
+	}
+	return validateNamespaceList(cmd, "exclude-namespaces", "--exclude-namespaces", scanInfo.ExcludedNamespaces)
+}
+
+func validateNamespaceList(cmd *cobra.Command, flagName, flag, value string) error {
+	if value == "" {
+		if commandFlagChanged(cmd, flagName) {
+			return fmt.Errorf("%s value %q contains no valid namespace names", flag, value)
+		}
+		return nil
+	}
+	for _, ns := range strings.Split(value, ",") {
+		if strings.TrimSpace(ns) != "" {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s value %q contains no valid namespace names", flag, value)
 }

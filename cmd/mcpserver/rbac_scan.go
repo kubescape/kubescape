@@ -6,6 +6,6 @@ import (
 
 // RunRBACScan executes a headless, highly-optimized on-demand scan using the Kubescape engine,
 // isolated to just the core RBAC controls (e.g. C-0015, C-0035) to ensure rapid return times for MCP.
-func (ksServer *KubescapeMcpserver) RunRBACScan(ctx context.Context, namespace string) ([]byte, error) {
-	return runControlScan(ctx, ksServer, namespace, []string{"C-0015", "C-0035"}, "RBAC")
+func (ksServer *KubescapeMcpserver) RunRBACScan(ctx context.Context, namespace string, filters ...scanFilterArgs) ([]byte, error) {
+	return runControlScan(ctx, ksServer, namespace, []string{"C-0015", "C-0035"}, "RBAC", filters...)
 }

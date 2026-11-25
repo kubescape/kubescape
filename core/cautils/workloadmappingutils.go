@@ -50,9 +50,11 @@ func MapExternalResource(externalResourceMap ExternalResources, resources []stri
 		for _, resource := range resources {
 			if strings.Contains(k, resource) {
 				hostResources = append(hostResources, k)
+				break
 			}
 		}
 	}
+	slices.Sort(hostResources)
 	return hostResources
 }
 

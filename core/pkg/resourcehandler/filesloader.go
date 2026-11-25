@@ -45,32 +45,58 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 	// load resources from all input paths
 	mappedResources := map[string][]workloadinterface.IMetadata{}
 	var inputs []loadedInput
+	var inputErrors []error
 	for path := range scanInfo.InputPatterns {
 		var input loadedInput
 		var skipped []cautils.SkippedManifest
+		var ignoreFile string
 		var err error
 
 		cloneDepth := scanInfo.EffectiveGitCloneDepth()
 		helmValueOpts := helmValueOptionsFromScanInfo(scanInfo)
 		if scanInfo.ChartPath != "" && scanInfo.FilePath != "" {
 			// A chart-and-file input names one workload, leaving nothing to narrow.
-			input.sources, input.workloads, err = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath, helmValueOpts, cloneDepth)
+			input.sources, input.workloads, err = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath, helmValueOpts, cloneDepth, scanInfo.WorkspaceDir)
 		} else {
 			pathFilter, filterErr := pathFilterFromScanInfo(ctx, scanInfo.InputPatterns[path], scanInfo)
 			if filterErr != nil {
-				return nil, allResources, nil, nil, filterErr
+				err = filterErr
+				// Record the ignore file the error names. The anonymizer
+				// can't find it again from the input for a repository cloned
+				// with another depth, or a directory gone by then.
+				var ignoreErr *cautils.IgnoreFileError
+				if errors.As(filterErr, &ignoreErr) {
+					ignoreFile = ignoreErr.Path
+				}
+			} else {
+				input.root, input.sources, input.workloads, skipped, err = getResourcesFromInput(ctx, scanInfo.InputPatterns[path], helmValueOpts, pathFilter, cloneDepth, scanInfo.WorkspaceDir)
+				input.remote = remoteName(scanInfo.InputPatterns[path], cloneDepth)
 			}
-			input.root, input.sources, input.workloads, skipped, err = getResourcesFromInput(ctx, scanInfo.InputPatterns[path], helmValueOpts, pathFilter, cloneDepth, scanInfo.WorkspaceDir)
-			input.remote = remoteName(scanInfo.InputPatterns[path], cloneDepth)
 		}
 		sessionObj.SkippedManifests = append(sessionObj.SkippedManifests, skipped...)
 		if err != nil {
+			if len(scanInfo.InputPatterns) > 1 {
+				logger.L().Ctx(ctx).Warning("failed to load input path, skipping",
+					helpers.String("path", scanInfo.InputPatterns[path]),
+					helpers.Error(err))
+				sessionObj.SkippedManifests = append(sessionObj.SkippedManifests, cautils.SkippedManifest{
+					Path:       scanInfo.InputPatterns[path],
+					Reason:     fmt.Sprintf("failed to load input: %v", err),
+					IgnoreFile: ignoreFile,
+				})
+				inputErrors = append(inputErrors, fmt.Errorf("input %q: %w", scanInfo.InputPatterns[path], err))
+				continue
+			}
 			return nil, allResources, nil, nil, err
 		}
 		if len(input.workloads) == 0 {
 			continue
 		}
 		inputs = append(inputs, input)
+	}
+
+	if len(inputs) == 0 && len(inputErrors) > 0 {
+		return nil, allResources, nil, nil, errors.Join(inputErrors...)
 	}
 
 	anchorInputs(ctx, inputs)
@@ -81,14 +107,17 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		addWorkloadsToResourcesMap(mappedResources, input.workloads)
 	}
 
-	// locate input k8s object in the mapped resources - if not found or not a valid resource, return error
-	var err error
-	if sessionObj.SingleResourceScan, err = findScanObjectResource(mappedResources, scanInfo.ScanObject); err != nil {
+	sessionObj.SingleResourceScan = nil
+	selected, err := findScanObjectResource(mappedResources, scanInfo.ScanObject)
+	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-
-	if sessionObj.SingleResourceScan != nil && workloadHasParent(sessionObj.SingleResourceScan.GetObject()) {
-		return nil, nil, nil, nil, fmt.Errorf("resource %s has a parent and cannot be scanned", sessionObj.SingleResourceScan.GetID())
+	if selected != nil {
+		workload := workloadinterface.NewWorkloadObj(selected.GetObject())
+		sessionObj.SingleResourceScan = workload
+		if workloadHasParent(workload.GetObject()) {
+			return nil, nil, nil, nil, fmt.Errorf("resource %s has a parent and cannot be scanned", workload.GetID())
+		}
 	}
 
 	scanningScope := cautils.GetScanningScope(sessionObj.Metadata.ContextMetadata)
@@ -120,7 +149,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 
 	logger.L().StopSuccess("Done accessing local objects")
 	// save input resource in resource maps
-	addSingleResourceToResourceMaps(k8sResources, allResources, sessionObj.SingleResourceScan, offlineResolver)
+	addSingleResourceToResourceMaps(k8sResources, allResources, selected, offlineResolver)
 
 	if err := applyKindFilter(k8sResources, allResources, scanInfo, sessionObj.SingleResourceScan); err != nil {
 		return nil, nil, nil, nil, err
@@ -385,8 +414,8 @@ func pathFilterFromScanInfo(ctx context.Context, input string, scanInfo *cautils
 	return filter, nil
 }
 
-func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath string, helmValueOpts cautils.HelmValueOptions, depthOpt ...int) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
-	clonedRepo := cautils.GetClonedPath(path, depthOpt...)
+func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath string, helmValueOpts cautils.HelmValueOptions, cloneDepth int, workspaceOpt ...string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
+	clonedRepo := cautils.GetClonedPath(path, cloneDepth)
 
 	if clonedRepo != "" {
 		// if the repo was cloned, add the workload path to the cloned repo
@@ -399,7 +428,7 @@ func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath 
 	// Get repo root
 	repoRoot, gitRepo := extractGitRepo(clonedRepo)
 
-	helmSourceToWorkloads, helmSourceToChart, _, err := cautils.LoadResourcesFromHelmCharts(ctx, helmPath, helmValueOpts)
+	helmSourceToWorkloads, helmSourceToChart, _, err := cautils.LoadResourcesFromHelmChartsFiltered(ctx, helmPath, helmValueOpts, nil, nil, workspaceOpt...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -431,7 +460,7 @@ func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath 
 }
 
 func getWorkloadSourceHelmChart(repoRoot string, source string, gitRepo *cautils.LocalGitRepository, helmChart cautils.Chart) reporthandling.Source {
-	relSource, err := filepath.Rel(repoRoot, source)
+	relSource, err := cautils.RelativeToRoot(repoRoot, source)
 	if err == nil {
 		source = relSource
 	}
@@ -521,8 +550,10 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 		path = clonedRepo
 	}
 
-	// Get repo root
-	repoRoot, gitRepo := extractGitRepo(path)
+	// Get repo root. A glob input is not a path on disk: anchor it at the
+	// directory file discovery walks, as the ignore file and --watch already do.
+	rootInput, _ := cautils.GlobInputRoot(path)
+	repoRoot, gitRepo := extractGitRepo(rootInput)
 
 	// when scanning a single file, we consider the repository root to be
 	// the directory of the scanned file. This applies to every file type: a
@@ -568,7 +599,8 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 	if err != nil && !errors.Is(err, cautils.ErrNoManifestFiles) {
 		return "", nil, nil, allSkips, err
 	}
-	terraformSourceToWorkloads, err := cautils.LoadResourcesFromTerraformFiltered(ctx, path, pathFilter, workspaceDir)
+	terraformSourceToWorkloads, terraformSkips, err := cautils.LoadResourcesFromTerraformFilteredWithSkips(ctx, path, pathFilter, workspaceDir)
+	allSkips = append(allSkips, terraformSkips...)
 	if err != nil {
 		return "", nil, nil, allSkips, err
 	}
@@ -585,7 +617,7 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 	// merge Terraform-derived workloads, same pattern as the Kustomize block below
 	for source, ws := range terraformSourceToWorkloads {
 		workloads = append(workloads, ws...)
-		relSource, err := filepath.Rel(repoRoot, source)
+		relSource, err := cautils.RelativeToRoot(repoRoot, source)
 		if err == nil {
 			source = relSource
 		}
@@ -636,7 +668,7 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 		}
 		workloads = append(workloads, ws...)
 
-		relSource, err := filepath.Rel(repoRoot, source)
+		relSource, err := cautils.RelativeToRoot(repoRoot, source)
 
 		if err == nil {
 			source = relSource
@@ -754,7 +786,7 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 		// (before it is rewritten to a repo-relative path below) is that directory's name — the
 		// correct owner for each entry even when several Kustomize directories were rendered.
 		kustomizeDirectoryName := source
-		relSource, err := filepath.Rel(repoRoot, source)
+		relSource, err := cautils.RelativeToRoot(repoRoot, source)
 
 		if err == nil {
 			source = relSource
@@ -799,12 +831,15 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 //
 // Only a file inside the scan root is used, after symlinks are resolved. One
 // outside it would make a path that is relative to the root escape it, which
-// printers that refuse such a location would then drop.
+// printers that refuse such a location would then drop. Kustomize records the
+// file under the path the scan was given, which may reach the repository
+// through a symlink its root does not have, so the two are related the way the
+// other sources are.
 func kustomizeWorkloadSource(directorySource reporthandling.Source, originFile, repoRoot string, lastCommitOf func(string) reporthandling.LastCommit) reporthandling.Source {
 	if originFile == "" || repoRoot == "" {
 		return directorySource
 	}
-	relative, err := filepath.Rel(repoRoot, originFile)
+	relative, err := cautils.RelativeToRoot(repoRoot, originFile)
 	if err != nil || !filepath.IsLocal(relative) {
 		return directorySource
 	}

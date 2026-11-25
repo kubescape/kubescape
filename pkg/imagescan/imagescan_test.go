@@ -293,6 +293,31 @@ func TestGetProviderConfig(t *testing.T) {
 			},
 			wantCreds: []image.RegistryCredentials{{Authority: "registry.example.com", Token: "token"}},
 		},
+		{
+			name: "Whitespace-only username and password treated as empty",
+			creds: RegistryCredentials{
+				Username: "   ",
+				Password: "   ",
+			},
+			wantCreds: nil,
+		},
+		{
+			name: "Whitespace-only token treated as empty",
+			creds: RegistryCredentials{
+				Authority: "registry.example.com",
+				Token:     "   ",
+			},
+			wantCreds: nil,
+		},
+		{
+			name: "Whitespace-padded credentials trimmed",
+			creds: RegistryCredentials{
+				Authority: "  registry.example.com  ",
+				Username:  "  user  ",
+				Password:  "  pass  ",
+			},
+			wantCreds: []image.RegistryCredentials{{Authority: "registry.example.com", Username: "user", Password: "pass"}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

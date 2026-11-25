@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -46,10 +47,13 @@ func NewExceptionsPrinter() *ExceptionsPrinter {
 }
 
 func (ep *ExceptionsPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if ep == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.ExceptionsFormat, outputFile, exceptionsOutputFile)
 	if explicitOutput {
 		var err error
-		ep.writer, err = printer.GetWriterNoFallback(outputFile)
+		ep.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	ep.writer = printer.GetWriter(ctx, outputFile)
@@ -60,9 +64,21 @@ func (ep *ExceptionsPrinter) Score(float32) {}
 
 func (ep *ExceptionsPrinter) PrintNextSteps() {}
 
-func (ep *ExceptionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
+func (ep *ExceptionsPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if ep == nil {
+		return fmt.Errorf("failed to write exceptions: printer is nil")
+	}
+	if ep.writer == nil {
+		return fmt.Errorf("failed to write exceptions: output writer is nil")
+	}
+	if err := printer.PrepareOutput(ep.writer); err != nil {
+		return err
+	}
 	if opaSessionObj == nil {
 		return fmt.Errorf("failed to write exceptions: no data provided")
+	}
+	if len(imageScanData) > 0 {
+		return fmt.Errorf("exceptions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
 	}
 
 	policies := buildExceptionPolicies(ctx, opaSessionObj)
@@ -131,8 +147,8 @@ func buildExceptionPolicies(ctx context.Context, opaSessionObj *cautils.OPASessi
 // CloseWriter closes the exceptions output writer, returning any error from
 // flushing or closing.
 func (ep *ExceptionsPrinter) CloseWriter() error {
-	if ep.writer != nil && ep.writer != os.Stdout {
-		return ep.writer.Close()
+	if ep != nil && ep.writer != nil && ep.writer != os.Stdout {
+		return printer.CloseOutput(ep.writer)
 	}
 	return nil
 }
@@ -224,6 +240,9 @@ func collectFailures(ctx context.Context, opaSessionObj *cautils.OPASessionObj) 
 			if cautils.ControlStatus(summary, control).Status() != apis.StatusFailed {
 				continue
 			}
+			if strings.TrimSpace(control.ControlID) == "" {
+				continue
+			}
 			if _, ok := failures[control.ControlID]; !ok {
 				failures[control.ControlID] = map[resourceKey]struct{}{}
 			}
@@ -236,7 +255,11 @@ func collectFailures(ctx context.Context, opaSessionObj *cautils.OPASessionObj) 
 
 func hasFailedControl(summary *reportsummary.SummaryDetails, result resourcesresults.Result) bool {
 	for i := range result.AssociatedControls {
-		if cautils.ControlStatus(summary, &result.AssociatedControls[i]).Status() == apis.StatusFailed {
+		control := &result.AssociatedControls[i]
+		if strings.TrimSpace(control.ControlID) == "" {
+			continue
+		}
+		if cautils.ControlStatus(summary, control).Status() == apis.StatusFailed {
 			return true
 		}
 	}
@@ -246,6 +269,9 @@ func hasFailedControl(summary *reportsummary.SummaryDetails, result resourcesres
 // sourcePath returns the manifest a locally scanned resource was read from.
 // Cluster scans carry none, and the path axis is then left off entirely.
 func sourcePath(resource workloadinterface.IMetadata) string {
+	if resource == nil {
+		return ""
+	}
 	object := resource.GetObject()
 	if object == nil {
 		return ""

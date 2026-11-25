@@ -242,12 +242,17 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 				}
 				if out.ImageScanFindings != nil {
 					for _, finding := range out.ImageScanFindings.Findings {
-						report.Vulnerabilities = append(report.Vulnerabilities, Vulnerability{
+						vulnerability := Vulnerability{
 							ID:          aws.ToString(finding.Name),
 							Severity:    NormalizeSeverity(string(finding.Severity)),
 							Description: aws.ToString(finding.Description),
-							Links:       []string{aws.ToString(finding.Uri)},
-						})
+						}
+						// Uri is optional. An empty string is not a link, and
+						// [""] would survive omitempty as "links":[""].
+						if uri := aws.ToString(finding.Uri); uri != "" {
+							vulnerability.Links = []string{uri}
+						}
+						report.Vulnerabilities = append(report.Vulnerabilities, vulnerability)
 					}
 					for _, finding := range out.ImageScanFindings.EnhancedFindings {
 						// Inspector retains closed findings after remediation or

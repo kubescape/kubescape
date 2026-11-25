@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/go-logr/logr/funcr"
 	v1 "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/kubescape/backend/pkg/servicediscovery"
 	sdClientV2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
@@ -17,13 +18,14 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 var isTerminal = isatty.IsTerminal
 
 func initLogger() {
 	if rootInfo.LoggerName == "" {
-		if l := os.Getenv("KS_LOGGER_NAME"); l != "" {
+		if l := strings.TrimSpace(os.Getenv("KS_LOGGER_NAME")); l != "" {
 			rootInfo.LoggerName = l
 		} else {
 			if isTerminal(os.Stdout.Fd()) {
@@ -35,6 +37,20 @@ func initLogger() {
 	}
 
 	logger.InitLogger(rootInfo.LoggerName)
+	initControllerRuntimeLogger()
+}
+
+// initControllerRuntimeLogger gives controller-runtime a logger. Until it has
+// one, controller-runtime discards what it logs and, once the process is 30
+// seconds old, prints a "log.SetLogger(...) was never called" notice with a
+// goroutine stack trace to stderr the first time it logs. k8sinterface logs
+// through it when it finds no kubeconfig, so a scan of local files that took
+// more than 30 seconds to reach that point printed a trace that looks like a
+// crash. Its lines go to the debug log instead.
+func initControllerRuntimeLogger() {
+	ctrllog.SetLogger(funcr.New(func(prefix, args string) {
+		logger.L().Debug("controller-runtime", helpers.String("log", strings.TrimSpace(prefix+" "+args)))
+	}, funcr.Options{}))
 }
 
 func initLoggerLevel(cmd *cobra.Command) error {
@@ -51,7 +67,7 @@ func initLoggerLevel(cmd *cobra.Command) error {
 		}
 	}
 	if !loggerExplicit && rootInfo.Logger == helpers.InfoLevel.String() {
-		if l := os.Getenv("KS_LOGGER"); l != "" {
+		if l := strings.TrimSpace(os.Getenv("KS_LOGGER")); l != "" {
 			rootInfo.Logger = l
 		}
 	}
@@ -76,7 +92,7 @@ func initCacheDir(cmd *cobra.Command) {
 		}
 	}
 	if !cacheDirExplicit {
-		if cacheDir := os.Getenv("KS_CACHE_DIR"); cacheDir != "" {
+		if cacheDir := strings.TrimSpace(os.Getenv("KS_CACHE_DIR")); cacheDir != "" {
 			getter.DefaultLocalStore = cacheDir
 			logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
 		}

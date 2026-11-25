@@ -13,6 +13,7 @@ import (
 	gitv5 "github.com/go-git/go-git/v5"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
@@ -1285,6 +1286,67 @@ func TestExcludeFilesUnderDirectories_CanonicalizesSymlinkedDirs(t *testing.T) {
 	assert.NotContains(t, sources, lexicalSource, "the input is under the physical directory, so it must be excluded")
 }
 
+// TestGetResourcesFromPath_RepositoryReachedThroughSymlink verifies that a scan of a
+// repository reached through a symlinked path still reports repository-relative
+// paths. go-git resolves the repository root, while discovered files keep the path
+// the scan was given; on macOS every temporary directory is such a path (/var is a
+// link to /private/var). Comparing the two forms produced "../<link>/..." or a
+// climb to the filesystem root, which SARIF and GitLab then reported as files
+// outside the repository.
+func TestGetResourcesFromPath_RepositoryReachedThroughSymlink(t *testing.T) {
+	const manifest = "k8s/pod.yaml"
+	repoRoot := newRepoWithUnusableGitMetadata(t, manifest)
+
+	link := filepath.Join(t.TempDir(), "linked-repo")
+	if err := os.Symlink(repoRoot, link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		scanPath string
+	}{
+		// the link itself is the root: discovery used to list nothing below it
+		{name: "repository root scan", scanPath: link},
+		{name: "directory scan", scanPath: filepath.Join(link, "k8s")},
+		{name: "single file scan", scanPath: filepath.Join(link, filepath.FromSlash(manifest))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workloadIDToSource, workloads, _, err := getResourcesFromPath(context.Background(), tt.scanPath, cautils.HelmValueOptions{}, nil)
+			require.NoError(t, err)
+			require.Len(t, workloads, 1)
+
+			src, ok := workloadIDToSource[workloads[0].GetID()]
+			require.True(t, ok, "the workload must have a source")
+			assert.Equal(t, repoRoot, src.Path)
+			assert.Equal(t, manifest, filepath.ToSlash(src.RelativePath))
+		})
+	}
+}
+
+// TestGetResources_SymlinkedInputOutsideWorkspace pins that following a scan
+// input that is itself a symlink does not read past the workspace: the link is
+// inside it, its target is not.
+func TestGetResources_SymlinkedInputOutsideWorkspace(t *testing.T) {
+	wsDir := t.TempDir()
+	outsideDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outsideDir, "pod.yaml"), []byte(singlePodManifest), 0o600))
+	link := filepath.Join(wsDir, "linked")
+	if err := os.Symlink(outsideDir, link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	scanInfo := &cautils.ScanInfo{InputPatterns: []string{link}, WorkspaceDir: wsDir}
+	session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+
+	_, workloads, _, _, _ := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+	assert.Empty(t, workloads, "a manifest outside the workspace must not be loaded")
+	require.Len(t, session.SkippedManifests, 1)
+	assert.Equal(t, filepath.Join(link, "pod.yaml"), session.SkippedManifests[0].Path)
+	assert.Contains(t, session.SkippedManifests[0].Reason, "escapes workspace root")
+}
+
 func TestHelmValueOptionsFromScanInfo(t *testing.T) {
 	assert.True(t, helmValueOptionsFromScanInfo(nil).IsEmpty())
 
@@ -1420,6 +1482,264 @@ func TestAnchorInputsKeepsRootsApart(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			anchorInputs(context.Background(), tc.inputs)
 			assert.Equal(t, tc.want, entries(tc.inputs))
+		})
+	}
+}
+
+func TestGetResources_MultiInputPartialFailureRecoversValidManifests(t *testing.T) {
+	dir := t.TempDir()
+	validYaml := filepath.Join(dir, "pod.yaml")
+	require.NoError(t, os.WriteFile(validYaml, []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: my-pod\nspec:\n  containers:\n  - name: c\n    image: nginx\n"), 0o600))
+
+	brokenChartDir := filepath.Join(dir, "brokenchart")
+	require.NoError(t, os.MkdirAll(filepath.Join(brokenChartDir, "templates"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(brokenChartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: broken\nversion: 0.1.0\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(brokenChartDir, "templates", "sa.yaml"), []byte("apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: {{ required \"missing\" .Values.nonexistent }}\n"), 0o600))
+
+	match := reporthandling.RuleMatchObjects{
+		APIGroups:   []string{""},
+		APIVersions: []string{"v1"},
+		Resources:   []string{"pods"},
+	}
+	framework := *mockFramework("test-framework", []reporthandling.Control{
+		mockControl("test-control", []reporthandling.PolicyRule{
+			mockRule("test-rule", []reporthandling.RuleMatchObjects{match}, ""),
+		}),
+	})
+
+	// Multi-input scan: one valid manifest, one broken chart
+	scanInfo := &cautils.ScanInfo{
+		InputPatterns: []string{brokenChartDir, validYaml},
+	}
+	session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo, nil)
+
+	_, allResources, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+	require.NoError(t, err, "multi-input scan must not fail when at least one input is valid")
+	require.NotEmpty(t, allResources, "valid manifests must be loaded despite broken chart")
+
+	var names []string
+	for _, res := range allResources {
+		names = append(names, res.GetName())
+	}
+	assert.Contains(t, names, "my-pod")
+
+	// Verify broken chart is recorded in SkippedManifests
+	require.NotEmpty(t, session.SkippedManifests)
+	foundSkip := false
+	for _, sk := range session.SkippedManifests {
+		if strings.Contains(sk.Path, "brokenchart") {
+			foundSkip = true
+			break
+		}
+	}
+	assert.True(t, foundSkip, "broken chart must be recorded in SkippedManifests")
+}
+
+func TestGetResources_SingleBrokenInputFailsPromptly(t *testing.T) {
+	dir := t.TempDir()
+	brokenChartDir := filepath.Join(dir, "brokenchart")
+	require.NoError(t, os.MkdirAll(filepath.Join(brokenChartDir, "templates"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(brokenChartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: broken\nversion: 0.1.0\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(brokenChartDir, "templates", "sa.yaml"), []byte("apiVersion: v1\nkind: ServiceAccount\nmetadata:\n  name: {{ required \"missing\" .Values.nonexistent }}\n"), 0o600))
+
+	// Single input that fails must still return error promptly
+	scanInfo := &cautils.ScanInfo{
+		InputPatterns: []string{brokenChartDir},
+	}
+	session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+
+	_, _, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+	require.Error(t, err, "single broken input must return error")
+	assert.ErrorIs(t, err, cautils.ErrHelmRenderFailed)
+}
+
+func createTestHelmChartHelper(t *testing.T, baseDir, chartName string) string {
+	chartDir := filepath.Join(baseDir, chartName)
+	require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(fmt.Sprintf("apiVersion: v2\nname: %s\nversion: 0.1.0\n", chartName)), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("replicaCount: 1\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "deployment.yaml"), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-deploy
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: demo
+    spec:
+      containers:
+      - name: demo
+        image: nginx:latest
+`), 0o600))
+	return chartDir
+}
+
+func TestGetWorkloadFromHelmChart_WorkspaceContainment(t *testing.T) {
+	wsDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	inWsChart := createTestHelmChartHelper(t, wsDir, "in-ws-chart")
+	outsideChart := createTestHelmChartHelper(t, outsideDir, "outside-chart")
+
+	outsideValFile := filepath.Join(outsideDir, "outside-vals.yaml")
+	require.NoError(t, os.WriteFile(outsideValFile, []byte("replicaCount: 2\n"), 0o600))
+
+	outsideSecretFile := filepath.Join(outsideDir, "secret.txt")
+	require.NoError(t, os.WriteFile(outsideSecretFile, []byte("super-secret\n"), 0o600))
+
+	workloadRelPath := filepath.Join(inWsChart, "templates", "deployment.yaml")
+
+	t.Run("chart outside workspace is rejected", func(t *testing.T) {
+		outsideWlPath := filepath.Join(outsideChart, "templates", "deployment.yaml")
+		_, _, err := getWorkloadFromHelmChart(context.Background(), outsideChart, outsideChart, outsideWlPath, cautils.HelmValueOptions{}, 0, wsDir)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("values file outside workspace is rejected", func(t *testing.T) {
+		valueOpts := cautils.HelmValueOptions{
+			ValueFiles: []string{outsideValFile},
+		}
+		_, _, err := getWorkloadFromHelmChart(context.Background(), inWsChart, inWsChart, workloadRelPath, valueOpts, 0, wsDir)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("set-file outside workspace is rejected", func(t *testing.T) {
+		valueOpts := cautils.HelmValueOptions{
+			FileValues: []string{"secret=" + outsideSecretFile},
+		}
+		_, _, err := getWorkloadFromHelmChart(context.Background(), inWsChart, inWsChart, workloadRelPath, valueOpts, 0, wsDir)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("valid in-workspace chart and files succeed", func(t *testing.T) {
+		inWsValFile := filepath.Join(wsDir, "in-ws-vals.yaml")
+		require.NoError(t, os.WriteFile(inWsValFile, []byte("replicaCount: 3\n"), 0o600))
+
+		valueOpts := cautils.HelmValueOptions{
+			ValueFiles: []string{inWsValFile},
+		}
+		sources, workloads, err := getWorkloadFromHelmChart(context.Background(), inWsChart, inWsChart, workloadRelPath, valueOpts, 0, wsDir)
+		require.NoError(t, err)
+		assert.NotEmpty(t, sources)
+		assert.Len(t, workloads, 1)
+		assert.Equal(t, "demo-deploy", workloads[0].GetName())
+	})
+
+	t.Run("omitted workspace permits outside chart without containment error", func(t *testing.T) {
+		outsideWlPath := filepath.Join(outsideChart, "templates", "deployment.yaml")
+		sources, workloads, err := getWorkloadFromHelmChart(context.Background(), outsideChart, outsideChart, outsideWlPath, cautils.HelmValueOptions{}, 0)
+		require.NoError(t, err)
+		assert.NotEmpty(t, sources)
+		assert.Len(t, workloads, 1)
+	})
+}
+
+func TestGetResources_ChartAndFileRoute_EnforcesWorkspaceContainment(t *testing.T) {
+	wsDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	inWsChart := createTestHelmChartHelper(t, wsDir, "ws-chart")
+	outsideChart := createTestHelmChartHelper(t, outsideDir, "outside-chart")
+
+	t.Run("rejects outside chart path when workspace configured", func(t *testing.T) {
+		scanInfo := &cautils.ScanInfo{
+			InputPatterns: []string{outsideChart},
+			ChartPath:     outsideChart,
+			FilePath:      filepath.Join(outsideChart, "templates", "deployment.yaml"),
+			WorkspaceDir:  wsDir,
+		}
+		session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+
+		_, _, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("rejects outside set-file when workspace configured", func(t *testing.T) {
+		outsideFile := filepath.Join(outsideDir, "stolen.txt")
+		require.NoError(t, os.WriteFile(outsideFile, []byte("payload\n"), 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			InputPatterns:     []string{inWsChart},
+			ChartPath:         inWsChart,
+			FilePath:          filepath.Join(inWsChart, "templates", "deployment.yaml"),
+			WorkspaceDir:      wsDir,
+			HelmSetFileValues: []string{"custom=" + outsideFile},
+		}
+		session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+
+		_, _, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, pathcontainment.ErrPathEscapesWorkspace)
+	})
+
+	t.Run("permits in-workspace chart and files", func(t *testing.T) {
+		scanInfo := &cautils.ScanInfo{
+			InputPatterns: []string{inWsChart},
+			ChartPath:     inWsChart,
+			FilePath:      filepath.Join(inWsChart, "templates", "deployment.yaml"),
+			WorkspaceDir:  wsDir,
+		}
+		session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+
+		_, _, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+		require.NoError(t, err)
+	})
+}
+
+func TestGetResources_IgnoreFileError(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		validFirst   bool
+		includeValid bool
+	}{
+		{name: "single invalid input"},
+		{name: "invalid then valid", includeValid: true},
+		{name: "valid then invalid", includeValid: true, validFirst: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			badRoot := t.TempDir()
+			// A directory is rejected portably, even when tests run as root.
+			require.NoError(t, os.Mkdir(filepath.Join(badRoot, cautils.IgnoreFileName), 0o700))
+			require.NoError(t, os.WriteFile(filepath.Join(badRoot, "bad.yaml"), []byte(singlePodManifest), 0o600))
+			inputs := []string{badRoot}
+			if tc.includeValid {
+				validPath := filepath.Join(t.TempDir(), "pod.yaml")
+				require.NoError(t, os.WriteFile(validPath, []byte(singlePodManifest), 0o600))
+				if tc.validFirst {
+					inputs = append([]string{validPath}, inputs...)
+				} else {
+					inputs = append(inputs, validPath)
+				}
+			}
+			match := reporthandling.RuleMatchObjects{
+				APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"pods"},
+			}
+			framework := *mockFramework("test-framework", []reporthandling.Control{
+				mockControl("test-control", []reporthandling.PolicyRule{
+					mockRule("test-rule", []reporthandling.RuleMatchObjects{match}, ""),
+				}),
+			})
+			scanInfo := &cautils.ScanInfo{InputPatterns: inputs}
+			session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo, nil)
+			_, resources, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+			if !tc.includeValid {
+				require.ErrorIs(t, err, cautils.ErrIgnoreFileNotRegular)
+				assert.Empty(t, resources)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, resources, 1, "the valid input must still be scanned")
+			require.Len(t, session.SkippedManifests, 1)
+			assert.Equal(t, badRoot, session.SkippedManifests[0].Path)
+			assert.Contains(t, session.SkippedManifests[0].Reason, cautils.ErrIgnoreFileNotRegular.Error())
+			// The anonymizer hides this path in the reason.
+			assert.Equal(t, filepath.Join(badRoot, cautils.IgnoreFileName), session.SkippedManifests[0].IgnoreFile)
 		})
 	}
 }

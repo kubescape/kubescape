@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -50,4 +52,32 @@ func TestSetAndGetAccount(t *testing.T) {
 			assert.Equal(t, tt.account, GetAccount())
 		})
 	}
+}
+
+func TestCredentialsConcurrentAccess(t *testing.T) {
+	origAccessKey, origAccount := GetAccessKey(), GetAccount()
+	defer func() {
+		SetAccessKey(origAccessKey)
+		SetAccount(origAccount)
+	}()
+
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for j := range 100 {
+				SetAccessKey(fmt.Sprintf("key-%d", j))
+				SetAccount(fmt.Sprintf("acc-%d", j))
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for range 100 {
+				_ = GetAccessKey()
+				_ = GetAccount()
+			}
+		}()
+	}
+	wg.Wait()
 }

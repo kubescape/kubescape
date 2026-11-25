@@ -41,6 +41,7 @@ func NewOperatorAdapterWithClient(scanInfo cautils.OperatorScanInfo, ns string, 
 	}
 }
 
+// OperatorScan creates commands and waits for their completion, with a separate timeout for each phase.
 func (a *OperatorAdapter) OperatorScan(ctx ...context.Context) (string, error) {
 	c := context.Background()
 	if len(ctx) > 0 && ctx[0] != nil {
@@ -53,18 +54,24 @@ func (a *OperatorAdapter) OperatorScan(ctx ...context.Context) (string, error) {
 	if err := c.Err(); err != nil {
 		return "", err
 	}
-	names, err := CreateOperatorCommands(c, a.dyn, a.namespace, *payload)
-	if err != nil {
-		return "", err
-	}
 	timeout := a.timeout
 	if timeout <= 0 {
 		timeout = defaultOperatorCommandTimeout
 	}
-	if err := WaitForOperatorCommands(c, a.dyn, a.namespace, names, timeout); err != nil {
+	createCtx, cancel := context.WithTimeout(c, timeout)
+	names, err := CreateOperatorCommands(createCtx, a.dyn, a.namespace, *payload)
+	cancel()
+	if err != nil {
+		return "", err
+	}
+	payloads, err := WaitForOperatorCommandsWithPayloads(c, a.dyn, a.namespace, names, timeout)
+	if err != nil {
 		return "", err
 	}
 	logger.L().Info("All operator commands completed")
+	if len(names) == 1 && payloads[names[0]] != "" {
+		return payloads[names[0]], nil
+	}
 	return "success", nil
 }
 

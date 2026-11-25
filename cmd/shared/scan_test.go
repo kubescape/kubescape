@@ -308,8 +308,17 @@ func TestValidateCommonScanFlags(t *testing.T) {
 			expectedErr:   "",
 		},
 		{
-			name:          "Padded max severity accepted",
+			name:          "Padded max severity accepted and normalized",
 			maxSeverity:   "  critical  ",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "",
+		},
+		{
+			name:          "Padded and mixed-case severities normalized",
+			severity:      "  HIGH  ",
+			minSeverity:   "  medium ",
+			maxSeverity:   " Critical ",
 			format:        "json",
 			formatChanged: true,
 			expectedErr:   "",
@@ -338,10 +347,88 @@ func TestValidateCommonScanFlags(t *testing.T) {
 
 			if tt.expectedErr == "" {
 				assert.NoError(t, err)
+				if tt.severity != "" {
+					assert.Equal(t, strings.ToLower(strings.TrimSpace(tt.severity)), scanInfo.FailThresholdSeverity)
+				}
+				if tt.minSeverity != "" {
+					assert.Equal(t, strings.ToLower(strings.TrimSpace(tt.minSeverity)), scanInfo.MinSeverity)
+				}
+				if tt.maxSeverity != "" {
+					assert.Equal(t, strings.ToLower(strings.TrimSpace(tt.maxSeverity)), scanInfo.MaxSeverity)
+				}
 			} else {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedErr)
 			}
+		})
+	}
+}
+
+func TestValidateCommonScanFlags_ExplicitEmptySeverityFlags(t *testing.T) {
+	tests := []struct {
+		name     string
+		flagName string
+		setup    func(*cobra.Command, *cautils.ScanInfo)
+	}{
+		{
+			name:     "empty --severity-threshold is rejected",
+			flagName: "severity-threshold",
+			setup: func(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
+				cmd.Flags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "")
+				_ = cmd.Flags().Set("severity-threshold", "")
+			},
+		},
+		{
+			name:     "whitespace --severity-threshold is rejected",
+			flagName: "severity-threshold",
+			setup: func(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
+				cmd.Flags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "")
+				_ = cmd.Flags().Set("severity-threshold", "   ")
+			},
+		},
+		{
+			name:     "empty --min-severity is rejected",
+			flagName: "min-severity",
+			setup: func(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
+				cmd.Flags().StringVar(&scanInfo.MinSeverity, "min-severity", "", "")
+				_ = cmd.Flags().Set("min-severity", "")
+			},
+		},
+		{
+			name:     "whitespace --min-severity is rejected",
+			flagName: "min-severity",
+			setup: func(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
+				cmd.Flags().StringVar(&scanInfo.MinSeverity, "min-severity", "", "")
+				_ = cmd.Flags().Set("min-severity", "   ")
+			},
+		},
+		{
+			name:     "empty --max-severity is rejected",
+			flagName: "max-severity",
+			setup: func(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
+				cmd.Flags().StringVar(&scanInfo.MaxSeverity, "max-severity", "", "")
+				_ = cmd.Flags().Set("max-severity", "")
+			},
+		},
+		{
+			name:     "whitespace --max-severity is rejected",
+			flagName: "max-severity",
+			setup: func(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
+				cmd.Flags().StringVar(&scanInfo.MaxSeverity, "max-severity", "", "")
+				_ = cmd.Flags().Set("max-severity", "   ")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{}
+			cmd := &cobra.Command{}
+			tt.setup(cmd, scanInfo)
+
+			err := ValidateCommonScanFlags(cmd, scanInfo, ScanFormats)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrUnknownSeverity)
 		})
 	}
 }
@@ -618,6 +705,168 @@ func TestValidateKindFilters(t *testing.T) {
 	}
 }
 
+func TestValidateNamespaceFilters(t *testing.T) {
+	tests := []struct {
+		name              string
+		includeNamespaces string
+		excludeNamespaces string
+		expectedErr       string
+	}{
+		{
+			name:              "both empty is valid",
+			includeNamespaces: "",
+			excludeNamespaces: "",
+			expectedErr:       "",
+		},
+		{
+			name:              "valid include-namespaces",
+			includeNamespaces: "default,kube-system",
+			excludeNamespaces: "",
+			expectedErr:       "",
+		},
+		{
+			name:              "valid exclude-namespaces",
+			includeNamespaces: "",
+			excludeNamespaces: "kube-system,kube-public",
+			expectedErr:       "",
+		},
+		{
+			name:              "include-namespaces whitespace-only tokens are rejected",
+			includeNamespaces: " , , ",
+			excludeNamespaces: "",
+			expectedErr:       "contains no valid namespace names",
+		},
+		{
+			name:              "exclude-namespaces whitespace-only tokens are rejected",
+			includeNamespaces: "",
+			excludeNamespaces: "  ,  ",
+			expectedErr:       "contains no valid namespace names",
+		},
+		{
+			name:              "single valid namespace passes",
+			includeNamespaces: "prod",
+			excludeNamespaces: "",
+			expectedErr:       "",
+		},
+		{
+			name:              "padded valid namespace passes",
+			includeNamespaces: "  prod  ",
+			excludeNamespaces: "",
+			expectedErr:       "",
+		},
+		{
+			name:              "wildcard namespace passes",
+			includeNamespaces: "*",
+			excludeNamespaces: "",
+			expectedErr:       "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				IncludeNamespaces:  tt.includeNamespaces,
+				ExcludedNamespaces: tt.excludeNamespaces,
+			}
+			err := ValidateNamespaceFilters(scanInfo)
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
+func TestValidateCommonScanFlags_NamespaceFilters(t *testing.T) {
+	tests := []struct {
+		name        string
+		flagName    string
+		flagVal     string
+		setFlag     bool
+		setInfo     func(*cautils.ScanInfo, string)
+		expectedErr string
+	}{
+		{
+			name:     "omitted include-namespaces is valid",
+			flagName: "include-namespaces",
+			setFlag:  false,
+			setInfo:  func(s *cautils.ScanInfo, v string) { s.IncludeNamespaces = v },
+		},
+		{
+			name:     "omitted exclude-namespaces is valid",
+			flagName: "exclude-namespaces",
+			setFlag:  false,
+			setInfo:  func(s *cautils.ScanInfo, v string) { s.ExcludedNamespaces = v },
+		},
+		{
+			name:        "explicit empty include-namespaces is rejected",
+			flagName:    "include-namespaces",
+			flagVal:     "",
+			setFlag:     true,
+			setInfo:     func(s *cautils.ScanInfo, v string) { s.IncludeNamespaces = v },
+			expectedErr: `--include-namespaces value "" contains no valid namespace names`,
+		},
+		{
+			name:        "explicit whitespace include-namespaces is rejected",
+			flagName:    "include-namespaces",
+			flagVal:     "   ",
+			setFlag:     true,
+			setInfo:     func(s *cautils.ScanInfo, v string) { s.IncludeNamespaces = v },
+			expectedErr: `--include-namespaces value "   " contains no valid namespace names`,
+		},
+		{
+			name:        "explicit empty exclude-namespaces is rejected",
+			flagName:    "exclude-namespaces",
+			flagVal:     "",
+			setFlag:     true,
+			setInfo:     func(s *cautils.ScanInfo, v string) { s.ExcludedNamespaces = v },
+			expectedErr: `--exclude-namespaces value "" contains no valid namespace names`,
+		},
+		{
+			name:        "explicit whitespace exclude-namespaces is rejected",
+			flagName:    "exclude-namespaces",
+			flagVal:     "   ",
+			setFlag:     true,
+			setInfo:     func(s *cautils.ScanInfo, v string) { s.ExcludedNamespaces = v },
+			expectedErr: `--exclude-namespaces value "   " contains no valid namespace names`,
+		},
+		{
+			name:     "valid include-namespaces passes",
+			flagName: "include-namespaces",
+			flagVal:  "default",
+			setFlag:  true,
+			setInfo:  func(s *cautils.ScanInfo, v string) { s.IncludeNamespaces = v },
+		},
+		{
+			name:     "valid exclude-namespaces passes",
+			flagName: "exclude-namespaces",
+			flagVal:  "kube-system",
+			setFlag:  true,
+			setInfo:  func(s *cautils.ScanInfo, v string) { s.ExcludedNamespaces = v },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := &cautils.ScanInfo{Format: "json"}
+			tt.setInfo(info, tt.flagVal)
+			cmd := &cobra.Command{}
+			cmd.Flags().String(tt.flagName, "", "")
+			if tt.setFlag {
+				require.NoError(t, cmd.Flags().Set(tt.flagName, tt.flagVal))
+			}
+			err := ValidateCommonScanFlags(cmd, info, ScanFormats)
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.EqualError(t, err, tt.expectedErr)
+			}
+		})
+	}
+}
+
 func TestValidateExcludePaths(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -722,6 +971,162 @@ func TestValidateExcludeControls(t *testing.T) {
 	}
 }
 
+func TestValidateControlFilters(t *testing.T) {
+	tests := []struct {
+		name        string
+		include     string
+		skip        string
+		expectedErr string
+	}{
+		{
+			name:        "empty filters are valid",
+			include:     "",
+			skip:        "",
+			expectedErr: "",
+		},
+		{
+			name:        "valid single and comma-separated controls",
+			include:     "C-0016,C-0017",
+			skip:        "C-0018",
+			expectedErr: "",
+		},
+		{
+			name:        "padded control IDs are valid",
+			include:     " C-0016 , C-0017 ",
+			skip:        " C-0018 ",
+			expectedErr: "",
+		},
+		{
+			name:        "include controls with empty token is rejected",
+			include:     "C-0016,",
+			expectedErr: "--include-controls contains an empty control identifier",
+		},
+		{
+			name:        "include controls with whitespace-only token is rejected",
+			include:     "C-0016,   ,C-0017",
+			expectedErr: "--include-controls contains an empty control identifier",
+		},
+		{
+			name:        "include controls whitespace only is rejected",
+			include:     "   ",
+			expectedErr: "--include-controls contains an empty control identifier",
+		},
+		{
+			name:        "skip controls with empty token is rejected",
+			skip:        "C-0016,",
+			expectedErr: "--skip-controls contains an empty control identifier",
+		},
+		{
+			name:        "skip controls with whitespace-only token is rejected",
+			skip:        "C-0016,   ",
+			expectedErr: "--skip-controls contains an empty control identifier",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateControlFilters(&cautils.ScanInfo{
+				IncludeControls: tt.include,
+				SkipControls:    tt.skip,
+			})
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
+func TestValidateCommonScanFlags_ControlFilters(t *testing.T) {
+	tests := []struct {
+		name        string
+		flagName    string
+		flagVal     string
+		setFlag     bool
+		setInfo     func(*cautils.ScanInfo, string)
+		expectedErr string
+	}{
+		{
+			name:     "omitted include-controls is valid",
+			flagName: "include-controls",
+			setFlag:  false,
+			setInfo:  func(s *cautils.ScanInfo, v string) { s.IncludeControls = v },
+		},
+		{
+			name:     "omitted skip-controls is valid",
+			flagName: "skip-controls",
+			setFlag:  false,
+			setInfo:  func(s *cautils.ScanInfo, v string) { s.SkipControls = v },
+		},
+		{
+			name:        "explicit empty include-controls is rejected",
+			flagName:    "include-controls",
+			flagVal:     "",
+			setFlag:     true,
+			setInfo:     func(s *cautils.ScanInfo, v string) { s.IncludeControls = v },
+			expectedErr: "--include-controls contains an empty control identifier",
+		},
+		{
+			name:        "explicit whitespace include-controls is rejected",
+			flagName:    "include-controls",
+			flagVal:     "   ",
+			setFlag:     true,
+			setInfo:     func(s *cautils.ScanInfo, v string) { s.IncludeControls = v },
+			expectedErr: "--include-controls contains an empty control identifier",
+		},
+		{
+			name:        "explicit empty skip-controls is rejected",
+			flagName:    "skip-controls",
+			flagVal:     "",
+			setFlag:     true,
+			setInfo:     func(s *cautils.ScanInfo, v string) { s.SkipControls = v },
+			expectedErr: "--skip-controls contains an empty control identifier",
+		},
+		{
+			name:        "explicit whitespace skip-controls is rejected",
+			flagName:    "skip-controls",
+			flagVal:     "   ",
+			setFlag:     true,
+			setInfo:     func(s *cautils.ScanInfo, v string) { s.SkipControls = v },
+			expectedErr: "--skip-controls contains an empty control identifier",
+		},
+		{
+			name:     "valid include-controls passes",
+			flagName: "include-controls",
+			flagVal:  "C-0016",
+			setFlag:  true,
+			setInfo:  func(s *cautils.ScanInfo, v string) { s.IncludeControls = v },
+		},
+		{
+			name:     "valid skip-controls passes",
+			flagName: "skip-controls",
+			flagVal:  "C-0016",
+			setFlag:  true,
+			setInfo:  func(s *cautils.ScanInfo, v string) { s.SkipControls = v },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := &cautils.ScanInfo{Format: "json"}
+			tt.setInfo(info, tt.flagVal)
+			cmd := &cobra.Command{}
+			cmd.Flags().String(tt.flagName, "", "")
+			if tt.setFlag {
+				require.NoError(t, cmd.Flags().Set(tt.flagName, tt.flagVal))
+			}
+			err := ValidateCommonScanFlags(cmd, info, ScanFormats)
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.EqualError(t, err, tt.expectedErr)
+			}
+		})
+	}
+}
+
 func TestValidateLabelSelector(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -818,6 +1223,108 @@ func TestValidateCommonScanFlags_SBOMFormats(t *testing.T) {
 			format:     printer.SPDXFormat,
 			scanType:   cautils.ScanTypeImage,
 			scanImages: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := &cobra.Command{}
+			cmd.Flags().String("format", "", "")
+			scanInfo := &cautils.ScanInfo{
+				Format:     tt.format,
+				ScanImages: tt.scanImages,
+				ScanType:   tt.scanType,
+			}
+			err := ValidateCommonScanFlags(cmd, scanInfo, ScanFormats)
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Equal(t, tt.expectedErr, err.Error())
+			}
+		})
+	}
+}
+
+func TestValidateCommonScanFlags_PathFlags(t *testing.T) {
+	flags := []struct {
+		name    string
+		set     func(*cautils.ScanInfo, string)
+		get     func(*cautils.ScanInfo) string
+		wantErr string
+	}{
+		{"output", func(s *cautils.ScanInfo, v string) { s.Output = v }, func(s *cautils.ScanInfo) string { return s.Output }, "output file path cannot be empty"},
+		{"controls-config", func(s *cautils.ScanInfo, v string) { s.ControlsInputs = v }, func(s *cautils.ScanInfo) string { return s.ControlsInputs }, "--controls-config needs a file path"},
+		{"exceptions", func(s *cautils.ScanInfo, v string) { s.UseExceptions = v }, func(s *cautils.ScanInfo) string { return s.UseExceptions }, "--exceptions needs a file path"},
+		{"use-artifacts-from", func(s *cautils.ScanInfo, v string) { s.UseArtifactsFrom = v }, func(s *cautils.ScanInfo) string { return s.UseArtifactsFrom }, "--use-artifacts-from needs a directory path"},
+		{"custom-rules", func(s *cautils.ScanInfo, v string) { s.CustomRules = v }, func(s *cautils.ScanInfo) string { return s.CustomRules }, "--custom-rules needs a path"},
+		{"file-path", func(s *cautils.ScanInfo, v string) { s.FilePath = v }, func(s *cautils.ScanInfo) string { return s.FilePath }, "--file-path needs a file path"},
+		{"chart-path", func(s *cautils.ScanInfo, v string) { s.ChartPath = v }, func(s *cautils.ScanInfo) string { return s.ChartPath }, "--chart-path needs a path"},
+	}
+
+	for _, f := range flags {
+		for _, ws := range []string{"", "   ", "\t\n"} {
+			t.Run(f.name+"_whitespace", func(t *testing.T) {
+				info := &cautils.ScanInfo{Format: "json"}
+				f.set(info, ws)
+				cmd := &cobra.Command{}
+				cmd.Flags().String(f.name, "", "")
+				require.NoError(t, cmd.Flags().Set(f.name, ws))
+				err := ValidateCommonScanFlags(cmd, info, ScanFormats)
+				require.EqualError(t, err, f.wantErr)
+			})
+		}
+		t.Run(f.name+"_inherited_whitespace", func(t *testing.T) {
+			info := &cautils.ScanInfo{Format: "json"}
+			f.set(info, "   ")
+			parent := &cobra.Command{Use: "parent"}
+			child := &cobra.Command{Use: "child"}
+			parent.AddCommand(child)
+			parent.PersistentFlags().String(f.name, "", "")
+			require.NoError(t, parent.PersistentFlags().Set(f.name, "   "))
+			err := ValidateCommonScanFlags(child, info, ScanFormats)
+			require.EqualError(t, err, f.wantErr)
+		})
+		t.Run(f.name+"_trims_whitespace", func(t *testing.T) {
+			info := &cautils.ScanInfo{Format: "json"}
+			f.set(info, "  path/to/target  ")
+			cmd := &cobra.Command{}
+			cmd.Flags().String(f.name, "", "")
+			require.NoError(t, cmd.Flags().Set(f.name, "  path/to/target  "))
+			require.NoError(t, ValidateCommonScanFlags(cmd, info, ScanFormats))
+			assert.Equal(t, "path/to/target", f.get(info))
+		})
+	}
+}
+
+func TestValidateCommonScanFlags_ExceptionsWithScanImages(t *testing.T) {
+	tests := []struct {
+		name        string
+		format      string
+		scanType    cautils.ScanTypes
+		scanImages  bool
+		expectedErr string
+	}{
+		{
+			name:        "exceptions on posture scan with --scan-images is rejected",
+			format:      printer.ExceptionsFormat,
+			scanType:    cautils.ScanTypeCluster,
+			scanImages:  true,
+			expectedErr: "exceptions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images",
+		},
+		{
+			name:        "exceptions on posture scan without --scan-images is accepted",
+			format:      printer.ExceptionsFormat,
+			scanType:    cautils.ScanTypeCluster,
+			scanImages:  false,
+			expectedErr: "",
+		},
+		{
+			name:        "comma-separated formats containing exceptions with --scan-images is rejected",
+			format:      "json,exceptions",
+			scanType:    cautils.ScanTypeCluster,
+			scanImages:  true,
+			expectedErr: "exceptions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images",
 		},
 	}
 

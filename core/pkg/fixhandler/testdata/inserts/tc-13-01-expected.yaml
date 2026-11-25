@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-with-init-container
+
+spec:
+  # Pre-flight init container
+  initContainers:
+  - name: init-service
+    image: busybox:1.36
+    securityContext:
+      allowPrivilegeEscalation: false
+  containers:
+  - name: main-app
+    image: nginx:1.25

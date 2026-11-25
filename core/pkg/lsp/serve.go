@@ -2,11 +2,15 @@ package lsp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/core"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	"go.lsp.dev/jsonrpc2"
 	"go.lsp.dev/protocol"
 )
@@ -41,7 +45,11 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, scanner Scanner, op
 // serve is Serve with the scan as a function, for tests.
 func serve(ctx context.Context, in io.Reader, out io.Writer, scan func(context.Context, []string) (scanFindings, error), debounce time.Duration) (int, error) {
 	srv := newServer(scan, debounce)
-	defer srv.close()
+	// The coordinator can be blocked writing diagnostics to a client that stopped
+	// reading, and nothing interrupts that write: the wait for it is bounded, and
+	// made once, so the session still ends.
+	closeServer := sync.OnceFunc(func() { closeWithin(closerFunc(srv.close), closeLimit) })
+	defer closeServer()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -64,10 +72,10 @@ func serve(ctx context.Context, in io.Reader, out io.Writer, scan func(context.C
 			return code, nil
 		default:
 		}
-		srv.close()
+		closeServer()
 		return srv.codeWithoutExit(), conn.Err()
 	case <-ctx.Done():
-		srv.close()
+		closeServer()
 		return srv.codeWithoutExit(), nil
 	}
 }
@@ -85,13 +93,48 @@ func (s *server) codeWithoutExit() int {
 
 // scanWith adapts a scanner to what the coordinator needs.
 func scanWith(s Scanner) func(context.Context, []string) (scanFindings, error) {
-	return func(ctx context.Context, paths []string) (scanFindings, error) {
+	scan := func(ctx context.Context, paths []string) (scanFindings, error) {
 		result, err := s.Scan(ctx, core.LocalInput{Paths: paths})
 		if err != nil {
 			return scanFindings{}, err
 		}
 		return findingsOf(result.Session, result.Coverage), nil
 	}
+	return func(ctx context.Context, paths []string) (scanFindings, error) {
+		findings, err := scan(ctx, paths)
+		if err == nil || len(paths) < 2 || !nothingToScan(err) {
+			return findings, err
+		}
+		// A scan of several inputs fails when one of them has nothing to scan,
+		// such as a workspace folder without manifests or an open values file.
+		// Such an input has no findings, so the others are scanned without it.
+		var rest []string
+		for _, path := range paths {
+			alone, aloneErr := scan(ctx, []string{path})
+			if nothingToScan(aloneErr) {
+				continue
+			}
+			if aloneErr != nil {
+				return scanFindings{}, aloneErr
+			}
+			findings = alone
+			rest = append(rest, path)
+		}
+		switch len(rest) {
+		case 0:
+			return scanFindings{}, err
+		case 1:
+			return findings, nil
+		default:
+			return scan(ctx, rest)
+		}
+	}
+}
+
+// nothingToScan reports whether a scan failed only because an input holds no
+// manifests or no Kubernetes objects, as cmd/scan's watch also tells apart.
+func nothingToScan(err error) bool {
+	return errors.Is(err, cautils.ErrNoManifestFiles) || errors.Is(err, resourcehandler.ErrNoScannableResources)
 }
 
 // codec encodes and decodes the protocol's messages: the protocol package's own,
@@ -152,4 +195,12 @@ func closeWithin(c io.Closer, limit time.Duration) {
 	case <-done:
 	case <-time.After(limit):
 	}
+}
+
+// closerFunc makes a function that cannot fail an io.Closer, for closeWithin.
+type closerFunc func()
+
+func (f closerFunc) Close() error {
+	f()
+	return nil
 }

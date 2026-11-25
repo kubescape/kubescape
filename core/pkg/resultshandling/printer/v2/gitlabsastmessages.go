@@ -192,9 +192,11 @@ func boundGitLabMessage(s string) string {
 
 // gitLabDisplayPath shows a skipped manifest relative to the scan root when it
 // lies inside it, so the report does not carry the CI runner's absolute paths.
+// The root of a repository scan has its symlinks resolved and the manifest's
+// path does not, so the two are related the way the loader relates them.
 func gitLabDisplayPath(p, basePath string) string {
 	if basePath != "" {
-		if rel, err := filepath.Rel(basePath, p); err == nil && isRepositoryRelative(rel) {
+		if rel, err := cautils.RelativeToRoot(basePath, p); err == nil && isRepositoryRelative(rel) {
 			return filepath.ToSlash(rel)
 		}
 	}

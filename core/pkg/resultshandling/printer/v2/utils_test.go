@@ -1067,6 +1067,46 @@ func TestSetSeverityToSummaryMap(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "case insensitive and whitespace trimming canonicalization",
+			cves: []imageprinter.CVE{
+				{
+					ID:         "CVE-2024-0001",
+					Severity:   " critical ",
+					FixedState: string(v5.FixedState),
+				},
+				{
+					ID:         "CVE-2024-0002",
+					Severity:   "CRITICAL",
+					FixedState: string(v5.NotFixedState),
+				},
+				{
+					ID:         "CVE-2024-0003",
+					Severity:   "high",
+					FixedState: string(v5.FixedState),
+				},
+				{
+					ID:         "CVE-2024-0004",
+					Severity:   "  CustomSeverity  ",
+					FixedState: string(v5.NotFixedState),
+				},
+			},
+			originalMap: nil,
+			want: map[string]*imageprinter.SeveritySummary{
+				"Critical": {
+					NumberOfCVEs:        2,
+					NumberOfFixableCVEs: 1,
+				},
+				"High": {
+					NumberOfCVEs:        1,
+					NumberOfFixableCVEs: 1,
+				},
+				"CustomSeverity": {
+					NumberOfCVEs:        1,
+					NumberOfFixableCVEs: 0,
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -1493,6 +1533,18 @@ func Test_mapInfoToPrintInfo_stableMarkers(t *testing.T) {
 	for i := 0; i < 64; i++ {
 		require.Equalf(t, want, mapInfoToPrintInfo(controls), "iteration %d", i)
 	}
+}
+
+func Test_mapInfoToPrintInfo_NilStatusSafety(t *testing.T) {
+	controls := reportsummary.ControlSummaries{
+		"C-0001": reportsummary.ControlSummary{
+			ControlID: "C-0001",
+		},
+	}
+	assert.NotPanics(t, func() {
+		res := mapInfoToPrintInfo(controls)
+		assert.Empty(t, res)
+	})
 }
 
 func TestFilterBySeverity(t *testing.T) {

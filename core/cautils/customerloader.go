@@ -68,11 +68,12 @@ func ConfigFileFullPath() string { return getter.GetDefaultPath(configFileName +
 // ======================================================================================
 
 type ConfigObj struct {
-	AccountID      string `json:"accountID,omitempty"`
-	ClusterName    string `json:"clusterName,omitempty"`
-	CloudReportURL string `json:"cloudReportURL,omitempty"`
-	CloudAPIURL    string `json:"cloudAPIURL,omitempty"`
-	AccessKey      string `json:"accessKey,omitempty"`
+	AccountID           string `json:"accountID,omitempty"`
+	ClusterName         string `json:"clusterName,omitempty"`
+	CloudReportURL      string `json:"cloudReportURL,omitempty"`
+	CloudAPIURL         string `json:"cloudAPIURL,omitempty"`
+	AccessKey           string `json:"accessKey,omitempty"`
+	ExplicitClusterName bool   `json:"-"`
 }
 
 // Config - convert ConfigObj to config file
@@ -104,6 +105,7 @@ func (co *ConfigObj) updateEmptyFields(inCO *ConfigObj) error {
 	}
 	if co.ClusterName == "" && inCO.ClusterName != "" {
 		co.ClusterName = inCO.ClusterName
+		co.ExplicitClusterName = inCO.ExplicitClusterName
 	}
 
 	return nil
@@ -166,12 +168,42 @@ func NewLocalConfig(accountID, accessKey, clusterName, customClusterName string)
 	return lc
 }
 
-func (lc *LocalConfig) GetConfigObj() *ConfigObj  { return lc.configObj }
-func (lc *LocalConfig) GetAccountID() string      { return lc.configObj.AccountID }
-func (lc *LocalConfig) GetContextName() string    { return lc.configObj.ClusterName }
-func (lc *LocalConfig) GetCloudReportURL() string { return lc.configObj.CloudReportURL }
-func (lc *LocalConfig) GetCloudAPIURL() string    { return lc.configObj.CloudAPIURL }
-func (lc *LocalConfig) GetAccessKey() string      { return lc.configObj.AccessKey }
+func (lc *LocalConfig) GetConfigObj() *ConfigObj {
+	if lc == nil {
+		return nil
+	}
+	return lc.configObj
+}
+func (lc *LocalConfig) GetAccountID() string {
+	if lc == nil || lc.configObj == nil {
+		return ""
+	}
+	return lc.configObj.AccountID
+}
+func (lc *LocalConfig) GetContextName() string {
+	if lc == nil || lc.configObj == nil {
+		return ""
+	}
+	return lc.configObj.ClusterName
+}
+func (lc *LocalConfig) GetCloudReportURL() string {
+	if lc == nil || lc.configObj == nil {
+		return ""
+	}
+	return lc.configObj.CloudReportURL
+}
+func (lc *LocalConfig) GetCloudAPIURL() string {
+	if lc == nil || lc.configObj == nil {
+		return ""
+	}
+	return lc.configObj.CloudAPIURL
+}
+func (lc *LocalConfig) GetAccessKey() string {
+	if lc == nil || lc.configObj == nil {
+		return ""
+	}
+	return lc.configObj.AccessKey
+}
 
 func (lc *LocalConfig) GenerateAccountID() (string, error) {
 	lc.configObj.AccountID = uuid.NewString()
@@ -186,6 +218,9 @@ func (lc *LocalConfig) DeleteCredentials() error {
 }
 
 func (lc *LocalConfig) UpdateCachedConfig() error {
+	if lc == nil || lc.configObj == nil {
+		return errors.New("uninitialized local config")
+	}
 	logger.L().Debug("updating cached config", helpers.Interface("configObj", lc.configObj))
 	return updateConfigFile(lc.configObj)
 }
@@ -268,14 +303,47 @@ func NewClusterConfig(ctx context.Context, k8s *k8sinterface.KubernetesApi, acco
 	return c
 }
 
-func (c *ClusterConfig) GetConfigObj() *ConfigObj  { return c.configObj }
-func (c *ClusterConfig) GetDefaultNS() string      { return c.configMapNamespace }
-func (c *ClusterConfig) GetAccountID() string      { return c.configObj.AccountID }
-func (c *ClusterConfig) GetCloudReportURL() string { return c.configObj.CloudReportURL }
-func (c *ClusterConfig) GetCloudAPIURL() string    { return c.configObj.CloudAPIURL }
-func (c *ClusterConfig) GetAccessKey() string      { return c.configObj.AccessKey }
+func (c *ClusterConfig) GetConfigObj() *ConfigObj {
+	if c == nil {
+		return nil
+	}
+	return c.configObj
+}
+func (c *ClusterConfig) GetDefaultNS() string {
+	if c == nil {
+		return ""
+	}
+	return c.configMapNamespace
+}
+func (c *ClusterConfig) GetAccountID() string {
+	if c == nil || c.configObj == nil {
+		return ""
+	}
+	return c.configObj.AccountID
+}
+func (c *ClusterConfig) GetCloudReportURL() string {
+	if c == nil || c.configObj == nil {
+		return ""
+	}
+	return c.configObj.CloudReportURL
+}
+func (c *ClusterConfig) GetCloudAPIURL() string {
+	if c == nil || c.configObj == nil {
+		return ""
+	}
+	return c.configObj.CloudAPIURL
+}
+func (c *ClusterConfig) GetAccessKey() string {
+	if c == nil || c.configObj == nil {
+		return ""
+	}
+	return c.configObj.AccessKey
+}
 
 func (c *ClusterConfig) UpdateCachedConfig() error {
+	if c == nil || c.configObj == nil {
+		return errors.New("uninitialized cluster config")
+	}
 	logger.L().Debug("updating cached config", helpers.Interface("configObj", c.configObj))
 	return updateConfigFile(c.configObj)
 }
@@ -284,6 +352,9 @@ func (c *ClusterConfig) DeleteCachedConfig(_ context.Context) error {
 	return deleteCachedConfigFile()
 }
 func (c *ClusterConfig) GetContextName() string {
+	if c == nil || c.configObj == nil {
+		return ""
+	}
 	return c.configObj.ClusterName
 }
 
@@ -376,11 +447,14 @@ var configMarshal = func(v any) ([]byte, error) {
 }
 
 // marshalConfigObj serializes co for persistence, stripping ClusterName from a
-// snapshot because it is runtime-only and must not be saved. Serializing the
+// snapshot unless it was explicitly configured, because auto-derived runtime
+// cluster contexts must not be saved to the configuration file. Serializing the
 // snapshot keeps the shared runtime config unchanged for concurrent readers.
 func marshalConfigObj(co *ConfigObj) ([]byte, error) {
 	snapshot := *co
-	snapshot.ClusterName = ""
+	if !snapshot.ExplicitClusterName {
+		snapshot.ClusterName = ""
+	}
 	return configMarshal(&snapshot)
 }
 
@@ -511,7 +585,13 @@ func loadConfigFromFile(configObj *ConfigObj) error {
 		}
 		return err
 	}
-	return readConfig(dat, configObj)
+	if err := readConfig(dat, configObj); err != nil {
+		return err
+	}
+	if configObj.ClusterName != "" {
+		configObj.ExplicitClusterName = true
+	}
+	return nil
 }
 func readConfig(dat []byte, configObj *ConfigObj) error {
 

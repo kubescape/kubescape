@@ -923,8 +923,93 @@ func TestWriteConfigurationJSON_NilReportReturnsError(t *testing.T) {
 	err = writeConfigurationJSON(io.Discard, &cautils.OPASessionObj{}, []cautils.ImageScanData{{}})
 	require.EqualError(t, err, "no data provided for JSON output")
 
+	tmpFile, err := os.CreateTemp(t.TempDir(), "json-*.json")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	jp := NewJsonPrinter()
+	jp.writer = tmpFile
 	err = jp.ActionPrint(context.Background(), &cautils.OPASessionObj{}, nil)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "no data provided for JSON output")
+}
+
+func TestActionPrint_Json_NilWriterReturnsError(t *testing.T) {
+	jp := NewJsonPrinter()
+
+	// Posture scan path with nil writer returns error without panicking
+	require.NotPanics(t, func() {
+		err := jp.ActionPrint(context.Background(), cautils.NewOPASessionObjMock(), nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	// Single image scan fallback path with nil writer returns error without panicking
+	require.NotPanics(t, func() {
+		err := jp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{buildSeverityExceptionImageScanData()})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	// Multi-image scan path with nil writer returns error without panicking
+	require.NotPanics(t, func() {
+		err := jp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{
+			buildSeverityExceptionImageScanData(),
+			buildSeverityExceptionImageScanData(),
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestPrintConfigurationsScanning_NilWriterReturnsError(t *testing.T) {
+	jp := NewJsonPrinter()
+	require.NotPanics(t, func() {
+		err := printConfigurationsScanning(cautils.NewOPASessionObjMock(), nil, jp)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestPrintImageScanning_NilWriterReturnsError(t *testing.T) {
+	jp := NewJsonPrinter()
+	require.NotPanics(t, func() {
+		err := printImageScanning([]cautils.ImageScanData{buildSeverityExceptionImageScanData()}, jp)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestWriteConfigurationJSON_NilWriterReturnsError(t *testing.T) {
+	require.NotPanics(t, func() {
+		err := writeConfigurationJSON(nil, cautils.NewOPASessionObjMock(), nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestJsonPrinter_NilReceiverSafety(t *testing.T) {
+	var jp *JsonPrinter
+
+	assert.NotPanics(t, func() {
+		err := jp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := jp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := jp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		jp.Score(100)
+		jp.PrintNextSteps()
+	})
 }

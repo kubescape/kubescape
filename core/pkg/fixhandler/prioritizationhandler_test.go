@@ -106,6 +106,29 @@ func TestDetectProfileDrift_NonEmptyCapabilitiesUnchanged(t *testing.T) {
 	assert.True(t, drop)
 }
 
+// A container that already drops ALL has no capability left to drop, whether
+// or not the profile recorded one: both branches must leave its drop list alone.
+func TestDetectProfileDrift_DropAllAlreadyPresent(t *testing.T) {
+	manifest := driftTestManifest + `    securityContext:
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+        add: ["NET_BIND_SERVICE"]
+`
+	complete := map[string]string{idhelpers.StatusMetadataKey: idhelpers.Completed, idhelpers.CompletionMetadataKey: idhelpers.Full}
+
+	for name, caps := range map[string][]string{
+		"profile without capabilities":        nil,
+		"profile with the capability it adds": {"NET_BIND_SERVICE"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fixes := DetectProfileDrift([]byte(manifest), driftProfile(complete, caps, nil), "Pod", "app", 0)
+			_, drop := driftKinds(fixes)
+			assert.False(t, drop, "unexpected capabilities.drop suggestion: %v", fixes)
+		})
+	}
+}
+
 // A suppressed suggestion must not reach the application list of the CLI path.
 func TestPrepareResourcesToFix_IncompleteProfileSuppressesDrift(t *testing.T) {
 	dir := t.TempDir()

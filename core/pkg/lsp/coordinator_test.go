@@ -124,7 +124,7 @@ func (h *harness) file(name string) string {
 	h.t.Helper()
 	p := filepath.Join(h.dir, name)
 	require.NoError(h.t, os.WriteFile(p, []byte("kind: Pod\n"), 0o600))
-	h.docs.open(uriFromPath(p), p, 1)
+	h.docs.open(uriFromPath(p), p, 1, false)
 	return p
 }
 
@@ -133,7 +133,7 @@ func (h *harness) save(path string) {
 	h.t.Helper()
 	d, ok := h.docs.saved(path)
 	require.True(h.t, ok)
-	h.c.saved(path, d.version)
+	h.c.saved(d)
 }
 
 func (h *harness) nextPublish() *protocol.PublishDiagnosticsParams {
@@ -315,6 +315,50 @@ func TestADocumentWithUnsavedChangesIsLeftAlone(t *testing.T) {
 	assert.Empty(t, h.barrier())
 }
 
+func TestPendingSaveDoesNotBelongToAReopenedDocument(t *testing.T) {
+	for _, dirty := range []bool{false, true} {
+		name := "clean"
+		if dirty {
+			name = "unsaved changes"
+		}
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "pod.yaml")
+			docs := newDocumentStore()
+			docs.open(uriFromPath(path), path, 1, false)
+			require.True(t, docs.change(path, 2))
+			saved, ok := docs.saved(path)
+			require.True(t, ok)
+			var published []*protocol.PublishDiagnosticsParams
+			c := newCoordinator(docs, []string{filepath.Dir(path)}, func(context.Context, []string) (scanFindings, error) {
+				return findingsFor(true, map[string][]protocol.Diagnostic{path: {diag("disk finding")}}), nil
+			}, func(_ context.Context, p *protocol.PublishDiagnosticsParams) error {
+				published = append(published, p)
+				return nil
+			})
+			c.saved(saved)
+			_, ok = docs.close(path)
+			require.True(t, ok)
+			docs.open(uriFromPath(path), path, 1, false)
+			if dirty {
+				require.True(t, docs.change(path, 2))
+			}
+
+			// Run the pending scan only after reopening, as if the close and
+			// reopen happened before the save's debounce expired.
+			c.scanOnce(context.Background())
+			if dirty {
+				assert.Empty(t, published, "a previous lifecycle's save cannot authorize disk findings for an unsaved buffer")
+				return
+			}
+			require.Len(t, published, 1, "a clean reopened document still receives disk findings")
+			assert.Equal(t, []string{"disk finding"}, messages(published[0]))
+			version, ok := published[0].Version.Get()
+			require.True(t, ok)
+			assert.Equal(t, int32(1), version)
+		})
+	}
+}
+
 func TestClosingADocumentClearsItsDiagnostics(t *testing.T) {
 	var path string
 	scan := newFakeScan(func(int, []string) (scanFindings, error) {
@@ -355,6 +399,63 @@ func TestNothingIsPublishedForADocumentClosedDuringAScan(t *testing.T) {
 	assert.Equal(t, uriFromPath(staying), string(p.URI), "the scan still serves the documents that are open")
 	assert.Equal(t, []string{"kept"}, messages(p))
 	assert.Empty(t, h.barrier(), "and publishes nothing for the closed one")
+}
+
+func TestNothingIsPublishedForADocumentClosedAndReopenedDuringAScan(t *testing.T) {
+	var target, staying string
+	proceed := make(chan struct{})
+	scan := newFakeScan(func(int, []string) (scanFindings, error) {
+		return findingsFor(true, map[string][]protocol.Diagnostic{target: {diag("stale")}, staying: {diag("kept")}}), nil
+	})
+	scan.gate = func(int) <-chan struct{} { return proceed }
+	h := newHarness(t, scan, true)
+	target, staying = h.file("target.yaml"), h.file("staying.yaml")
+
+	h.save(staying)
+	h.waitScan()
+
+	// Close target and immediately reopen it with the same version (1).
+	d, _ := h.docs.close(target)
+	h.c.closed(d)
+	assert.Equal(t, uriFromPath(target), string(h.nextPublish().URI), "the close's own empty list")
+
+	h.docs.open(uriFromPath(target), target, 1, false)
+	close(proceed)
+
+	p := h.nextPublish()
+	assert.Equal(t, uriFromPath(staying), string(p.URI), "the scan serves the staying document")
+	assert.Equal(t, []string{"kept"}, messages(p))
+	assert.Empty(t, h.barrier(), "and publishes nothing for the reopened document whose scan belongs to a prior lifecycle")
+}
+
+func TestSymlinkAndRealFileOpenConcurrentlyTrackVersionsIndependently(t *testing.T) {
+	var realFile string
+	scan := newFakeScan(func(int, []string) (scanFindings, error) {
+		return findingsFor(true, map[string][]protocol.Diagnostic{realFile: {diag("vuln")}}), nil
+	})
+	h := newHarness(t, scan, true)
+	realFile = h.file("real.yaml")
+	symFile := filepath.Join(h.dir, "symlink.yaml")
+	require.NoError(t, os.Symlink(realFile, symFile))
+
+	// Open both real and symlink documents with different versions.
+	h.docs.open(uriFromPath(realFile), realFile, 1, false)
+	h.docs.open(uriFromPath(symFile), symFile, 2, false)
+
+	h.save(realFile)
+
+	got := map[string]int32{}
+	gotMsgs := map[string][]string{}
+	for range 2 {
+		p := h.nextPublish()
+		name := filepath.Base(mustPath(t, string(p.URI)))
+		v, ok := p.Version.Get()
+		require.True(t, ok)
+		got[name] = v
+		gotMsgs[name] = messages(p)
+	}
+	assert.Equal(t, map[string]int32{"real.yaml": 1, "symlink.yaml": 2}, got)
+	assert.Equal(t, map[string][]string{"real.yaml": {"vuln"}, "symlink.yaml": {"vuln"}}, gotMsgs)
 }
 
 func TestSeveralDocumentsEachGetTheirOwnDiagnostics(t *testing.T) {
@@ -456,13 +557,60 @@ func TestAnUnreadableManifestKeepsItsPreviousDiagnostics(t *testing.T) {
 	assert.Empty(t, h.barrier())
 }
 
+// A scan can skip a whole input, as #5089 does for a workspace folder whose
+// Kustomize or Helm build fails. Nothing is then known of the files in it, so
+// their diagnostics are left as they are, not cleared, while the files outside
+// it get theirs.
+func TestASkippedFolderKeepsTheDiagnosticsOfItsFiles(t *testing.T) {
+	var pod, other string
+	scan := newFakeScan(func(n int, _ []string) (scanFindings, error) {
+		if n == 1 {
+			return findingsFor(true, map[string][]protocol.Diagnostic{pod: {diag("pod")}, other: {diag("other")}}), nil
+		}
+		f := findingsFor(true, map[string][]protocol.Diagnostic{other: {diag("other, rescanned")}})
+		f.unreliable[pathKey(filepath.Dir(pod))] = struct{}{} // the folder's input was skipped
+		return f, nil
+	})
+	h := newHarness(t, scan, true)
+	// Capitals in the path: the skipped folder is kept as a key, lowercased where
+	// the file system ignores case.
+	require.NoError(t, os.Mkdir(filepath.Join(h.dir, "App"), 0o700))
+	pod, other = h.file(filepath.Join("App", "Pod.yaml")), h.file("other.yaml")
+	h.save(other)
+	h.nextPublish()
+	h.nextPublish()
+
+	h.save(other)
+	for p := h.nextPublish(); string(p.URI) != uriFromPath(other); p = h.nextPublish() {
+		assert.NotEqual(t, uriFromPath(pod), string(p.URI), "the pod's diagnostics are left as they are")
+	}
+	// apply publishes under pubMu, so taking it waits for the rest of the scan.
+	h.c.pubMu.Lock()
+	_, kept := h.c.published[pathKey(pod)]
+	h.c.pubMu.Unlock()
+	assert.True(t, kept, "the pod's diagnostics are left as they are")
+}
+
+// The unreliable paths are keys, lowercased where the file system ignores case
+// (pathKey), so a file is found inside one whatever the case of its own path.
+func TestInsideAnyComparesKeys(t *testing.T) {
+	app := filepath.Join(t.TempDir(), "App")
+	require.NoError(t, os.Mkdir(app, 0o700))
+	pod := filepath.Join(app, "Pod.yaml")
+	require.NoError(t, os.WriteFile(pod, []byte("kind: Pod\n"), 0o600))
+
+	assert.True(t, insideAny(map[string]struct{}{pathKey(app): {}}, pod), "a file inside a skipped folder")
+	assert.True(t, insideAny(map[string]struct{}{pathKey(pod): {}}, pod), "a skipped file is inside itself")
+	assert.False(t, insideAny(map[string]struct{}{pathKey(app): {}}, filepath.Join(filepath.Dir(app), "Other.yaml")))
+}
+
 func TestADocumentOutsideTheWorkspaceIsNotTouched(t *testing.T) {
 	scan := newFakeScan(func(int, []string) (scanFindings, error) { return findingsFor(true, nil), nil })
 	h := newHarness(t, scan, true)
 	inside := h.file("pod.yaml")
 	outside := filepath.Join(t.TempDir(), "elsewhere.yaml")
 	require.NoError(t, os.WriteFile(outside, []byte("kind: Pod\n"), 0o600))
-	h.docs.open(uriFromPath(outside), outside, 1)
+	h.docs.open(uriFromPath(outside), outside, 1, false)
 	h.c.published[pathKey(outside)] = struct{}{} // it has diagnostics
 
 	h.save(inside)

@@ -84,12 +84,13 @@ func NewScanPathFilter(input string, patterns []string, useIgnoreFile bool, dept
 
 	var combined []string
 	if useIgnoreFile {
+		ignoreFile := filepath.Join(root, IgnoreFileName)
 		filePatterns, err := LoadIgnoreFilePatterns(root)
 		if err != nil {
-			return nil, err
+			return nil, &IgnoreFileError{Path: ignoreFile, Err: err}
 		}
 		if err := ValidateIgnorePatterns(filePatterns); err != nil {
-			return nil, fmt.Errorf("%s: %w", filepath.Join(root, IgnoreFileName), err)
+			return nil, &IgnoreFileError{Path: ignoreFile, Err: fmt.Errorf("%s: %w", ignoreFile, err)}
 		}
 		combined = append(combined, filePatterns...)
 	}
@@ -126,6 +127,18 @@ func ValidateCommandLinePatterns(patterns []string) error {
 	}
 	return nil
 }
+
+// IgnoreFileError is the error NewScanPathFilter returns when the ignore file
+// at the scan root can't be read or holds an invalid pattern. Path is the file
+// it read, which the message names; the message is the wrapped error's.
+type IgnoreFileError struct {
+	Path string
+	Err  error
+}
+
+func (e *IgnoreFileError) Error() string { return e.Err.Error() }
+
+func (e *IgnoreFileError) Unwrap() error { return e.Err }
 
 var (
 	// ErrIgnoreFileNotRegular is returned when an ignore file is not a regular file.
@@ -211,6 +224,10 @@ func LoadIgnoreFilePatterns(root string) ([]string, error) {
 		}
 		return nil, fmt.Errorf("failed to read %s: %w", path, err)
 	}
+
+	// Editors such as Windows Notepad may prefix the file with a UTF-8 byte order mark,
+	// which would otherwise become part of the first pattern.
+	content = bytes.TrimPrefix(content, []byte("\xef\xbb\xbf"))
 
 	var patterns []string
 	scanner := bufio.NewScanner(bytes.NewReader(content))
@@ -353,7 +370,12 @@ func parseIgnoreRule(line string) (ignoreRule, bool, error) {
 		rule.dirOnly = true
 		pattern = strings.TrimRight(pattern, "/")
 	}
-	pattern = strings.TrimPrefix(pattern, "./")
+	// A leading "./" names the scan root the way a leading "/" does, so it anchors the
+	// pattern even when no other "/" is left in it.
+	if rest, ok := strings.CutPrefix(pattern, "./"); ok {
+		pattern = rest
+		rule.anchored = true
+	}
 	if strings.HasPrefix(pattern, "/") {
 		rule.anchored = true
 		pattern = strings.TrimLeft(pattern, "/")
@@ -390,14 +412,14 @@ func descendantPrefix(rule ignoreRule) string {
 	return prefix
 }
 
-// ignoreRoot resolves the directory a scan input is anchored at. A file or a glob is
-// anchored at its parent directory, so patterns stay relative to the same place.
 // IgnoreRoot is the directory NewScanPathFilter reads the ignore file from for
 // input.
 func IgnoreRoot(input string) string {
 	return ignoreRoot(input)
 }
 
+// ignoreRoot resolves the directory a scan input is anchored at. A file or a glob is
+// anchored at its parent directory, so patterns stay relative to the same place.
 func ignoreRoot(input string, depthOpt ...int) string {
 	if input == "" {
 		return "."

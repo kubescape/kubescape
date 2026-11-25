@@ -334,7 +334,7 @@ SARIF is a standard format for the output of static analysis tools. It is suppor
 kubescape scan --format sarif --output results.sarif
 ```
 > **Note**
-> SARIF format is supported only when scanning local files or git repositories, but not when scanning a running cluster.
+> A resource read from a running cluster has no source file, so its SARIF location is a virtual resource identifier, `cluster/<namespace>/<kind>/<name>.yaml` (`_cluster` takes the place of the namespace for cluster-scoped resources). These identifiers are not files in your repository, every result points at line 1, and no fixes are included. To get findings on real file locations, with suggested fixes, scan the manifests instead.
 
 #### Markdown
 

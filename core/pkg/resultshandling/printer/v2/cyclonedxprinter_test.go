@@ -159,3 +159,40 @@ func TestActionPrint_CycloneDX_PostureScanWithImages(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &documents))
 	assert.Len(t, documents, 2, "a posture scan with --scan-images must emit one document per scanned image")
 }
+
+func TestActionPrint_CycloneDX_NilWriterReturnsError(t *testing.T) {
+	cp := NewCycloneDXPrinter()
+	imageScanData := []cautils.ImageScanData{buildSeverityExceptionImageScanData()}
+
+	require.NotPanics(t, func() {
+		err := cp.ActionPrint(context.Background(), nil, imageScanData)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestCycloneDX_NilReceiverSafety(t *testing.T) {
+	var cp *CycloneDXPrinter
+
+	assert.NotPanics(t, func() {
+		err := cp.ActionPrint(context.Background(), nil, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := cp.SetWriter(context.Background(), "test")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := cp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		cp.Score(0)
+		cp.PrintNextSteps()
+	})
+}

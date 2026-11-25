@@ -500,6 +500,67 @@ func TestReportV2ToV1_DeterministicOrdering(t *testing.T) {
 	}
 }
 
+func TestReportV2ToV1_DeterministicResourceOrdering(t *testing.T) {
+	for _, passingName := range []string{"", "alpha", "mu", "zeta"} {
+		t.Run("passing="+passingName, func(t *testing.T) {
+			const controlID = "C-001"
+			session := &OPASessionObj{
+				AllResources:    make(map[string]workloadinterface.IMetadata),
+				ResourcesResult: make(map[string]resourcesresults.Result),
+				Report:          &reporthandlingv2.PostureReport{},
+			}
+			control := reportsummary.ControlSummary{ControlID: controlID, Name: "control", ScoreFactor: 5}
+			names := []string{"alpha", "mu", "zeta"}
+			var resourceIDs []string
+			var findingNames []string
+			for _, name := range names {
+				resource := workloadinterface.NewWorkloadObj(map[string]any{
+					"apiVersion": "v1",
+					"kind":       "Pod",
+					"metadata":   map[string]any{"name": name, "namespace": "default"},
+				})
+				id := resource.GetID()
+				resourceIDs = append(resourceIDs, id)
+				status := apis.StatusFailed
+				if name == passingName {
+					status = apis.StatusPassed
+				} else {
+					findingNames = append(findingNames, name)
+				}
+				control.Append(helpersv1.NewStatus(status), id)
+				session.AllResources[id] = resource
+				session.ResourcesResult[id] = resourcesresults.Result{
+					ResourceID: id,
+					AssociatedControls: []resourcesresults.ResourceAssociatedControl{{
+						ControlID: controlID,
+						ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{
+							Name: "rule", Status: status,
+						}},
+					}},
+				}
+			}
+			session.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{controlID: control}
+
+			for i := 0; i < 50; i++ {
+				report := ReportV2ToV1(session)
+				require.Len(t, report.FrameworkReports, 1)
+				require.Len(t, report.FrameworkReports[0].ControlReports, 1)
+				rules := report.FrameworkReports[0].ControlReports[0].RuleReports
+				require.Len(t, rules, 1)
+				require.Equal(t, resourceIDs, rules[0].ListInputKinds, "resource order must be stable")
+				require.Equal(t, len(names), rules[0].TotalResources)
+				require.Equal(t, len(findingNames), rules[0].FailedResources)
+				require.Len(t, rules[0].RuleResponses, len(findingNames))
+				for j, response := range rules[0].RuleResponses {
+					require.Len(t, response.AlertObject.K8SApiObjects, 1)
+					metadata := response.AlertObject.K8SApiObjects[0]["metadata"].(map[string]any)
+					require.Equal(t, findingNames[j], metadata["name"], "finding order must follow resource order")
+				}
+			}
+		})
+	}
+}
+
 func TestReportV2ToV1_FrameworkStatusCounters_MultipleControls(t *testing.T) {
 	// Framework counters aggregate unique resources across multiple controls
 	// and therefore differ from any individual control's counters.

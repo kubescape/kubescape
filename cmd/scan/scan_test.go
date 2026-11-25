@@ -544,6 +544,8 @@ func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
 		{name: "rejects whitespace-only baseline flag", args: []string{"--baseline=   "}, wantError: "--baseline cannot be empty"},
 		{name: "rejects invalid baseline granularity", args: []string{"--baseline=base.json", "--baseline-granularity=invalid"}, wantError: "invalid diff granularity"},
 		{name: "rejects invalid baseline severity threshold", args: []string{"--baseline=base.json", "--baseline-severity-threshold=invalid"}, wantError: "unknown severity"},
+		{name: "rejects baseline with encrypt", args: []string{"--baseline=base.json", "--encrypt"}, wantError: "--baseline is not supported with --encrypt"},
+		{name: "rejects baseline with encrypt and fail-on-new", args: []string{"--baseline=base.json", "--baseline-fail-on-new", "--encrypt"}, wantError: "--baseline is not supported with --encrypt"},
 		{name: "accepts include namespaces alone", args: []string{"--include-namespaces=a,b"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts exclude namespaces alone", args: []string{"--exclude-namespaces=b"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts defaults", wantCalls: 1, wantError: "scan reached"},
@@ -556,6 +558,7 @@ func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
 		{name: "accepts baseline with fail-on-new", args: []string{"--baseline=base.json", "--baseline-fail-on-new"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts baseline with severity threshold", args: []string{"--baseline=base.json", "--baseline-severity-threshold=high"}, wantCalls: 1, wantError: "scan reached"},
 		{name: "accepts baseline with granularity", args: []string{"--baseline=base.json", "--baseline-granularity=control"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts baseline with hide", args: []string{"--baseline=base.json", "--baseline-fail-on-new", "--hide"}, wantCalls: 1, wantError: "scan reached"},
 	}
 
 	for _, tt := range tests {
@@ -627,6 +630,11 @@ func TestGetScanCommand_BaselineFlagValidation(t *testing.T) {
 				name:      "scan workload rejects baseline-granularity without baseline",
 				args:      []string{"workload", "Deployment/nginx", "--baseline-granularity=control"},
 				wantError: "--baseline-granularity requires --baseline",
+			},
+			{
+				name:      "scan control rejects baseline with encrypt",
+				args:      []string{"control", "C-0057", "--baseline=base.json", "--encrypt"},
+				wantError: "--baseline is not supported with --encrypt",
 			},
 		}
 
@@ -1060,6 +1068,42 @@ func TestSecurityScan_ZeroTimeoutNoDeadline(t *testing.T) {
 
 	_, hasDeadline := ks.scanCalledWith.Deadline()
 	assert.False(t, hasDeadline, "ScanContext() must not receive a deadline when ScanTimeout is 0")
+}
+
+func TestDeriveTimeoutContext_NilSafety(t *testing.T) {
+	// Nil ks returns Background context and no-op cancel
+	ctx, cancel := deriveTimeoutContext(&cautils.ScanInfo{ScanTimeout: time.Minute}, nil)
+	require.NotNil(t, ctx)
+	require.NotNil(t, cancel)
+	_, hasDeadline := ctx.Deadline()
+	assert.False(t, hasDeadline)
+	cancel()
+
+	// Nil scanInfo returns ks.Context() and no-op cancel without panicking
+	parentCtx := context.Background()
+	ks := &contextTrackingKubescape{ctx: parentCtx}
+	ctx, cancel = deriveTimeoutContext(nil, ks)
+	require.NotNil(t, ctx)
+	require.NotNil(t, cancel)
+	assert.Equal(t, parentCtx, ctx)
+	_, hasDeadline = ctx.Deadline()
+	assert.False(t, hasDeadline)
+	cancel()
+
+	// ks with nil context falls back to Background context without panicking
+	ksNilCtx := &contextTrackingKubescape{ctx: nil}
+	ctx, cancel = deriveTimeoutContext(&cautils.ScanInfo{ScanTimeout: time.Minute}, ksNilCtx)
+	require.NotNil(t, ctx)
+	require.NotNil(t, cancel)
+	_, hasDeadline = ctx.Deadline()
+	assert.True(t, hasDeadline)
+	cancel()
+
+	// Both nil returns Background context and no-op cancel
+	ctx, cancel = deriveTimeoutContext(nil, nil)
+	require.NotNil(t, ctx)
+	require.NotNil(t, cancel)
+	cancel()
 }
 
 func TestGetScanCommand_RegistryCredentialFlags(t *testing.T) {
@@ -2020,6 +2064,37 @@ func TestGetScanCommand_GitCloneDepthReachesScanInfo(t *testing.T) {
 	}
 }
 
+func TestGetScanCommand_MaxParallelPullsFlagRegistered(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	f := cmd.PersistentFlags().Lookup("max-parallel-pulls")
+	require.NotNil(t, f, "--max-parallel-pulls flag must be registered on the scan command")
+	assert.Equal(t, "int", f.Value.Type(), "--max-parallel-pulls must be an integer flag")
+	assert.Equal(t, "0", f.DefValue, "--max-parallel-pulls default must be 0 (fallback to env or default 8)")
+}
+
+func TestGetScanCommand_MaxParallelPullsFlagParsed(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	err := cmd.PersistentFlags().Set("max-parallel-pulls", "4")
+	require.NoError(t, err)
+
+	f := cmd.PersistentFlags().Lookup("max-parallel-pulls")
+	assert.Equal(t, "4", f.Value.String())
+}
+
+func TestGetScanCommand_MaxParallelPullsValidation(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--max-parallel-pulls=-1"})
+	err := cmd.Execute()
+	require.ErrorContains(t, err, "invalid --max-parallel-pulls -1: must be zero or positive")
+}
+
 func TestGetScanCommand_NilKubescape(t *testing.T) {
 	cmd := GetScanCommand(nil)
 	require.NotNil(t, cmd)
@@ -2052,4 +2127,13 @@ func TestGetScanCommand_Subcommands_NilKubescape(t *testing.T) {
 			require.EqualError(t, err, "uninitialized kubescape interface")
 		})
 	}
+}
+
+func TestScanCmd_RejectsWhitespaceFilePath(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"--file-path", "   "})
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.EqualError(t, err, "--file-path needs a file path")
 }

@@ -74,10 +74,13 @@ func csvSafeRow(row []string) []string {
 }
 
 func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if cp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.CsvFormat, outputFile, csvOutputFile)
 	if explicitOutput {
 		var err error
-		cp.writer, err = printer.GetWriterNoFallback(outputFile)
+		cp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	cp.writer = printer.GetWriter(ctx, outputFile)
@@ -85,6 +88,9 @@ func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) error {
 }
 
 func (cp *CsvPrinter) Score(score float32) {
+	if cp == nil {
+		return
+	}
 	if score > 100 {
 		score = 100
 	} else if score < 0 {
@@ -99,16 +105,25 @@ func (cp *CsvPrinter) Score(score float32) {
 // cluster-wide skipped or unevaluated controls. A missing session or posture
 // report returns an error instead of reading a nil report.
 func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) (err error) {
+	if cp == nil {
+		return fmt.Errorf("failed to write csv results: printer is nil")
+	}
+	if err := printer.PrepareOutput(cp.writer); err != nil {
+		return err
+	}
 	hasReport := opaSessionObj != nil && opaSessionObj.Report != nil
+	if !hasReport && len(imageScanData) == 0 {
+		return fmt.Errorf("no data provided for CSV output")
+	}
+	if cp.writer == nil {
+		return fmt.Errorf("failed to write CSV results: output writer is nil")
+	}
 	if !hasReport && len(imageScanData) > 0 {
 		if err := writeImageScanCSV(cp.writer, imageScanData); err != nil {
 			return err
 		}
 		printer.LogOutputFile(cp.writer.Name())
 		return nil
-	}
-	if !hasReport {
-		return fmt.Errorf("no data provided for CSV output")
 	}
 
 	finalizedReport := FinalizeResults(opaSessionObj)
@@ -216,8 +231,10 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 					reason:    remediation,
 				}] = struct{}{}
 			} else {
-				if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, ctrlID); ctrl != nil {
-					remediation = ctrl.GetRemediation()
+				if summaryControls != nil {
+					if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, ctrlID); ctrl != nil {
+						remediation = ctrl.GetRemediation()
+					}
 				}
 			}
 
@@ -246,8 +263,10 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 	for _, sc := range skippedControls {
 		name := sc.name
 		if name == "" || name == sc.controlID {
-			if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, sc.controlID); ctrl != nil && ctrl.GetName() != "" {
-				name = ctrl.GetName()
+			if summaryControls != nil {
+				if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, sc.controlID); ctrl != nil && ctrl.GetName() != "" {
+					name = ctrl.GetName()
+				}
 			}
 		}
 		if name == "" {
@@ -255,8 +274,10 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 		}
 		severity := apis.ControlSeverityToString(sc.scoreFactor)
 		if severity == "" || severity == "Unknown" {
-			if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, sc.controlID); ctrl != nil && ctrl.GetScoreFactor() > 0 {
-				severity = apis.ControlSeverityToString(ctrl.GetScoreFactor())
+			if summaryControls != nil {
+				if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, sc.controlID); ctrl != nil && ctrl.GetScoreFactor() > 0 {
+					severity = apis.ControlSeverityToString(ctrl.GetScoreFactor())
+				}
 			}
 		}
 		if severity == "" {
@@ -304,7 +325,10 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 }
 
 func (cp *CsvPrinter) writeImageScanCompanion(ctx context.Context, imageScanData []cautils.ImageScanData) error {
-	if len(imageScanData) == 0 || cp.writer.Name() == os.DevNull {
+	if len(imageScanData) == 0 {
+		return nil
+	}
+	if cp.writer == nil || cp.writer.Name() == os.DevNull {
 		return nil
 	}
 	postureInfo, err := cp.writer.Stat()
@@ -387,8 +411,8 @@ func (cp *CsvPrinter) PrintNextSteps() {
 
 // CloseWriter closes the CSV output writer, returning any error from flushing or closing.
 func (cp *CsvPrinter) CloseWriter() error {
-	if cp.writer != nil && cp.writer != os.Stdout {
-		return cp.writer.Close()
+	if cp != nil && cp.writer != nil && cp.writer != os.Stdout {
+		return printer.CloseOutput(cp.writer)
 	}
 	return nil
 }

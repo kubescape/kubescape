@@ -1,6 +1,7 @@
 package prettyprinter
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"reflect"
@@ -41,6 +42,32 @@ func TestFilterComplianceFrameworks(t *testing.T) {
 					},
 					{
 						Name: "mitre",
+					},
+				},
+			},
+		},
+		{
+			name: "check compliance frameworks with whitespace padding are normalized and matched",
+			summaryDetails: &reportsummary.SummaryDetails{
+				Frameworks: []reportsummary.FrameworkSummary{
+					{
+						Name: "  CIS Kubernetes Benchmark  ",
+					},
+					{
+						Name: "  nsa  ",
+					},
+					{
+						Name: " mitre\t",
+					},
+				},
+			},
+			expectedSummaryDetails: &reportsummary.SummaryDetails{
+				Frameworks: []reportsummary.FrameworkSummary{
+					{
+						Name: "  nsa  ",
+					},
+					{
+						Name: " mitre\t",
 					},
 				},
 			},
@@ -383,6 +410,34 @@ func TestFilterCVEsBySeverities(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "case insensitive and whitespace trimming",
+			cves: []imageprinter.CVE{
+				{
+					Severity: " high ",
+					ID:       "CVE-2020-1234",
+				},
+				{
+					Severity: "MEDIUM",
+					ID:       "CVE-2020-1235",
+				},
+				{
+					Severity: "Low",
+					ID:       "CVE-2020-1236",
+				},
+			},
+			severities: []string{" HIGH", "medium "},
+			expectedCVEs: []imageprinter.CVE{
+				{
+					Severity: "High",
+					ID:       "CVE-2020-1234",
+				},
+				{
+					Severity: "Medium",
+					ID:       "CVE-2020-1235",
+				},
+			},
+		},
 	}
 
 	for _, tt := range test {
@@ -452,6 +507,24 @@ func TestGetSortPackageScores(t *testing.T) {
 				},
 			},
 			expectedResult: []string{"packageA", "packageB"},
+		},
+		{
+			name: "Non-empty input, same score and same name tie-broken by map key",
+			pkgScores: map[string]*imageprinter.PackageScore{
+				"pkg:b": {
+					Name:                    "openssl",
+					Version:                 "2.0",
+					Score:                   10,
+					MapSeverityToCVEsNumber: map[string]int{},
+				},
+				"pkg:a": {
+					Name:                    "openssl",
+					Version:                 "1.0",
+					Score:                   10,
+					MapSeverityToCVEsNumber: map[string]int{},
+				},
+			},
+			expectedResult: []string{"pkg:a", "pkg:b"},
 		},
 	}
 
@@ -644,6 +717,14 @@ func TestGetSortedCVEsBySeverity(t *testing.T) {
 			severityToCVEs: map[string]int{},
 			expectedResult: []string{},
 		},
+		{
+			name: "Severities with same rank are tie-broken alphabetically",
+			severityToCVEs: map[string]int{
+				"Unknown": 1,
+				"Other":   2,
+			},
+			expectedResult: []string{"Other", "Unknown"},
+		},
 	}
 
 	for _, tc := range tests {
@@ -655,6 +736,45 @@ func TestGetSortedCVEsBySeverity(t *testing.T) {
 					t.Errorf("Expected: %v, Got: %v", tc.expectedResult, sortedCVEs)
 				}
 			}
+		})
+	}
+}
+
+func TestGetSortedSeverityKeys(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    map[string]*imageprinter.SeveritySummary
+		expected []string
+	}{
+		{
+			name: "Standard severities ordered descending by rank",
+			input: map[string]*imageprinter.SeveritySummary{
+				"Low":      {NumberOfCVEs: 1},
+				"Critical": {NumberOfCVEs: 5},
+				"High":     {NumberOfCVEs: 3},
+				"Medium":   {NumberOfCVEs: 2},
+			},
+			expected: []string{"Critical", "High", "Medium", "Low"},
+		},
+		{
+			name: "Equal rank severities tie-broken alphabetically",
+			input: map[string]*imageprinter.SeveritySummary{
+				"Unknown": {NumberOfCVEs: 1},
+				"Other":   {NumberOfCVEs: 2},
+			},
+			expected: []string{"Other", "Unknown"},
+		},
+		{
+			name:     "Empty map",
+			input:    map[string]*imageprinter.SeveritySummary{},
+			expected: []string{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := getSortedSeverityKeys(tc.input)
+			assert.Equal(t, tc.expected, got)
 		})
 	}
 }
@@ -804,6 +924,18 @@ func TestGetFilteredCVEsKeepsKEV(t *testing.T) {
 				{ID: "CVE-1", Severity: "High"},
 			},
 		},
+		{
+			name: "case insensitive and whitespace-padded severities in getFilteredCVEs",
+			cves: []imageprinter.CVE{
+				{ID: "CVE-1", Severity: " critical "},
+				{ID: "CVE-2", Severity: "HIGH"},
+				{ID: "CVE-3", Severity: "low"},
+			},
+			want: []imageprinter.CVE{
+				{ID: "CVE-1", Severity: "Critical"},
+				{ID: "CVE-2", Severity: "High"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -811,6 +943,16 @@ func TestGetFilteredCVEsKeepsKEV(t *testing.T) {
 			assert.Equal(t, tt.want, getFilteredCVEs(tt.cves))
 		})
 	}
+}
+
+func TestCanonicalSeverity(t *testing.T) {
+	assert.Equal(t, "Critical", canonicalSeverity(" critical "))
+	assert.Equal(t, "High", canonicalSeverity("HIGH"))
+	assert.Equal(t, "Medium", canonicalSeverity("medium"))
+	assert.Equal(t, "Low", canonicalSeverity("  low  "))
+	assert.Equal(t, "Negligible", canonicalSeverity("NEGLIGIBLE"))
+	assert.Equal(t, "Unknown", canonicalSeverity("  unknown  "))
+	assert.Equal(t, "Custom", canonicalSeverity("Custom"))
 }
 
 // TestPrintTopComponents_PackageNameWithPercentVerbs guards against a
@@ -845,4 +987,122 @@ func TestPrintTopComponents_PackageNameWithPercentVerbs(t *testing.T) {
 	}
 
 	assert.Contains(t, string(got), name, "package name must be printed literally, not interpreted as a format string")
+}
+
+func TestPrintComplianceScore(t *testing.T) {
+	tests := []struct {
+		name       string
+		frameworks []reportsummary.IFrameworkSummary
+		wantSub    []string
+		notWantSub []string
+	}{
+		{
+			name: "valid framework scores",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: 85.4},
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: 100.0},
+			},
+			wantSub: []string{
+				"nsa: 85.40%",
+				"mitre: 100.00%",
+			},
+			notWantSub: []string{
+				"N/A",
+				"-1",
+			},
+		},
+		{
+			name: "uncalculated sentinel score -1.0",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: -1.0},
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: 80.0},
+			},
+			wantSub: []string{
+				"nsa: N/A",
+				"mitre: 80.00%",
+			},
+			notWantSub: []string{
+				"-1.00%",
+				"-1%",
+			},
+		},
+		{
+			name: "fractional negative sentinel scores",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: -0.25},
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: -0.5},
+			},
+			wantSub: []string{
+				"nsa: N/A",
+				"mitre: N/A",
+			},
+			notWantSub: []string{
+				"-0.25%",
+				"-0.50%",
+				"-1%",
+				"0.00%",
+			},
+		},
+		{
+			name: "genuine zero score",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: 0.0},
+			},
+			wantSub: []string{
+				"nsa: 0.00%",
+			},
+			notWantSub: []string{
+				"N/A",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			printComplianceScore(&buf, tt.frameworks)
+			got := buf.String()
+			for _, want := range tt.wantSub {
+				assert.Contains(t, got, want)
+			}
+			for _, notWant := range tt.notWantSub {
+				assert.NotContains(t, got, notWant)
+			}
+		})
+	}
+}
+
+func TestPrintNextSteps_PercentVerbsPreserved(t *testing.T) {
+	f, err := os.CreateTemp("", "print-next-steps")
+	require.NoError(t, err)
+	defer f.Close()
+
+	nextStep := "Increase memory request to at least 80% of limit (%s-%d)"
+	printNextSteps(f, []string{nextStep}, false)
+
+	_, err = f.Seek(0, 0)
+	require.NoError(t, err)
+	got, err := io.ReadAll(f)
+	require.NoError(t, err)
+
+	assert.Contains(t, string(got), nextStep, "next step text must be printed literally, not evaluated as format string")
+}
+
+func TestPrintImagesCommands_PercentVerbsPreserved(t *testing.T) {
+	f, err := os.CreateTemp("", "print-images-commands")
+	require.NoError(t, err)
+	defer f.Close()
+
+	img := "registry.example.com/repo:tag-100%cpu-%s"
+	summary := imageprinter.ImageScanSummary{
+		Images: []string{img},
+	}
+	printImagesCommands(f, summary)
+
+	_, err = f.Seek(0, 0)
+	require.NoError(t, err)
+	got, err := io.ReadAll(f)
+	require.NoError(t, err)
+
+	assert.Contains(t, string(got), img, "image name must be printed literally, not evaluated as format string")
 }

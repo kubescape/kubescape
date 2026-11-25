@@ -29,10 +29,13 @@ func NewSPDXPrinter() *SPDXPrinter {
 }
 
 func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if sp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.SPDXFormat, outputFile, spdxOutputFile)
 	if explicitOutput {
 		var err error
-		sp.writer, err = printer.GetWriterNoFallback(outputFile)
+		sp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	sp.writer = printer.GetWriter(ctx, outputFile)
@@ -42,9 +45,18 @@ func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
 func (sp *SPDXPrinter) Score(score float32) {}
 
 func (sp *SPDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if sp == nil {
+		return fmt.Errorf("failed to write spdx-json results: printer is nil")
+	}
+	if err := printer.PrepareOutput(sp.writer); err != nil {
+		return err
+	}
 	if len(imageScanData) == 0 {
 		logger.L().Ctx(ctx).Error("spdx-json output requires scanned images")
 		return fmt.Errorf("spdx-json output requires scanned images")
+	}
+	if sp.writer == nil {
+		return fmt.Errorf("failed to write spdx-json output: output writer is nil")
 	}
 
 	encoder, err := spdxjson.NewFormatEncoderWithConfig(spdxjson.DefaultEncoderConfig())
@@ -98,8 +110,8 @@ func (sp *SPDXPrinter) PrintNextSteps() {}
 
 // CloseWriter closes the SPDX output writer, returning any error from flushing or closing.
 func (sp *SPDXPrinter) CloseWriter() error {
-	if sp.writer != nil && sp.writer != os.Stdout {
-		return sp.writer.Close()
+	if sp != nil && sp.writer != nil && sp.writer != os.Stdout {
+		return printer.CloseOutput(sp.writer)
 	}
 	return nil
 }

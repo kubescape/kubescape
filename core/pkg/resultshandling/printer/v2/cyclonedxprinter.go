@@ -29,10 +29,13 @@ func NewCycloneDXPrinter() *CycloneDXPrinter {
 }
 
 func (cp *CycloneDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if cp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.CycloneDXFormat, outputFile, cyclonedxOutputFile)
 	if explicitOutput {
 		var err error
-		cp.writer, err = printer.GetWriterNoFallback(outputFile)
+		cp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	cp.writer = printer.GetWriter(ctx, outputFile)
@@ -42,9 +45,18 @@ func (cp *CycloneDXPrinter) SetWriter(ctx context.Context, outputFile string) er
 func (cp *CycloneDXPrinter) Score(score float32) {}
 
 func (cp *CycloneDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if cp == nil {
+		return fmt.Errorf("failed to write cyclonedx-json results: printer is nil")
+	}
+	if err := printer.PrepareOutput(cp.writer); err != nil {
+		return err
+	}
 	if len(imageScanData) == 0 {
 		logger.L().Ctx(ctx).Error("cyclonedx-json output requires scanned images")
 		return fmt.Errorf("cyclonedx-json output requires scanned images")
+	}
+	if cp.writer == nil {
+		return fmt.Errorf("failed to write cyclonedx-json output: output writer is nil")
 	}
 
 	encoder, err := cyclonedxjson.NewFormatEncoderWithConfig(cyclonedxjson.DefaultEncoderConfig())
@@ -98,8 +110,8 @@ func (cp *CycloneDXPrinter) PrintNextSteps() {}
 
 // CloseWriter closes the CycloneDX output writer, returning any error from flushing or closing.
 func (cp *CycloneDXPrinter) CloseWriter() error {
-	if cp.writer != nil && cp.writer != os.Stdout {
-		return cp.writer.Close()
+	if cp != nil && cp.writer != nil && cp.writer != os.Stdout {
+		return printer.CloseOutput(cp.writer)
 	}
 	return nil
 }

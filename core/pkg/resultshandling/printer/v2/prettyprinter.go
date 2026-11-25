@@ -60,13 +60,16 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, v
 		showEvidence:    showEvidence,
 		showSecrets:     showSecrets,
 	}
-
+	prettyPrinter.SetMainPrinter()
 	return prettyPrinter
 }
 
 // SetKubeconfig records the kubeconfig file the scan was given, so a command
 // printed for a live cluster reads the same cluster from the same file.
 func (pp *PrettyPrinter) SetKubeconfig(path string) {
+	if pp == nil {
+		return
+	}
 	pp.kubeconfig = path
 }
 
@@ -74,10 +77,16 @@ func (pp *PrettyPrinter) SetKubeconfig(path string) {
 // --encrypt, so resource names, namespaces and the context name in it are
 // pseudonyms and cannot be put in a kubectl command.
 func (pp *PrettyPrinter) SetAnonymized(anonymized bool) {
+	if pp == nil {
+		return
+	}
 	pp.anonymized = anonymized
 }
 
 func (pp *PrettyPrinter) SetMainPrinter() {
+	if pp == nil {
+		return
+	}
 	switch pp.scanType {
 	case cautils.ScanTypeCluster:
 		pp.mainPrinter = prettyprinter.NewClusterPrinter(pp.writer, pp.verboseMode)
@@ -93,16 +102,44 @@ func (pp *PrettyPrinter) SetMainPrinter() {
 }
 
 func (pp *PrettyPrinter) PrintNextSteps() {
-	pp.mainPrinter.PrintNextSteps()
+	if pp == nil {
+		return
+	}
+	if pp.mainPrinter == nil {
+		pp.SetMainPrinter()
+	}
+	if pp.mainPrinter != nil {
+		pp.mainPrinter.PrintNextSteps()
+	}
 }
 
 func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) error {
-	pp.mainPrinter.PrintImageScanning(buildImageScanSummary(imageScanData))
+	if pp == nil {
+		return fmt.Errorf("failed to print image scan: printer is nil")
+	}
+	if pp.mainPrinter == nil {
+		pp.SetMainPrinter()
+	}
+	if pp.mainPrinter != nil {
+		pp.mainPrinter.PrintImageScanning(buildImageScanSummary(imageScanData))
+	}
 	return nil
 }
 
 func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
-	if opaSessionObj != nil && opaSessionObj.Report != nil {
+	if pp == nil {
+		return fmt.Errorf("failed to write pretty results: printer is nil")
+	}
+	if err := printer.PrepareOutput(pp.writer); err != nil {
+		return err
+	}
+	if pp.mainPrinter == nil {
+		pp.SetMainPrinter()
+	}
+	hasReport := opaSessionObj != nil && opaSessionObj.Report != nil
+	hasImages := len(imageScanData) > 0
+
+	if hasReport {
 		if isPrintSeparatorType(pp.scanType) {
 			fmt.Fprintf(pp.writer, "\n%s\n\n",
 				gchalk.WithAnsi256(238).Bold(strings.Repeat("─", 50)))
@@ -134,20 +171,19 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 
 		pp.printScanCoverage(opaSessionObj.ScanCoverage)
 
-		// When writing to Stdout, we aren’t really writing to an output file,
-		// so no need to print that we are
-		if pp.writer.Name() != os.Stdout.Name() {
-			printer.LogOutputFile(pp.writer.Name())
-		}
-
 		pp.printAttackTracks(opaSessionObj)
 	}
 
-	if len(imageScanData) > 0 {
+	if hasImages {
 		if err := pp.PrintImageScan(imageScanData); err != nil {
 			return err
 		}
 	}
+
+	if (hasReport || hasImages) && pp.writer != nil {
+		printer.LogOutputFile(pp.writer.Name())
+	}
+
 	return nil
 }
 
@@ -162,10 +198,10 @@ func (pp *PrettyPrinter) printOverview(opaSessionObj *cautils.OPASessionObj, pri
 func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
 	switch pp.scanType {
 	case cautils.ScanTypeCluster:
-		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nSecurity posture overview for cluster: '%s'\n\n", pp.clusterName))
+		cautils.InfoDisplay(pp.writer, "\nSecurity posture overview for cluster: '%s'\n\n", pp.clusterName)
 		cautils.SimpleDisplay(pp.writer, "In this overview, Kubescape shows you a summary of your cluster security posture, including the number of users who can perform administrative actions. For each result greater than 0, you should evaluate its need, and then define an exception to allow it. This baseline can be used to detect drift in future.\n\n")
 	case cautils.ScanTypeRepo:
-		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nSecurity posture overview for repo: '%s'\n\n", strings.Join(pp.inputPatterns, ", ")))
+		cautils.InfoDisplay(pp.writer, "\nSecurity posture overview for repo: '%s'\n\n", strings.Join(pp.inputPatterns, ", "))
 	case cautils.ScanTypeWorkload:
 		cautils.InfoDisplay(pp.writer, "Workload security posture overview for:\n")
 		if opaSessionObj == nil || opaSessionObj.SingleResourceScan == nil {
@@ -194,6 +230,9 @@ func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
 }
 
 func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if pp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	if outputFile == os.Stdout.Name() {
 		pp.writer = printer.GetWriter(ctx, "")
 		pp.SetMainPrinter()
@@ -208,7 +247,7 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) error
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.PrettyFormat, outputFile, prettyOutputFile)
 
 	if explicitOutput {
-		writer, err := printer.GetWriterNoFallback(outputFile)
+		writer, err := printer.GetPrinterWriterNoFallback(outputFile)
 		if err != nil {
 			return err
 		}
@@ -224,9 +263,15 @@ func (pp *PrettyPrinter) Score(_ float32) {
 }
 
 func (pp *PrettyPrinter) printResults(summary *reportsummary.SummaryDetails, catalog cautils.ResourceCatalog, resourcesResult map[string]resourcesresults.Result, sortedControlIDs [][]string) {
+	if summary == nil {
+		return
+	}
 	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
 		for _, c := range sortedControlID {
 			controlSummary := summary.Controls.GetControl(reportsummary.EControlCriteriaID, c)
+			if controlSummary == nil {
+				continue
+			}
 			pp.printTitle(controlSummary)
 			pp.printResources(summary, controlSummary, catalog, resourcesResult)
 			pp.printSummary(controlSummary)
@@ -235,12 +280,22 @@ func (pp *PrettyPrinter) printResults(summary *reportsummary.SummaryDetails, cat
 }
 
 func (prettyPrinter *PrettyPrinter) printSummary(controlSummary reportsummary.IControlSummary) {
+	if controlSummary == nil {
+		return
+	}
+	var passed, skipped, failed, all int
+	if numRes := controlSummary.NumberOfResources(); numRes != nil {
+		passed = numRes.Passed()
+		skipped = numRes.Skipped()
+		failed = numRes.Failed()
+		all = numRes.All()
+	}
 	cautils.SimpleDisplay(prettyPrinter.writer, "Summary - ")
-	cautils.SuccessDisplay(prettyPrinter.writer, "Passed:%v   ", controlSummary.NumberOfResources().Passed())
-	cautils.WarningDisplay(prettyPrinter.writer, "Action Required:%v   ", controlSummary.NumberOfResources().Skipped())
-	cautils.FailureDisplay(prettyPrinter.writer, "Failed:%v   ", controlSummary.NumberOfResources().Failed())
-	cautils.InfoDisplay(prettyPrinter.writer, "Total:%v\n", controlSummary.NumberOfResources().All())
-	if controlSummary.GetStatus().IsFailed() {
+	cautils.SuccessDisplay(prettyPrinter.writer, "Passed:%v   ", passed)
+	cautils.WarningDisplay(prettyPrinter.writer, "Action Required:%v   ", skipped)
+	cautils.FailureDisplay(prettyPrinter.writer, "Failed:%v   ", failed)
+	cautils.InfoDisplay(prettyPrinter.writer, "Total:%v\n", all)
+	if status := controlSummary.GetStatus(); status != nil && status.IsFailed() {
 		cautils.DescriptionDisplay(prettyPrinter.writer, "Remediation: %v\n", controlSummary.GetRemediation())
 	}
 	cautils.DescriptionDisplay(prettyPrinter.writer, "\n")
@@ -248,12 +303,21 @@ func (prettyPrinter *PrettyPrinter) printSummary(controlSummary reportsummary.IC
 }
 
 func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.IControlSummary) {
+	if controlSummary == nil {
+		return
+	}
 	cautils.InfoDisplay(prettyPrinter.writer, "[control: %s - %s] ", controlSummary.GetName(), cautils.GetControlLink(controlSummary.GetID()))
 	statusDetails := ""
 	if controlSummary.GetSubStatus() != apis.SubStatusUnknown {
 		statusDetails = fmt.Sprintf(" (%s)", controlSummary.GetSubStatus())
 	}
-	switch controlSummary.GetStatus().Status() {
+	var status apis.ScanningStatus
+	var statusInfo string
+	if s := controlSummary.GetStatus(); s != nil {
+		status = s.Status()
+		statusInfo = s.Info()
+	}
+	switch status {
 	case apis.StatusSkipped:
 		cautils.InfoDisplay(prettyPrinter.writer, "action required%s %v\n", statusDetails, emoji.ConfusedFace)
 	case apis.StatusFailed:
@@ -262,13 +326,15 @@ func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.ICon
 		cautils.SuccessDisplay(prettyPrinter.writer, "passed%s %v\n", statusDetails, emoji.ThumbsUp)
 	}
 	cautils.DescriptionDisplay(prettyPrinter.writer, "Description: %s\n", controlSummary.GetDescription())
-	if controlSummary.GetStatus().Info() != "" {
-		cautils.WarningDisplay(prettyPrinter.writer, "Reason: %v\n", controlSummary.GetStatus().Info())
+	if statusInfo != "" {
+		cautils.WarningDisplay(prettyPrinter.writer, "Reason: %v\n", statusInfo)
 	}
 }
 
 func (pp *PrettyPrinter) printResources(summary *reportsummary.SummaryDetails, controlSummary reportsummary.IControlSummary, catalog cautils.ResourceCatalog, resourcesResult map[string]resourcesresults.Result) {
-
+	if controlSummary == nil {
+		return
+	}
 	workloadsSummary := listResultSummaryFromCatalog(controlSummary, catalog)
 	// --show-evidence asks for the evidence, so it enables the evidence on its
 	// own here. Gating this on --verbose alone left the flag unread on the
@@ -483,8 +549,8 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 
 // CloseWriter closes the pretty-printer output writer, returning any error from flushing or closing.
 func (p *PrettyPrinter) CloseWriter() error {
-	if p.writer != nil && p.writer != os.Stdout {
-		return p.writer.Close()
+	if p != nil && p.writer != nil && p.writer != os.Stdout {
+		return printer.CloseOutput(p.writer)
 	}
 	return nil
 }

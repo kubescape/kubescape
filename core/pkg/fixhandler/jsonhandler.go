@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"container/list"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -28,8 +29,12 @@ func applyFixToJSONContent(ctx context.Context, jsonAsString, yamlExpression str
 			return "", fmt.Errorf("expected one document in the JSON manifest; re-scan and use the new report")
 		}
 		var obj map[string]any
-		doc := documents.Front().Value.(*yqlib.CandidateNode).Node
-		if err := doc.Decode(&obj); err != nil {
+		doc := documents.Front().Value.(*yqlib.CandidateNode)
+		docJSON, err := doc.MarshalJSON()
+		if err != nil {
+			return "", fmt.Errorf("expected a single resource in the JSON manifest; re-scan and use the new report")
+		}
+		if err := json.Unmarshal(docJSON, &obj); err != nil {
 			return "", fmt.Errorf("expected a single resource in the JSON manifest; re-scan and use the new report")
 		}
 		if err := verifyFixTargets(fixes, []manifestDocument{{identity: manifestIdentityOf(obj)}}); err != nil {
@@ -47,7 +52,7 @@ func applyFixToJSONContent(ctx context.Context, jsonAsString, yamlExpression str
 
 	var fixed bytes.Buffer
 	printer := yqlib.NewPrinter(
-		yqlib.NewJSONEncoder(detectJSONIndent(jsonAsString), false),
+		yqlib.NewJSONEncoder(yqlib.JsonPreferences{Indent: detectJSONIndent(jsonAsString)}),
 		yqlib.NewSinglePrinterWriter(&fixed),
 	)
 	if err := printer.PrintResults(fixedNodes); err != nil {

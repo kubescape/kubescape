@@ -1,11 +1,14 @@
 package configurationprinter
 
 import (
+	"bytes"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMapCategoryToSummary(t *testing.T) {
@@ -551,6 +554,32 @@ func TestGetDocsForControl(t *testing.T) {
 			},
 			expectedDocsLink: "https://kubescape.io/docs/controls/ctrlid1",
 		},
+		{
+			name: "control with empty ID",
+			controlSummary: &reportsummary.ControlSummary{
+				ControlID: "",
+			},
+			expectedDocsLink: "",
+		},
+		{
+			name: "control with whitespace ID",
+			controlSummary: &reportsummary.ControlSummary{
+				ControlID: "   ",
+			},
+			expectedDocsLink: "",
+		},
+		{
+			name:             "nil control",
+			controlSummary:   nil,
+			expectedDocsLink: "",
+		},
+		{
+			name: "control with whitespace-padded ID",
+			controlSummary: &reportsummary.ControlSummary{
+				ControlID: "  C-0001  ",
+			},
+			expectedDocsLink: "https://kubescape.io/docs/controls/c-0001",
+		},
 	}
 
 	for _, test := range tests {
@@ -584,6 +613,32 @@ func TestGetRunCommandForControl(t *testing.T) {
 			},
 			expectedRunLink: "$ kubescape scan control ctrlid1 -v",
 		},
+		{
+			name: "control with empty ID",
+			controlSummary: &reportsummary.ControlSummary{
+				ControlID: "",
+			},
+			expectedRunLink: "",
+		},
+		{
+			name: "control with whitespace ID",
+			controlSummary: &reportsummary.ControlSummary{
+				ControlID: "   ",
+			},
+			expectedRunLink: "",
+		},
+		{
+			name:            "nil control",
+			controlSummary:  nil,
+			expectedRunLink: "",
+		},
+		{
+			name: "control with whitespace-padded ID",
+			controlSummary: &reportsummary.ControlSummary{
+				ControlID: "  C-0001  ",
+			},
+			expectedRunLink: "$ kubescape scan control C-0001 -v",
+		},
 	}
 
 	for _, test := range tests {
@@ -595,4 +650,14 @@ func TestGetRunCommandForControl(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPrintCategoryInfo_PercentVerbsPreserved(t *testing.T) {
+	var buf bytes.Buffer
+	info := "threshold exceeds 95% of capacity (%s %d)"
+	printCategoryInfo(&buf, []utils.InfoStars{{Stars: "**", Info: info}})
+
+	got := buf.String()
+	assert.Contains(t, got, info, "category info text must be printed literally, not evaluated as format string")
+	assert.NotContains(t, got, "%!o(MISSING)", "percent signs must not cause format string errors")
 }

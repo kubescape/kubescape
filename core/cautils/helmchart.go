@@ -299,7 +299,10 @@ func (hc *HelmChart) GetWorkloadsWithCapabilities(values map[string]any, release
 	var errs []error
 
 	for path, renderedYaml := range sourceToFile {
-		if !IsYaml(strings.ToLower(path)) {
+		// Skip NOTES.txt and other text, but keep every extension Helm treats
+		// as a manifest (.yaml, .yml and .json, see chart.hasManifestExtension).
+		// As Helm does, rendered JSON is read with the YAML reader below.
+		if !IsYaml(path) && !IsJson(path) {
 			continue
 		}
 
@@ -507,7 +510,11 @@ func isListEnvelope(doc []byte) bool {
 	if err := yaml.Unmarshal(doc, &decoded); err != nil {
 		return true
 	}
-	obj, ok := convertYamlToJson(decoded).(map[string]any)
+	converted, err := convertYamlToJson(decoded)
+	if err != nil {
+		return true
+	}
+	obj, ok := converted.(map[string]any)
 	if !ok {
 		return false
 	}

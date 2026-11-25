@@ -93,10 +93,13 @@ func (sp *SARIFPrinter) Score(score float32) {
 }
 
 func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if sp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.SARIFFormat, outputFile, sarifOutputFile)
 	if explicitOutput {
 		var err error
-		sp.writer, err = printer.GetWriterNoFallback(outputFile)
+		sp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	sp.writer = printer.GetWriter(ctx, outputFile)
@@ -555,8 +558,14 @@ func sanitizeImageScanData(scan cautils.ImageScanData) cautils.ImageScanData {
 
 // buildImageScanRuns constructs SARIF runs for the provided container image scan results,
 // applying image source metadata sanitization, VEX status enrichment, Kubescape driver
-// naming, and finding fingerprints.
-func (sp *SARIFPrinter) buildImageScanRuns(scanResults []cautils.ImageScanData) ([]*sarif.Run, error) {
+// naming, and finding fingerprints. When isCombinedScan is true, or when multiple image
+// results are scanned, each image run receives its own automationDetails.id so that
+// its category does not collide with the configuration scan run or sibling image runs.
+func (sp *SARIFPrinter) buildImageScanRuns(scanResults []cautils.ImageScanData, isCombinedScanOpt ...bool) ([]*sarif.Run, error) {
+	isCombinedScan := false
+	if len(isCombinedScanOpt) > 0 {
+		isCombinedScan = isCombinedScanOpt[0]
+	}
 	var runs []*sarif.Run
 	for _, scan := range scanResults {
 		sanitizedScan := sanitizeImageScanData(scan)
@@ -632,8 +641,11 @@ func (sp *SARIFPrinter) buildImageScanRuns(scanResults []cautils.ImageScanData) 
 			addImageSARIFFingerprints(run)
 			// GitHub Code Scanning rejects a file in which two runs share a tool and
 			// a category, and every image run has the same driver name. A lone run
-			// keeps no category, so one given at upload time still applies to it.
-			if len(scanResults) > 1 {
+			// (a standalone scan of exactly one image) keeps no category, so one
+			// given at upload time still applies to it. In a multi-image scan or a
+			// combined posture+image scan, the report contains several runs and each
+			// image run must carry its own category to avoid collisions.
+			if len(scanResults) > 1 || isCombinedScan {
 				run.WithAutomationDetails(sarifImageRunCategory(sanitizedScan))
 			}
 			runs = append(runs, run)
@@ -687,9 +699,19 @@ func (sp *SARIFPrinter) PrintNextSteps() {
 // it streams the configuration run and appends any container image vulnerability runs.
 // For standalone image scans, it generates a multi-run vulnerability report.
 func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if sp == nil {
+		return fmt.Errorf("failed to write sarif results: printer is nil")
+	}
+	if err := printer.PrepareOutput(sp.writer); err != nil {
+		return err
+	}
 	if opaSessionObj == nil || opaSessionObj.Report == nil {
 		if len(imageScanData) == 0 {
 			return fmt.Errorf("failed to write results in sarif format: no data provided")
+		}
+
+		if sp.writer == nil {
+			return fmt.Errorf("failed to write sarif results: output writer is nil")
 		}
 
 		// image scan
@@ -698,11 +720,16 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 			return fmt.Errorf("failed to write results in sarif format: %w", err)
 		}
 	} else {
+		if sp.writer == nil {
+			return fmt.Errorf("failed to write sarif results: output writer is nil")
+		}
+
+		// configuration scan, with image scan runs appended when present
 		// configuration scan, with image scan runs appended when present
 		var imageRuns []*sarif.Run
 		if len(imageScanData) > 0 {
 			var err error
-			imageRuns, err = sp.buildImageScanRuns(imageScanData)
+			imageRuns, err = sp.buildImageScanRuns(imageScanData, true)
 			if err != nil {
 				logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
 				return fmt.Errorf("failed to write results in sarif format: %w", err)
@@ -745,7 +772,9 @@ func (sp *SARIFPrinter) configurationResult(ctx context.Context, opaSessionObj *
 	if rsrc != nil {
 		kind = rsrc.GetKind()
 	}
-	collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath, kind, sp.showSecrets)
+	if !resource.isVirtual && cache != nil {
+		collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath, kind, sp.showSecrets)
+	}
 	return r, true
 }
 
@@ -783,15 +812,47 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 		// Github Code Scanning considers results not associated to a file path
 		// meaningless and invalid when uploading, and the location written to the
 		// report is the relative path alone, so a base path cannot stand in for a
-		// missing one
+		// missing one. For live cluster scans, synthesize a stable virtual location
+		// so external consumers (DefectDojo, GitLab, etc.) do not drop findings.
+		var isVirtual bool
 		if relPath == "" {
-			continue
+			if isClusterScan(opaSessionObj) {
+				isVirtual = true
+				if rsrc, ok := opaSessionObj.GetResource(resourceID); ok && rsrc != nil {
+					ns := rsrc.GetNamespace()
+					if ns == "" {
+						ns = "_cluster"
+					}
+					kind := strings.ToLower(rsrc.GetKind())
+					if kind == "" {
+						kind = "resource"
+					}
+					name := rsrc.GetName()
+					if name == "" {
+						name = "unnamed"
+					}
+					relPath = fmt.Sprintf("cluster/%s/%s/%s.yaml", url.PathEscape(ns), url.PathEscape(kind), url.PathEscape(name))
+				} else {
+					cleanID := strings.Trim(strings.ReplaceAll(resourceID, "//", "/"), "/")
+					if cleanID == "" {
+						cleanID = "unknown"
+					}
+					parts := strings.Split(cleanID, "/")
+					for i, p := range parts {
+						parts[i] = url.PathEscape(p)
+					}
+					relPath = fmt.Sprintf("cluster/resources/%s.yaml", strings.Join(parts, "/"))
+				}
+			} else {
+				continue
+			}
 		}
 
 		failed = append(failed, scannedResource{
 			resourceID: resourceID,
 			relPath:    filepath.ToSlash(relPath),
 			absPath:    filepath.Join(effectiveBasePath(resourceSource, basePath), relPath),
+			isVirtual:  isVirtual,
 		})
 	}
 
@@ -859,8 +920,12 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 		if stream.err != nil {
 			return fmt.Errorf("failed to write SARIF report: %w", stream.err)
 		}
-		cache := caches.get(resource.absPath)
-		locationResolver := cache.locationResolver(resource.absPath, "SARIF")
+		var cache *fixReportCache
+		var locationResolver *locationresolver.PathLocationResolver
+		if !resource.isVirtual {
+			cache = caches.get(resource.absPath)
+			locationResolver = cache.locationResolver(resource.absPath, "SARIF")
+		}
 
 		for _, toPin := range sortedSARIFControls(opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls) {
 			if stream.err != nil {
@@ -1219,7 +1284,10 @@ func getBasePathFromMetadata(opaSessionObj *cautils.OPASessionObj) string {
 		}
 		return ""
 	case v2.Directory:
-		return opaSessionObj.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
+		if dir := opaSessionObj.Metadata.ContextMetadata.DirectoryContextMetadata; dir != nil {
+			return dir.BasePath
+		}
+		return ""
 	case v2.File:
 		if opaSessionObj.Metadata.ContextMetadata.FileContextMetadata != nil {
 			return cautils.FileScanRootPath(opaSessionObj.Metadata.ContextMetadata.FileContextMetadata.FilePath)
@@ -1253,8 +1321,8 @@ func hashArtifactChange(artifactChange *sarif.ArtifactChange) [32]byte {
 
 // CloseWriter closes the SARIF output writer, returning any error from flushing or closing.
 func (p *SARIFPrinter) CloseWriter() error {
-	if p.writer != nil && p.writer != os.Stdout {
-		return p.writer.Close()
+	if p != nil && p.writer != nil && p.writer != os.Stdout {
+		return printer.CloseOutput(p.writer)
 	}
 	return nil
 }

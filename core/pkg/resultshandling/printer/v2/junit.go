@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -74,6 +75,7 @@ type JUnitTestCase struct {
 	Time        string            `xml:"time,attr,omitempty"` // Time taken (in seconds) to execute the test. optional
 	SkipMessage *JUnitSkipMessage `xml:"skipped,omitempty"`
 	Failure     *JUnitFailure     `xml:"failure,omitempty"`
+	controlID   string            `xml:"-"`
 }
 
 // JUnitSkipMessage contains the reason why a testcase was skipped.
@@ -101,10 +103,13 @@ func NewJunitPrinter(verbose bool) *JunitPrinter {
 }
 
 func (jp *JunitPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if jp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.JunitResultFormat, outputFile, junitOutputFile)
 	if explicitOutput {
 		var err error
-		jp.writer, err = printer.GetWriterNoFallback(outputFile)
+		jp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	jp.writer = printer.GetWriter(ctx, outputFile)
@@ -112,6 +117,9 @@ func (jp *JunitPrinter) SetWriter(ctx context.Context, outputFile string) error 
 }
 
 func (jp *JunitPrinter) Score(score float32) {
+	if jp == nil {
+		return
+	}
 	// Handle invalid scores
 	if score > 100 {
 		score = 100
@@ -127,6 +135,15 @@ func (jp *JunitPrinter) PrintNextSteps() {
 }
 
 func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if jp == nil {
+		return fmt.Errorf("failed to write junit results: printer is nil")
+	}
+	if jp.writer == nil {
+		return fmt.Errorf("failed to write junit results: output writer is nil")
+	}
+	if err := printer.PrepareOutput(jp.writer); err != nil {
+		return err
+	}
 	var junitResult *JUnitTestSuites
 
 	if opaSessionObj != nil && opaSessionObj.Report != nil {
@@ -187,6 +204,9 @@ func aggregateSuiteCounts(suites []JUnitTestSuite) (tests, failures, errors, ski
 
 // testsSuites builds the root JUnitTestSuites document aggregating child suites.
 func testsSuites(results *cautils.OPASessionObj) *JUnitTestSuites {
+	if results == nil || results.Report == nil {
+		return &JUnitTestSuites{Name: "Kubescape Scanning"}
+	}
 	suites := listTestsSuite(results)
 	tests, failures, errs, skipped := aggregateSuiteCounts(suites)
 	return &JUnitTestSuites{
@@ -201,6 +221,9 @@ func testsSuites(results *cautils.OPASessionObj) *JUnitTestSuites {
 
 // listTestsSuite generates JUnit test suites for framework or control scans.
 func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
+	if results == nil || results.Report == nil {
+		return nil
+	}
 	var testSuites []JUnitTestSuite
 	timestamp := iso8601Timestamp(results.Report.ReportGenerationTime)
 	skippedControls := collectSkippedControls(results)
@@ -226,23 +249,19 @@ func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 		testSuite := JUnitTestSuite{}
 		testSuite.Timestamp = timestamp
 		testSuite.ID = i
-		testSuite.Name = f.Name
+		testSuite.Name = xmlSanitize(f.Name)
 		props := properties(f.GetComplianceScore())
 		props = append(props, coverageProperties(results.ScanCoverage)...)
 		testSuite.Properties = props
 		cases := testsCases(results, f.GetControls(), f.GetName())
-		for _, tc := range cases {
-			if parts := strings.Split(tc.Classname, "/"); len(parts) >= 2 {
-				assigned[parts[len(parts)-1]] = struct{}{}
+		testSuite.TestCases = appendSkippedControls(results, cases, skippedControls, f.GetName(), func(controlID string) bool {
+			return frameworkContainsControl(results, f.GetName(), controlID)
+		})
+		for _, tc := range testSuite.TestCases {
+			if id := getControlIDFromCase(tc); id != "" {
+				assigned[id] = struct{}{}
 			}
 		}
-		testSuite.TestCases = appendSkippedControls(results, cases, skippedControls, f.GetName(), func(controlID string) bool {
-			matches := frameworkContainsControl(results, f.GetName(), controlID)
-			if matches {
-				assigned[controlID] = struct{}{}
-			}
-			return matches
-		})
 		updateSuiteCounts(&testSuite)
 		testSuites = append(testSuites, testSuite)
 	}
@@ -258,7 +277,11 @@ func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 			}
 		}
 		if len(unassigned) > 0 {
-			testSuites[0].TestCases = appendSkippedControls(results, testSuites[0].TestCases, unassigned, testSuites[0].Name, nil)
+			fallbackFrameworkName := "Kubescape"
+			if len(results.Report.SummaryDetails.Frameworks) > 0 {
+				fallbackFrameworkName = results.Report.SummaryDetails.Frameworks[0].GetName()
+			}
+			testSuites[0].TestCases = appendSkippedControls(results, testSuites[0].TestCases, unassigned, fallbackFrameworkName, nil)
 			updateSuiteCounts(&testSuites[0])
 		}
 	}
@@ -271,9 +294,8 @@ func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 func appendSkippedControls(results *cautils.OPASessionObj, existingCases []JUnitTestCase, skippedControls []skippedControlInfo, classname string, shouldInclude func(controlID string) bool) []JUnitTestCase {
 	emitted := make(map[string]struct{}, len(existingCases))
 	for _, tc := range existingCases {
-		parts := strings.Split(tc.Classname, "/")
-		if len(parts) >= 2 {
-			emitted[parts[len(parts)-1]] = struct{}{}
+		if id := getControlIDFromCase(tc); id != "" {
+			emitted[id] = struct{}{}
 		}
 	}
 
@@ -298,11 +320,12 @@ func appendSkippedControls(results *cautils.OPASessionObj, existingCases []JUnit
 			name = sc.controlID
 		}
 		existingCases = append(existingCases, JUnitTestCase{
-			Classname: classname + "/" + sc.controlID,
-			Name:      name,
+			Classname: xmlSanitizeID(classname) + "/" + xmlSanitizeID(sc.controlID),
+			Name:      xmlSanitize(name),
 			SkipMessage: &JUnitSkipMessage{
-				Message: reason,
+				Message: xmlSanitize(reason),
 			},
+			controlID: sc.controlID,
 		})
 		emitted[sc.controlID] = struct{}{}
 	}
@@ -350,7 +373,7 @@ func frameworkContainsControl(results *cautils.OPASessionObj, fwName, controlID 
 	if results == nil {
 		return false
 	}
-	if len(results.Report.SummaryDetails.Frameworks) == 1 {
+	if results.Report != nil && len(results.Report.SummaryDetails.Frameworks) == 1 {
 		return true
 	}
 	for _, p := range results.Policies {
@@ -376,18 +399,19 @@ func imageTestsSuites(imageScanData []cautils.ImageScanData) *JUnitTestSuites {
 		cves := extractCVEs(imageScanData[i].Matches, image, imageScanData[i].VexStatuses)
 		suite := JUnitTestSuite{
 			ID:        i,
-			Name:      image,
+			Name:      xmlSanitize(image),
 			Tests:     len(cves),
 			Failures:  len(cves),
 			Timestamp: timestamp,
 			TestCases: imageTestCases(cves, imageScanData[i].Platform),
 		}
-		if imageScanData[i].Platform != "" {
-			suite.Properties = []JUnitProperty{
-				{Name: "image", Value: imageScanData[i].Image},
-				{Name: "platform", Value: imageScanData[i].Platform},
-			}
+		props := []JUnitProperty{
+			{Name: "image", Value: xmlSanitize(imageScanData[i].Image)},
 		}
+		if imageScanData[i].Platform != "" {
+			props = append(props, JUnitProperty{Name: "platform", Value: xmlSanitize(imageScanData[i].Platform)})
+		}
+		suite.Properties = props
 		suites = append(suites, suite)
 	}
 
@@ -438,26 +462,32 @@ func imageTestCases(cves []imageprinter.CVE, platform string) []JUnitTestCase {
 			contents += "\nPlatform: " + platform
 		}
 		testCases = append(testCases, JUnitTestCase{
-			Classname: cve.Image,
-			Name:      fmt.Sprintf("%s (%s)", cve.ID, cve.Package),
+			Classname: xmlSanitize(cve.Image),
+			Name:      xmlSanitize(fmt.Sprintf("%s (%s)", cve.ID, cve.Package)),
 			Failure: &JUnitFailure{
 				Type:     "Vulnerability",
-				Message:  fmt.Sprintf("%s severity vulnerability found in package %s", cve.Severity, cve.Package),
-				Contents: contents,
+				Message:  xmlSanitize(fmt.Sprintf("%s severity vulnerability found in package %s", cve.Severity, cve.Package)),
+				Contents: xmlSanitize(contents),
 			},
 		})
 	}
 	return testCases
 }
 func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControlsSummaries, classname string) []JUnitTestCase {
+	if controls == nil {
+		return nil
+	}
 	var testCases []JUnitTestCase
 
-	controlIDs := controls.ListControlsIDs(nil).All()
-	sortedIDs := make([]string, 0, len(controlIDs))
-	for cID := range controlIDs {
-		sortedIDs = append(sortedIDs, cID)
+	var sortedIDs []string
+	if list := controls.ListControlsIDs(nil); list != nil {
+		controlIDs := list.All()
+		sortedIDs = make([]string, 0, len(controlIDs))
+		for cID := range controlIDs {
+			sortedIDs = append(sortedIDs, cID)
+		}
+		sort.Strings(sortedIDs)
 	}
-	sort.Strings(sortedIDs)
 
 	for _, cID := range sortedIDs {
 		testCase := JUnitTestCase{}
@@ -465,45 +495,53 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 		if control == nil {
 			continue
 		}
-		testCase.Name = control.GetName()
+		testCase.controlID = cID
+		testCase.Name = xmlSanitize(control.GetName())
 		// JUnit consumers identify a test by (classname, name); several controls
 		// share a display name, so fold the unique control ID into the classname
 		// to keep findings from colliding in CI reporters.
-		testCase.Classname = classname + "/" + cID
+		testCase.Classname = xmlSanitizeID(classname) + "/" + xmlSanitizeID(cID)
 
-		if control.GetStatus().IsFailed() {
+		status := control.GetStatus()
+		if status != nil && status.IsFailed() {
 			resources := map[string]any{}
-			for rId, status := range control.ListResourcesIDs(nil).All() {
-				if status != apis.StatusFailed {
-					continue
-				}
+			if resList := control.ListResourcesIDs(nil); resList != nil {
+				for rId, s := range resList.All() {
+					if s != apis.StatusFailed {
+						continue
+					}
 
-				resource, ok := results.GetResource(rId)
-				if !ok || resource == nil {
-					logger.L().Debug("resource missing from AllResources, reporting by ID",
-						helpers.String("resourceID", rId))
-					resources[fmt.Sprintf("resourceID: %s", rId)] = nil
-					continue
+					var resource workloadinterface.IMetadata
+					if results != nil {
+						resource, _ = results.GetResource(rId)
+					}
+					if resource == nil {
+						logger.L().Debug("resource missing from AllResources, reporting by ID",
+							helpers.String("resourceID", rId))
+						resources[fmt.Sprintf("resourceID: %s", rId)] = nil
+						continue
+					}
+					sourcePath := ""
+					if results != nil && results.ResourceSource != nil {
+						if ResourceSourcePath, ok := results.ResourceSource[rId]; ok {
+							sourcePath = BestSourcePath(ResourceSourcePath)
+						}
+					}
+					resources[resourceToString(resource, sourcePath)] = nil
 				}
-				sourcePath := ""
-				if ResourceSourcePath, ok := results.ResourceSource[rId]; ok {
-					sourcePath = BestSourcePath(ResourceSourcePath)
-				}
-				resources[resourceToString(resource, sourcePath)] = nil
 			}
 			resourcesStr := shared.MapStringToSlice(resources)
 			sort.Strings(resourcesStr)
 			testCaseFailure := JUnitFailure{}
 			testCaseFailure.Type = "Control"
-			testCaseFailure.Message = fmt.Sprintf("%s failed on %d resource(s)", control.GetName(), len(resourcesStr))
-			testCaseFailure.Contents = fmt.Sprintf("Remediation: %s\nMore details: %s\n\n%s", control.GetRemediation(), cautils.GetControlLink(control.GetID()), strings.Join(resourcesStr, "\n"))
+			testCaseFailure.Message = xmlSanitize(fmt.Sprintf("%s failed on %d resource(s)", control.GetName(), len(resourcesStr)))
+			testCaseFailure.Contents = xmlSanitize(fmt.Sprintf("Remediation: %s\nMore details: %s\n\n%s", control.GetRemediation(), cautils.GetControlLink(control.GetID()), strings.Join(resourcesStr, "\n")))
 
 			testCase.Failure = &testCaseFailure
-		} else if control.GetStatus().IsSkipped() {
+		} else if status != nil && status.IsSkipped() {
 			testCase.SkipMessage = &JUnitSkipMessage{
-				Message: buildSkipMessage(control.GetStatus()),
+				Message: xmlSanitize(buildSkipMessage(status)),
 			}
-
 		}
 		testCases = append(testCases, testCase)
 	}
@@ -511,6 +549,9 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 }
 
 func resourceToString(resource workloadinterface.IMetadata, sourcePath string) string {
+	if resource == nil {
+		return ""
+	}
 	sep := "; "
 	s := ""
 	s += fmt.Sprintf("apiVersion: %s", resource.GetApiVersion()) + sep
@@ -529,7 +570,7 @@ func properties(complianceScore float32) []JUnitProperty {
 	return []JUnitProperty{
 		{
 			Name:  "complianceScore",
-			Value: cautils.ComplianceScoreToString(complianceScore, 2),
+			Value: xmlSanitize(cautils.ComplianceScoreToString(complianceScore, 2)),
 		},
 	}
 }
@@ -541,7 +582,7 @@ func coverageProperties(coverage cautils.ScanCoverage) []JUnitProperty {
 	return []JUnitProperty{
 		{
 			Name:  "coverageScore",
-			Value: cautils.ComplianceScoreToString(coverage.CoverageScore, 2),
+			Value: xmlSanitize(cautils.ComplianceScoreToString(coverage.CoverageScore, 2)),
 		},
 		{
 			Name:  "evaluatedControls",
@@ -558,10 +599,121 @@ func coverageProperties(coverage cautils.ScanCoverage) []JUnitProperty {
 	}
 }
 
+func isIllegalXMLChar(r rune) bool {
+	return (r < 0x20 && r != '\t' && r != '\n' && r != '\r') || r == 0xfffe || r == 0xffff
+}
+
+// xmlSanitize strips characters that are illegal in XML 1.0 documents:
+// (r < 0x20 && r != '\t' && r != '\n' && r != '\r') || r == 0xfffe || r == 0xffff.
+// XML 1.0 permits U+007F (DEL) within the [#x20-#xD7FF] range, but forbids
+// non-whitespace C0 controls (< 0x20) and noncharacters U+FFFE / U+FFFF.
+// This prevents malformed XML output that breaks downstream CI/CD parsers (CWE-150).
+func xmlSanitize(s string) string {
+	if s == "" {
+		return s
+	}
+	hasIllegal := false
+	for _, r := range s {
+		if isIllegalXMLChar(r) {
+			hasIllegal = true
+			break
+		}
+	}
+	if !hasIllegal {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if isIllegalXMLChar(r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// xmlSanitizeID sanitizes an identifier (such as a control ID) while preserving
+// uniqueness: illegal XML 1.0 characters are percent-encoded rather than stripped,
+// preventing distinct custom controls from colliding in JUnit (classname, name) pairs.
+func xmlSanitizeID(id string) string {
+	if id == "" {
+		return id
+	}
+	hasIllegal := false
+	for _, r := range id {
+		if isIllegalXMLChar(r) || r == '%' {
+			hasIllegal = true
+			break
+		}
+	}
+	if !hasIllegal {
+		return id
+	}
+	var b strings.Builder
+	b.Grow(len(id) + 4)
+	for _, r := range id {
+		if isIllegalXMLChar(r) {
+			if r <= 0xff {
+				fmt.Fprintf(&b, "%%%02X", r)
+			} else {
+				fmt.Fprintf(&b, "%%u%04X", r)
+			}
+		} else if r == '%' {
+			b.WriteString("%25")
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// xmlUnsanitizeID restores raw control IDs from percent-encoded identifiers produced by xmlSanitizeID.
+func xmlUnsanitizeID(s string) string {
+	if !strings.Contains(s, "%") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		if s[i] == '%' {
+			if i+5 < len(s) && s[i+1] == 'u' {
+				if val, err := strconv.ParseUint(s[i+2:i+6], 16, 32); err == nil && val <= unicode.MaxRune {
+					b.WriteRune(rune(val))
+					i += 6
+					continue
+				}
+			} else if i+2 < len(s) {
+				if val, err := strconv.ParseUint(s[i+1:i+3], 16, 8); err == nil && val <= 0xff {
+					b.WriteByte(byte(val))
+					i += 3
+					continue
+				}
+			}
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+// getControlIDFromCase retrieves the raw control ID from a testcase, either from
+// its unexported controlID field or by decoding the classname suffix.
+func getControlIDFromCase(tc JUnitTestCase) string {
+	if tc.controlID != "" {
+		return tc.controlID
+	}
+	parts := strings.Split(tc.Classname, "/")
+	if len(parts) >= 2 {
+		return xmlUnsanitizeID(parts[len(parts)-1])
+	}
+	return ""
+}
+
 // CloseWriter closes the JUnit output writer, returning any error from flushing or closing.
 func (p *JunitPrinter) CloseWriter() error {
-	if p.writer != nil && p.writer != os.Stdout {
-		return p.writer.Close()
+	if p != nil && p.writer != nil && p.writer != os.Stdout {
+		return printer.CloseOutput(p.writer)
 	}
 	return nil
 }

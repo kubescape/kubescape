@@ -163,6 +163,42 @@ func TestPathFilterExcluded(t *testing.T) {
 			path:     "testdata/pod.yaml",
 			want:     true,
 		},
+		{
+			name:     "explicit relative prefix anchors a single name at the root",
+			patterns: []string{"./testdata"},
+			path:     "src/testdata/pod.yaml",
+			want:     false,
+		},
+		{
+			name:     "explicit relative prefix anchors a directory pattern at the root",
+			patterns: []string{"./testdata/"},
+			path:     "src/testdata/pod.yaml",
+			want:     false,
+		},
+		{
+			name:     "explicit relative prefix anchors a wildcard at the root",
+			patterns: []string{"./*.yaml"},
+			path:     "deploy/pod.yaml",
+			want:     false,
+		},
+		{
+			name:     "explicit relative prefix still matches a wildcard at the root",
+			patterns: []string{"./*.yaml"},
+			path:     "pod.yaml",
+			want:     true,
+		},
+		{
+			name:     "explicit relative prefix re-includes only at the root",
+			patterns: []string{"*.yaml", "!./keep.yaml"},
+			path:     "keep.yaml",
+			want:     false,
+		},
+		{
+			name:     "explicit relative prefix leaves a nested re-include excluded",
+			patterns: []string{"*.yaml", "!./keep.yaml"},
+			path:     "sub/keep.yaml",
+			want:     true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -267,6 +303,43 @@ func TestNewScanPathFilterAnchorsAFileInputAtItsDirectory(t *testing.T) {
 
 	assert.Equal(t, filepath.Clean(root), filter.Root())
 	assert.True(t, filter.Excluded(filepath.Join(root, "skipped.yaml"), false))
+}
+
+func TestNewScanPathFilterIgnoreFileWithBOM(t *testing.T) {
+	const bom = "\xef\xbb\xbf"
+	tests := []struct {
+		name     string
+		content  string
+		patterns []string
+	}{
+		{name: "without BOM", content: "a.yaml\n", patterns: []string{"a.yaml"}},
+		{name: "with BOM", content: bom + "a.yaml\n", patterns: []string{"a.yaml"}},
+		{name: "with BOM and comment first", content: bom + "# skip\na.yaml\n", patterns: []string{"a.yaml"}},
+		{name: "with BOM and CRLF lines", content: bom + "a.yaml\r\nb/\r\n", patterns: []string{"a.yaml", "b/"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeIgnoreFile(t, root, tc.content)
+
+			filter, err := NewScanPathFilter(root, nil, true)
+			require.NoError(t, err)
+			require.NotNil(t, filter)
+
+			assert.Equal(t, tc.patterns, filter.Patterns())
+			assert.True(t, filter.Excluded(filepath.Join(root, "a.yaml"), false))
+			assert.False(t, filter.Excluded(filepath.Join(root, "c.yaml"), false))
+		})
+	}
+}
+
+func TestLoadIgnoreFilePatternsBOMOnlyFile(t *testing.T) {
+	root := t.TempDir()
+	writeIgnoreFile(t, root, "\xef\xbb\xbf")
+
+	patterns, err := LoadIgnoreFilePatterns(root)
+	require.NoError(t, err)
+	assert.Empty(t, patterns)
 }
 
 func TestLoadIgnoreFilePatternsWithoutFile(t *testing.T) {
@@ -583,6 +656,54 @@ func TestNewScanPathFilterAnchorsARepositoryInputAtItsClone(t *testing.T) {
 	assert.Equal(t, filepath.Clean(clone), filter.Root())
 	assert.True(t, filter.Excluded(filepath.Join(clone, "testdata", "pod.yaml"), false))
 	assert.False(t, filter.Excluded(filepath.Join(clone, "pod.yaml"), false))
+}
+
+// An unusable ignore file fails the filter with an IgnoreFileError that carries
+// the path it read, with the message and wrapped errors it had before.
+func TestNewScanPathFilterReportsTheIgnoreFileItRead(t *testing.T) {
+	invalid := t.TempDir()
+	writeIgnoreFile(t, invalid, "[\n")
+
+	notAFile := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(notAFile, IgnoreFileName), 0o700))
+
+	// A repository is found through its clone, which the scan's clone depth keys.
+	const repoURL = "https://github.com/kubescape/example-ignore-file-error"
+	const depth = 5
+	clone := t.TempDir()
+	writeIgnoreFile(t, clone, "[\n")
+	gitURL, err := giturl.NewGitAPI(repoURL)
+	require.NoError(t, err)
+	key := repoWorkspaceKey(gitURL, depth)
+	tmpDirPathsMu.Lock()
+	tmpDirPaths[key] = clone
+	tmpDirPathsMu.Unlock()
+	t.Cleanup(func() {
+		tmpDirPathsMu.Lock()
+		delete(tmpDirPaths, key)
+		tmpDirPathsMu.Unlock()
+	})
+
+	for name, tc := range map[string]struct {
+		input   string
+		depth   []int
+		root    string
+		wrapped error
+	}{
+		"invalid pattern":            {input: invalid, root: invalid, wrapped: ErrInvalidIgnorePattern},
+		"ignore file is a directory": {input: notAFile, root: notAFile, wrapped: ErrIgnoreFileNotRegular},
+		"repository clone":           {input: repoURL, depth: []int{depth}, root: clone, wrapped: ErrInvalidIgnorePattern},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewScanPathFilter(tc.input, nil, true, tc.depth...)
+			var ignoreErr *IgnoreFileError
+			require.ErrorAs(t, err, &ignoreErr)
+			ignoreFile := filepath.Join(tc.root, IgnoreFileName)
+			assert.Equal(t, ignoreFile, ignoreErr.Path)
+			assert.ErrorIs(t, err, tc.wrapped)
+			assert.Contains(t, err.Error(), ignoreFile)
+		})
+	}
 }
 
 func TestLoadIgnoreFilePatterns_OversizedFileRejected(t *testing.T) {

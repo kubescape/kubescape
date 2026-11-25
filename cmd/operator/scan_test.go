@@ -57,6 +57,27 @@ func TestGetOperatorScanCmd(t *testing.T) {
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }
 
+func TestGetOperatorScanCmd_NilOperatorInfo(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+
+	cmd := getOperatorScanCmd(mockKubescape, nil)
+	require.NotNil(t, cmd)
+	assert.Equal(t, "scan", cmd.Use)
+
+	// Verify Args doesn't panic when operatorInfo is nil
+	err := cmd.Args(&cobra.Command{}, []string{"configurations"})
+	assert.NoError(t, err)
+
+	// Verify child commands don't panic when created with nil operatorInfo
+	configCmd := getOperatorScanConfigCmd(mockKubescape, nil)
+	require.NotNil(t, configCmd)
+	assert.NoError(t, configCmd.Args(configCmd, []string{}))
+
+	vulnCmd := getOperatorScanVulnerabilitiesCmd(mockKubescape, nil)
+	require.NotNil(t, vulnCmd)
+	assert.NoError(t, vulnCmd.Args(vulnCmd, []string{}))
+}
+
 // TestOperatorScanCmd_NamespaceFlagPropagatesToChildCommands guards against a
 // regression where operatorInfo was passed by value into the "configurations"
 // and "vulnerabilities" child commands: the child received a copy frozen at
@@ -212,6 +233,26 @@ func newFakeOperator(t *testing.T, failMessage string) *fakeOperator {
 		status := map[string]interface{}{"started": true, "completed": true}
 		if failMessage != "" {
 			status = map[string]interface{}{"started": true, "error": map[string]interface{}{"reason": "Failed", "message": failMessage}}
+		}
+		_ = unstructured.SetNestedField(obj.Object, status, "status")
+		return false, nil, nil
+	})
+	return &fakeOperator{dyn: dyn}
+}
+
+func newFakeOperatorWithPayload(t *testing.T, payload string) *fakeOperator {
+	t.Helper()
+	gvr := schema.GroupVersionResource{Group: "kubescape.io", Version: "v1alpha1", Resource: "operatorcommands"}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{gvr: "OperatorCommandList"})
+	var counter int64
+	dyn.PrependReactor("create", "operatorcommands", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		obj := action.(clienttesting.CreateAction).GetObject().(*unstructured.Unstructured)
+		obj.SetName(fmt.Sprintf("%s%d", obj.GetGenerateName(), atomic.AddInt64(&counter, 1)))
+		status := map[string]interface{}{
+			"started":   true,
+			"completed": true,
+			"payload":   base64.StdEncoding.EncodeToString([]byte(payload)),
 		}
 		_ = unstructured.SetNestedField(obj.Object, status, "status")
 		return false, nil, nil

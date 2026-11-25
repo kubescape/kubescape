@@ -2,6 +2,7 @@ package policytest
 
 import (
 	"encoding/json"
+	"slices"
 	"sort"
 
 	"github.com/google/go-cmp/cmp"
@@ -11,6 +12,7 @@ import (
 // Compare reports whether got matches want, ignoring the order of the
 // response slice and the order within each response's path lists (the
 // evaluator does not guarantee either). It returns an empty diff on a match.
+// Neither argument is modified.
 func Compare(got, want []reporthandling.RuleResponse) string {
 	normGot := normalize(got)
 	normWant := normalize(want)
@@ -21,6 +23,14 @@ func normalize(responses []reporthandling.RuleResponse) []reporthandling.RuleRes
 	out := make([]reporthandling.RuleResponse, len(responses))
 	copy(out, responses)
 	for i := range out {
+		// copy above is shallow: the path lists still share the caller's
+		// backing arrays. Sort clones, or comparing would reorder the
+		// caller's responses, and WriteExpected would then write paths in
+		// sorted order only when a stale expected.json happened to exist.
+		out[i].FailedPaths = slices.Clone(out[i].FailedPaths)
+		out[i].ReviewPaths = slices.Clone(out[i].ReviewPaths)
+		out[i].DeletePaths = slices.Clone(out[i].DeletePaths)
+		out[i].FixPaths = slices.Clone(out[i].FixPaths)
 		sort.Strings(out[i].FailedPaths)
 		sort.Strings(out[i].ReviewPaths)
 		sort.Strings(out[i].DeletePaths)

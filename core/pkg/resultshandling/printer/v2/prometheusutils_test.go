@@ -5,7 +5,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anchore/grype/grype/match"
+	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/assert"
@@ -671,6 +676,45 @@ func TestSetComplianceScores_NilSummaryDetails(t *testing.T) {
 	assert.Empty(t, m.listControls)
 }
 
+func TestSetComplianceScores_FrameworkNameWhitespaceAndDeduplication(t *testing.T) {
+	summaryDetails := &reportsummary.SummaryDetails{
+		Frameworks: []reportsummary.FrameworkSummary{
+			{
+				Name:            "  nsa  ",
+				ComplianceScore: 80,
+			},
+			{
+				Name:            "nsa",
+				ComplianceScore: 85,
+			},
+			{
+				Name:            "   ",
+				ComplianceScore: 50,
+			},
+			{
+				Name:            "mitre ",
+				ComplianceScore: 90,
+			},
+		},
+	}
+
+	m := &Metrics{}
+	m.setComplianceScores(summaryDetails)
+	output := m.String()
+
+	// Should trim whitespace and deduplicate identical framework names
+	assert.Len(t, m.listFrameworks, 2)
+	assert.Equal(t, "mitre", m.listFrameworks[0].frameworkName)
+	assert.Equal(t, "nsa", m.listFrameworks[1].frameworkName)
+	assert.Equal(t, 85, m.listFrameworks[1].complianceScore)
+
+	// Series should not be duplicated
+	assert.Equal(t, 1, strings.Count(output, `kubescape_framework_complianceScore{name="nsa"}`))
+	assert.Equal(t, 1, strings.Count(output, `kubescape_framework_complianceScore{name="mitre"}`))
+	assert.NotContains(t, output, `name="  nsa  "`)
+	assert.NotContains(t, output, `name="   "`)
+}
+
 func TestEscapePrometheusLabelValue(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -717,6 +761,16 @@ func TestEscapePrometheusLabelValue(t *testing.T) {
 			input:    "name=\"evil\"\r\nkubescape_score 100",
 			expected: `name=\"evil\"\nkubescape_score 100`,
 		},
+		{
+			name:     "strips null bytes",
+			input:    "foo\x00bar",
+			expected: "foobar",
+		},
+		{
+			name:     "strips null bytes with crlf and quotes",
+			input:    "foo\x00\r\nbar\"test\"",
+			expected: `foo\nbar\"test\"`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -724,6 +778,7 @@ func TestEscapePrometheusLabelValue(t *testing.T) {
 			got := escapePrometheusLabelValue(tt.input)
 			assert.Equal(t, tt.expected, got)
 			assert.NotContains(t, got, "\r", "output must never contain raw carriage returns")
+			assert.NotContains(t, got, "\x00", "output must never contain raw null bytes")
 		})
 	}
 }
@@ -756,4 +811,285 @@ func TestPrometheusMetrics_CarriageReturnNeutralization(t *testing.T) {
 	assert.Contains(t, output, `name="my-pod\nfake-line"`)
 	assert.Contains(t, output, `path="manifests/pod\n.yaml"`)
 	assert.Contains(t, output, `image="my-image:latest\nmalicious"`)
+}
+
+func TestPrometheusMetrics_NullByteSanitization(t *testing.T) {
+	m := &Metrics{
+		listResources: []mResources{
+			{
+				apiVersion: "v1",
+				kind:       "Pod",
+				namespace:  "default\x00injected",
+				name:       "my-pod\x00extra",
+				path:       "manifests/pod\x00.yaml",
+				withPath:   true,
+			},
+		},
+		listImages: []mImageVulnerability{
+			{
+				image:    "my-image:latest\x00extra",
+				platform: "linux/amd64",
+				severity: "High",
+				cveCount: 1,
+			},
+		},
+	}
+
+	output := m.String()
+	assert.NotContains(t, output, "\x00", "prometheus metrics output must not contain raw null bytes")
+	assert.Contains(t, output, `namespace="defaultinjected"`)
+	assert.Contains(t, output, `name="my-podextra"`)
+	assert.Contains(t, output, `path="manifests/pod.yaml"`)
+	assert.Contains(t, output, `image="my-image:latestextra"`)
+
+	parser := expfmt.NewTextParser(model.LegacyValidation)
+	_, err := parser.TextToMetricFamilies(strings.NewReader(output))
+	require.NoError(t, err, "Prometheus text parser must successfully parse sanitized metrics")
+}
+
+type mockCounters struct {
+	passed  int
+	skipped int
+	failed  int
+}
+
+func (m *mockCounters) Passed() int   { return m.passed }
+func (m *mockCounters) Skipped() int  { return m.skipped }
+func (m *mockCounters) Failed() int   { return m.failed }
+func (m *mockCounters) Excluded() int { return 0 }
+func (m *mockCounters) All() int      { return m.passed + m.skipped + m.failed }
+
+func TestMetricsSet_NilCountersSafety(t *testing.T) {
+	t.Run("mComplianceScore nil counters", func(t *testing.T) {
+		mrs := mComplianceScore{}
+		require.NotPanics(t, func() {
+			mrs.set(nil, nil)
+		})
+		assert.Equal(t, 0, mrs.resourcesCountFailed)
+		assert.Equal(t, 0, mrs.resourcesCountPassed)
+		assert.Equal(t, 0, mrs.resourcesCountSkipped)
+		assert.Equal(t, 0, mrs.controlsCountFailed)
+		assert.Equal(t, 0, mrs.controlsCountPassed)
+		assert.Equal(t, 0, mrs.controlsCountSkipped)
+
+		resCounters := &mockCounters{passed: 10, skipped: 5, failed: 2}
+		require.NotPanics(t, func() {
+			mrs.set(resCounters, nil)
+		})
+		assert.Equal(t, 10, mrs.resourcesCountPassed)
+		assert.Equal(t, 5, mrs.resourcesCountSkipped)
+		assert.Equal(t, 2, mrs.resourcesCountFailed)
+		assert.Equal(t, 0, mrs.controlsCountFailed)
+
+		ctrlCounters := &mockCounters{passed: 8, skipped: 1, failed: 3}
+		require.NotPanics(t, func() {
+			mrs.set(nil, ctrlCounters)
+		})
+		assert.Equal(t, 10, mrs.resourcesCountPassed)
+		assert.Equal(t, 8, mrs.controlsCountPassed)
+		assert.Equal(t, 1, mrs.controlsCountSkipped)
+		assert.Equal(t, 3, mrs.controlsCountFailed)
+	})
+
+	t.Run("mFrameworkComplianceScore nil counters", func(t *testing.T) {
+		mfrs := mFrameworkComplianceScore{}
+		require.NotPanics(t, func() {
+			mfrs.set(nil, nil)
+		})
+		assert.Equal(t, 0, mfrs.resourcesCountFailed)
+		assert.Equal(t, 0, mfrs.controlsCountFailed)
+
+		resCounters := &mockCounters{passed: 4, skipped: 2, failed: 1}
+		require.NotPanics(t, func() {
+			mfrs.set(resCounters, nil)
+		})
+		assert.Equal(t, 4, mfrs.resourcesCountPassed)
+		assert.Equal(t, 2, mfrs.resourcesCountSkipped)
+		assert.Equal(t, 1, mfrs.resourcesCountFailed)
+
+		ctrlCounters := &mockCounters{passed: 6, skipped: 0, failed: 2}
+		require.NotPanics(t, func() {
+			mfrs.set(nil, ctrlCounters)
+		})
+		assert.Equal(t, 4, mfrs.resourcesCountPassed)
+		assert.Equal(t, 6, mfrs.controlsCountPassed)
+		assert.Equal(t, 0, mfrs.controlsCountSkipped)
+		assert.Equal(t, 2, mfrs.controlsCountFailed)
+	})
+
+	t.Run("mControlComplianceScore nil counters", func(t *testing.T) {
+		mcrs := mControlComplianceScore{}
+		require.NotPanics(t, func() {
+			mcrs.set(nil)
+		})
+		assert.Equal(t, 0, mcrs.resourcesCountPassed)
+		assert.Equal(t, 0, mcrs.resourcesCountFailed)
+		assert.Equal(t, 0, mcrs.resourcesCountSkipped)
+
+		resCounters := &mockCounters{passed: 7, skipped: 3, failed: 1}
+		require.NotPanics(t, func() {
+			mcrs.set(resCounters)
+		})
+		assert.Equal(t, 7, mcrs.resourcesCountPassed)
+		assert.Equal(t, 3, mcrs.resourcesCountSkipped)
+		assert.Equal(t, 1, mcrs.resourcesCountFailed)
+	})
+}
+
+func TestSetComplianceScores_WithNilCounters(t *testing.T) {
+	score := float32(80)
+	summaryDetails := &reportsummary.SummaryDetails{
+		Score:           80,
+		ComplianceScore: 80,
+		Frameworks: []reportsummary.FrameworkSummary{
+			{
+				Name:            "FrameworkWithNilCounters",
+				ComplianceScore: 80,
+			},
+		},
+		Controls: reportsummary.ControlSummaries{
+			"C-0001": {
+				ControlID:       "C-0001",
+				Name:            "ControlWithNilCounters",
+				ComplianceScore: &score,
+			},
+		},
+	}
+
+	m := &Metrics{}
+	require.NotPanics(t, func() {
+		m.setComplianceScores(summaryDetails)
+	})
+	assert.Len(t, m.listFrameworks, 1)
+	assert.Len(t, m.listControls, 1)
+	assert.Equal(t, 0, m.listFrameworks[0].resourcesCountPassed)
+	assert.Equal(t, 0, m.listFrameworks[0].controlsCountPassed)
+	assert.Equal(t, 0, m.listControls[0].resourcesCountPassed)
+}
+
+func TestSetResourcesCountersFromCatalog_NilSummaryDetailsSafety(t *testing.T) {
+	resources := map[string]workloadinterface.IMetadata{}
+	wl := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "test-pod", "namespace": "default"},
+	})
+	id := wl.GetID()
+	resources[id] = wl
+
+	results := map[string]resourcesresults.Result{
+		id: {
+			ResourceID: id,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0001",
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+						{
+							Name: "rule-1",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	catalog := cautils.NewMapResourceCatalog(resources)
+	m := &Metrics{}
+	require.NotPanics(t, func() {
+		m.setResourcesCountersFromCatalog(catalog, results, nil, nil)
+	})
+	require.Len(t, m.listResources, 1)
+	assert.Equal(t, "test-pod", m.listResources[0].name)
+}
+
+func TestSetResourcesCountersFromCatalog_DeduplicatesEscapedLabelCollisions(t *testing.T) {
+	resources := map[string]workloadinterface.IMetadata{}
+	wl1 := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "test-pod", "namespace": "default"},
+	})
+	wl2 := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "test-pod\x00", "namespace": "default"},
+	})
+	id1 := "id-1"
+	id2 := "id-2"
+	resources[id1] = wl1
+	resources[id2] = wl2
+
+	results := map[string]resourcesresults.Result{
+		id1: {
+			ResourceID: id1,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0001",
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+						{Name: "rule-1", Status: "passed"},
+					},
+				},
+			},
+		},
+		id2: {
+			ResourceID: id2,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0002",
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+						{Name: "rule-2", Status: "failed"},
+					},
+				},
+			},
+		},
+	}
+
+	catalog := cautils.NewMapResourceCatalog(resources)
+	m := &Metrics{}
+	m.setResourcesCountersFromCatalog(catalog, results, nil, nil)
+
+	require.Len(t, m.listResources, 1)
+	assert.Equal(t, 1, m.listResources[0].controlsCountPassed)
+	assert.Equal(t, 1, m.listResources[0].controlsCountFailed)
+
+	metricsStr := m.String()
+	parser := expfmt.NewTextParser(model.LegacyValidation)
+	families, err := parser.TextToMetricFamilies(strings.NewReader(metricsStr))
+	require.NoError(t, err)
+	failedFamily, ok := families["kubescape_resource_count_controls_failed"]
+	require.True(t, ok)
+	require.Len(t, failedFamily.Metric, 1, "must have exactly 1 series, not duplicate series")
+}
+
+func TestSetImageVulnerabilities_NilSummarySafety(t *testing.T) {
+	m := &Metrics{isImageScan: true}
+	require.NotPanics(t, func() {
+		m.setImageVulnerabilities([]cautils.ImageScanData{
+			{
+				Image:    "test-image:latest",
+				Platform: "linux/amd64",
+			},
+		})
+	})
+	assert.Empty(t, m.listImages)
+}
+
+func TestSetImageVulnerabilities_CanonicalSeverityAndTrimmedLabels(t *testing.T) {
+	m := &Metrics{isImageScan: true}
+	matches := match.NewMatches(
+		mdImageMatch("CVE-2024-0001", " critical ", "openssl", "1.0.0", vulnerability.FixStateFixed),
+		mdImageMatch("CVE-2024-0002", "CRITICAL", "curl", "7.0.0", vulnerability.FixStateNotFixed),
+	)
+	data := cautils.ImageScanData{
+		Image:    "  nginx:latest  ",
+		Platform: " linux/amd64 ",
+		Matches:  matches,
+	}
+	m.setImageVulnerabilities([]cautils.ImageScanData{data})
+	require.Len(t, m.listImages, 1)
+	assert.Equal(t, "nginx:latest", m.listImages[0].image)
+	assert.Equal(t, "linux/amd64", m.listImages[0].platform)
+	assert.Equal(t, "Critical", m.listImages[0].severity)
+	assert.Equal(t, 2, m.listImages[0].cveCount)
+	assert.Equal(t, 1, m.listImages[0].fixableCVECount)
 }

@@ -535,3 +535,145 @@ func TestActionPrint_NilReportDoesNotPanic(t *testing.T) {
 	})
 	require.NoError(t, err)
 }
+
+func TestExceptionsPrinter_RejectsImageScanData(t *testing.T) {
+	ep := NewExceptionsPrinter()
+	images := []cautils.ImageScanData{{Image: "nginx:1.23"}}
+	session := exceptionsSession(t)
+
+	tmp, err := os.CreateTemp("", "exceptions-combined-*.json")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	})
+	ep.writer = tmp
+
+	err = ep.ActionPrint(context.Background(), session, images)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceptions cannot carry image vulnerabilities; use json or sarif for a combined scan with --scan-images")
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+	assert.Empty(t, raw, "a partial report must not appear when combined scan is rejected")
+}
+
+func TestActionPrint_NilWriterReturnsError(t *testing.T) {
+	ep := NewExceptionsPrinter()
+	session := exceptionsSession(t)
+
+	require.NotPanics(t, func() {
+		err := ep.ActionPrint(context.Background(), session, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestBuildExceptionPolicies_SkipsEmptyAndWhitespaceControlIDs(t *testing.T) {
+	session := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			ReportGenerationTime: time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC),
+		},
+		AllResources: map[string]workloadinterface.IMetadata{
+			"api": exceptionsWorkload(t, "Deployment", "prod", "api"),
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			"api": {
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					failedControl(""),
+					failedControl("   "),
+					failedControl("\t\n"),
+					failedControl("C-0001"),
+				},
+			},
+		},
+	}
+
+	policies := buildExceptionPolicies(context.Background(), session)
+	require.Len(t, policies, 1)
+	assert.Equal(t, "exclude-C-0001", policies[0].Name)
+	require.Len(t, policies[0].PosturePolicies, 1)
+	assert.Equal(t, "C-0001", policies[0].PosturePolicies[0].ControlID)
+
+	for _, policy := range policies {
+		for _, pp := range policy.PosturePolicies {
+			assert.NotEmpty(t, pp.ControlID, "controlID must not be empty or wildcard")
+		}
+	}
+}
+
+func TestHasFailedControl_IgnoresEmptyControlIDs(t *testing.T) {
+	result := resourcesresults.Result{
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			failedControl(""),
+			failedControl("   "),
+		},
+	}
+	assert.False(t, hasFailedControl(nil, result))
+
+	resultWithValidControl := resourcesresults.Result{
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			failedControl(""),
+			failedControl("C-0001"),
+		},
+	}
+	assert.True(t, hasFailedControl(nil, resultWithValidControl))
+}
+
+func TestSourcePath_NilResourceDoesNotPanic(t *testing.T) {
+	assert.Empty(t, sourcePath(nil))
+}
+
+func TestBuildExceptionPolicies_PreservesRawControlIDWhitespace(t *testing.T) {
+	session := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			ReportGenerationTime: time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC),
+		},
+		AllResources: map[string]workloadinterface.IMetadata{
+			"api": exceptionsWorkload(t, "Deployment", "prod", "api"),
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			"api": {
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					failedControl(" custom-foo "),
+					failedControl("custom-foo"),
+				},
+			},
+		},
+	}
+
+	policies := buildExceptionPolicies(context.Background(), session)
+	require.Len(t, policies, 2)
+	assert.Equal(t, "exclude- custom-foo ", policies[0].Name)
+	require.Len(t, policies[0].PosturePolicies, 1)
+	assert.Equal(t, " custom-foo ", policies[0].PosturePolicies[0].ControlID)
+	assert.Equal(t, "exclude-custom-foo", policies[1].Name)
+	require.Len(t, policies[1].PosturePolicies, 1)
+	assert.Equal(t, "custom-foo", policies[1].PosturePolicies[0].ControlID)
+}
+
+func TestExceptionsPrinter_NilReceiverSafety(t *testing.T) {
+	var ep *ExceptionsPrinter
+
+	assert.NotPanics(t, func() {
+		err := ep.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := ep.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := ep.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		ep.Score(100)
+		ep.PrintNextSteps()
+	})
+}

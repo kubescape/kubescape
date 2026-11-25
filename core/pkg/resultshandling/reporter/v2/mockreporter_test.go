@@ -89,6 +89,26 @@ func TestReportMockGetURL(t *testing.T) {
 	}
 }
 
+func TestReportMock_DisplayMessage_PercentSpecifiers(t *testing.T) {
+	msg := "Risk exceeded by 80% with %s format and %d items"
+	var reportMock reporter.IReport = NewReportMock("https://kubescape.io", msg)
+
+	capture, clean := captureStderr(t)
+	defer clean()
+
+	reportMock.DisplayMessage()
+	require.NoError(t, capture.Close())
+
+	buf, err := os.ReadFile(capture.Name())
+	require.NoError(t, err)
+
+	output := string(buf)
+	require.NotEmpty(t, output)
+	assert.Contains(t, output, msg)
+	assert.NotContains(t, output, "%!s(MISSING)")
+	assert.NotContains(t, output, "%!d(MISSING)")
+}
+
 func TestReportMock_strToDisplay(t *testing.T) {
 	type fields struct {
 		query   string

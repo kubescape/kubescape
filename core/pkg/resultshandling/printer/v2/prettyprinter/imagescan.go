@@ -30,12 +30,18 @@ func NewImagePrinter(writer *os.File, verboseMode bool) *ImagePrinter {
 var _ MainPrinter = &ImagePrinter{}
 
 func (ip *ImagePrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary) {
+	if ip == nil || ip.writer == nil || summary == nil {
+		return
+	}
 	ip.PrintImageScanningTable(*summary)
 	printImageScanningSummary(ip.writer, *summary, ip.verboseMode)
 	printTopComponents(ip.writer, *summary)
 }
 
 func (ip *ImagePrinter) PrintImageScanningTable(summary imageprinter.ImageScanSummary) {
+	if ip == nil || ip.writer == nil {
+		return
+	}
 	if !ip.verboseMode {
 		summary.CVEs = getFilteredCVEs(summary.CVEs)
 	}
@@ -48,6 +54,9 @@ func (ip *ImagePrinter) PrintConfigurationsScanning(summaryDetails *reportsummar
 }
 
 func (ip *ImagePrinter) PrintNextSteps() {
+	if ip == nil || ip.writer == nil {
+		return
+	}
 	if ip.verboseMode {
 		printNextSteps(ip.writer, []string{installKubescapeText}, true)
 		return

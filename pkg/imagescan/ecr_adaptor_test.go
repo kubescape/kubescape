@@ -2,6 +2,7 @@ package imagescan
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -317,6 +318,33 @@ func TestAWSECRAdaptor_GetImagesVulnerabilities(t *testing.T) {
 	assert.Equal(t, "High", vuln.Severity)
 	assert.Equal(t, "Test vulnerability", vuln.Description)
 	assert.Equal(t, []string{"https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2023-1234"}, vuln.Links)
+}
+
+// A basic-scan finding does not have to carry a URI. Without one the
+// vulnerability has no links, rather than a single empty link.
+func TestAWSECRAdaptor_GetImagesVulnerabilities_FindingWithoutURIHasNoLinks(t *testing.T) {
+	adaptor := NewAWSECRAdaptor()
+	adaptor.client = &mockECRClient{
+		describeFindingsOut: &ecr.DescribeImageScanFindingsOutput{
+			ImageScanFindings: &types.ImageScanFindings{
+				Findings: []types.ImageScanFinding{
+					{Name: aws.String("CVE-2023-1234"), Severity: types.FindingSeverityHigh},
+				},
+			},
+		},
+	}
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "test-repo", Tag: "latest"},
+	})
+	require.NoError(t, err)
+	require.Len(t, reports, 1)
+	require.Len(t, reports[0].Vulnerabilities, 1)
+	assert.Empty(t, reports[0].Vulnerabilities[0].Links)
+
+	encoded, err := json.Marshal(reports[0].Vulnerabilities[0])
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "links")
 }
 
 func TestAWSECRAdaptor_GetImagesVulnerabilities_EnhancedFindings(t *testing.T) {

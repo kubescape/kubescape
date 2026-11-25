@@ -172,12 +172,15 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 	// ================== version testing ======================================
 	// Skip version check in air-gapped mode (when keep-local flag is set)
 	if !scanInfo.Local {
-		v := versioncheck.NewIVersionCheckHandler(ctx)
-		_ = v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(policyIdentifiers), "", string(scanInfo.GetScanningContext()), k8sClient))
+		// Copied here so the background check never reads scanInfo while the scan runs.
+		accountID, frameworks, scanningContext := scanInfo.AccountID, policyIdentifierIdentities(policyIdentifiers), string(scanInfo.GetScanningContext())
+		cautils.CheckLatestVersion(ctx, cautils.VersionCheckTimeout, versioncheck.NewIVersionCheckHandler(ctx), func() *versioncheck.VersionCheckRequest {
+			return versioncheck.NewVersionCheckRequest(accountID, versioncheck.BuildNumber, frameworks, "", scanningContext, k8sClient)
+		})
 	}
 
 	// ================== setup host scanner object ======================================
-	// The version check above reads the cluster without the scan's context.
+	// The version check above stops waiting when ctx ends; stop here too.
 	if err := ctx.Err(); err != nil {
 		err = fmt.Errorf("scan stopped while setting up: %w", err)
 		span.RecordError(err)
@@ -704,10 +707,10 @@ func checkGlobCollision(rawPath string, scanInfo *cautils.ScanInfo, destInfo fs.
 
 // validateScanOutputSafety ensures an output destination does not overwrite an
 // input manifest, baseline report, exceptions file, framework definition, or controls
-// configuration. SetWriter truncates the destination file immediately on open with
-// O_TRUNC, so an alias to any of these input sources would destroy user data before the
-// scan can read or compare it. When traverseDirs is false, recursive directory traversal is
-// deferred to GetOutputPrinters.
+// configuration. The printers truncate the destination file when they write the
+// report, so an alias to any of these input sources would destroy user data.
+// When traverseDirs is false, recursive directory traversal is deferred to
+// GetOutputPrinters.
 func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo, traverseDirs bool) error {
 	if outputFile == "" || outputFile == os.DevNull || scanInfo == nil {
 		return nil
@@ -910,6 +913,11 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (scanResult *resultshandling.ResultsHandler, scanErr error) {
 	if scanInfo == nil {
 		return nil, errors.New("uninitialized scan parameters")
+	}
+	if scanInfo.ScanImages {
+		if err := registryCredentialsFromScanInfo(scanInfo).ValidateWorkloadAuthority(); err != nil {
+			return nil, err
+		}
 	}
 
 	var (

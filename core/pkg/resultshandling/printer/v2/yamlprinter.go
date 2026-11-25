@@ -29,10 +29,13 @@ func NewYamlPrinter() *YamlPrinter {
 }
 
 func (yp *YamlPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if yp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.YamlFormat, outputFile, yamlOutputFile)
 	if explicitOutput {
 		var err error
-		yp.writer, err = printer.GetWriterNoFallback(outputFile)
+		yp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	yp.writer = printer.GetWriter(ctx, outputFile)
@@ -51,6 +54,12 @@ func (yp *YamlPrinter) Score(score float32) {
 }
 
 func (yp *YamlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if yp == nil {
+		return fmt.Errorf("failed to write yaml results: printer is nil")
+	}
+	if err := printer.PrepareOutput(yp.writer); err != nil {
+		return err
+	}
 	var err error
 
 	if opaSessionObj != nil && opaSessionObj.Report != nil {
@@ -149,8 +158,8 @@ func (yp *YamlPrinter) PrintNextSteps() {
 
 // CloseWriter closes the YAML output writer, returning any error from flushing or closing.
 func (yp *YamlPrinter) CloseWriter() error {
-	if yp.writer != nil && yp.writer != os.Stdout {
-		return yp.writer.Close()
+	if yp != nil && yp.writer != nil && yp.writer != os.Stdout {
+		return printer.CloseOutput(yp.writer)
 	}
 	return nil
 }

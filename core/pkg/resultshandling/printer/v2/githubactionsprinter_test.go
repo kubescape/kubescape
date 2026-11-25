@@ -260,11 +260,16 @@ func TestGitHubActionsPrinter_SkipsResourcesWithoutFilePath(t *testing.T) {
 // TestGitHubActionsPrinter_RejectsImageScanData pins the config-scan boundary:
 // image findings have no manifest location to anchor an annotation to.
 func TestGitHubActionsPrinter_RejectsImageScanData(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "gha-*.txt")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	gp := NewGitHubActionsPrinter()
+	gp.writer = tmpFile
 	images := []cautils.ImageScanData{{Image: "nginx:1.23"}}
 
 	// Standalone image scan with nil session
-	err := gp.ActionPrint(context.Background(), nil, images)
+	err = gp.ActionPrint(context.Background(), nil, images)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "only supported for configuration scanning")
 
@@ -856,4 +861,159 @@ func TestGenerateStepSummary_SanitizesControlID(t *testing.T) {
 			assert.Equal(t, 4, unescapedPipes, "table row should have exactly 3 columns: %q", line)
 		}
 	}
+}
+
+func TestSanitizeMarkdownTableCell_StripsControlsAndBackticks(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "clean string",
+			input:    "regular text",
+			expected: "regular text",
+		},
+		{
+			name:     "replaces backticks with single quotes",
+			input:    "syntax error near `unexpected token` in `manifest.yaml`",
+			expected: "syntax error near 'unexpected token' in 'manifest.yaml'",
+		},
+		{
+			name:     "escapes pipes and replaces newlines",
+			input:    "col1 | col2\r\nrow2\nrow3\rrow4",
+			expected: "col1 \\| col2 row2 row3 row4",
+		},
+		{
+			name:     "strips non-printable ascii controls and del",
+			input:    "bad\x00control\x01bytes\x08and\x1b[31mescapes\x7f",
+			expected: "badcontrolbytesand\\[31mescapes",
+		},
+		{
+			name:     "escapes markdown formatting characters (*, _, <, >, [, ], ~)",
+			input:    "error in *.yaml* and _value_ and <nil> and [selector] and ~~strikethrough~~ and path\\to\\file",
+			expected: "error in \\*.yaml\\* and \\_value\\_ and \\<nil\\> and \\[selector\\] and \\~\\~strikethrough\\~\\~ and path\\\\to\\\\file",
+		},
+		{
+			name:     "escapes standalone asterisk and underscore",
+			input:    "* and _",
+			expected: "\\* and \\_",
+		},
+		{
+			name:     "escapes angle-bracket tags to prevent html swallowing",
+			input:    "resource <default/pod> failed <nil>",
+			expected: "resource \\<default/pod\\> failed \\<nil\\>",
+		},
+		{
+			name:     "preserves tab and unicode",
+			input:    "tab\tseparated 🚀 unicode",
+			expected: "tab\tseparated 🚀 unicode",
+		},
+		{
+			name:     "preserves edge tabs while trimming ordinary edge spaces",
+			input:    "  \tentry with tabs at both edges\t  ",
+			expected: "\tentry with tabs at both edges\t",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, sanitizeMarkdownTableCell(tc.input))
+		})
+	}
+}
+
+func TestEscapeAnnotation_StripsControls(t *testing.T) {
+	data := "msg\x00with\x1bcontrols\x08and\x7f\r\nnewlines and % signs"
+	escapedData := escapeAnnotationData(data)
+	assert.Equal(t, "msgwithcontrolsand%0D%0Anewlines and %25 signs", escapedData)
+	assert.NotContains(t, escapedData, "\x00")
+	assert.NotContains(t, escapedData, "\x1b")
+	assert.NotContains(t, escapedData, "\x08")
+	assert.NotContains(t, escapedData, "\x7f")
+
+	prop := "prop:name,with\x00controls\x1band:delimiters"
+	escapedProp := escapeAnnotationProperty(prop)
+	assert.Equal(t, "prop%3Aname%2Cwithcontrolsand%3Adelimiters", escapedProp)
+	assert.NotContains(t, escapedProp, "\x00")
+	assert.NotContains(t, escapedProp, "\x1b")
+}
+
+func TestGenerateStepSummary_SanitizesBackticksAndControlsInTables(t *testing.T) {
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     50.0,
+		EvaluatedControls: 1,
+		TotalControls:     2,
+		Degraded:          true,
+		FailedGVRPulls: []cautils.FailedGVRPull{
+			{
+				GVR:   "apps/v1/deployments",
+				Error: "failed with `syntax error`\x00and\x1b[31mcolor\x1b[0m",
+			},
+		},
+		SkippedManifests: []cautils.SkippedManifest{
+			{
+				Path:   "manifests/`app`.yaml",
+				Reason: "unsupported `kind`\x08with\x7fcontrol",
+			},
+		},
+	}
+
+	summary := generateStepSummaryWithBudget(session, 1024*1024)
+	assert.Contains(t, summary, "failed with 'syntax error'and\\[31mcolor\\[0m")
+	assert.Contains(t, summary, "manifests/'app'.yaml")
+	assert.Contains(t, summary, "unsupported 'kind'withcontrol")
+	assert.NotContains(t, summary, "`")
+	assert.NotContains(t, summary, "\x00")
+	assert.NotContains(t, summary, "\x1b")
+	assert.NotContains(t, summary, "\x08")
+	assert.NotContains(t, summary, "\x7f")
+}
+
+func TestGenerateStepSummary_EscapesMarkdownCharactersInTables(t *testing.T) {
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	session.ScanCoverage = cautils.ScanCoverage{
+		CoverageScore:     50.0,
+		EvaluatedControls: 1,
+		TotalControls:     2,
+		Degraded:          true,
+		FailedGVRPulls: []cautils.FailedGVRPull{
+			{
+				GVR:   "apps/v1/deployments",
+				Error: "failed with *.yaml* and <nil> and [selector]",
+			},
+		},
+		SkippedManifests: []cautils.SkippedManifest{
+			{
+				Path:   "manifests/pod_test.yaml",
+				Reason: "skipped because of ~~deprecated~~ and <custom-tag>",
+			},
+		},
+	}
+
+	summary := generateStepSummaryWithBudget(session, 1024*1024)
+	assert.Contains(t, summary, "failed with \\*.yaml\\* and \\<nil\\> and \\[selector\\]")
+	assert.Contains(t, summary, "manifests/pod\\_test.yaml")
+	assert.Contains(t, summary, "skipped because of \\~\\~deprecated\\~\\~ and \\<custom-tag\\>")
+}
+
+func TestGitHubActionsPrinter_FilePathWithControls_EmitsWithoutLocation(t *testing.T) {
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	require.NoError(t, os.Chdir(t.TempDir()))
+
+	session := ghSessionFixture(t, "C-0057", 8.0)
+	// Mutate the resource's source path to contain a control character
+	for id, src := range session.ResourceSource {
+		src.RelativePath = "deploy\x01evil.yaml"
+		session.ResourceSource[id] = src
+	}
+
+	output := ghOutputFor(t, session)
+	// Annotation must be emitted without file or line metadata to prevent attaching to mutated path
+	assert.Contains(t, output, "::error title=C-0057 Privileged container::")
+	assert.NotContains(t, output, "file=deployevil.yaml")
+	assert.NotContains(t, output, "file=deploy\x01evil.yaml")
 }

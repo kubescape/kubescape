@@ -12,7 +12,6 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
-	"sigs.k8s.io/yaml"
 )
 
 // vapdataFS bakes the vendored cel-admission-library bundle (see vapdata/README.md)
@@ -249,12 +248,71 @@ func LoadVAP(controlID string) (*VAP, error) {
 	return vap, nil
 }
 
+// VAPDocument pairs a parsed policy with the exact YAML document it was decoded
+// from, so callers that turn a bundle into individual rules can keep each
+// policy's source separate and re-parse it on its own.
+type VAPDocument struct {
+	VAP *VAP
+	Raw []byte
+}
+
+// ParseVAPDocuments parses every non-empty document in data as a standalone
+// ValidatingAdmissionPolicy, enforcing the same Kind, APIVersion, validation,
+// offline-compatibility and duplicate-key rules as ParseVAP. Empty documents
+// between separators are ignored, matching the trailing `---` kubectl permits.
+// An empty stream is still an error, because a custom rule file that declares
+// no policy would otherwise disappear silently.
+func ParseVAPDocuments(data []byte) ([]VAPDocument, error) {
+	documents, err := splitYAMLDocuments(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(documents) == 0 {
+		return nil, fmt.Errorf("decode ValidatingAdmissionPolicy: empty document")
+	}
+
+	parsed := make([]VAPDocument, 0, len(documents))
+	for i, document := range documents {
+		vap, err := parseVAPDocument(document)
+		if err != nil {
+			// A bundle with one bad policy reports which document failed;
+			// a single-document error keeps its existing shape.
+			if len(documents) > 1 {
+				return nil, fmt.Errorf("document %d: %w", i+1, err)
+			}
+			return nil, err
+		}
+		parsed = append(parsed, VAPDocument{VAP: vap, Raw: document})
+	}
+	return parsed, nil
+}
+
 // ParseVAP parses a standalone ValidatingAdmissionPolicy from raw YAML/JSON data,
-// validating its Kind, APIVersion, and non-empty validations, enforcing offline evaluation
-// compatibility, and rejecting multi-document streams and duplicate mapping keys.
+// validating its Kind, APIVersion, and non-empty validations, enforcing offline
+// evaluation compatibility, and rejecting multi-document streams and duplicate
+// mapping keys. Use ParseVAPDocuments for a bundle that intentionally holds
+// more than one policy.
 func ParseVAP(data []byte) (*VAP, error) {
+	documents, err := ParseVAPDocuments(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(documents) != 1 {
+		return nil, fmt.Errorf("expected exactly one ValidatingAdmissionPolicy document, but found multiple documents")
+	}
+	return documents[0].VAP, nil
+}
+
+// splitYAMLDocuments returns the non-empty documents in a YAML stream. A
+// comment-only chunk is not a document: it is the preamble authors write above
+// a `---` separator (for example `# @baseScore 9`), so it is attached to the
+// document that follows instead of being decoded as an empty policy.
+func splitYAMLDocuments(data []byte) ([][]byte, error) {
 	reader := k8syaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
-	var firstDoc []byte
+	var (
+		documents [][]byte
+		pending   []byte
+	)
 	for {
 		doc, err := reader.Read()
 		if err != nil {
@@ -266,21 +324,71 @@ func ParseVAP(data []byte) (*VAP, error) {
 		if len(bytes.TrimSpace(doc)) == 0 {
 			continue
 		}
-		if firstDoc != nil {
-			return nil, fmt.Errorf("expected exactly one ValidatingAdmissionPolicy document, but found multiple documents")
+		if preamble := stripLeadingSeparator(doc); isCommentOnlyYAML(preamble) {
+			pending = append(pending, preamble...)
+			if len(pending) > 0 && pending[len(pending)-1] != '\n' {
+				pending = append(pending, '\n')
+			}
+			continue
 		}
-		firstDoc = doc
+		if len(pending) > 0 {
+			doc = append(pending, doc...)
+			pending = nil
+		}
+		documents = append(documents, doc)
 	}
-	if firstDoc == nil {
-		return nil, fmt.Errorf("decode ValidatingAdmissionPolicy: empty document")
-	}
+	return documents, nil
+}
 
+// stripLeadingSeparator drops the `---` that starts doc, keeping a comment that
+// follows it on the same line. The reader returns a stream's leading separator,
+// or the second of two in a row, as the first line of the next chunk, so a
+// stream that starts with `---` and then a comment-only preamble or an empty
+// document would otherwise look like a document of its own.
+func stripLeadingSeparator(doc []byte) []byte {
+	rest, ok := bytes.CutPrefix(doc, []byte("---"))
+	if !ok {
+		return doc
+	}
+	line, remainder, _ := bytes.Cut(rest, []byte("\n"))
+	comment := bytes.TrimSpace(line)
+	if len(comment) == 0 {
+		return remainder
+	}
+	if comment[0] != '#' {
+		return doc
+	}
+	out := make([]byte, 0, len(comment)+1+len(remainder))
+	out = append(out, comment...)
+	out = append(out, '\n')
+	return append(out, remainder...)
+}
+
+// isCommentOnlyYAML reports whether doc contains only comments and blank
+// lines.
+func isCommentOnlyYAML(doc []byte) bool {
+	for _, line := range bytes.Split(doc, []byte("\n")) {
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 || trimmed[0] == '#' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// parseVAPDocument decodes and validates one ValidatingAdmissionPolicy
+// document.
+func parseVAPDocument(document []byte) (*VAP, error) {
 	var policy admissionregistrationv1.ValidatingAdmissionPolicy
-	if err := k8syaml.UnmarshalStrict(firstDoc, &policy); err != nil {
+	if err := k8syaml.UnmarshalStrict(document, &policy); err != nil {
 		return nil, fmt.Errorf("decode ValidatingAdmissionPolicy: %w", err)
 	}
 	if policy.Kind != vapKind || policy.APIVersion != vapAPIVersion {
 		return nil, fmt.Errorf("expected %s %s, got %s %s", vapAPIVersion, vapKind, policy.APIVersion, policy.Kind)
+	}
+	if policy.Name == "" {
+		return nil, fmt.Errorf("%s %s declares no metadata.name; refusing it rather than deriving a meaningless control ID", vapAPIVersion, vapKind)
 	}
 	if len(policy.Spec.Validations) == 0 {
 		return nil, fmt.Errorf("ValidatingAdmissionPolicy %q declares no validations; refusing it rather than producing no verdict", policy.Name)
@@ -500,10 +608,8 @@ func controlConfig() (map[string]any, error) {
 			controlConfigErr = fmt.Errorf("read embedded control configuration: %w", err)
 			return
 		}
-		// sigs.k8s.io/yaml decodes via JSON, so numbers, lists and maps come out
-		// as the JSON-shaped types CEL expects (the same shape the apiserver hands
-		// a paramKind object).
-		if err := yaml.Unmarshal(data, &controlConfigVal); err != nil {
+		// Preserve integers as the apiserver does, including inside lists and maps.
+		if err := k8syaml.Unmarshal(data, &controlConfigVal); err != nil {
 			controlConfigErr = fmt.Errorf("parse embedded control configuration: %w", err)
 		}
 	})

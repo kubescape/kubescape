@@ -3,6 +3,7 @@ package cautils
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -268,7 +269,7 @@ func TestLoadResourcesFromKustomizeDirectoryUnstartableHelmIsFatal(t *testing.T)
 }
 
 func TestLoadResourcesFromKustomizeDirectoryHelmErrors(t *testing.T) {
-	for _, layout := range []string{"root", "component", "generator", "component generator", "symlink configuration", "inline generator", "symlink generator", "List generator", "inline List generator", "symlink configuration generator"} {
+	for _, layout := range []string{"root", "component", "generator", "component generator", "symlink configuration", "inline generator", "symlink generator", "List generator", "inline List generator", "symlink configuration generator", "directory generator"} {
 		for _, tc := range []struct {
 			name        string
 			version     string
@@ -306,6 +307,12 @@ func TestLoadResourcesFromKustomizeDirectoryHelmErrors(t *testing.T) {
 					}
 					if strings.Contains(layout, "inline") {
 						config = "generators:\n- |\n    " + strings.ReplaceAll(strings.TrimSuffix(generator, "\n"), "\n", "\n    ") + "\n"
+					} else if layout == "directory generator" {
+						config = "generators: [generator-dir]\n"
+						genDir := filepath.Join(chartRoot, "generator-dir")
+						require.NoError(t, os.Mkdir(genDir, 0o700))
+						writeManifestFixture(t, genDir, "kustomization.yaml", "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: [helm.yaml]\n")
+						writeManifestFixture(t, genDir, "helm.yaml", generator)
 					} else {
 						config = "generators: [helm.yaml]\n"
 						file := "helm.yaml"
@@ -364,6 +371,45 @@ func TestLoadResourcesFromKustomizeDirectoryDoesNotProbeHelmForPlainResource(t *
 
 	require.ErrorIs(t, err, ErrManifestsNotLoaded)
 	assert.NotErrorIs(t, err, ErrKustomizeHelmSetup)
+}
+
+func TestLoadResourcesFromKustomizeDirectoryNonHelmMissingResourceStaysRecoverable(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	dir := filepath.Join(t.TempDir(), "helm-charts", "app")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	writeManifestFixture(t, dir, "kustomization.yaml", "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: [helm-values.yaml]\n")
+
+	_, _, err := LoadResourcesFromKustomizeDirectory(context.Background(), dir)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrManifestsNotLoaded)
+	assert.NotErrorIs(t, err, ErrKustomizeHelmSetup)
+}
+
+// A missing resource named like the Helm command is still a missing resource:
+// kustomize reports it as a path error on .../helm, which is not Helm failing to
+// run, so the input stays recoverable and Helm isn't blamed.
+func TestLoadResourcesFromKustomizeDirectoryMissingResourceNamedHelmStaysRecoverable(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	for _, resource := range []string{"helm", "../helm"} {
+		t.Run(resource, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "app")
+			require.NoError(t, os.MkdirAll(dir, 0o700))
+			writeManifestFixture(t, dir, "kustomization.yaml", "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: ["+resource+"]\n")
+
+			_, _, err := LoadResourcesFromKustomizeDirectory(context.Background(), dir)
+
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrManifestsNotLoaded)
+			assert.NotErrorIs(t, err, ErrKustomizeHelmSetup)
+		})
+	}
+}
+
+func TestIsKustomizeHelmErrorOnlyForAFailureToStartHelm(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "helm")
+	assert.False(t, isKustomizeHelmError(fmt.Errorf("accumulating resources: %w", &os.PathError{Op: "lstat", Path: missing, Err: os.ErrNotExist}), "helm"), "a missing path named helm")
+	assert.True(t, isKustomizeHelmError(fmt.Errorf("running helm: %w", &os.PathError{Op: "fork/exec", Path: missing, Err: os.ErrPermission}), missing), "helm that can't be started")
 }
 
 // The version probe can succeed independently of rendering the chart.

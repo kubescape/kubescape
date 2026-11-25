@@ -8,9 +8,11 @@ import (
 	"net/http/httptrace"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -25,6 +27,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/hostsensorutils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler/partitionstore"
 	"github.com/kubescape/kubescape/v4/core/pkg/vapreconcile"
+	"github.com/kubescape/kubescape/v4/core/pkg/webhookcoverage"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	v1 "k8s.io/api/core/v1"
@@ -79,6 +82,27 @@ type K8sResourceHandler struct {
 	// that returned NotFound, or whose response client-go retried past leaves no
 	// other trace.
 	apiAnswered atomic.Bool
+	// maxParallelResourcePulls limits concurrent queries when pulling resources.
+	maxParallelResourcePulls int
+	// retrySleep overrides the backoff delay during rate-limit retries for testing.
+	retrySleep func(context.Context, time.Duration) error
+}
+
+// SetMaxParallelResourcePulls configures the maximum concurrent resource pulls.
+func (k8sHandler *K8sResourceHandler) SetMaxParallelResourcePulls(limit int) {
+	k8sHandler.maxParallelResourcePulls = limit
+}
+
+func (k8sHandler *K8sResourceHandler) getMaxParallelPulls() int {
+	if k8sHandler.maxParallelResourcePulls > 0 {
+		return k8sHandler.maxParallelResourcePulls
+	}
+	if v := os.Getenv("KUBESCAPE_MAX_PARALLEL_PULLS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultMaxParallelResourcePulls
 }
 
 // SetStoreFactory overrides the default DiskStore factory for testing or memory-only environments.
@@ -127,6 +151,10 @@ func NewK8sResourceHandler(ctx context.Context, k8s *k8sinterface.KubernetesApi,
 func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
 	logger.L().Start("Accessing Kubernetes objects...")
 	var err error
+
+	if scanInfo != nil && scanInfo.MaxParallelResourcePulls > 0 {
+		k8sHandler.maxParallelResourcePulls = scanInfo.MaxParallelResourcePulls
+	}
 
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
 	resolver, discoveryFailures, discoveredResources := newDiscoveryResourceResolverWithKinds(k8sHandler.k8s.DiscoveryClient)
@@ -275,6 +303,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
 		k8sHandler.collectVAPResources(ctx, sessionObj)
+		k8sHandler.collectWebhookConfigurations(ctx, sessionObj)
 	}
 
 	return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, nil
@@ -300,7 +329,65 @@ func (k8sHandler *K8sResourceHandler) collectVAPResources(ctx context.Context, s
 	default:
 		sessionObj.VAPPolicies = policies
 		sessionObj.VAPBindings = bindings
+		if bindingsUseParamRef(bindings) {
+			params, err := vapreconcile.CollectControlConfigurations(ctx, k8sHandler.k8s)
+			switch {
+			case errors.Is(err, vapreconcile.ErrUnsupported):
+				logger.L().Debug("skipping ControlConfiguration collection, cluster does not serve the API")
+			case errors.Is(err, vapreconcile.ErrForbidden):
+				logger.L().Ctx(ctx).Warning("credentials may not list controlconfigurations.kubescape.io, so a binding that references one cannot be resolved and its control may fail every resource", helpers.Error(err))
+			case err != nil:
+				logger.L().Ctx(ctx).Warning("failed to collect ControlConfiguration resources", helpers.Error(err))
+			default:
+				sessionObj.VAPParamObjects = params
+			}
+		}
 	}
+}
+
+// collectWebhookConfigurations records the cluster's validating and mutating
+// admission webhook configurations on the session. Like VAP state, they only
+// enrich the report, so a list that cannot be read is logged and the failure is
+// kept on the collection (never as an empty list) for the analysis to report.
+func (k8sHandler *K8sResourceHandler) collectWebhookConfigurations(ctx context.Context, sessionObj *cautils.OPASessionObj) {
+	if k8sHandler.k8s == nil {
+		return
+	}
+	collection, err := webhookcoverage.Collect(ctx, k8sHandler.k8s)
+	if err != nil {
+		logger.L().Debug("skipping admission webhook analysis", helpers.Error(err))
+		return
+	}
+	for _, source := range []struct {
+		kind string
+		webhookcoverage.Source
+	}{{"validating", collection.ValidatingSource}, {"mutating", collection.MutatingSource}} {
+		switch {
+		case errors.Is(source.Err, webhookcoverage.ErrUnsupported), errors.Is(source.Err, webhookcoverage.ErrForbidden):
+			logger.L().Debug("admission webhook analysis is partial: "+source.kind+" webhook configurations unavailable", helpers.Error(source.Err))
+		case source.Err != nil:
+			logger.L().Ctx(ctx).Warning("failed to collect "+source.kind+" admission webhook configurations", helpers.Error(source.Err))
+		}
+		for _, decErr := range source.DecodeErrs {
+			logger.L().Ctx(ctx).Warning("skipping undecodable admission webhook configuration", helpers.Error(decErr))
+		}
+	}
+	sessionObj.WebhookConfigurations = collection
+}
+
+// bindingsUseParamRef reports whether any binding names a parameter object via
+// spec.paramRef.name, the only form that needs the referenced object collected.
+func bindingsUseParamRef(bindings []unstructured.Unstructured) bool {
+	for i := range bindings {
+		if bindings[i].Object == nil {
+			continue
+		}
+		name, _, _ := unstructured.NestedString(bindings[i].Object, "spec", "paramRef", "name")
+		if name != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (k8sHandler *K8sResourceHandler) GetCloudProvider() string {
@@ -325,6 +412,10 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 
 	batchChan := make(chan *cautils.ResourceBatch, 2)
 	errChan := make(chan error, 1)
+
+	if scanInfo != nil && scanInfo.MaxParallelResourcePulls > 0 {
+		k8sHandler.maxParallelResourcePulls = scanInfo.MaxParallelResourcePulls
+	}
 
 	// Setup phase: collect metadata and queryable resources
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
@@ -683,6 +774,7 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
 		k8sHandler.collectVAPResources(ctx, sessionObj)
+		k8sHandler.collectWebhookConfigurations(ctx, sessionObj)
 	}
 
 	for groupResource, ids := range ksResourceMap {
@@ -1132,7 +1224,10 @@ func classifySelectorFailures(gvrTriplet string, selectorErrs []selectorFailure)
 	return failures
 }
 
-const maxParallelResourcePulls = 8
+const (
+	defaultMaxParallelResourcePulls = 8
+	maxParallelResourcePulls        = defaultMaxParallelResourcePulls
+)
 
 func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector, labelSelector string) (cautils.K8SResources, map[string]workloadinterface.IMetadata, map[string]queryFailure) {
 	k8sResources := queryableResources.ToK8sResourceMap()
@@ -1145,7 +1240,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 		wg sync.WaitGroup
 	)
 
-	sem := make(chan struct{}, maxParallelResourcePulls)
+	sem := make(chan struct{}, k8sHandler.getMaxParallelPulls())
 
 	for key := range queryableResources {
 		qr := queryableResources[key]
@@ -1398,17 +1493,57 @@ func (k8sHandler *K8sResourceHandler) pullSingleResourceInto(ctx context.Context
 		var sinkErr error
 
 		if err := pager.New(func(pCtx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
-			// Responses are recorded as they arrive rather than read from the
-			// result, because client-go retries a 429 or 5xx and can return only
-			// the error from a later attempt. The result still covers clients
-			// that do not go over HTTP.
-			list, err := clientResource.List(httptrace.WithClientTrace(pCtx, &httptrace.ClientTrace{
-				GotFirstResponseByte: func() { k8sHandler.apiAnswered.Store(true) },
-			}), opts)
-			if apiServerResponded(err) {
-				k8sHandler.apiAnswered.Store(true)
+			const maxRetries = 5
+			backoff := 100 * time.Millisecond
+			for attempt := 0; ; attempt++ {
+				// Responses are recorded as they arrive rather than read from the
+				// result, because client-go retries a 429 or 5xx and can return only
+				// the error from a later attempt. The result still covers clients
+				// that do not go over HTTP.
+				list, err := clientResource.List(httptrace.WithClientTrace(pCtx, &httptrace.ClientTrace{
+					GotFirstResponseByte: func() { k8sHandler.apiAnswered.Store(true) },
+				}), opts)
+				if apiServerResponded(err) {
+					k8sHandler.apiAnswered.Store(true)
+				}
+				if err != nil && apierrors.IsTooManyRequests(err) && attempt < maxRetries {
+					logger.L().Ctx(pCtx).Warning("API server rate limit (429) hit, retrying with backoff",
+						helpers.String("resource", resource.String()),
+						helpers.Int("retry", attempt+1))
+
+					delayDuration := backoff
+					if delay, ok := apierrors.SuggestsClientDelay(err); ok && delay > 0 {
+						delayDuration = time.Duration(delay) * time.Second
+					}
+					const maxRetryDelay = 30 * time.Second
+					if delayDuration > maxRetryDelay {
+						delayDuration = maxRetryDelay
+					}
+
+					sleepFn := k8sHandler.retrySleep
+					if sleepFn == nil {
+						sleepFn = func(ctx context.Context, d time.Duration) error {
+							timer := time.NewTimer(d)
+							select {
+							case <-ctx.Done():
+								timer.Stop()
+								return ctx.Err()
+							case <-timer.C:
+								return nil
+							}
+						}
+					}
+					if sleepErr := sleepFn(pCtx, delayDuration); sleepErr != nil {
+						return nil, sleepErr
+					}
+					backoff *= 2
+					if backoff > 5*time.Second {
+						backoff = 5 * time.Second
+					}
+					continue
+				}
+				return list, err
 			}
-			return list, err
 		}).EachListItem(ctx, listOptions, func(obj runtime.Object) error {
 
 			uObject := obj.(*unstructured.Unstructured)

@@ -247,6 +247,7 @@ func (miv *mImageVulnerability) prefix() string {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 func escapePrometheusLabelValue(value string) string {
+	value = strings.ReplaceAll(value, "\x00", "")
 	value = strings.ReplaceAll(value, "\r\n", "\n")
 	value = strings.ReplaceAll(value, "\r", "\n")
 	return strings.NewReplacer(
@@ -406,27 +407,37 @@ type Metrics struct {
 }
 
 func (mrs *mComplianceScore) set(resources reportsummary.ICounters, controls reportsummary.ICounters) {
-	mrs.resourcesCountSkipped = resources.Skipped()
-	mrs.resourcesCountFailed = resources.Failed()
-	mrs.resourcesCountPassed = resources.Passed()
-	mrs.controlsCountFailed = controls.Failed()
-	mrs.controlsCountPassed = controls.Passed()
-	mrs.controlsCountSkipped = controls.Skipped()
+	if resources != nil {
+		mrs.resourcesCountSkipped = resources.Skipped()
+		mrs.resourcesCountFailed = resources.Failed()
+		mrs.resourcesCountPassed = resources.Passed()
+	}
+	if controls != nil {
+		mrs.controlsCountFailed = controls.Failed()
+		mrs.controlsCountPassed = controls.Passed()
+		mrs.controlsCountSkipped = controls.Skipped()
+	}
 }
 
 func (mfrs *mFrameworkComplianceScore) set(resources reportsummary.ICounters, controls reportsummary.ICounters) {
-	mfrs.resourcesCountSkipped = resources.Skipped()
-	mfrs.resourcesCountFailed = resources.Failed()
-	mfrs.resourcesCountPassed = resources.Passed()
-	mfrs.controlsCountFailed = controls.Failed()
-	mfrs.controlsCountPassed = controls.Passed()
-	mfrs.controlsCountSkipped = controls.Skipped()
+	if resources != nil {
+		mfrs.resourcesCountSkipped = resources.Skipped()
+		mfrs.resourcesCountFailed = resources.Failed()
+		mfrs.resourcesCountPassed = resources.Passed()
+	}
+	if controls != nil {
+		mfrs.controlsCountFailed = controls.Failed()
+		mfrs.controlsCountPassed = controls.Passed()
+		mfrs.controlsCountSkipped = controls.Skipped()
+	}
 }
 
 func (mcrs *mControlComplianceScore) set(resources reportsummary.ICounters) {
-	mcrs.resourcesCountSkipped = resources.Skipped()
-	mcrs.resourcesCountFailed = resources.Failed()
-	mcrs.resourcesCountPassed = resources.Passed()
+	if resources != nil {
+		mcrs.resourcesCountSkipped = resources.Skipped()
+		mcrs.resourcesCountFailed = resources.Failed()
+		mcrs.resourcesCountPassed = resources.Passed()
+	}
 }
 func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetails) {
 	if summaryDetails == nil {
@@ -437,15 +448,28 @@ func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetai
 	// GetScore() returns the risk score; the metric is the compliance score.
 	m.rs.complianceScore = cautils.ComplianceScoreToInt(summaryDetails.ComplianceScore)
 
+	seenFrameworks := make(map[string]int, len(summaryDetails.ListFrameworks()))
 	for _, fw := range summaryDetails.ListFrameworks() {
 		if fw == nil {
 			continue
 		}
+		fwName := strings.TrimSpace(fw.GetName())
+		if fwName == "" {
+			continue
+		}
+		escapedName := escapePrometheusLabelValue(fwName)
+		if idx, seen := seenFrameworks[escapedName]; seen {
+			if cautils.ComplianceScoreToInt(fw.GetComplianceScore()) > m.listFrameworks[idx].complianceScore {
+				m.listFrameworks[idx].complianceScore = cautils.ComplianceScoreToInt(fw.GetComplianceScore())
+			}
+			continue
+		}
 		mfrs := mFrameworkComplianceScore{
-			frameworkName:   fw.GetName(),
+			frameworkName:   fwName,
 			complianceScore: cautils.ComplianceScoreToInt(fw.GetComplianceScore()),
 		}
 		mfrs.set(fw.NumberOfResources(), fw.NumberOfControls())
+		seenFrameworks[escapedName] = len(m.listFrameworks)
 		m.listFrameworks = append(m.listFrameworks, mfrs)
 	}
 	// Sort frameworks by name to ensure consistent metric ordering across runs.
@@ -526,7 +550,13 @@ func (m *Metrics) setResourcesCountersFromCatalog(
 		mrc.name = r.GetName()
 		mrc.path = BestSourcePath(sources[resourceID])
 
-		key := seriesKey{mrc.apiVersion, mrc.kind, mrc.namespace, mrc.name, mrc.path}
+		key := seriesKey{
+			escapePrometheusLabelValue(mrc.apiVersion),
+			escapePrometheusLabelValue(mrc.kind),
+			escapePrometheusLabelValue(mrc.namespace),
+			escapePrometheusLabelValue(mrc.name),
+			escapePrometheusLabelValue(mrc.path),
+		}
 		i, seen := seriesIndex[key]
 		if !seen {
 			i = len(controlStatuses)
@@ -536,7 +566,13 @@ func (m *Metrics) setResourcesCountersFromCatalog(
 		}
 		for j := range result.AssociatedControls {
 			control := &result.AssociatedControls[j]
-			status := cautils.ControlStatus(summaryDetails, control).Status()
+			cs := cautils.ControlStatus(summaryDetails, control)
+			var status apis.ScanningStatus
+			if cs != nil {
+				status = cs.Status()
+			} else {
+				status = apis.StatusUnknown
+			}
 			if previous, found := controlStatuses[i][control.ControlID]; found {
 				status = apis.Compare(previous, status)
 			}
@@ -575,15 +611,16 @@ func (m *Metrics) setResourcesCountersFromCatalog(
 // setImageVulnerabilities builds per-image, per-severity CVE counters for an image scan (#2782)
 func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData) {
 	for i := range imageScanData {
-		target := imageScanData[i].Target()
-		cves := extractCVEs(imageScanData[i].Matches, target, imageScanData[i].VexStatuses)
+		scanData := &imageScanData[i]
+		target := scanData.Target()
+		cves := extractCVEs(scanData.Matches, target, scanData.VexStatuses)
 
 		severityToSummary := map[string]*imageprinter.SeveritySummary{}
 		setSeverityToSummaryMap(cves, severityToSummary)
 		severityToKEV := map[string]int{}
 		for _, cve := range cves {
 			if cve.KEV {
-				severityToKEV[cve.Severity]++
+				severityToKEV[canonicalSeverity(cve.Severity)]++
 			}
 		}
 
@@ -596,12 +633,18 @@ func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData)
 		}
 		sort.Strings(severities)
 
+		imageName := strings.TrimSpace(scanData.Image)
+		platformName := strings.TrimSpace(scanData.Platform)
+
 		for _, severity := range severities {
 			summary := severityToSummary[severity]
+			if summary == nil {
+				continue
+			}
 			m.listImages = append(m.listImages, mImageVulnerability{
-				image:           imageScanData[i].Image,
-				platform:        imageScanData[i].Platform,
-				severity:        severity,
+				image:           imageName,
+				platform:        platformName,
+				severity:        canonicalSeverity(severity),
 				cveCount:        summary.NumberOfCVEs,
 				fixableCVECount: summary.NumberOfFixableCVEs,
 				kevCVECount:     severityToKEV[severity],

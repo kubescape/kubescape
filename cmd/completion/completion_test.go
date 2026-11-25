@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -69,6 +70,54 @@ func TestCompletionRejectsInvalidArguments(t *testing.T) {
 			}
 			if output.Len() != 0 {
 				t.Fatalf("invalid arguments generated output: %q", output.String())
+			}
+		})
+	}
+}
+
+func TestCompletionHelpExamples(t *testing.T) {
+	originalArgs := os.Args
+	t.Cleanup(func() { os.Args = originalArgs })
+	for _, invocation := range []struct{ executable, command string }{
+		{"kubescape", "kubescape"},
+		{"kubectl-kubescape", "kubectl kubescape"},
+	} {
+		t.Run(invocation.executable, func(t *testing.T) {
+			os.Args = []string{invocation.executable}
+			var output bytes.Buffer
+
+			root := &cobra.Command{Use: "kubescape"}
+			root.AddCommand(GetCompletionCmd())
+			root.SetOut(&output)
+			root.SetErr(io.Discard)
+			root.SetArgs([]string{"completion", "--help"})
+
+			if err := root.Execute(); err != nil {
+				t.Fatalf("show completion help: %v", err)
+			}
+
+			help := output.String()
+
+			expectedExamples := []string{
+				"Generate completion scripts for Bash, Zsh, Fish, and PowerShell.",
+				"echo 'source <(" + invocation.command + " completion bash)' >> ~/.bashrc",
+				invocation.command + ` completion zsh > "${fpath[1]}/_kubescape"`,
+				`mkdir -p "$__fish_config_dir/completions"`,
+				invocation.command + ` completion fish > "$__fish_config_dir/completions/kubescape.fish"`,
+				`if (!(Test-Path -Path $PROFILE)) { New-Item -ItemType File -Path $PROFILE -Force | Out-Null }`,
+				"completion powershell >> $PROFILE",
+			}
+
+			for _, example := range expectedExamples {
+				if !strings.Contains(help, example) {
+					t.Errorf("completion help is missing expected example %q", example)
+				}
+			}
+
+			brokenZshExample := `completion zsh)' >> "${fpath[1]}/_`
+
+			if strings.Contains(help, brokenZshExample) {
+				t.Error("completion help still contains the incorrect persistent Zsh instruction")
 			}
 		})
 	}

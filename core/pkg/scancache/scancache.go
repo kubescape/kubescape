@@ -4,10 +4,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/gofrs/flock"
 	"github.com/kubescape/go-logger"
@@ -52,7 +58,7 @@ func Load(cacheDir, controlsConfigVersion string) (*Store, error) {
 		return nil, fmt.Errorf("inspect incremental scan cache directory: %w", err)
 	}
 
-	// A Windows reader keeps the destination file open while os.ReadFile runs.
+	// A Windows reader keeps the destination file open while readCache runs.
 	// Atomic replacement uses MoveFileEx, which can fail with a sharing
 	// violation unless that read is coordinated with the publisher. The shared
 	// sidecar lock also gives every platform one read/merge/write contract.
@@ -98,13 +104,100 @@ func (e *invalidCacheError) Unwrap() error {
 	return e.err
 }
 
+var (
+	// ErrCacheNotRegular is returned when a scan cache file is not a regular file.
+	ErrCacheNotRegular = errors.New("scan cache file is not a regular file")
+	// ErrCacheTooLarge is returned when a scan cache file exceeds the maximum allowed size.
+	ErrCacheTooLarge = errors.New("scan cache file exceeds maximum size limit")
+)
+
 func isInvalidCache(err error) bool {
-	_, ok := err.(*invalidCacheError)
-	return ok
+	var target *invalidCacheError
+	return errors.As(err, &target) || errors.Is(err, ErrCacheTooLarge)
+}
+
+func getMaxCacheSize() int64 {
+	if v, ok := os.LookupEnv(cautils.MaxFileSizeEnvVar); ok {
+		trimmed := strings.TrimSpace(v)
+		if trimmed != "" {
+			if parsed, err := strconv.ParseInt(trimmed, 10, 64); err == nil && parsed > 0 && parsed != math.MaxInt64 {
+				return parsed
+			}
+			logger.L().Warning("invalid KUBESCAPE_MAX_FILE_SIZE, using default", helpers.String("value", v), helpers.Int("default", int(cautils.DefaultMaxFileSize)))
+		}
+	}
+	return cautils.DefaultMaxFileSize
+}
+
+// openCacheFile opens path for reading and rejects anything but a regular file.
+// A pre-open stat check prevents opening device nodes (e.g. character devices).
+// O_NONBLOCK keeps opening a FIFO from waiting for a writer, and descriptor-based
+// validation ensures a path swapped after stat cannot slip past.
+func openCacheFile(path string) (*os.File, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	cleaned := filepath.Clean(path)
+	statInfo, err := os.Stat(cleaned)
+	if err != nil {
+		return nil, err
+	}
+	if statInfo.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrCacheNotRegular)
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrCacheNotRegular, path)
+	}
+
+	file, err := os.OpenFile(cleaned, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if info.IsDir() {
+		_ = file.Close()
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrCacheNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, fmt.Errorf("%w: %q", ErrCacheNotRegular, path)
+	}
+	return file, nil
+}
+
+// readCacheFile returns the contents of the cache file at path, reading at most
+// getMaxCacheSize() bytes (configurable via KUBESCAPE_MAX_FILE_SIZE, defaulting to
+// cautils.DefaultMaxFileSize) so that reading remains bounded.
+func readCacheFile(path string) ([]byte, error) {
+	file, err := openCacheFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+
+	limit := getMaxCacheSize()
+
+	info, err := file.Stat()
+	if err == nil && info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrCacheTooLarge, path, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrCacheTooLarge, path, limit)
+	}
+	return data, nil
 }
 
 func readCache(path string) (diskCache, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := readCacheFile(path)
 	if err != nil {
 		return diskCache{}, err
 	}

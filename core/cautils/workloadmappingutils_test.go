@@ -45,12 +45,22 @@ func TestMapExternalResource(t *testing.T) {
 			},
 			want: nil,
 		},
+		{
+			name: "Key matching multiple patterns is not duplicated and output is sorted",
+			args: args{
+				externalResourceMap: ExternalResources{
+					"KubeletConfigurationBeta": {"KubeletConfigurationBeta"},
+					"ImageVulnerabilities":     {"ImageVulnerabilities"},
+				},
+				resources: []string{"Configuration", "Kubelet"},
+			},
+			want: []string{"KubeletConfigurationBeta"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := MapExternalResource(tt.args.externalResourceMap, tt.args.resources)
-			sort.Strings(got)
 			sort.Strings(tt.want)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("MapExternalResource() = %v, want %v", got, tt.want)

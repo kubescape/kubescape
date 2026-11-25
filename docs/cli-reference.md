@@ -39,7 +39,7 @@ kubescape scan [target] [flags]
 | `--account <id>` | Kubescape SaaS account ID | from cache |
 | `--access-key <key>` | Kubescape SaaS access key | from cache |
 | `--cluster-name <name>` | Custom name for the cluster in reports. Not the same as `--kube-context` | - |
-| `--compliance-threshold <float>` | Fail if compliance score is below threshold. Applies to `scan framework`, `scan control`, and `--view resource\|control` — see [score thresholds](#score-thresholds). | `0` |
+| `--compliance-threshold <float>` | Fail if compliance score is below threshold. Applies to `scan framework`, `scan control`, `--view resource\|control`, and scans whose `--scan-contract` selects a policy — see [score thresholds](#score-thresholds). | `0` |
 | `--controls-config <path>` | Path to controls configuration file | - |
 | `--controls-version <tag>` | Pin the [regolibrary](https://github.com/kubescape/regolibrary/releases) release tag used to download controls. Has no effect when `--account` is set, because the cloud backend is used instead | latest release |
 | `--custom-rules <path>` | Path to user-authored custom rules — see [custom rules](#custom-rules) | - |
@@ -51,7 +51,7 @@ kubescape scan [target] [flags]
 | `--exceptions <path>` | Path to exceptions file | - |
 | `--honor-inline-exceptions` | Honor `kubescape.io/skip-*` annotations as inline exception policies | on for local manifest files, off for live-cluster scans |
 | `--audit-exceptions` | Include exception usage details in supported scan outputs | `false` |
-| `--baseline <path>` | Path to a saved JSON scan report to diff the fresh scan against | - |
+| `--baseline <path>` | Path to a saved JSON scan report to diff the fresh scan against. Not supported with `--encrypt` | - |
 | `--baseline-fail-on-new` | With `--baseline`, exit with code `1` when new or incomparable failures are found compared with the baseline. A failure is incomparable when a change in scan scope or coverage means it cannot be classified safely | `false` |
 | `--baseline-granularity <unit>` | With `--baseline`, the comparison unit: `evidence` or `control` | `evidence` |
 | `--baseline-severity-threshold <sev>` | With `--baseline` and `--baseline-fail-on-new`, count only new or incomparable failures at or above this severity | - |
@@ -77,7 +77,7 @@ kubescape scan [target] [flags]
 | `--reference-cluster <ctx>` | With `--fleet-report`, the context the other clusters are compared against. Must be one of `--kube-contexts`. | - |
 | `--retries <n>` | With `--kube-contexts`, how many more times to try a cluster whose API server never answered, waiting 2s, then 4s, doubling up to 30s. `0` disables retries. | `2` |
 | `--fleet-config <path>` | Read `--kube-contexts`, `--output`, `--fleet-report`, `--reference-cluster` and `--retries` from a `FleetConfig` file. A flag on the command line overrides the file. See [fleet config file](fleet-scanning.md#fleet-config-file). | - |
-| `-o, --output <path>` | Output file path. For `scan validate-contract`, the destination must not refer to the input contract, including through symbolic or hard links | stdout |
+| `-o, --output <path>` | Output file path. An existing file is only replaced once the scan has a report to write, so a scan that fails before the report is written leaves the file's contents intact (its mode may be tightened to 0600) and never leaves an empty file at a new path. For `scan validate-contract`, the destination must not refer to the input contract, including through symbolic or hard links | stdout |
 | `--release-name <name>` | Helm release name made available as `.Release.Name` when rendering a chart | `release-name` |
 | `--release-namespace <ns>` | Helm release namespace made available as `.Release.Namespace` when rendering a chart | `default` |
 | `--kube-version <version>` | Kubernetes version made available as `.Capabilities.KubeVersion` when rendering a chart, as in `helm template`. A chart whose `kubeVersion` constraint rejects it is not rendered | the newest version the chart's `kubeVersion` allows, up to the Kubernetes version Kubescape is built with; `v1.20` (Helm's library default) when the chart declares none or no such version satisfies it |
@@ -474,13 +474,59 @@ kubescape scan ./manifests --custom-rules ./myrules/no-root.rego
 A bare rule is matched against every resource kind, so it must filter input
 itself. Prefer a rule directory when the rule targets specific kinds.
 
+A **ValidatingAdmissionPolicy** YAML file is accepted too, so a guardrail can be
+scanned locally before it is applied to a cluster:
+
+```yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: disallow-host-ipc
+spec:
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+  validations:
+    - expression: "!has(object.spec.hostIPC) || !object.spec.hostIPC"
+      message: "hostIPC is forbidden"
+```
+
+```bash
+kubescape scan ./manifests --custom-rules ./myrules/disallow-host-ipc.yaml
+```
+
+The policy is evaluated only against the resources its `matchConstraints`
+target. Every policy document must declare a `metadata.name` (nameless policies
+are rejected with an error; Kubescape does not derive control IDs from file names).
+A file may hold more than one policy separated by `---`, as in a
+manifest passed to `kubectl apply`; each document becomes its own
+`custom-<metadata.name>` control. Policies that narrow with
+`namespaceSelector` are refused because the offline scan cannot guarantee the
+namespace labels admission uses.
+
+A policy that declares a `paramKind` is not always refused. When the scan has a
+single matching `ValidatingAdmissionPolicyBinding` whose `paramRef` names a
+parameter object it can resolve, and that binding covers the resource matched by
+the policy, that object supplies `params` even when its kind is not the bundled
+`ControlConfiguration`. Conversely, non-bundled kinds are refused when parameter
+resolution falls back to the bundled `ControlConfiguration` — when there is no
+binding, the binding does not cover the matched resource, or the binding names no
+object — because the scan cannot supply the inputs admission uses. (Policies
+matched by multiple bindings, or bindings that select parameters dynamically via
+`spec.paramRef.selector`, are also refused before resolution to preserve
+admission parity.)
+
 Every custom rule becomes a control named `custom-<rule>` in the report.
 
 #### Custom rule severity
 
 A custom rule is **medium** severity (base score `5`) unless it says otherwise.
-Either layout can declare its own severity with a `# @baseScore <1-10>` comment
-anywhere in its Rego source:
+Any layout can declare its own severity with a `# @baseScore <1-10>` comment
+anywhere in its source. In a multi-document VAP file each policy can declare its
+own score; a document without one is medium:
 
 ```rego
 package armo_builtins
@@ -493,9 +539,11 @@ deny[msga] { ... }
 The base score is bucketed the same way as a built-in control — `1-3` low,
 `4-6` medium, `7-8` high, `9-10` critical — so it drives the report's severity
 column, `--min-severity`/`--max-severity` and `--severity-threshold`. A value
-outside `1-10`, a malformed value, or duplicate annotations in the same file
-fail the scan rather than defaulting, because a rule whose severity cannot be
-determined is treated as exceeding every `--severity-threshold`.
+outside `1-10`, a malformed value, or duplicate annotations within a single
+policy document (or rule file) fail the scan rather than defaulting, because a
+rule whose severity cannot be determined is treated as exceeding every
+`--severity-threshold`. Distinct documents in a multi-document bundle may each
+declare their own `@baseScore`.
 
 
 ### API group matching in SecurityExceptions
@@ -604,11 +652,20 @@ invocations:
 - `kubescape scan framework <name> ...`
 - `kubescape scan control <id> ...`
 - `kubescape scan --view resource ...` or `--view control ...`
+- `kubescape scan --scan-contract <file> ...` when the selected contract has a
+  `policy` section, in every view unless `--view security` is given explicitly.
+  This includes fleet scans with `--kube-contexts`.
 
-The default `kubescape scan [path]` uses `--view security`, which does
-not evaluate against a score threshold. To gate a pipeline on the
-compliance score, use one of the forms above.
+Without such a contract, the default `kubescape scan [path]` uses
+`--view security`, which does not evaluate against a score threshold. To gate
+a pipeline on the compliance score, use one of the forms above.
 `--severity-threshold` and `--fail-coverage-below` apply in every view.
+
+For a contract-driven policy scan the threshold is the stricter of the
+contract's `failure.complianceBelow` and an explicit `--compliance-threshold`.
+Selecting `--view security` explicitly keeps the security view's exemption; the
+report's contract provenance then records the requested floor but no effective
+compliance gate.
 
 `--fail-coverage-below` gates on the **scan coverage score**, not the raw
 ratio of evaluated controls. The score starts from the percentage of controls
@@ -755,11 +812,16 @@ Scan for a specific control.
 kubescape scan control <control-id> [target] [flags]
 ```
 
+A control is named by its ID (`C-0057`), by its name as `kubescape list controls` prints it (`"privileged container"`, case-insensitive) or, for a control that carries one, by its framework section number (`CIS-5.2.1`).
+
 ### Examples
 
 ```bash
 # Scan for privileged containers
 kubescape scan control C-0057 -v
+
+# Scan for privileged containers, naming the control
+kubescape scan control "privileged container" -v
 
 # Scan specific files for a control
 kubescape scan control C-0013 /path/to/deployment.yaml
@@ -767,6 +829,8 @@ kubescape scan control C-0013 /path/to/deployment.yaml
 # Scan a manifest from stdin
 cat ./manifests/deployment.yaml | kubescape scan control C-0013 -
 ```
+
+A manifest read from stdin (`-`) is named `stdin.yaml` in the report.
 
 ---
 
@@ -994,7 +1058,7 @@ Two details worth knowing:
 #### What is skipped, and why
 
 A cluster fix is only offered where the emitted manifest would be both correct
-and applyable. Everything else is listed as unfixed with its reason, so nothing
+and applicable. Everything else is listed as unfixed with its reason, so nothing
 disappears silently:
 
 - **Resources whose scan record is redacted.** A scan report is built for
@@ -1701,7 +1765,7 @@ kubescape operator scan <type> [flags]
 
 ### How it works
 
-The command creates one `OperatorCommand` object (`kubescape.io/v1alpha1`) per scan request in the operator's namespace and waits, for up to 10 minutes, until the operator reports each one completed. It reports an error if the operator marks a command as failed. Your kubeconfig identity needs permission to create and get `operatorcommands.kubescape.io` in that namespace. No port-forward to the operator is used.
+The command has up to 10 minutes to create all `OperatorCommand` objects (`kubescape.io/v1alpha1`), one per scan request in the operator's namespace. Once creation succeeds, it waits up to another 10 minutes for the operator to report that all commands have completed. It reports an error if the operator marks a command as failed. Your kubeconfig identity needs permission to create and get `operatorcommands.kubescape.io` in that namespace. No port-forward to the operator is used.
 
 ### Examples
 
@@ -1905,6 +1969,39 @@ kubescape predict pss ./k8s/ -f sarif -o pss.sarif
 
 ---
 
+## kubescape prerequisites
+
+Check prerequisites for installing the Kubescape Operator in a cluster.
+
+### Synopsis
+
+```bash
+kubescape prerequisites [--kubeconfig <path>]
+```
+
+### Flags
+
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--kubeconfig` | - | - | Path to the kubeconfig file. If not set, in-cluster config is used when running inside a cluster; otherwise `$KUBECONFIG`, then `$HOME/.kube/config`. Ignored when running inside a cluster, where in-cluster configuration takes precedence. |
+| `--kube-context` | - | - | Kubernetes context to use (global flag). Honored only outside a cluster; defaults to the context's current-context. |
+
+### Examples
+
+```bash
+# Check prerequisites for installing Kubescape Operator in the current cluster
+# (uses in-cluster config inside a cluster, or $KUBECONFIG / $HOME/.kube/config outside)
+kubescape prerequisites
+
+# Check prerequisites using a specific kubeconfig file
+kubescape prerequisites --kubeconfig /path/to/kubeconfig
+
+# Check prerequisites in another context of the kubeconfig
+kubescape prerequisites --kube-context staging
+```
+
+---
+
 ## kubescape version
 
 Display version information.
@@ -1991,6 +2088,8 @@ Kubescape respects the following environment variables:
 | `HTTPS_PROXY` | HTTPS proxy URL |
 | `HTTP_PROXY` | HTTP proxy URL |
 | `NO_PROXY` | Hosts to exclude from proxy |
+| `KUBESCAPE_PARTITION_STORE` | Partition store backend: `disk` (default) or `memory`. |
+| `KUBESCAPE_SPILL_DIR` | Base directory for the on-disk partition store (spill files). When unset, the OS temporary directory is used. Must be writable; if the disk store cannot be created, Kubescape logs a warning and falls back to an in-memory store, which can OOM on large clusters. See [Resource Streaming Implementation](STREAMING_IMPLEMENTATION.md). |
 
 ---
 

@@ -31,6 +31,20 @@ func TestEnvHelpers(t *testing.T) {
 		assert.Equal(t, "configured", envToString("KS_TEST_STRING", "fallback"))
 	})
 
+	t.Run("envToString trims surrounding whitespace", func(t *testing.T) {
+		t.Setenv("KS_TEST_STRING", "  configured-value \t\n")
+
+		assert.Equal(t, "configured-value", envToString("KS_TEST_STRING", "fallback"))
+	})
+
+	t.Run("envToString falls back to default when empty or whitespace-only", func(t *testing.T) {
+		t.Setenv("KS_TEST_STRING", "")
+		assert.Equal(t, "fallback", envToString("KS_TEST_STRING", "fallback"))
+
+		t.Setenv("KS_TEST_STRING", "   \t\n")
+		assert.Equal(t, "fallback", envToString("KS_TEST_STRING", "fallback"))
+	})
+
 	t.Run("envToBool returns default when unset", func(t *testing.T) {
 		t.Setenv("KS_TEST_BOOL", "")
 		require.NoError(t, os.Unsetenv("KS_TEST_BOOL"))
@@ -40,6 +54,12 @@ func TestEnvHelpers(t *testing.T) {
 
 	t.Run("envToBool parses configured value", func(t *testing.T) {
 		t.Setenv("KS_TEST_BOOL", "true")
+
+		assert.True(t, envToBool("KS_TEST_BOOL", false))
+	})
+
+	t.Run("envToBool trims whitespace from configured value", func(t *testing.T) {
+		t.Setenv("KS_TEST_BOOL", "  true \t")
 
 		assert.True(t, envToBool("KS_TEST_BOOL", false))
 	})

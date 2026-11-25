@@ -108,10 +108,13 @@ func NewPolicyReportPrinter() *PolicyReportPrinter {
 }
 
 func (pp *PolicyReportPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if pp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.PolicyReportFormat, outputFile, policyReportOutputFile)
 	if explicitOutput {
 		var err error
-		pp.writer, err = printer.GetWriterNoFallback(outputFile)
+		pp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	pp.writer = printer.GetWriter(ctx, outputFile)
@@ -125,9 +128,18 @@ func (pp *PolicyReportPrinter) PrintNextSteps() {
 }
 
 func (pp *PolicyReportPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if pp == nil {
+		return fmt.Errorf("failed to write PolicyReport results: printer is nil")
+	}
 	hasPosture := opaSessionObj != nil && opaSessionObj.Report != nil
 	if !hasPosture && len(imageScanData) == 0 {
 		return fmt.Errorf("failed to write results in PolicyReport format: no data provided")
+	}
+	if pp.writer == nil {
+		return fmt.Errorf("failed to write PolicyReport results: output writer is nil")
+	}
+	if err := printer.PrepareOutput(pp.writer); err != nil {
+		return err
 	}
 
 	var reports []policyReport
@@ -170,6 +182,9 @@ func (pp *PolicyReportPrinter) ActionPrint(ctx context.Context, opaSessionObj *c
 // buildPolicyReports constructs PolicyReport and ClusterPolicyReport objects from an OPA session,
 // including cluster-wide skipped controls and diagnostics (#3989).
 func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
+	if opaSessionObj == nil {
+		return nil
+	}
 	var timestamp time.Time
 	if opaSessionObj.Report != nil {
 		timestamp = opaSessionObj.Report.ReportGenerationTime
@@ -226,10 +241,12 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 			}
 			severity := "Unknown"
 			message := ac.GetName()
-			if ctl := summaryControls.GetControl(reportsummary.EControlCriteriaID, ac.GetID()); ctl != nil {
-				severity = apis.ControlSeverityToString(ctl.GetScoreFactor())
-				if desc := ctl.GetDescription(); desc != "" {
-					message = desc
+			if summaryControls != nil {
+				if ctl := summaryControls.GetControl(reportsummary.EControlCriteriaID, ac.GetID()); ctl != nil {
+					severity = apis.ControlSeverityToString(ctl.GetScoreFactor())
+					if desc := ctl.GetDescription(); desc != "" {
+						message = desc
+					}
 				}
 			}
 
@@ -298,8 +315,10 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 
 		severity := apis.ControlSeverityToString(sc.scoreFactor)
 		if severity == "" || severity == "Unknown" {
-			if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, sc.controlID); ctrl != nil && ctrl.GetScoreFactor() > 0 {
-				severity = apis.ControlSeverityToString(ctrl.GetScoreFactor())
+			if summaryControls != nil {
+				if ctrl := summaryControls.GetControl(reportsummary.EControlCriteriaID, sc.controlID); ctrl != nil && ctrl.GetScoreFactor() > 0 {
+					severity = apis.ControlSeverityToString(ctrl.GetScoreFactor())
+				}
 			}
 		}
 		if severity == "" {
@@ -631,8 +650,8 @@ func mapPolicyReportSeverity(severity string) string {
 
 // CloseWriter closes the PolicyReport output writer, returning any error from flushing or closing.
 func (pp *PolicyReportPrinter) CloseWriter() error {
-	if pp.writer != nil && pp.writer != os.Stdout {
-		return pp.writer.Close()
+	if pp != nil && pp.writer != nil && pp.writer != os.Stdout {
+		return printer.CloseOutput(pp.writer)
 	}
 	return nil
 }

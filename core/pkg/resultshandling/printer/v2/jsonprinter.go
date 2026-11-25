@@ -40,10 +40,13 @@ func NewJsonPrinter() *JsonPrinter {
 }
 
 func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if jp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.JsonFormat, outputFile, jsonOutputFile)
 	if explicitOutput {
 		var err error
-		jp.writer, err = printer.GetWriterNoFallback(outputFile)
+		jp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	jp.writer = printer.GetWriter(ctx, outputFile)
@@ -62,16 +65,33 @@ func (jp *JsonPrinter) Score(score float32) {
 
 }
 func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if jp == nil {
+		return fmt.Errorf("failed to write json results: printer is nil")
+	}
+	if err := printer.PrepareOutput(jp.writer); err != nil {
+		return err
+	}
+	hasReport := opaSessionObj != nil && opaSessionObj.Report != nil
+	if !hasReport && len(imageScanData) == 0 {
+		var err error
+		if opaSessionObj != nil {
+			err = fmt.Errorf("no data provided for JSON output")
+		} else {
+			err = fmt.Errorf("no data provided")
+		}
+		logger.L().Ctx(ctx).Error("failed to write results in json format", helpers.Error(err))
+		return fmt.Errorf("failed to write results in json format: %w", err)
+	}
+	if jp.writer == nil {
+		return fmt.Errorf("failed to write json results: output writer is nil")
+	}
+
 	var err error
 
-	if opaSessionObj != nil && opaSessionObj.Report != nil {
+	if hasReport {
 		err = printConfigurationsScanning(opaSessionObj, imageScanData, jp)
 	} else if len(imageScanData) > 0 {
 		err = printImageScanning(imageScanData, jp)
-	} else if opaSessionObj != nil {
-		err = printConfigurationsScanning(opaSessionObj, imageScanData, jp)
-	} else {
-		err = fmt.Errorf("no data provided")
 	}
 
 	if err != nil {
@@ -86,6 +106,12 @@ func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 // printImageScanning keeps grype's bare document shape for a single image and
 // wraps several in an array, as the CycloneDX and SPDX printers already do.
 func printImageScanning(imageScanData []cautils.ImageScanData, jp *JsonPrinter) error {
+	if len(imageScanData) == 0 {
+		return fmt.Errorf("no data provided for JSON output")
+	}
+	if jp == nil || jp.writer == nil {
+		return fmt.Errorf("failed to write json results: output writer is nil")
+	}
 	if len(imageScanData) == 1 {
 		return presentImageScan(imageScanData[0], jp.writer)
 	}
@@ -117,6 +143,9 @@ func presentImageScan(imageScanData cautils.ImageScanData, w io.Writer) error {
 }
 
 func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData, jp *JsonPrinter) error {
+	if jp == nil || jp.writer == nil {
+		return fmt.Errorf("failed to write json results: output writer is nil")
+	}
 	return writeConfigurationJSON(jp.writer, opaSessionObj, imageScanData)
 }
 
@@ -127,6 +156,9 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScan
 func writeConfigurationJSON(w io.Writer, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if opaSessionObj == nil || opaSessionObj.Report == nil {
 		return fmt.Errorf("no data provided for JSON output")
+	}
+	if w == nil {
+		return fmt.Errorf("failed to write json results: output writer is nil")
 	}
 
 	finalizedReport := *opaSessionObj.Report
@@ -314,8 +346,8 @@ func (jp *JsonPrinter) PrintNextSteps() {
 
 // CloseWriter closes the JSON output writer, returning any error from flushing or closing.
 func (p *JsonPrinter) CloseWriter() error {
-	if p.writer != nil && p.writer != os.Stdout {
-		return p.writer.Close()
+	if p != nil && p.writer != nil && p.writer != os.Stdout {
+		return printer.CloseOutput(p.writer)
 	}
 	return nil
 }

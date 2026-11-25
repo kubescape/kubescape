@@ -561,3 +561,79 @@ func TestCompute_OutputOrderIsDeterministic(t *testing.T) {
 		require.Equal(t, first.Unchanged, got.Unchanged, "Unchanged ordered differently on run %d for identical inputs", run)
 	}
 }
+
+func TestCompute_RejectsEncryptedReports(t *testing.T) {
+	valid := writeTempReport(t, makeReport())
+
+	tests := []struct {
+		name   string
+		report string
+	}{
+		{
+			name: "metadata with encryptedDEK",
+			report: `{
+				"results": [{"resourceID": "pod-1", "controls": [{"controlID": "C-0001", "status": {"status": "failed"}}]}],
+				"summaryDetails": {"controls": {"C-0001": {"scoreFactor": 0.5, "severity": "Medium"}}},
+				"metadata": {
+					"encryptionMetadata": {
+						"version": "v1",
+						"dekAlgorithm": "AES256_GCM",
+						"kekAlgorithm": "ARGON2ID_AES256_GCM",
+						"encryptedDEK": "ENC[ARGON2ID_AES256_GCM,salt,nonce,ciphertext]"
+					}
+				}
+			}`,
+		},
+		{
+			name: "top-level encryptionMetadata",
+			report: `{
+				"results": [{"resourceID": "pod-1", "controls": [{"controlID": "C-0001", "status": {"status": "failed"}}]}],
+				"summaryDetails": {"controls": {"C-0001": {"scoreFactor": 0.5, "severity": "Medium"}}},
+				"encryptionMetadata": {
+					"encryptedDEK": "ENC[ARGON2ID_AES256_GCM,salt,nonce,ciphertext]"
+				}
+			}`,
+		},
+		{
+			name: "encrypted resource ID",
+			report: `{
+				"results": [{"resourceID": "path=pod.yaml/api=v1/default/Pod/ENC[AES256_GCM,nonce,cipher]", "controls": [{"controlID": "C-0001", "status": {"status": "failed"}}]}],
+				"summaryDetails": {"controls": {"C-0001": {"scoreFactor": 0.5, "severity": "Medium"}}}
+			}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+" base", func(t *testing.T) {
+			path := writeRawReport(t, tt.report)
+			_, err := Compute(path, valid)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrEncryptedReport)
+			assert.Contains(t, err.Error(), "cannot diff encrypted report")
+			assert.Contains(t, err.Error(), "decrypt first with 'kubescape decrypt'")
+
+			// ComputeFromJSON
+			_, err = ComputeFromJSON([]byte(tt.report), marshalReport(t, makeReport()), Options{})
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrEncryptedReport)
+			assert.Contains(t, err.Error(), "cannot diff encrypted base report")
+			assert.Contains(t, err.Error(), "decrypt first with 'kubescape decrypt'")
+		})
+
+		t.Run(tt.name+" head", func(t *testing.T) {
+			path := writeRawReport(t, tt.report)
+			_, err := Compute(valid, path)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrEncryptedReport)
+			assert.Contains(t, err.Error(), "cannot diff encrypted report")
+			assert.Contains(t, err.Error(), "decrypt first with 'kubescape decrypt'")
+
+			// ComputeFromJSON
+			_, err = ComputeFromJSON(marshalReport(t, makeReport()), []byte(tt.report), Options{})
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrEncryptedReport)
+			assert.Contains(t, err.Error(), "cannot diff encrypted head report")
+			assert.Contains(t, err.Error(), "decrypt first with 'kubescape decrypt'")
+		})
+	}
+}

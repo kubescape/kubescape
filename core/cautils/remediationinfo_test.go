@@ -27,11 +27,26 @@ func TestRemediationInfo_ValidatePayload(t *testing.T) {
 		{"valid annotate", RemediationInfo{Action: "annotate", Kind: "Deployment", Namespace: "payments", Name: "api"}, false},
 		{"valid quarantine", RemediationInfo{Action: "quarantine", Kind: "Deployment", Namespace: "payments", Name: "api"}, false},
 		{"valid revert", RemediationInfo{Action: "revert", Kind: "Pod", Namespace: "default", Name: "p"}, false},
+		{"valid patch default type", RemediationInfo{Action: "patch", Kind: "Deployment", Namespace: "payments", Name: "api", Patch: `{"spec":{}}`}, false},
+		{"valid patch strategic", RemediationInfo{Action: "patch", Kind: "Deployment", Namespace: "payments", Name: "api", Patch: `{"spec":{}}`, PatchType: "strategic"}, false},
+		{"valid patch merge", RemediationInfo{Action: "patch", Kind: "Deployment", Namespace: "payments", Name: "api", Patch: `{"spec":{}}`, PatchType: "merge"}, false},
+		{"patch missing patch body", RemediationInfo{Action: "patch", Kind: "Deployment", Namespace: "payments", Name: "api"}, true},
+		{"patch whitespace patch body", RemediationInfo{Action: "patch", Kind: "Deployment", Namespace: "payments", Name: "api", Patch: "   "}, true},
+		{"patch invalid json", RemediationInfo{Action: "patch", Kind: "Deployment", Namespace: "payments", Name: "api", Patch: "not-json"}, true},
+		{"patch null json", RemediationInfo{Action: "patch", Kind: "Deployment", Namespace: "payments", Name: "api", Patch: "null"}, true},
+		{"patch non-object json array", RemediationInfo{Action: "patch", Kind: "Deployment", Namespace: "payments", Name: "api", Patch: `["item"]`}, true},
+		{"patch unsupported patch-type", RemediationInfo{Action: "patch", Kind: "Deployment", Namespace: "payments", Name: "api", Patch: `{"spec":{}}`, PatchType: "invalid"}, true},
+		{"annotate with patch body", RemediationInfo{Action: "annotate", Kind: "Deployment", Namespace: "payments", Name: "api", Patch: `{"spec":{}}`}, true},
+		{"annotate with patch-type", RemediationInfo{Action: "annotate", Kind: "Deployment", Namespace: "payments", Name: "api", PatchType: "merge"}, true},
 		{"unknown action", RemediationInfo{Action: "explode", Kind: "Deployment", Namespace: "ns", Name: "a"}, true},
 		{"later-phase action", RemediationInfo{Action: "cordon", Kind: "Deployment", Namespace: "ns", Name: "a"}, true},
 		{"missing name", RemediationInfo{Action: "annotate", Kind: "Deployment", Namespace: "ns"}, true},
+		{"whitespace name", RemediationInfo{Action: "annotate", Kind: "Deployment", Namespace: "ns", Name: "   "}, true},
 		{"unsupported kind", RemediationInfo{Action: "annotate", Kind: "Service", Namespace: "ns", Name: "a"}, true},
+		{"whitespace kind", RemediationInfo{Action: "annotate", Kind: "   ", Namespace: "ns", Name: "a"}, true},
 		{"missing namespace", RemediationInfo{Action: "annotate", Kind: "Deployment", Name: "a"}, true},
+		{"whitespace namespace", RemediationInfo{Action: "annotate", Kind: "Deployment", Namespace: "   ", Name: "a"}, true},
+		{"padded target fields are trimmed", RemediationInfo{Action: "annotate", Kind: " Deployment ", Namespace: " payments ", Name: " api "}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -137,6 +152,39 @@ func TestRemediationInfo_GetRequestPayload_Revert(t *testing.T) {
 	assert.Empty(t, args.TTL)
 }
 
+func TestRemediationInfo_GetRequestPayload_Patch(t *testing.T) {
+	r := &RemediationInfo{
+		Action:     "patch",
+		Kind:       "Deployment",
+		Namespace:  "payments",
+		Name:       "api",
+		Patch:      `{"spec":{"replicas":3}}`,
+		PatchType:  "merge",
+		Reason:     "scale up",
+		FindingRef: "workloadconfigurationscansummaries/payments/api",
+	}
+
+	args, err := apis.OperatorActionArgsFromMap(r.GetRequestPayload().Commands[0].Args)
+	require.NoError(t, err)
+	assert.Equal(t, apis.OperatorActionPatch, args.Action)
+	require.NotNil(t, args.Target)
+	assert.Equal(t, "Deployment", args.Target.Kind)
+	assert.Equal(t, "payments", args.Target.Namespace)
+	assert.Equal(t, "api", args.Target.Name)
+	assert.Equal(t, apis.OperatorActionPatchBody(`{"spec":{"replicas":3}}`), args.Patch)
+	assert.Equal(t, "merge", args.PatchType)
+	assert.Equal(t, "scale up", args.Reason)
+	assert.Equal(t, "workloadconfigurationscansummaries/payments/api", args.FindingRef)
+	assert.True(t, args.IsDryRun())
+	assert.Nil(t, args.Selector)
+	assert.Empty(t, args.TTL)
+
+	r.Confirm = true
+	args, err = apis.OperatorActionArgsFromMap(r.GetRequestPayload().Commands[0].Args)
+	require.NoError(t, err)
+	assert.False(t, args.IsDryRun())
+}
+
 func TestRemediationInfo_HasTargetAndSelector(t *testing.T) {
 	assert.False(t, (&RemediationInfo{}).HasExplicitTarget())
 	assert.False(t, (&RemediationInfo{}).HasSelector())
@@ -149,6 +197,12 @@ func TestRemediationInfo_HasTargetAndSelector(t *testing.T) {
 	// either selector axis alone is a selector
 	assert.True(t, (&RemediationInfo{Control: "C-0016"}).HasSelector())
 	assert.True(t, (&RemediationInfo{MinSeverity: "High"}).HasSelector())
+
+	// whitespace-only fields do not count as explicit target or selector
+	assert.False(t, (&RemediationInfo{Kind: "   "}).HasExplicitTarget())
+	assert.False(t, (&RemediationInfo{Name: "   "}).HasExplicitTarget())
+	assert.False(t, (&RemediationInfo{Control: "   "}).HasSelector())
+	assert.False(t, (&RemediationInfo{MinSeverity: "   "}).HasSelector())
 }
 
 func TestRemediationInfo_ValidatePayload_Selector(t *testing.T) {
@@ -160,6 +214,7 @@ func TestRemediationInfo_ValidatePayload_Selector(t *testing.T) {
 		{"control only", RemediationInfo{Action: "quarantine", Control: "C-0016"}, false},
 		{"min-severity only", RemediationInfo{Action: "quarantine", MinSeverity: "High"}, false},
 		{"control and min-severity", RemediationInfo{Action: "quarantine", Control: "C-0016", MinSeverity: "Critical"}, false},
+		{"patch by selector", RemediationInfo{Action: "patch", Control: "C-0016", Patch: `{"spec":{}}`}, false},
 		{"severity is case-insensitive", RemediationInfo{Action: "annotate", MinSeverity: "high"}, false},
 		{"severity is trimmed", RemediationInfo{Action: "annotate", MinSeverity: " High "}, false},
 		// the operator's severityRank accepts Unknown, so the CLI must too
@@ -167,6 +222,11 @@ func TestRemediationInfo_ValidatePayload_Selector(t *testing.T) {
 		// revert by selector re-selects the set that was acted on: a quarantined
 		// workload still fails the control that justified quarantining it
 		{"revert by selector", RemediationInfo{Action: "revert", Control: "C-0016"}, false},
+		{"selector with whitespace name is valid selector", RemediationInfo{Action: "quarantine", Control: "C-0016", Name: "   "}, false},
+		{"selector with whitespace namespace is valid selector", RemediationInfo{Action: "quarantine", Control: "C-0016", Namespace: "   "}, false},
+		{"whitespace control with valid severity", RemediationInfo{Action: "quarantine", Control: "   ", MinSeverity: "High"}, true},
+		{"valid control with whitespace severity", RemediationInfo{Action: "quarantine", Control: "C-0016", MinSeverity: "   "}, true},
+		{"padded control and severity are trimmed", RemediationInfo{Action: "quarantine", Control: " C-0016 ", MinSeverity: " High "}, false},
 		{"bogus severity", RemediationInfo{Action: "quarantine", MinSeverity: "Extreme"}, true},
 		// selector and explicit target describe different target sets
 		{"selector with kind", RemediationInfo{Action: "quarantine", Control: "C-0016", Kind: "Deployment"}, true},

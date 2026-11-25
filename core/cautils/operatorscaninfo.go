@@ -1,8 +1,10 @@
 package cautils
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/armosec/armoapi-go/apis"
@@ -44,6 +46,23 @@ type OperatorScanInfo interface {
 	ValidatePayload(*apis.Commands) error
 }
 
+func cleanPayloadStrings(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	res := make([]string, 0, len(items))
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed != "" && !slices.Contains(res, trimmed) {
+			res = append(res, trimmed)
+		}
+	}
+	if len(res) == 0 {
+		return nil
+	}
+	return res
+}
+
 func (v *VulnerabilitiesScanInfo) ValidatePayload(commands *apis.Commands) error {
 	return nil
 }
@@ -51,8 +70,9 @@ func (v *VulnerabilitiesScanInfo) ValidatePayload(commands *apis.Commands) error
 func (v *VulnerabilitiesScanInfo) GetRequestPayload() *apis.Commands {
 	var commands []apis.Command
 
-	clusterName := v.ClusterName
-	if len(v.IncludeNamespaces) == 0 {
+	clusterName := strings.TrimSpace(v.ClusterName)
+	namespaces := cleanPayloadStrings(v.IncludeNamespaces)
+	if len(namespaces) == 0 {
 		wildWlid := wlid.GetWLID(clusterName, "", "", "")
 		command := apis.Command{
 			CommandName: apis.TypeScanImages,
@@ -60,8 +80,8 @@ func (v *VulnerabilitiesScanInfo) GetRequestPayload() *apis.Commands {
 		}
 		commands = append(commands, command)
 	} else {
-		for i := range v.IncludeNamespaces {
-			wildWlid := wlid.GetWLID(clusterName, v.IncludeNamespaces[i], "", "")
+		for _, ns := range namespaces {
+			wildWlid := wlid.GetWLID(clusterName, ns, "", "")
 			command := apis.Command{
 				CommandName: apis.TypeScanImages,
 				WildWlid:    wildWlid,
@@ -89,10 +109,10 @@ func (c *ConfigScanInfo) GetRequestPayload() *apis.Commands {
 				CommandName: apis.TypeRunKubescape,
 				Args: map[string]any{
 					KubescapeScanV1: utilsmetav1.PostScanRequest{
-						ExcludedNamespaces: c.ExcludedNamespaces,
-						IncludeNamespaces:  c.IncludedNamespaces,
+						ExcludedNamespaces: cleanPayloadStrings(c.ExcludedNamespaces),
+						IncludeNamespaces:  cleanPayloadStrings(c.IncludedNamespaces),
 						TargetType:         apisv1.KindFramework,
-						TargetNames:        c.Frameworks,
+						TargetNames:        cleanPayloadStrings(c.Frameworks),
 						HostScanner:        &c.HostScanner,
 					},
 				},
@@ -132,12 +152,12 @@ func isSupportedRemediationSeverity(severity string) bool {
 // OperatorAdapter transport (one OperatorCommand object per apis.Command) — a
 // remediation is a new verb on that pipeline, not a new mechanism.
 //
-// Supported actions: `annotate`, `quarantine` and `revert`; the `cordon` action
+// Supported actions: `annotate`, `patch` (requires Kubescape Operator >= v0.2.240), `quarantine` and `revert`; the `cordon` action
 // arrives in a later phase. A target is given either explicitly (--kind/--name)
 // or as a findings-driven selector (--control/--min-severity) that the operator
 // resolves against the scan results already stored in the cluster.
 type RemediationInfo struct {
-	// Action is the operation to perform: "annotate", "quarantine" or "revert".
+	// Action is the operation to perform: "annotate", "patch", "quarantine" or "revert".
 	Action string
 	// Target (explicit).
 	Kind      string
@@ -148,6 +168,10 @@ type RemediationInfo struct {
 	// exclusive with the explicit target above.
 	Control     string
 	MinSeverity string
+	// Patch is the raw JSON patch body for the "patch" action (requires Kubescape Operator >= v0.2.240).
+	Patch string
+	// PatchType selects the patch type: "strategic" (default) or "merge" (requires Kubescape Operator >= v0.2.240).
+	PatchType string
 	// Audit metadata.
 	Reason     string
 	FindingRef string
@@ -158,12 +182,12 @@ type RemediationInfo struct {
 
 // HasSelector reports whether findings-driven targeting was requested.
 func (r *RemediationInfo) HasSelector() bool {
-	return r.Control != "" || r.MinSeverity != ""
+	return strings.TrimSpace(r.Control) != "" || strings.TrimSpace(r.MinSeverity) != ""
 }
 
 // HasExplicitTarget reports whether a single concrete object was named.
 func (r *RemediationInfo) HasExplicitTarget() bool {
-	return r.Kind != "" || r.Name != ""
+	return strings.TrimSpace(r.Kind) != "" || strings.TrimSpace(r.Name) != ""
 }
 
 // IsDryRun reports whether the action should be sent as a plan-only dry-run.
@@ -176,12 +200,38 @@ func (r *RemediationInfo) IsDryRun() bool {
 
 func (r *RemediationInfo) ValidatePayload(*apis.Commands) error {
 	switch apis.OperatorActionType(r.Action) {
-	case apis.OperatorActionAnnotate, apis.OperatorActionQuarantine, apis.OperatorActionRevert:
-		// supported: annotate + revert (Phase 1), quarantine (Phase 2)
+	case apis.OperatorActionAnnotate, apis.OperatorActionPatch, apis.OperatorActionQuarantine, apis.OperatorActionRevert:
+		// supported: annotate + revert (Phase 1), quarantine (Phase 2), patch
 	case apis.OperatorActionCordon:
-		return fmt.Errorf("remediation action %q is not supported yet (planned for a later phase); supported: annotate, quarantine, revert", r.Action)
+		return fmt.Errorf("remediation action %q is not supported yet (planned for a later phase); supported: annotate, patch, quarantine, revert", r.Action)
 	default:
-		return fmt.Errorf("unknown remediation action %q (supported: annotate, quarantine, revert)", r.Action)
+		return fmt.Errorf("unknown remediation action %q (supported: annotate, patch, quarantine, revert)", r.Action)
+	}
+
+	if apis.OperatorActionType(r.Action) == apis.OperatorActionPatch {
+		if strings.TrimSpace(r.Patch) == "" {
+			return errors.New("patch remediation requires --patch")
+		}
+		var patchMap map[string]any
+		if err := json.Unmarshal([]byte(r.Patch), &patchMap); err != nil || patchMap == nil {
+			if err != nil {
+				return fmt.Errorf("invalid --patch: must be a valid JSON object: %w", err)
+			}
+			return errors.New("invalid --patch: must be a valid JSON object: got null")
+		}
+		if r.PatchType != "" {
+			pt := strings.ToLower(strings.TrimSpace(r.PatchType))
+			if pt != "strategic" && pt != "merge" {
+				return fmt.Errorf("unsupported --patch-type %q (supported: strategic, merge)", r.PatchType)
+			}
+		}
+	} else {
+		if r.Patch != "" {
+			return fmt.Errorf("--patch is only supported with the \"patch\" action")
+		}
+		if r.PatchType != "" {
+			return fmt.Errorf("--patch-type is only supported with the \"patch\" action")
+		}
 	}
 
 	// A remediation is aimed either at one named object or at whatever the
@@ -203,9 +253,15 @@ func (r *RemediationInfo) ValidatePayload(*apis.Commands) error {
 // resolved in-cluster by the operator against the stored scan results, so the
 // CLI validates only what it can know locally.
 func (r *RemediationInfo) validateSelector() error {
+	if r.Control != "" && strings.TrimSpace(r.Control) == "" {
+		return errors.New("remediation selector --control cannot be whitespace-only")
+	}
 	if r.MinSeverity != "" && !isSupportedRemediationSeverity(r.MinSeverity) {
 		return fmt.Errorf("unsupported --min-severity %q (supported: %s)", r.MinSeverity, strings.Join(remediationSeverities, ", "))
 	}
+	r.Control = strings.TrimSpace(r.Control)
+	r.MinSeverity = strings.TrimSpace(r.MinSeverity)
+	r.Namespace = strings.TrimSpace(r.Namespace)
 	// The operator resolves a selector across every namespace and has no
 	// namespace filter yet (resolveSelectorTargets in mainhandler/findings.go
 	// ignores selector.namespace), so honouring --target-namespace here would
@@ -219,6 +275,9 @@ func (r *RemediationInfo) validateSelector() error {
 
 // validateExplicitTarget checks a single named object.
 func (r *RemediationInfo) validateExplicitTarget() error {
+	r.Kind = strings.TrimSpace(r.Kind)
+	r.Name = strings.TrimSpace(r.Name)
+	r.Namespace = strings.TrimSpace(r.Namespace)
 	if r.Kind == "" || r.Name == "" {
 		return errors.New("remediation target requires --kind and --name")
 	}
@@ -239,20 +298,26 @@ func (r *RemediationInfo) GetRequestPayload() *apis.Commands {
 		FindingRef: r.FindingRef,
 		DryRun:     &dryRun,
 	}
+	if apis.OperatorActionType(r.Action) == apis.OperatorActionPatch {
+		args.Patch = apis.OperatorActionPatchBody(r.Patch)
+		if r.PatchType != "" {
+			args.PatchType = strings.ToLower(strings.TrimSpace(r.PatchType))
+		}
+	}
 	// ValidatePayload guarantees exactly one of the two is set. Emit them
 	// independently anyway so an unvalidated call cannot ship an empty Target,
 	// which the operator would take as a request to act on a nameless object.
 	if r.HasExplicitTarget() {
 		args.Target = &apis.OperatorActionTarget{
-			Kind:      r.Kind,
-			Namespace: r.Namespace,
-			Name:      r.Name,
+			Kind:      strings.TrimSpace(r.Kind),
+			Namespace: strings.TrimSpace(r.Namespace),
+			Name:      strings.TrimSpace(r.Name),
 		}
 	}
 	if r.HasSelector() {
 		args.Selector = &apis.OperatorActionSelector{
-			Control:     r.Control,
-			MinSeverity: r.MinSeverity,
+			Control:     strings.TrimSpace(r.Control),
+			MinSeverity: strings.TrimSpace(r.MinSeverity),
 		}
 	}
 	// ToArgs marshals a plain struct, so it cannot fail in practice; an empty

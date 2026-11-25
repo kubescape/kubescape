@@ -100,6 +100,84 @@ func TestSetContextMetadata(t *testing.T) {
 	})
 }
 
+// A directory scan outside a committed repository is identified as
+// "path@<directory>". A glob reads the files below its directory, so it must carry
+// that directory's identity, not one built from the pattern itself.
+func TestSetContextMetadataDirectoryRepoIdentity(t *testing.T) {
+	// directoryRepoContext runs setContextMetadata for input, which must resolve
+	// to a local directory scan.
+	directoryRepoContext := func(t *testing.T, input string) *reporthandlingv2.RepoContextMetadata {
+		t.Helper()
+		ctx := reporthandlingv2.ContextMetadata{}
+		scanInfo := &ScanInfo{InputPatterns: []string{input}}
+		scanInfo.setContextMetadata(context.Background(), &ctx)
+		require.Equal(t, ContextDir, scanInfo.GetScanningContext())
+		require.NotNil(t, ctx.DirectoryContextMetadata)
+		require.NotNil(t, ctx.RepoContextMetadata)
+		return ctx.RepoContextMetadata
+	}
+	// manifestsOutsideGit creates <tmp>/k8s with one manifest in it, outside any
+	// git checkout.
+	manifestsOutsideGit := func(t *testing.T) string {
+		t.Helper()
+		root := t.TempDir()
+		if _, err := GetGitRootDir(root); err == nil {
+			t.Skip("the temporary directory is inside a git checkout")
+		}
+		manifests := filepath.Join(root, "k8s")
+		require.NoError(t, os.MkdirAll(manifests, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(manifests, "pod.yaml"), []byte("kind: Pod\n"), 0o600))
+		return manifests
+	}
+
+	t.Run("directory", func(t *testing.T) {
+		manifests := manifestsOutsideGit(t)
+		repo := directoryRepoContext(t, manifests)
+		assert.Equal(t, "path@"+manifests, repo.Repo)
+		assert.Equal(t, manifests, repo.LocalRootPath)
+	})
+
+	t.Run("absolute glob", func(t *testing.T) {
+		manifests := manifestsOutsideGit(t)
+		dir := directoryRepoContext(t, manifests)
+		glob := directoryRepoContext(t, filepath.Join(manifests, "*.yaml"))
+		assert.Equal(t, "path@"+manifests, glob.Repo)
+		assert.Equal(t, manifests, glob.LocalRootPath)
+		assert.Equal(t, dir, glob)
+	})
+
+	t.Run("relative glob", func(t *testing.T) {
+		manifests := manifestsOutsideGit(t)
+		dir := directoryRepoContext(t, manifests)
+		t.Chdir(manifests)
+		glob := directoryRepoContext(t, "*.yaml")
+		assert.Equal(t, "path@"+manifests, glob.Repo)
+		assert.Equal(t, manifests, glob.LocalRootPath)
+		assert.Equal(t, dir, glob)
+	})
+
+	t.Run("directory inside a repository without commits", func(t *testing.T) {
+		// Without a HEAD the scan is a directory scan. Its identity stays the
+		// scanned directory while its root is the repository root, and a glob in
+		// that directory gets the same identity and root. The root is go-git's
+		// worktree root, which resolves symlinks, so the expectation is built from
+		// the resolved temporary directory (on macOS /var is a link to /private/var).
+		root, err := filepath.EvalSymlinks(t.TempDir())
+		require.NoError(t, err)
+		manifests := filepath.Join(root, "k8s")
+		require.NoError(t, os.MkdirAll(manifests, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(manifests, "pod.yaml"), []byte("kind: Pod\n"), 0o600))
+		_, err = git.PlainInit(root, false)
+		require.NoError(t, err)
+
+		dir := directoryRepoContext(t, manifests)
+		assert.Equal(t, "path@"+manifests, dir.Repo)
+		assert.Equal(t, root, dir.LocalRootPath)
+		glob := directoryRepoContext(t, filepath.Join(manifests, "*.yaml"))
+		assert.Equal(t, dir, glob)
+	})
+}
+
 func TestScanContractProvenanceUsesFinalPolicySelection(t *testing.T) {
 	scanInfo := &ScanInfo{
 		ScanContract: &reporthandlingv2.ScanContractMetadata{
@@ -1244,5 +1322,37 @@ func TestScanInfo_NilReceiverMethods(t *testing.T) {
 		assert.NotEmpty(t, policy)
 		scanInfo.Cleanup()
 		scanInfo.AddCleanup(func() {})
+	})
+}
+
+func TestAppendPolicyIdentifiers_TrimmingAndDeduplication(t *testing.T) {
+	t.Run("trims surrounding whitespace and deduplicates case-insensitively", func(t *testing.T) {
+		got := BuildPolicyIdentifiers([]string{"  nsa  ", "NSA", "mitre", "  MITRE  ", "C-0001", " c-0001 "}, apisv1.KindFramework)
+		want := []PolicyIdentifier{
+			{Kind: apisv1.KindFramework, Identifier: "nsa"},
+			{Kind: apisv1.KindFramework, Identifier: "mitre"},
+			{Kind: apisv1.KindFramework, Identifier: "C-0001"},
+		}
+		assert.Equal(t, want, got)
+	})
+
+	t.Run("skips empty and whitespace-only identifiers", func(t *testing.T) {
+		got := BuildPolicyIdentifiers([]string{"", "   ", "nsa", "  ", ""}, apisv1.KindFramework)
+		want := []PolicyIdentifier{
+			{Kind: apisv1.KindFramework, Identifier: "nsa"},
+		}
+		assert.Equal(t, want, got)
+	})
+
+	t.Run("appends to existing identifiers without duplicates", func(t *testing.T) {
+		existing := []PolicyIdentifier{
+			{Kind: apisv1.KindFramework, Identifier: "nsa"},
+		}
+		got := AppendPolicyIdentifiers(existing, []string{"  NSA  ", "mitre"}, apisv1.KindFramework)
+		want := []PolicyIdentifier{
+			{Kind: apisv1.KindFramework, Identifier: "nsa"},
+			{Kind: apisv1.KindFramework, Identifier: "mitre"},
+		}
+		assert.Equal(t, want, got)
 	})
 }

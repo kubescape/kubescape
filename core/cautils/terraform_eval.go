@@ -3,6 +3,7 @@ package cautils
 import (
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/ext/customdecode"
 	"github.com/hashicorp/hcl/v2/ext/tryfunc"
 	"github.com/hashicorp/hcl/v2/ext/typeexpr"
 	"github.com/hashicorp/hcl/v2/hclparse"
@@ -99,37 +101,92 @@ const (
 )
 
 var coalesceFunc = function.New(&function.Spec{
-	VarParam: &function.Parameter{Name: "vals", Type: cty.DynamicPseudoType, AllowNull: true, AllowDynamicType: true},
+	VarParam: &function.Parameter{
+		Name: "expressions",
+		Type: customdecode.ExpressionClosureType,
+	},
 	Type: func(args []cty.Value) (cty.Type, error) {
-		var types []cty.Type
-		for _, arg := range args {
-			if arg.Type() != cty.DynamicPseudoType {
-				types = append(types, arg.Type())
-			}
+		if len(args) == 0 {
+			return cty.NilType, fmt.Errorf("no non-null, non-empty-string arguments")
 		}
-		if len(types) == 0 {
-			return cty.DynamicPseudoType, nil
-		}
-		ty, _ := convert.UnifyUnsafe(types)
-		if ty == cty.NilType {
-			return cty.NilType, fmt.Errorf("all arguments must have the same type")
-		}
-		return ty, nil
+		return cty.DynamicPseudoType, nil
 	},
 	Impl: func(args []cty.Value, retType cty.Type) (cty.Value, error) {
-		for _, arg := range args {
-			val, err := convert.Convert(arg, retType)
-			if err != nil {
-				return cty.UnknownVal(retType), err
-			}
-			if val.IsNull() || (val.Type() == cty.String && val.AsString() == "") {
-				continue
-			}
-			return val, nil
-		}
-		return cty.NilVal, fmt.Errorf("no non-null, non-empty-string arguments")
+		return evaluateCoalesce(args)
 	},
 })
+
+func evaluateCoalesce(args []cty.Value) (cty.Value, error) {
+	if len(args) == 0 {
+		return cty.NilVal, fmt.Errorf("no non-null, non-empty-string arguments")
+	}
+	var selectedVal cty.Value
+	var selectedIdx = -1
+	for i, arg := range args {
+		closure := customdecode.ExpressionClosureFromVal(arg)
+		v, moreDiags := closure.Value()
+		if moreDiags.HasErrors() {
+			return cty.NilVal, moreDiags
+		}
+		if !v.IsKnown() {
+			return v, nil
+		}
+		if v.IsNull() || (v.Type() == cty.String && v.AsString() == "") {
+			continue
+		}
+		selectedVal = v
+		selectedIdx = i
+		break
+	}
+	if selectedIdx == -1 {
+		return cty.NilVal, fmt.Errorf("no non-null, non-empty-string arguments")
+	}
+
+	types := []cty.Type{selectedVal.Type()}
+	for _, arg := range args[selectedIdx+1:] {
+		closure := customdecode.ExpressionClosureFromVal(arg)
+		v, moreDiags := closure.Value()
+		if moreDiags.HasErrors() {
+			continue
+		}
+		if ty := terraformCoalesceArgumentType(v); ty != cty.NilType {
+			types = append(types, ty)
+		}
+	}
+
+	if len(types) > 1 {
+		targetType, _ := convert.UnifyUnsafe(types)
+		if targetType == cty.NilType {
+			return cty.NilVal, fmt.Errorf("all arguments must have the same type")
+		}
+		if !targetType.Equals(selectedVal.Type()) {
+			if terraformValueSize(selectedVal, maxTerraformFunctionSize) > maxTerraformFunctionSize {
+				return cty.NilVal, fmt.Errorf("coalesce: argument exceeds the size limit of %d bytes", maxTerraformFunctionSize)
+			}
+			converted, err := convert.Convert(selectedVal, targetType)
+			if err != nil {
+				return cty.NilVal, err
+			}
+			if terraformValueSize(converted, maxTerraformFunctionSize) > maxTerraformFunctionSize {
+				return cty.NilVal, fmt.Errorf("coalesce: argument exceeds the size limit of %d bytes", maxTerraformFunctionSize)
+			}
+			return converted, nil
+		}
+	}
+
+	if terraformValueSize(selectedVal, maxTerraformFunctionSize) > maxTerraformFunctionSize {
+		return cty.NilVal, fmt.Errorf("coalesce: argument exceeds the size limit of %d bytes", maxTerraformFunctionSize)
+	}
+
+	return selectedVal, nil
+}
+
+func terraformCoalesceArgumentType(value cty.Value) cty.Type {
+	if !value.IsKnown() || value.IsNull() || (value.Type() == cty.String && value.AsString() == "") {
+		return cty.NilType
+	}
+	return value.Type()
+}
 
 var lookupFunc = function.New(&function.Spec{
 	Params: []function.Parameter{
@@ -386,7 +443,7 @@ func applyTerraformVarFiles(parser *hclparse.Parser, dir, workspaceDir string, d
 	return errs
 }
 
-func resolveLocals(files []*hcl.File, vars map[string]cty.Value) map[string]cty.Value {
+func resolveLocals(files []*hcl.File, vars map[string]cty.Value) (map[string]cty.Value, map[string]hcl.Expression) {
 	pending := map[string]hcl.Expression{}
 	schema := &hcl.BodySchema{Blocks: []hcl.BlockHeaderSchema{{Type: "locals"}}}
 	for _, file := range files {
@@ -399,6 +456,7 @@ func resolveLocals(files []*hcl.File, vars map[string]cty.Value) map[string]cty.
 		}
 	}
 
+	localExpressions := maps.Clone(pending)
 	resolved := map[string]cty.Value{}
 	budget := maxTerraformLocalsTotalSize
 	for len(pending) > 0 {
@@ -418,12 +476,16 @@ func resolveLocals(files []*hcl.File, vars map[string]cty.Value) map[string]cty.
 			if budget <= 0 {
 				logger.L().Warning("Skipping remaining Terraform locals: total size limit reached",
 					helpers.Int("skipped", len(pending)))
-				return resolved
+				return resolved, localExpressions
 			}
-			val, diags := pending[name].Value(evalCtx)
+			expr := pending[name]
+			val, diags := expr.Value(evalCtx)
 			delete(pending, name)
 			if diags.HasErrors() {
 				continue
+			}
+			if val.IsNull() && hasUnresolvableVariables(expr, evalCtx) {
+				val = cty.UnknownVal(cty.DynamicPseudoType)
 			}
 			limit := min(maxTerraformLocalSize, budget)
 			size := terraformValueSize(val, limit)
@@ -435,7 +497,7 @@ func resolveLocals(files []*hcl.File, vars map[string]cty.Value) map[string]cty.
 			resolved[name] = val
 		}
 	}
-	return resolved
+	return resolved, localExpressions
 }
 
 func referencesPendingLocal(expr hcl.Expression, pending map[string]hcl.Expression) bool {

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -113,18 +115,15 @@ func cloneSessionForTransform(session *cautils.OPASessionObj) (*sessionTransform
 	}
 	working.ExceptionAudit = exceptionAudit
 
-	skippedManifests, err := cloneJSON(session.SkippedManifests)
-	if err != nil {
-		return nil, fmt.Errorf("clone skipped manifests: %w", err)
-	}
-	working.SkippedManifests = skippedManifests
+	// Skipped manifests hold only strings, so a copy of the slice is a deep
+	// copy. A JSON round trip would drop IgnoreFile, which the report leaves
+	// out but the transformation needs.
+	working.SkippedManifests = slices.Clone(session.SkippedManifests)
 
 	// ScanCoverage is a value; only its skipped manifests are transformed, so
 	// a copy with its own slice is enough to keep the caller untouched.
 	working.ScanCoverage = session.ScanCoverage
-	if working.ScanCoverage.SkippedManifests, err = cloneJSON(session.ScanCoverage.SkippedManifests); err != nil {
-		return nil, fmt.Errorf("clone scan coverage skipped manifests: %w", err)
-	}
+	working.ScanCoverage.SkippedManifests = slices.Clone(session.ScanCoverage.SkippedManifests)
 
 	resources, originalByClone, err := cloneCatalog(session.GetCatalog())
 	if err != nil {
@@ -681,6 +680,10 @@ func transformSessionInPlace(session *cautils.OPASessionObj, transformer Transfo
 // across the report. The loader's reasons embed the same path, raw (an
 // os.PathError) or %q-quoted, so the path is replaced inside the reason too
 // and the rest of the diagnostic is kept.
+//
+// All replacements in a reason are made in one pass, so a pseudonym that was
+// just written is never matched again: the pseudonym "src-<hash>" of an input
+// named "src" contains "src".
 func transformSkippedManifests(skipped []cautils.SkippedManifest, transformer Transformer) error {
 	for i := range skipped {
 		original := skipped[i].Path
@@ -691,11 +694,55 @@ func transformSkippedManifests(skipped []cautils.SkippedManifest, transformer Tr
 		if err != nil {
 			return err
 		}
+		replacements, err := ignoreFileReplacements(skipped[i], transformed, transformer)
+		if err != nil {
+			return err
+		}
+		skipped[i].IgnoreFile = ""
+		// At a position where several match, strings.Replacer uses the
+		// first pair, so the ignore file's longer paths go first.
+		replacements = append(replacements,
+			strconv.Quote(original), strconv.Quote(transformed),
+			original, transformed,
+		)
 		skipped[i].Path = transformed
-		reason := strings.ReplaceAll(skipped[i].Reason, strconv.Quote(original), strconv.Quote(transformed))
-		skipped[i].Reason = strings.ReplaceAll(reason, original, transformed)
+		skipped[i].Reason = strings.NewReplacer(replacements...).Replace(skipped[i].Reason)
 	}
 	return nil
+}
+
+// ignoreFileReplacements returns the old, new pairs that replace, in the
+// reason of skipped, the path of the ignore file the scan read for its input.
+// A multi-input scan skips an input whose ignore file can't be used, and the
+// error names that file. The loader records which file that was, because it
+// can't always be found again from the input: a repository is cloned with the
+// scan's clone depth, and a directory can be gone by now. Without a recorded
+// path, it is worked out from the input. For a file or a glob input the file
+// is in the input's directory, not under the input path, so the directory gets
+// its own pseudonym and the file keeps its name.
+func ignoreFileReplacements(skipped cautils.SkippedManifest, transformedInput string, transformer Transformer) ([]string, error) {
+	ignoreFile := skipped.IgnoreFile
+	if ignoreFile == "" {
+		ignoreFile = filepath.Join(cautils.IgnoreRoot(skipped.Path), cautils.IgnoreFileName)
+	}
+	root := filepath.Dir(ignoreFile)
+	if root == "." {
+		return nil, nil
+	}
+	quoted := strconv.Quote(ignoreFile)
+	if !strings.Contains(skipped.Reason, ignoreFile) && !strings.Contains(skipped.Reason, quoted) {
+		return nil, nil
+	}
+	transformedRoot := transformedInput
+	if root != filepath.Clean(skipped.Path) {
+		var err error
+		if transformedRoot, err = transformValue(transformer, "src", root); err != nil {
+			return nil, err
+		}
+	}
+	// Not filepath.Join: an encrypted root is base64 and may contain "//".
+	replacement := transformedRoot + string(filepath.Separator) + cautils.IgnoreFileName
+	return []string{quoted, strconv.Quote(replacement), ignoreFile, replacement}, nil
 }
 
 func remapControlResourceIDs(controls reportsummary.ControlSummaries, transformer Transformer, idMapping map[string]string) error {
@@ -745,8 +792,17 @@ func transformExceptionAudit(audit *cautils.ExceptionAudit, exceptions *exceptio
 					return err
 				}
 			}
-			if match.Namespace, err = transformValue(transformer, "ns", match.Namespace); err != nil {
-				return err
+			if match.Namespace != "" {
+				trimmed := strings.TrimSpace(match.Namespace)
+				if trimmed == "" {
+					match.Namespace = ""
+				} else {
+					ns, err := transformValue(transformer, "ns", trimmed)
+					if err != nil {
+						return err
+					}
+					match.Namespace = ns
+				}
 			}
 			if match.Name, err = transformValue(transformer, "res", match.Name); err != nil {
 				return err
@@ -766,7 +822,12 @@ func transformNamespaceSummaries(summaries cautils.NamespaceSummaries, transform
 		if summaries[i].Namespace == cautils.ClusterScopedNamespace {
 			continue
 		}
-		namespace, err := transformValue(transformer, "ns", summaries[i].Namespace)
+		trimmed := strings.TrimSpace(summaries[i].Namespace)
+		if trimmed == "" {
+			summaries[i].Namespace = cautils.ClusterScopedNamespace
+			continue
+		}
+		namespace, err := transformValue(transformer, "ns", trimmed)
 		if err != nil {
 			return err
 		}
@@ -1042,13 +1103,18 @@ func transformResourceMetadata(
 		resource.SetName(name)
 	}
 
-	if namespace := resource.GetNamespace(); namespace != "" {
-		namespace, err = transformValue(transformer, "ns", namespace)
-		if err != nil {
-			return err
-		}
+	if rawNamespace := resource.GetNamespace(); rawNamespace != "" {
+		trimmedNamespace := strings.TrimSpace(rawNamespace)
+		if trimmedNamespace == "" {
+			resource.SetNamespace("")
+		} else {
+			namespace, err := transformValue(transformer, "ns", trimmedNamespace)
+			if err != nil {
+				return err
+			}
 
-		resource.SetNamespace(namespace)
+			resource.SetNamespace(namespace)
+		}
 	}
 
 	return nil
@@ -1185,8 +1251,16 @@ func transformRBACSubjects(obj map[string]any, transformer Transformer) error {
 			if err := transformStringField(&subjects[i].Name, "res", transformer); err != nil {
 				return err
 			}
-			if err := transformStringField(&subjects[i].Namespace, "ns", transformer); err != nil {
-				return err
+			if subjects[i].Namespace != "" {
+				trimmed := strings.TrimSpace(subjects[i].Namespace)
+				if trimmed == "" {
+					subjects[i].Namespace = ""
+				} else {
+					subjects[i].Namespace = trimmed
+					if err := transformStringField(&subjects[i].Namespace, "ns", transformer); err != nil {
+						return err
+					}
+				}
 			}
 		}
 		obj["subjects"] = subjects
@@ -1199,6 +1273,14 @@ func transformRBACSubjects(obj map[string]any, transformer Transformer) error {
 func transformRBACSubjectMap(subject map[string]any, transformer Transformer) error {
 	if err := transformMapStringField(subject, "name", "res", transformer); err != nil {
 		return err
+	}
+	if raw, ok := subject["namespace"].(string); ok && raw != "" {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			subject["namespace"] = ""
+			return nil
+		}
+		subject["namespace"] = trimmed
 	}
 	return transformMapStringField(subject, "namespace", "ns", transformer)
 }
@@ -1357,9 +1439,13 @@ func transformClusterMetadata(cluster *reporthandlingv2.ClusterMetadata, transfo
 		namespaceCounts := make(map[string]int, len(clusterCopy.MapNamespaceToNumberOfResources))
 
 		for namespace, count := range clusterCopy.MapNamespaceToNumberOfResources {
-			namespace, err = transformValue(transformer, "ns", namespace)
-			if err != nil {
-				return err
+			if strings.TrimSpace(namespace) == "" {
+				namespace = ""
+			} else {
+				namespace, err = transformValue(transformer, "ns", strings.TrimSpace(namespace))
+				if err != nil {
+					return err
+				}
 			}
 
 			namespaceCounts[namespace] += count

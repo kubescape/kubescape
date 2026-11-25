@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	k8sjson "k8s.io/apimachinery/pkg/util/json"
@@ -312,6 +313,17 @@ func (d *reportDecryptor) decryptResource(resource rawObject, context string) (s
 		return "", "", fmt.Errorf("failed to marshal %s.object: %w", context, err)
 	}
 	resource["object"] = updatedObject
+
+	// An RBAC User or Group subject has no sourcePath of its own: its ID is made
+	// from its related objects', which can start it with "path=".
+	// All other local resources whose ID starts with "path=" must have a valid sourcePath.
+	if strings.HasPrefix(oldID, "path=") && !isRBACSubject(workload) {
+		// File-scan IDs include the restored sourcePath, including its document index.
+		if path, ok := workload.GetObject()[localworkload.PathKey].(string); !ok || path == "" {
+			return "", "", fmt.Errorf("cannot restore %s.resourceID: local resource has no valid sourcePath", context)
+		}
+	}
+
 	if !hasUsableWorkloadID(workload) {
 		if err := d.decryptSource(resource, context); err != nil {
 			return "", "", err
@@ -320,6 +332,14 @@ func (d *reportDecryptor) decryptResource(resource rawObject, context string) (s
 	}
 
 	newID := workload.GetID()
+	// Ordinary file-manifest IDs must be rebuilt as local workload IDs to include
+	// the restored sourcePath and document index. Rego response vectors already
+	// produce their composite IDs via workload.GetID().
+	if strings.HasPrefix(oldID, "path=") {
+		if _, isRego := workload.(*objectsenvelopes.RegoResponseVectorObject); !isRego {
+			newID = localworkload.NewLocalWorkload(workload.GetObject()).GetID()
+		}
+	}
 
 	if oldID != "" || newID != "" {
 		resource["resourceID"], err = json.Marshal(newID)
@@ -977,6 +997,24 @@ func hasUsableWorkloadID(workload workloadinterface.IMetadata) bool {
 	return strings.TrimSpace(workload.GetApiVersion()) != "" &&
 		strings.TrimSpace(workload.GetKind()) != "" &&
 		strings.TrimSpace(workload.GetName()) != ""
+}
+
+// isRBACSubject reports whether workload represents an RBAC User or Group subject
+// with apiGroup "rbac.authorization.k8s.io".
+func isRBACSubject(workload workloadinterface.IMetadata) bool {
+	rego, ok := workload.(*objectsenvelopes.RegoResponseVectorObject)
+	if !ok {
+		return false
+	}
+	kind := rego.GetKind()
+	if kind != "User" && kind != "Group" {
+		return false
+	}
+	if apiGroup, ok := rego.GetObject()["apiGroup"].(string); ok && apiGroup != "" {
+		return apiGroup == "rbac.authorization.k8s.io"
+	}
+	group, _, _ := strings.Cut(rego.GetApiVersion(), "/")
+	return group == "rbac.authorization.k8s.io"
 }
 
 // validateNoEncryptedValues fails closed if any ciphertext remains outside the

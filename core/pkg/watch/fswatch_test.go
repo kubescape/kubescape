@@ -171,6 +171,37 @@ func startWatcher(t *testing.T, root string, opts FileWatcherOptions) (*FileWatc
 	return w, rec
 }
 
+// discardDeliveries reads and drops what the backend delivers to a watcher
+// the test drives by hand, until the test ends. On Windows the backend runs Add
+// and Remove on the goroutine that delivers events, and that goroutine waits
+// until an event is read, so a test that calls them (directly, or through
+// handle, settled or reconcile) after a change on disk would wait forever. pump
+// does this in a running watcher; the test drives the events itself instead.
+func discardDeliveries(t *testing.T, w *FileWatcher) {
+	t.Helper()
+	discarded := make(chan struct{})
+	go func() {
+		defer close(discarded)
+		events, failures := w.fs.Events, w.fs.Errors
+		for events != nil || failures != nil {
+			select {
+			case _, ok := <-events:
+				if !ok {
+					events = nil
+				}
+			case _, ok := <-failures:
+				if !ok {
+					failures = nil
+				}
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		_ = w.fs.Close()
+		<-discarded
+	})
+}
+
 var sentinels atomic.Int64
 
 // settle makes a manifest in dir that no test rule ignores and waits for its
@@ -666,6 +697,7 @@ func TestFileWatcherReconcilesWhenTheQueueOverflowed(t *testing.T) {
 	root := t.TempDir()
 	w, err := newFileWatcher(root, FileWatcherOptions{}) // no goroutine runs: the test drives it
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 	w.maxQueued = 1
 
@@ -693,6 +725,7 @@ func TestFileWatcherReconcilesASingleFilesDirectory(t *testing.T) {
 		write(t, file, "kind: Pod\n")
 		w, err := newFileWatcher(file, FileWatcherOptions{}) // no goroutine runs: the test drives it
 		require.NoError(t, err)
+		discardDeliveries(t, w)
 		defer w.fs.Close()
 		w.maxQueued = 0 // every delivery is dropped
 
@@ -713,6 +746,7 @@ func TestFileWatcherReconcilesASingleFilesDirectory(t *testing.T) {
 		write(t, file, "kind: Pod\n")
 		w, err := newFileWatcher(file, FileWatcherOptions{})
 		require.NoError(t, err)
+		discardDeliveries(t, w)
 		defer w.fs.Close()
 		w.maxQueued = 0
 
@@ -748,6 +782,7 @@ func TestFileWatcherReconcilesASingleFilesDirectory(t *testing.T) {
 		write(t, file, "kind: Pod\n")
 		w, err := newFileWatcher(file, FileWatcherOptions{})
 		require.NoError(t, err)
+		discardDeliveries(t, w)
 		defer w.fs.Close()
 		w.maxQueued = 0
 		calls := siblingGone(w, 2)
@@ -767,6 +802,7 @@ func TestFileWatcherReconcilesASingleFilesDirectory(t *testing.T) {
 		write(t, file, "kind: Pod\n")
 		w, err := newFileWatcher(file, FileWatcherOptions{})
 		require.NoError(t, err)
+		discardDeliveries(t, w)
 		defer w.fs.Close()
 		w.maxQueued = 0
 		calls := siblingGone(w, rewatchAttempts)
@@ -799,6 +835,7 @@ func TestFileWatcherRelevantFile(t *testing.T) {
 		// Terraform and Helm files a directory scan renders
 		{"main.tf", true}, {"terraform.tfvars", true}, {"prod.auto.tfvars", true},
 		{"terraform.tfvars.json", true}, {"_helpers.tpl", true},
+		{"security.patch", true}, {"patch.diff", true},
 		{"main.tf.bak", false}, {".terraform.lock.hcl", false},
 		{"notes.txt", false}, {"deploy", false}, {"deploy.yaml.bak", false},
 		{".deploy.yaml.swp", false}, {"deploy.yaml~", false}, {"#deploy.yaml#", false},
@@ -808,6 +845,46 @@ func TestFileWatcherRelevantFile(t *testing.T) {
 	for _, tt := range tests {
 		assert.Equal(t, tt.want, w.relevantFile(filepath.Join("/tmp", "x", tt.name)), tt.name)
 	}
+
+	wWithDeps := &FileWatcher{opts: FileWatcherOptions{
+		AcceptDependencies: func(string) bool { return true },
+		Exclude: func(path string, isDir bool) bool {
+			return !isDir && filepath.Base(path) == "excluded.yaml"
+		},
+	}}
+	depTests := []struct {
+		name string
+		want bool
+	}{
+		{"deploy.yaml", true}, {"security.patch", true}, {"patch.diff", true},
+		{"patch", true}, {"config.properties", true}, {"settings.ini", true},
+		{"main.tf.bak", false}, {".deploy.yaml.swp", false}, {"deploy.yaml~", false},
+		{"#deploy.yaml#", false}, {".#deploy.yaml", false},
+		{"excluded.yaml", false},
+	}
+	for _, tt := range depTests {
+		assert.Equal(t, tt.want, wWithDeps.relevantFile(filepath.Join("/tmp", "x", tt.name)), tt.name)
+	}
+}
+
+// A dependency file is relevant only while the directory is a rendered-input
+// directory: a kustomization that appears or is removed changes the answer
+// without the watcher being made again.
+func TestFileWatcherRelevantFileFollowsKustomization(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dependency := filepath.Join(root, "settings.properties")
+	write(t, dependency, "key=value\n")
+	w := &FileWatcher{opts: FileWatcherOptions{
+		AcceptDependencies: func(string) bool { return cautils.IsKustomizeDirectory(root) },
+	}}
+
+	assert.False(t, w.relevantFile(dependency), "without a kustomization the file is not one a scan reads")
+	kustomization := filepath.Join(root, "kustomization.yaml")
+	write(t, kustomization, "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n")
+	assert.True(t, w.relevantFile(dependency), "the kustomization makes it a dependency")
+	require.NoError(t, os.Remove(kustomization))
+	assert.False(t, w.relevantFile(dependency), "removing the kustomization makes it irrelevant again")
 }
 
 func TestFileWatcherBurstsLeaveOneSignalAndNeverBlock(t *testing.T) {
@@ -815,6 +892,7 @@ func TestFileWatcherBurstsLeaveOneSignalAndNeverBlock(t *testing.T) {
 	root := t.TempDir()
 	w, err := newFileWatcher(root, FileWatcherOptions{})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 
 	// Nobody reads Changes, as when a scan is running. The watcher must not wait
@@ -839,8 +917,9 @@ func TestFileWatcherBurstsLeaveOneSignalAndNeverBlock(t *testing.T) {
 func TestFileWatcherEventOverflowSignalsAndReconciles(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	w, err := newFileWatcher(root, FileWatcherOptions{}) // no goroutine reads events: the test drives it
+	w, err := newFileWatcher(root, FileWatcherOptions{}) // the test drives it
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 
 	// What was made while events were lost: a tree no event was seen for.
@@ -852,7 +931,8 @@ func TestFileWatcherEventOverflowSignalsAndReconciles(t *testing.T) {
 
 	require.NoError(t, w.handleError(fsnotify.ErrEventOverflow))
 
-	assert.Len(t, w.changes, 1, "an overflow signals a change: events were lost")
+	// required: the receive below would otherwise wait forever
+	require.Len(t, w.changes, 1, "an overflow signals a change: events were lost")
 	assert.Contains(t, w.dirs, filepath.Join(root, "late"))
 	assert.Contains(t, w.dirs, filepath.Join(root, "late", "inner"), "a directory made while events were lost is watched")
 	assert.NotContains(t, w.dirs, filepath.Join(root, "stale"), "a registration the backend does not have is dropped")
@@ -869,6 +949,7 @@ func TestFileWatcherOtherBackendErrors(t *testing.T) {
 	var reported []error
 	w, err := newFileWatcher(root, FileWatcherOptions{OnError: func(err error) { reported = append(reported, err) }})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 
 	// An error that leaves the watch working is reported, and asks for a scan
@@ -991,6 +1072,7 @@ func TestFileWatcherWatchesADirectoryMadeAgainUnderTheSameName(t *testing.T) {
 	write(t, filepath.Join(sub, "old.yaml"), "kind: Pod\n")
 	w, err := newFileWatcher(root, FileWatcherOptions{}) // the test drives the events
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 	require.Contains(t, w.dirs, sub)
 
@@ -1016,6 +1098,7 @@ func TestFileWatcherRegistersANewDirectoryOnceItHasSettled(t *testing.T) {
 	root := t.TempDir()
 	w, err := newFileWatcher(root, FileWatcherOptions{})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 
 	dir := filepath.Join(root, "new")
@@ -1045,6 +1128,7 @@ func TestFileWatcherMakesAGoodRegistrationOfADirectoryTheBackendLost(t *testing.
 	write(t, filepath.Join(dir, "a.yaml"), "kind: Pod\n")
 	w, err := newFileWatcher(root, FileWatcherOptions{})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 	require.Contains(t, w.dirs, dir)
 
@@ -1066,6 +1150,7 @@ func TestFileWatcherSettlingSkipsWhatIsNoLongerADirectory(t *testing.T) {
 	root := t.TempDir()
 	w, err := newFileWatcher(root, FileWatcherOptions{})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 
 	gone, file := filepath.Join(root, "gone"), filepath.Join(root, "now-a-file")
@@ -1081,6 +1166,34 @@ func TestFileWatcherSettlingSkipsWhatIsNoLongerADirectory(t *testing.T) {
 
 // After an overflow every registration is made again, not only the ones the
 // backend no longer lists: one it lists can have stopped reporting.
+// An overflow loses events, and the ignore file's can be among them, so the
+// directories it excludes now are dropped when the watch is reconciled, as they
+// are on its own event, instead of being watched again.
+func TestFileWatcherReconcileDropsWhatTheIgnoreFileNowExcludes(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	extra := filepath.Join(root, "extra")
+	nested := filepath.Join(extra, "nested")
+	write(t, filepath.Join(nested, "api.yaml"), "kind: Pod")
+	var excluded atomic.Bool
+	w, err := newFileWatcher(root, FileWatcherOptions{Exclude: func(path string, isDir bool) bool {
+		return excluded.Load() && isDir && path == extra
+	}})
+	require.NoError(t, err)
+	discardDeliveries(t, w)
+	defer w.fs.Close()
+	require.Contains(t, w.dirs, extra)
+
+	excluded.Store(true)
+	require.NoError(t, w.handleError(fsnotify.ErrEventOverflow))
+
+	assert.NotContains(t, w.dirs, extra, "a directory the ignore file now excludes is watched again")
+	assert.NotContains(t, w.dirs, nested)
+	assert.NotContains(t, w.fs.WatchList(), extra)
+	assert.Contains(t, w.dirs, root)
+	assert.Len(t, w.changes, 1, "the overflow is still signalled")
+}
+
 func TestFileWatcherOverflowRefreshesEveryRegistration(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -1088,6 +1201,7 @@ func TestFileWatcherOverflowRefreshesEveryRegistration(t *testing.T) {
 	write(t, filepath.Join(dir, "a.yaml"), "kind: Pod\n")
 	w, err := newFileWatcher(root, FileWatcherOptions{})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 
 	require.NoError(t, w.fs.Remove(dir)) // lost to the backend, still in the watcher's records
@@ -1140,6 +1254,7 @@ func TestFileWatcherWatchesWhatTheIgnoreFileNoLongerExcludes(t *testing.T) {
 		return excluded.Load() && isDir && path == extra
 	}})
 	require.NoError(t, err)
+	discardDeliveries(t, w)
 	defer w.fs.Close()
 	require.NotContains(t, w.dirs, extra)
 
@@ -1150,4 +1265,192 @@ func TestFileWatcherWatchesWhatTheIgnoreFileNoLongerExcludes(t *testing.T) {
 
 	assert.Contains(t, w.dirs, extra, "a directory the ignore file no longer excludes is not watched")
 	assert.Len(t, w.changes, 1, "an edit to the ignore file is signalled")
+}
+
+func TestFileWatcherStopsWatchingWhatTheIgnoreFileNowExcludes(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	extra := filepath.Join(root, "extra")
+	nested := filepath.Join(extra, "nested")
+	kept := filepath.Join(root, "kept")
+	write(t, filepath.Join(nested, "api.yaml"), "kind: Pod\n")
+	write(t, filepath.Join(kept, "api.yaml"), "kind: Pod\n")
+	var excluded atomic.Bool
+	w, err := newFileWatcher(root, FileWatcherOptions{Exclude: func(path string, isDir bool) bool {
+		return excluded.Load() && isDir && path == extra
+	}})
+	require.NoError(t, err)
+	discardDeliveries(t, w)
+	defer w.fs.Close()
+	require.Contains(t, w.dirs, extra)
+	require.Contains(t, w.dirs, nested)
+	made := filepath.Join(extra, "made")
+	w.pending[nested] = struct{}{}
+	w.pending[made] = struct{}{}
+
+	excluded.Store(true)
+	ignoreFile := filepath.Join(root, cautils.IgnoreFileName)
+	write(t, ignoreFile, "extra/\n")
+	require.NoError(t, w.handle(fsnotify.Event{Name: ignoreFile, Op: fsnotify.Write}))
+
+	assert.NotContains(t, w.dirs, extra, "a directory the ignore file now excludes is still watched")
+	assert.NotContains(t, w.dirs, nested, "and so are the directories below it")
+	assert.NotContains(t, w.pending, nested, "and one waiting to be registered")
+	assert.NotContains(t, w.pending, made, "and one below it that was not registered yet")
+	assert.Contains(t, w.dirs, root)
+	assert.Contains(t, w.dirs, kept)
+	assert.Len(t, w.changes, 1, "an edit to the ignore file is signalled")
+
+	require.NoError(t, os.RemoveAll(extra))
+	<-w.changes
+	require.NoError(t, w.handle(fsnotify.Event{Name: extra, Op: fsnotify.Remove}))
+	assert.Empty(t, w.changes, "removing an excluded directory is signalled")
+}
+
+// In a rendered root (a kustomization or Terraform directory), a file with any
+// name can be one the render reads, but a directory isn't: a watched one reports
+// what changes in it through its own watch, and .git and the directories the
+// scan excludes hold nothing it reads. On Windows the root's watch reports a
+// write to a directory whose entries change, such as .git on every commit.
+func TestFileWatcherDependenciesAreFiles(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	extra := filepath.Join(root, "extra")
+	git := filepath.Join(root, ".git")
+	write(t, filepath.Join(extra, "api.yaml"), "kind: Pod")
+	write(t, filepath.Join(git, "HEAD"), "ref: refs/heads/main")
+	w, err := newFileWatcher(root, FileWatcherOptions{
+		Exclude:            func(path string, isDir bool) bool { return isDir && path == extra }, // extra/
+		AcceptDependencies: func(string) bool { return true },
+	})
+	require.NoError(t, err)
+	discardDeliveries(t, w)
+	defer w.fs.Close()
+	require.NotContains(t, w.dirs, extra)
+
+	require.NoError(t, w.handle(fsnotify.Event{Name: git, Op: fsnotify.Write}))
+	assert.Empty(t, w.changes, "git updating .git is not an edit to the input")
+
+	require.NoError(t, w.handle(fsnotify.Event{Name: extra, Op: fsnotify.Write}))
+	assert.Empty(t, w.changes, "a change in an excluded directory is not an edit to the input")
+
+	require.NoError(t, os.RemoveAll(extra))
+	require.NoError(t, w.handle(fsnotify.Event{Name: extra, Op: fsnotify.Remove}))
+	assert.Empty(t, w.changes, "removing an excluded directory is not an edit to the input")
+
+	security := filepath.Join(root, "security")
+	write(t, security, "readOnlyRootFilesystem: false")
+	require.NoError(t, w.handle(fsnotify.Event{Name: security, Op: fsnotify.Write}))
+	require.Len(t, w.changes, 1, "an edit to a dependency file is signalled")
+	<-w.changes
+
+	require.NoError(t, os.Remove(security))
+	require.NoError(t, w.handle(fsnotify.Event{Name: security, Op: fsnotify.Remove}))
+	assert.Len(t, w.changes, 1, "and so is its removal")
+}
+
+func TestFileWatcherSingleFileIgnoreChanges(t *testing.T) {
+	t.Parallel()
+	for _, op := range []fsnotify.Op{fsnotify.Create, fsnotify.Write, fsnotify.Remove, fsnotify.Rename} {
+		t.Run(op.String(), func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			file := filepath.Join(root, "pod.yaml")
+			write(t, file, "kind: Pod\n")
+			w, err := newFileWatcher(file, FileWatcherOptions{})
+			require.NoError(t, err)
+			discardDeliveries(t, w)
+			defer w.fs.Close()
+
+			// Unrelated siblings must still be ignored in single-file mode.
+			for _, name := range []string{"other.yaml", "other.ignore", filepath.Join("nested", cautils.IgnoreFileName)} {
+				require.NoError(t, w.handle(fsnotify.Event{Name: filepath.Join(root, name), Op: op}))
+				assert.Empty(t, w.changes)
+			}
+			ignoreFile := filepath.Join(root, cautils.IgnoreFileName)
+			require.NoError(t, w.handle(fsnotify.Event{Name: ignoreFile, Op: fsnotify.Chmod}))
+			assert.Empty(t, w.changes)
+			require.NoError(t, w.handle(fsnotify.Event{Name: ignoreFile, Op: op}))
+			assert.Len(t, w.changes, 1, "changing the scan's ignore file must trigger a rescan")
+		})
+	}
+}
+
+// The removal of a dependency file is signalled even when its path no longer
+// says it was a file: it is named like a directory the scan excludes, or a
+// directory of that name took its place before the removal was handled.
+func TestFileWatcherSignalsRemovedDependencyFiles(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		before  bool // the file exists when the watch starts, rather than being written after
+		replace bool // a directory of the same name is made before the removal is handled
+	}{
+		{name: "named like an excluded directory, seen when the watch started", before: true},
+		{name: "named like an excluded directory, written while watching"},
+		{name: "replaced by a directory before its removal is handled", before: true, replace: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			dep := filepath.Join(root, "extra")
+			if tc.before {
+				write(t, dep, "readOnlyRootFilesystem: false")
+			}
+			w, err := newFileWatcher(root, FileWatcherOptions{
+				Exclude:            func(path string, isDir bool) bool { return isDir && path == dep }, // extra/
+				AcceptDependencies: func(string) bool { return true },
+			})
+			require.NoError(t, err)
+			discardDeliveries(t, w)
+			defer w.fs.Close()
+
+			if !tc.before {
+				write(t, dep, "readOnlyRootFilesystem: false")
+				require.NoError(t, w.handle(fsnotify.Event{Name: dep, Op: fsnotify.Write}))
+				require.Len(t, w.changes, 1, "an edit to the dependency file is signalled")
+				<-w.changes
+			}
+
+			require.NoError(t, os.Remove(dep))
+			if tc.replace {
+				require.NoError(t, os.Mkdir(dep, 0o755))
+			}
+			require.NoError(t, w.handle(fsnotify.Event{Name: dep, Op: fsnotify.Remove}))
+			require.Len(t, w.changes, 1, "the removal of a dependency file is signalled")
+			<-w.changes
+
+			// Once its removal is handled the path is forgotten: a directory under
+			// the name, or the excluded one, is not a dependency.
+			require.NoError(t, w.handle(fsnotify.Event{Name: dep, Op: fsnotify.Write}))
+			assert.Empty(t, w.changes, "what is under the name now is not a dependency file")
+		})
+	}
+}
+
+// A dependency file that cannot be looked at, for a reason other than being
+// gone, is still signalled, and stays remembered until it is known to be gone.
+func TestFileWatcherKeepsADependencyThatCannotBeInspected(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	dep := filepath.Join(sub, "settings")
+	write(t, dep, "key=value")
+	w := &FileWatcher{root: root}
+	require.True(t, w.mayBeDependency(dep))
+	require.Contains(t, w.depFiles, dep)
+
+	// sub becomes a file, so dep can't be inspected: not "does not exist" but
+	// "not a directory" (except where the platform reports that as missing).
+	require.NoError(t, os.RemoveAll(sub))
+	write(t, sub, "now a file")
+	if _, err := os.Lstat(dep); err == nil || errors.Is(err, fs.ErrNotExist) {
+		t.Skipf("this platform reports %q as missing, not as uninspectable: %v", dep, err)
+	}
+	assert.True(t, w.mayBeDependency(dep), "a dependency that can't be inspected still counts")
+	assert.Contains(t, w.depFiles, dep, "and stays remembered")
+
+	require.NoError(t, os.Remove(sub))
+	assert.True(t, w.mayBeDependency(dep), "its removal counts")
+	assert.NotContains(t, w.depFiles, dep, "and once it is known to be gone it is forgotten")
 }

@@ -1,0 +1,104 @@
+[
+    {
+        "alertMessage": "container debugger in Pod debug-target runs as root in the host user namespace; set spec.hostUsers: false to map container root to an unprivileged host UID (GA in Kubernetes 1.36)",
+        "failedPaths": [
+            "spec.ephemeralContainers[0]"
+        ],
+        "reviewPaths": [
+            "spec.ephemeralContainers[0]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 7,
+        "alertObject": {
+            "k8sApiObjects": [
+                {
+                    "apiVersion": "v1",
+                    "kind": "Pod",
+                    "metadata": {
+                        "name": "debug-target",
+                        "namespace": "ops"
+                    },
+                    "spec": {
+                        "containers": [
+                            {
+                                "image": "registry.example.com/app:2.4.0",
+                                "name": "app",
+                                "securityContext": {
+                                    "runAsUser": 1000
+                                }
+                            }
+                        ],
+                        "ephemeralContainers": [
+                            {
+                                "image": "registry.example.com/debug-tools:0.9.0",
+                                "name": "debugger",
+                                "securityContext": null
+                            }
+                        ],
+                        "initContainers": [
+                            {
+                                "image": "registry.example.com/migrate:1.2.0",
+                                "name": "migrate",
+                                "securityContext": null
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    },
+    {
+        "alertMessage": "container migrate in Pod debug-target runs as root in the host user namespace; set spec.hostUsers: false to map container root to an unprivileged host UID (GA in Kubernetes 1.36)",
+        "failedPaths": [
+            "spec.initContainers[0]"
+        ],
+        "reviewPaths": [
+            "spec.initContainers[0]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 7,
+        "alertObject": {
+            "k8sApiObjects": [
+                {
+                    "apiVersion": "v1",
+                    "kind": "Pod",
+                    "metadata": {
+                        "name": "debug-target",
+                        "namespace": "ops"
+                    },
+                    "spec": {
+                        "containers": [
+                            {
+                                "image": "registry.example.com/app:2.4.0",
+                                "name": "app",
+                                "securityContext": {
+                                    "runAsUser": 1000
+                                }
+                            }
+                        ],
+                        "ephemeralContainers": [
+                            {
+                                "image": "registry.example.com/debug-tools:0.9.0",
+                                "name": "debugger",
+                                "securityContext": null
+                            }
+                        ],
+                        "initContainers": [
+                            {
+                                "image": "registry.example.com/migrate:1.2.0",
+                                "name": "migrate",
+                                "securityContext": null
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    }
+]

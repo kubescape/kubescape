@@ -400,6 +400,72 @@ func TestHttpRespToString_ErrorCodeLessThan200(t *testing.T) {
 	assert.Equal(t, "test response", result)
 }
 
+func TestHttpRespToString_BoundedRead(t *testing.T) {
+	t.Parallel()
+
+	t.Run("excessive ContentLength is rejected before allocation without panic", func(t *testing.T) {
+		t.Parallel()
+		resp := &http.Response{
+			StatusCode:    http.StatusOK,
+			ContentLength: 1 << 60, // Exceeds slice memory allocation limits
+			Body:          io.NopCloser(strings.NewReader("small")),
+		}
+		res, err := httpRespToString(resp)
+		assert.Empty(t, res)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrHTTPResponseBodyTooLarge), "expected ErrHTTPResponseBodyTooLarge, got: %v", err)
+	})
+
+	t.Run("body stream exceeding limit is bounded and errors", func(t *testing.T) {
+		t.Parallel()
+		oversized := io.LimitReader(&repeatingByteReader{b: 'a'}, MaxHTTPResponseBodyBytes+10)
+		resp := &http.Response{
+			StatusCode:    http.StatusOK,
+			ContentLength: -1, // Unknown / chunked length
+			Body:          io.NopCloser(oversized),
+		}
+		res, err := httpRespToString(resp)
+		assert.Empty(t, res)
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrHTTPResponseBodyTooLarge), "expected ErrHTTPResponseBodyTooLarge, got: %v", err)
+	})
+
+	t.Run("valid response within size bounds succeeds", func(t *testing.T) {
+		t.Parallel()
+		content := "valid payload response"
+		resp := &http.Response{
+			StatusCode:    http.StatusOK,
+			ContentLength: int64(len(content)),
+			Body:          io.NopCloser(strings.NewReader(content)),
+		}
+		res, err := httpRespToString(resp)
+		require.NoError(t, err)
+		assert.Equal(t, content, res)
+	})
+
+	t.Run("nil response or nil body returns empty string and nil error", func(t *testing.T) {
+		t.Parallel()
+		res, err := httpRespToString(nil)
+		require.NoError(t, err)
+		assert.Empty(t, res)
+
+		res, err = httpRespToString(&http.Response{Body: nil})
+		require.NoError(t, err)
+		assert.Empty(t, res)
+	})
+}
+
+type repeatingByteReader struct {
+	b byte
+}
+
+func (r *repeatingByteReader) Read(p []byte) (n int, err error) {
+	for i := range p {
+		p[i] = r.b
+	}
+	return len(p), nil
+}
+
 func TestSetHeaders(t *testing.T) {
 	t.Run("sets every header on the request", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)

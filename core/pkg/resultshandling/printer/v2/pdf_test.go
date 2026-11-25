@@ -272,8 +272,13 @@ func TestActionPrint_PdfCombinedWritesBothSections(t *testing.T) {
 
 // TestActionPrint_PdfMissingData checks that ActionPrint returns an error when neither posture nor image data is present.
 func TestActionPrint_PdfMissingData(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "pdf-*.pdf")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	pp := NewPdfPrinter()
-	err := pp.ActionPrint(context.Background(), nil, nil)
+	pp.writer = tmpFile
+	err = pp.ActionPrint(context.Background(), nil, nil)
 	require.EqualError(t, err, "failed to print results, missing data")
 }
 
@@ -548,8 +553,56 @@ func TestPdfPrinter_ActionPrint_NilReportFallbackToImageScan(t *testing.T) {
 }
 
 func TestPdfPrinter_ActionPrint_NilReportNoData(t *testing.T) {
+	tmpFile, err := os.CreateTemp(t.TempDir(), "pdf-*.pdf")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
 	pp := NewPdfPrinter()
+	pp.writer = tmpFile
 	session := &cautils.OPASessionObj{Report: nil}
-	err := pp.ActionPrint(context.Background(), session, nil)
+	err = pp.ActionPrint(context.Background(), session, nil)
 	assert.ErrorContains(t, err, "failed to print results, missing data")
+}
+
+func TestPdfPrinter_getTableObjects_NilSafety(t *testing.T) {
+	pp := NewPdfPrinter()
+	t.Run("nil summary details returns empty slice", func(t *testing.T) {
+		assert.NotPanics(t, func() {
+			objs := pp.getTableObjects(nil, [][]string{{"C-0001"}}, nil)
+			require.NotNil(t, objs)
+			assert.Empty(t, *objs)
+		})
+	})
+
+	t.Run("missing control in summary details does not panic", func(t *testing.T) {
+		summary := &reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{},
+		}
+		assert.NotPanics(t, func() {
+			objs := pp.getTableObjects(summary, [][]string{{"C-9999"}}, nil)
+			require.NotNil(t, objs)
+			assert.Empty(t, *objs)
+		})
+	})
+}
+
+func TestActionPrint_Pdf_NilWriterReturnsError(t *testing.T) {
+	pp := NewPdfPrinter()
+
+	// Posture scan path
+	require.NotPanics(t, func() {
+		err := pp.ActionPrint(context.Background(), cautils.NewOPASessionObjMock(), nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	// Image scan fallback path
+	images := []cautils.ImageScanData{
+		{Image: "clean-image:latest", Matches: match.NewMatches()},
+	}
+	require.NotPanics(t, func() {
+		err := pp.ActionPrint(context.Background(), nil, images)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
 }

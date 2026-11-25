@@ -72,10 +72,13 @@ func (cp *GitLabContainerScanningPrinter) Score(float32) {}
 func (cp *GitLabContainerScanningPrinter) PrintNextSteps() {}
 
 func (cp *GitLabContainerScanningPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if cp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.GitLabContainerScanningFormat, outputFile, gitLabContainerScanningOutputFile)
 	if explicitOutput {
 		var err error
-		cp.writer, err = printer.GetWriterNoFallback(outputFile)
+		cp.writer, err = printer.GetPrinterWriterNoFallback(outputFile)
 		return err
 	}
 	cp.writer = printer.GetWriter(ctx, outputFile)
@@ -83,8 +86,17 @@ func (cp *GitLabContainerScanningPrinter) SetWriter(ctx context.Context, outputF
 }
 
 func (cp *GitLabContainerScanningPrinter) ActionPrint(ctx context.Context, _ *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if cp == nil {
+		return fmt.Errorf("failed to write gitlab-container-scanning results: printer is nil")
+	}
 	if len(imageScanData) == 0 {
 		return fmt.Errorf("gitlab-container-scanning output requires scanned images: run %q or add --scan-images", cautils.ExecName()+" scan image")
+	}
+	if err := printer.PrepareOutput(cp.writer); err != nil {
+		return err
+	}
+	if cp.writer == nil {
+		return fmt.Errorf("failed to write gitlab-container-scanning results: output writer is nil")
 	}
 
 	startedAt := time.Now().UTC()
@@ -176,8 +188,19 @@ func normalizeImageRef(image string) string {
 			if local {
 				return image + ":latest"
 			}
-			return scheme + ":" + normalizeImageRef(rest)
+			return scheme + ":" + withDefaultTag(rest)
 		}
+	}
+	return withDefaultTag(image)
+}
+
+// withDefaultTag adds the "latest" tag to an image reference that has none, before
+// its digest if it has one. It looks up no source scheme: it is also given what
+// follows a daemon or registry scheme, where "dir:latest" and "registry:2" are
+// images named like a scheme, not another scheme.
+func withDefaultTag(image string) string {
+	if image == "" {
+		return image
 	}
 	ref := image
 	if at := strings.Index(ref, "@"); at != -1 {
@@ -260,8 +283,8 @@ func truncateRunes(value string, limit int) string {
 }
 
 func (cp *GitLabContainerScanningPrinter) CloseWriter() error {
-	if cp.writer != nil && cp.writer != os.Stdout {
-		return cp.writer.Close()
+	if cp != nil && cp.writer != nil && cp.writer != os.Stdout {
+		return printer.CloseOutput(cp.writer)
 	}
 	return nil
 }

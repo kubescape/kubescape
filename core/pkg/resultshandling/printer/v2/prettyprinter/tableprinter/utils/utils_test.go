@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"strings"
@@ -145,11 +146,68 @@ func TestImageSeverityToInt(t *testing.T) {
 			severity: "-7",
 			expected: 0,
 		},
+		{
+			name:     "Lowercase critical severity",
+			severity: "critical",
+			expected: 5,
+		},
+		{
+			name:     "Uppercase high severity",
+			severity: "HIGH",
+			expected: 4,
+		},
+		{
+			name:     "Padded medium severity",
+			severity: "  Medium  ",
+			expected: 3,
+		},
+		{
+			name:     "Whitespace-only severity",
+			severity: "   ",
+			expected: 0,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.expected, ImageSeverityToInt(tt.severity))
+		})
+	}
+}
+
+func TestGetColorForVulnerabilitySeverity_CaseInsensitive(t *testing.T) {
+	previousLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi256)
+	t.Cleanup(func() { gchalk.SetLevel(previousLevel) })
+
+	// Without ANSI colors, every severity renders as plain text and hides regressions.
+	require.Contains(t, GetColorForVulnerabilitySeverity("Critical")("test"), "\x1b[")
+
+	tests := []struct {
+		name     string
+		severity string
+		expected string
+	}{
+		{
+			name:     "Standard critical",
+			severity: "Critical",
+			expected: GetColorForVulnerabilitySeverity("Critical")("test"),
+		},
+		{
+			name:     "Lowercase critical",
+			severity: "critical",
+			expected: GetColorForVulnerabilitySeverity("Critical")("test"),
+		},
+		{
+			name:     "Padded high",
+			severity: "  HIGH  ",
+			expected: GetColorForVulnerabilitySeverity("High")("test"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, GetColorForVulnerabilitySeverity(tt.severity)("test"))
 		})
 	}
 }
@@ -419,6 +477,30 @@ func TestCheckShortTerminalWidth(t *testing.T) {
 			headers:        table.Row{"Header1", "Header2"},
 			shouldNotPanic: true,
 		},
+		{
+			name: "Rows with more columns than headers",
+			rows: []table.Row{
+				{"cell1", "cell2", "cell3", "extra cell 4", "extra cell 5"},
+			},
+			headers:        table.Row{"Header1", "Header2"},
+			shouldNotPanic: true,
+		},
+		{
+			name: "Non-empty rows with empty headers",
+			rows: []table.Row{
+				{"cell1", "cell2"},
+			},
+			headers:        table.Row{},
+			shouldNotPanic: true,
+		},
+		{
+			name: "Non-empty rows with nil headers",
+			rows: []table.Row{
+				{"cell1", "cell2"},
+			},
+			headers:        nil,
+			shouldNotPanic: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -483,6 +565,21 @@ func TestMapInfoToPrintInfoFromIface_StableAcrossRuns(t *testing.T) {
 	assert.Equal(t, "C-0002", forward[0].GetID(), "the caller's slice must not be reordered")
 }
 
+func TestMapInfoToPrintInfoFromIface_HandlesNilElements(t *testing.T) {
+	first := skippedControlWithInfo("C-0002", "alpha", "control type is manual-review")
+	second := skippedControlWithInfo("C-0001", "delta", "configurations are empty")
+
+	var nilControl *reportsummary.ControlSummary
+	sliceWithNils := []reportsummary.IControlSummary{nil, &second, nilControl, &first, nil}
+
+	want := []InfoStars{
+		{Stars: "*", Info: "control type is manual-review"},
+		{Stars: "**", Info: "configurations are empty"},
+	}
+
+	assert.Equal(t, want, MapInfoToPrintInfoFromIface(sliceWithNils))
+}
+
 func TestMapInfoToPrintInfo_IgnoresNonSkippedAndEmptyInfo(t *testing.T) {
 	passed := skippedControlWithInfo("C-0001", "alpha", "ignored: not skipped")
 	passed.Status = apis.StatusPassed
@@ -495,4 +592,114 @@ func TestMapInfoToPrintInfo_IgnoresNonSkippedAndEmptyInfo(t *testing.T) {
 	}
 
 	assert.Equal(t, []InfoStars{{Stars: "*", Info: "requires host scanner"}}, MapInfoToPrintInfo(controls))
+}
+
+func TestFrameworksScoresToString(t *testing.T) {
+	var nilFramework *reportsummary.FrameworkSummary
+	tests := []struct {
+		name       string
+		frameworks []reportsummary.IFrameworkSummary
+		expected   string
+	}{
+		{
+			name:       "empty frameworks",
+			frameworks: nil,
+			expected:   "",
+		},
+		{
+			name:       "single nil framework",
+			frameworks: []reportsummary.IFrameworkSummary{nil},
+			expected:   "",
+		},
+		{
+			name: "single valid framework with nil entry",
+			frameworks: []reportsummary.IFrameworkSummary{
+				nilFramework,
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: 85.0},
+			},
+			expected: "Framework scanned: nsa\n",
+		},
+		{
+			name: "multiple frameworks with nil entries",
+			frameworks: []reportsummary.IFrameworkSummary{
+				nilFramework,
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: 85.0},
+				nil,
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: 100.0},
+				nil,
+			},
+			expected: "Frameworks scanned: nsa (compliance score: 85.00), mitre (compliance score: 100.00)\n",
+		},
+		{
+			name: "multiple frameworks all nil",
+			frameworks: []reportsummary.IFrameworkSummary{
+				nil,
+				nilFramework,
+			},
+			expected: "",
+		},
+		{
+			name: "single framework",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: 85.0},
+			},
+			expected: "Framework scanned: nsa\n",
+		},
+		{
+			name: "multiple frameworks with valid scores",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: 85.0},
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: 100.0},
+			},
+			expected: "Frameworks scanned: nsa (compliance score: 85.00), mitre (compliance score: 100.00)\n",
+		},
+		{
+			name: "multiple frameworks with uncalculated sentinel score -1.0",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: -1.0},
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: 85.0},
+			},
+			expected: "Frameworks scanned: nsa (compliance score: N/A), mitre (compliance score: 85.00)\n",
+		},
+		{
+			name: "multiple frameworks with fractional negative score -0.25",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: -0.25},
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: 85.0},
+			},
+			expected: "Frameworks scanned: nsa (compliance score: N/A), mitre (compliance score: 85.00)\n",
+		},
+		{
+			name: "multiple frameworks with genuine zero score",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: 0.0},
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: 85.0},
+			},
+			expected: "Frameworks scanned: nsa (compliance score: 0.00), mitre (compliance score: 85.00)\n",
+		},
+		{
+			name: "all frameworks uncalculated",
+			frameworks: []reportsummary.IFrameworkSummary{
+				&reportsummary.FrameworkSummary{Name: "nsa", ComplianceScore: -1.0},
+				&reportsummary.FrameworkSummary{Name: "mitre", ComplianceScore: -0.5},
+			},
+			expected: "Frameworks scanned: nsa (compliance score: N/A), mitre (compliance score: N/A)\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, FrameworksScoresToString(tt.frameworks))
+		})
+	}
+}
+
+func TestPrintInfo_PercentVerbsPreserved(t *testing.T) {
+	var buf bytes.Buffer
+	info := "memory usage exceeds 80% of limit (%s %d)"
+	PrintInfo(&buf, []InfoStars{{Stars: "*", Info: info}})
+
+	got := buf.String()
+	assert.Contains(t, got, info, "info text must be printed literally, not evaluated as format string")
+	assert.NotContains(t, got, "%!o(MISSING)", "percent signs must not cause format string errors")
 }

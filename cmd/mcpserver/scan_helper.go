@@ -15,8 +15,10 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor"
 	"github.com/kubescape/kubescape/v4/core/pkg/policyhandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/kubescape/opa-utils/resources"
@@ -43,6 +45,10 @@ type scanResponse struct {
 	FailedResources      []interface{}       `json:"failed_resources"`
 	Warning              string              `json:"warning,omitempty"`
 	TargetResource       *TargetResourceInfo `json:"target_resource,omitempty"`
+	ScanID               string              `json:"scan_id,omitempty"`
+	NextOffset           *int                `json:"next_offset,omitempty"`
+	ExpiresAt            *time.Time          `json:"expires_at,omitempty"`
+	PaginationWarning    string              `json:"pagination_warning,omitempty"`
 }
 
 // scanRequest carries the parameters shared by every MCP scan entry point.
@@ -75,18 +81,32 @@ type scanRequest struct {
 	scanObject *objectsenvelopes.ScanObject
 	// workspaceDir, when non-empty, confines local scans to files within this directory.
 	workspaceDir string
+
+	// Optional CLI filter fields
+	includeKinds       string
+	excludeKinds       string
+	labelSelector      string
+	excludeControls    []string
+	minSeverity        string
+	maxSeverity        string
+	excludedNamespaces string
+	limit              int
 }
 
-func runControlScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string, controlIDs []string, label string) ([]byte, error) {
+func runControlScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string, controlIDs []string, label string, filters ...scanFilterArgs) ([]byte, error) {
 	policyIdentifiers := make([]cautils.PolicyIdentifier, len(controlIDs))
 	for i, id := range controlIDs {
 		policyIdentifiers[i] = cautils.PolicyIdentifier{Kind: apisv1.KindControl, Identifier: id}
 	}
-	return runScan(ctx, ksServer, scanRequest{
+	req := scanRequest{
 		namespace:         namespace,
 		policyIdentifiers: policyIdentifiers,
 		label:             label,
-	})
+	}
+	if len(filters) > 0 {
+		filters[0].applyToRequest(&req)
+	}
+	return runScan(ctx, ksServer, req)
 }
 
 // executeScan runs the collect-policies → collect-resources → OPA pipeline and
@@ -175,6 +195,10 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, req scanRequest)
 		return nil, err
 	}
 
+	if req.minSeverity != "" || req.maxSeverity != "" {
+		resultshandling.ApplySeverityFilters(scanData, req.minSeverity, req.maxSeverity)
+	}
+
 	var complianceScore *float32
 	var frameworkName string
 	degraded := false
@@ -186,6 +210,15 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, req scanRequest)
 		summary = &scanData.Report.SummaryDetails
 		degraded = scanData.ScanCoverage.Degraded || processErr != nil
 		notEvaluated = len(scanData.ScanCoverage.NotEvaluatedControls)
+		if (req.minSeverity != "" || req.maxSeverity != "") && notEvaluated > 0 {
+			count := 0
+			for _, ne := range scanData.ScanCoverage.NotEvaluatedControls {
+				if _, ok := scanData.Report.SummaryDetails.Controls[ne.ControlID]; ok {
+					count++
+				}
+			}
+			notEvaluated = count
+		}
 		totalControls = len(scanData.Report.SummaryDetails.Controls)
 
 		if req.wantComplianceScore && len(scanData.Report.SummaryDetails.Frameworks) > 0 {
@@ -197,7 +230,13 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, req scanRequest)
 		}
 	}
 
-	response := buildScanResponse(summary, scanData.ResourcesResult, complianceScore, frameworkName, degraded, notEvaluated, totalControls)
+	limit := maxFailedResources
+	if full, _ := ctx.Value(fullScanResultsKey{}).(bool); full {
+		limit = len(scanData.ResourcesResult)
+	} else if req.limit > 0 {
+		limit = req.limit
+	}
+	response := buildScanResponseWithLimit(summary, scanData.ResourcesResult, complianceScore, frameworkName, degraded, notEvaluated, totalControls, limit)
 	if req.namespaceDefaulted && req.scanObject != nil {
 		response.Warning = "Workload namespace was omitted and defaulted to 'default'. If your workload is in another namespace, specify 'namespace' explicitly or pass '*' to search cluster-wide."
 		response.TargetResource = &TargetResourceInfo{
@@ -254,33 +293,74 @@ func buildScanInfo(req scanRequest) *cautils.ScanInfo {
 		namespace = ""
 	}
 	return &cautils.ScanInfo{
-		ScanAll:           false,
-		IncludeNamespaces: namespace,
-		ScanTimeout:       timeout,
-		InputPatterns:     req.inputPatterns,
-		ScanObject:        req.scanObject,
-		WorkspaceDir:      req.workspaceDir,
+		ScanAll:            false,
+		IncludeNamespaces:  namespace,
+		ExcludedNamespaces: req.excludedNamespaces,
+		ScanTimeout:        timeout,
+		InputPatterns:      req.inputPatterns,
+		ScanObject:         req.scanObject,
+		WorkspaceDir:       req.workspaceDir,
+		IncludeKinds:       req.includeKinds,
+		ExcludeKinds:       req.excludeKinds,
+		LabelSelector:      req.labelSelector,
+		ExcludeControls:    req.excludeControls,
 	}
 }
 
-func buildScanResponse(summary *reportsummary.SummaryDetails, results map[string]resourcesresults.Result, complianceScore *float32, frameworkName string, degraded bool, notEvaluated int, totalControls int) scanResponse {
-	failedResources := make([]interface{}, 0)
-	totalFailed := 0
-
-	keys := make([]string, 0, len(results))
-	for k := range results {
-		keys = append(keys, k)
+func resourceMaxSeverityRank(summary *reportsummary.SummaryDetails, result *resourcesresults.Result) int {
+	if summary == nil || len(summary.Controls) == 0 {
+		return 0
 	}
-	sort.Strings(keys)
-
-	for _, k := range keys {
-		result := results[k]
-		if cautils.ResourceStatus(summary, &result).IsFailed() {
-			totalFailed++
-			if len(failedResources) < maxFailedResources {
-				failedResources = append(failedResources, result)
+	maxRank := 0
+	for _, ac := range result.AssociatedControls {
+		if !cautils.ControlStatus(summary, &ac).IsFailed() {
+			continue
+		}
+		if ctrl, ok := summary.Controls[ac.GetID()]; ok {
+			rank := apis.ControlSeverityToInt(ctrl.GetScoreFactor())
+			if rank > maxRank {
+				maxRank = rank
 			}
 		}
+	}
+	return maxRank
+}
+
+func buildScanResponse(summary *reportsummary.SummaryDetails, results map[string]resourcesresults.Result, complianceScore *float32, frameworkName string, degraded bool, notEvaluated int, totalControls int) scanResponse {
+	return buildScanResponseWithLimit(summary, results, complianceScore, frameworkName, degraded, notEvaluated, totalControls, maxFailedResources)
+}
+
+func buildScanResponseWithLimit(summary *reportsummary.SummaryDetails, results map[string]resourcesresults.Result, complianceScore *float32, frameworkName string, degraded bool, notEvaluated int, totalControls, limit int) scanResponse {
+	type rankedResource struct {
+		key  string
+		rank int
+	}
+	failed := make([]rankedResource, 0, len(results))
+	for k, result := range results {
+		if cautils.ResourceStatus(summary, &result).IsFailed() {
+			failed = append(failed, rankedResource{
+				key:  k,
+				rank: resourceMaxSeverityRank(summary, &result),
+			})
+		}
+	}
+
+	sort.SliceStable(failed, func(i, j int) bool {
+		if failed[i].rank != failed[j].rank {
+			return failed[i].rank > failed[j].rank
+		}
+		return failed[i].key < failed[j].key
+	})
+
+	totalFailed := len(failed)
+	returnedCount := totalFailed
+	if limit < returnedCount {
+		returnedCount = limit
+	}
+
+	failedResources := make([]interface{}, 0, returnedCount)
+	for i := 0; i < returnedCount; i++ {
+		failedResources = append(failedResources, results[failed[i].key])
 	}
 
 	return scanResponse{
@@ -291,7 +371,7 @@ func buildScanResponse(summary *reportsummary.SummaryDetails, results map[string
 		TotalControls:        totalControls,
 		TotalFailed:          totalFailed,
 		ReturnedFailed:       len(failedResources),
-		Truncated:            totalFailed > maxFailedResources,
+		Truncated:            totalFailed > limit,
 		FailedResources:      failedResources,
 	}
 }

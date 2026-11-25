@@ -9,6 +9,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -167,7 +168,14 @@ func writeMarkdownFindings(ew *errWriter, title string, changes []ControlChange)
 func markdownEscape(value string) string {
 	value = strings.ReplaceAll(value, "\\", "\\\\")
 	value = strings.ReplaceAll(value, "|", "\\|")
+	value = strings.ReplaceAll(value, "`", "'")
 	value = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(value)
+	value = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && r != '\t' {
+			return -1
+		}
+		return r
+	}, value)
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "-"
@@ -236,22 +244,56 @@ type diffJUnitFailure struct {
 	Contents string `xml:",chardata"`
 }
 
+func isIllegalXMLChar(r rune) bool {
+	return (r < 0x20 && r != '\t' && r != '\n' && r != '\r') || r == 0xfffe || r == 0xffff
+}
+
+// xmlSanitize strips characters that are illegal in XML 1.0 documents:
+// (r < 0x20 && r != '\t' && r != '\n' && r != '\r') || r == 0xfffe || r == 0xffff.
+// XML 1.0 permits U+007F (DEL) within the [#x20-#xD7FF] range, but forbids
+// non-whitespace C0 controls (< 0x20) and noncharacters U+FFFE / U+FFFF.
+// This prevents malformed XML output that breaks downstream CI/CD parsers (CWE-150).
+func xmlSanitize(s string) string {
+	if s == "" {
+		return s
+	}
+	hasIllegal := false
+	for _, r := range s {
+		if isIllegalXMLChar(r) {
+			hasIllegal = true
+			break
+		}
+	}
+	if !hasIllegal {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if isIllegalXMLChar(r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 func diffJUnitBucketSuite(id int, name string, changes []ControlChange) diffJUnitSuite {
 	testCases := make([]diffJUnitTestCase, 0, len(changes))
 	for _, change := range changes {
 		testCases = append(testCases, diffJUnitTestCase{
-			Classname: "kubescape.diff/" + change.ControlID,
-			Name:      junitCaseName(change),
+			Classname: "kubescape.diff/" + xmlSanitize(change.ControlID),
+			Name:      xmlSanitize(junitCaseName(change)),
 			Failure: &diffJUnitFailure{
-				Type:     name,
-				Message:  findingTitle(name, change),
-				Contents: findingDetails(change),
+				Type:     xmlSanitize(name),
+				Message:  xmlSanitize(findingTitle(name, change)),
+				Contents: xmlSanitize(findingDetails(change)),
 			},
 		})
 	}
 	return diffJUnitSuite{
 		ID:        id,
-		Name:      "kubescape diff " + name,
+		Name:      xmlSanitize("kubescape diff " + name),
 		Tests:     len(testCases),
 		Failures:  len(testCases),
 		TestCases: testCases,

@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: invalid-pod-applier
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  resourceNames: ["debug-*", "DebugPod", "debug_pod", "-leading-dash"]
+  verbs: ["create"]
+- apiGroups: [""]
+  resources: ["pods"]
+  resourceNames: ["debug-*", "DebugPod", "debug_pod", "-leading-dash"]
+  verbs: ["patch"]
+

@@ -196,3 +196,17 @@ func TestGetValidateCmd_RejectsUnsupportedFormat(t *testing.T) {
 		})
 	}
 }
+
+func TestGetValidateCmd_HonorsCobraOutputWriter(t *testing.T) {
+	ks := &capturingValidate{}
+	cmd := getValidateCmd(ks)
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--format", "json"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+	if assert.NotNil(t, ks.got) {
+		assert.Equal(t, &buf, ks.got.Writer)
+	}
+}

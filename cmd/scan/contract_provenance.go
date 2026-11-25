@@ -2,11 +2,11 @@ package scan
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	contractv1alpha1 "github.com/kubescape/kubescape/v4/core/pkg/scancontract/v1alpha1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/spf13/cobra"
@@ -210,6 +210,33 @@ func effectiveFailure(cmd *cobra.Command, scanInfo *cautils.ScanInfo, contract *
 	return failure
 }
 
+// omitUnenforcedComplianceGate removes the compliance gate's effective value
+// from contract provenance for a scan that does not enforce it, so the report
+// never describes an unenforced gate as effective. The contract value and the
+// runner floor stay in the gate resolution: they record what was requested.
+// It reports whether an effective value was removed.
+func omitUnenforcedComplianceGate(metadata *reporthandlingv2.ScanContractMetadata) bool {
+	if metadata == nil {
+		return false
+	}
+	omitted := false
+	if metadata.GateResolution != nil && metadata.GateResolution.ComplianceBelow.Effective != nil {
+		metadata.GateResolution.ComplianceBelow.Effective = nil
+		omitted = true
+	}
+	if settings := metadata.Effective; settings != nil && settings.Failure != nil && settings.Failure.ComplianceBelow != nil {
+		settings.Failure.ComplianceBelow = nil
+		omitted = true
+		if *settings.Failure == (reporthandlingv2.ScanContractFailure{}) {
+			settings.Failure = nil
+		}
+		if settings.Policy == nil && settings.Scope == nil && settings.Evaluation == nil && settings.Failure == nil && settings.Output == nil {
+			metadata.Effective = nil
+		}
+	}
+	return omitted
+}
+
 func ordinaryCLIOverrides(cmd *cobra.Command, contract contractv1alpha1.Contract, scanInfo *cautils.ScanInfo) *reporthandlingv2.ScanContractCLIOverrides {
 	overrides := &reporthandlingv2.ScanContractCLIOverrides{}
 
@@ -263,18 +290,19 @@ func ordinaryCLIOverrides(cmd *cobra.Command, contract contractv1alpha1.Contract
 }
 
 func safeScanContractSource(path string) string {
-	clean := filepath.Clean(path)
-	if filepath.IsAbs(clean) {
-		if workingDirectory, err := os.Getwd(); err == nil {
-			if relative, err := filepath.Rel(workingDirectory, clean); err == nil {
-				clean = relative
-			}
-		}
-	}
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || filepath.IsAbs(clean) {
+	base, err := pathcontainment.ResolveBaseDir(".")
+	if err != nil {
 		return "external"
 	}
-	return filepath.ToSlash(clean)
+	resolved, err := pathcontainment.ResolveContainedPath(base, path)
+	if err != nil {
+		return "external"
+	}
+	relative, err := filepath.Rel(base, resolved)
+	if err != nil || relative == "." {
+		return "external"
+	}
+	return filepath.ToSlash(relative)
 }
 
 func splitContractNamespaces(value string) []string {

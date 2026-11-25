@@ -564,3 +564,66 @@ func TestBuildPolicyReports_RetainsClusterVerdictAndEmitsSkippedControlOnTimeout
 		})
 	}
 }
+
+func TestActionPrint_PolicyReport_NilWriterReturnsError(t *testing.T) {
+	pp := NewPolicyReportPrinter()
+
+	// Posture scan path
+	require.NotPanics(t, func() {
+		err := pp.ActionPrint(context.Background(), cautils.NewOPASessionObjMock(), nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	// Image scan fallback path
+	require.NotPanics(t, func() {
+		err := pp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{{Image: "nginx:1.23"}})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestBuildPolicyReports_NilSafety(t *testing.T) {
+	t.Run("nil session returns nil without panic", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			reports := buildPolicyReports(nil)
+			assert.Nil(t, reports)
+		})
+	})
+
+	t.Run("nil summary controls does not panic", func(t *testing.T) {
+		session := cautils.NewOPASessionObjMock()
+		session.Report.SummaryDetails.Controls = nil
+
+		require.NotPanics(t, func() {
+			reports := buildPolicyReports(session)
+			require.NotNil(t, reports)
+		})
+	})
+}
+
+func TestPolicyReport_NilReceiverSafety(t *testing.T) {
+	var pp *PolicyReportPrinter
+
+	assert.NotPanics(t, func() {
+		err := pp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := pp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := pp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		pp.Score(100)
+		pp.PrintNextSteps()
+	})
+}

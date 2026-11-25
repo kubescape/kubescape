@@ -85,7 +85,11 @@ func (g *LocalGitRepository) GetBranchName() string {
 // GetRemoteUrl get default remote URL
 func (g *LocalGitRepository) GetRemoteUrl() (string, error) {
 	branchName := g.GetBranchName()
-	if branchRef, branchFound := g.config.Branches[branchName]; branchFound {
+	// A [branch] section does not have to name a remote: tools and users add other
+	// keys to it (VS Code writes vscode-merge-base, `git branch --edit-description`
+	// writes description), and a branch that tracks another local branch names "."
+	// (this repository). Neither is a remote or a URL, so the default remote answers.
+	if branchRef, branchFound := g.config.Branches[branchName]; branchFound && branchRef.Remote != "" && branchRef.Remote != "." {
 		remoteName := branchRef.Remote
 		// branchRef.Remote can be a reference to a config.Remotes entry or directly a gitUrl
 		if _, found := g.config.Remotes[remoteName]; !found {
@@ -194,9 +198,11 @@ func FileScanRootPath(filePath string) string {
 // repository root when input sits inside a worktree, and input's own absolute path
 // otherwise. Scan metadata and the resource sources built in the file loader must
 // derive their anchor the same way, or the report's base path and its resources'
-// relative paths no longer compose.
+// relative paths no longer compose. A glob input is anchored at the directory it
+// reads from (GlobInputRoot), the same directory the file loader anchors it at.
 func ScanRootPath(input string) string {
-	absPath := getAbsPath(input)
+	anchor, _ := GlobInputRoot(input)
+	absPath := getAbsPath(anchor)
 	if root, err := GetGitRootDir(absPath); err == nil {
 		return root
 	}

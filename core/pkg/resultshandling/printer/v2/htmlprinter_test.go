@@ -577,3 +577,107 @@ func TestHtmlPrinter_ActionPrint_ValidHTMLTableStructure(t *testing.T) {
 	// Ensure no stray </div> in failed resources section
 	assert.NotContains(t, htmlContent, "</div>")
 }
+
+func TestHtmlPrinter_ResourceTable_NilSafety(t *testing.T) {
+	assert.NotPanics(t, func() {
+		assert.Nil(t, buildResourceTableView(nil, false))
+	})
+
+	sessionNilReport := &cautils.OPASessionObj{
+		ResourcesResult: map[string]resourcesresults.Result{
+			"res-1": {
+				ResourceID: "res-1",
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: "C-0001",
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+					},
+				},
+			},
+		},
+	}
+	assert.NotPanics(t, func() {
+		tv := buildResourceTableView(sessionNilReport, false)
+		assert.Empty(t, tv)
+	})
+
+	assert.NotPanics(t, func() {
+		ctlResult := buildResourceControlResult(resourcesresults.ResourceAssociatedControl{}, nil, nil, false)
+		assert.Equal(t, "", ctlResult.Severity)
+	})
+
+	assert.NotPanics(t, func() {
+		ctlResults := buildResourceControlResultTable([]resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: "C-0001",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			},
+		}, nil, nil, false)
+		assert.Empty(t, ctlResults)
+	})
+
+	assert.NotPanics(t, func() {
+		sorted := sortHTMLResourceTableView([]ResourceResult{
+			{Resource: nil},
+		})
+		assert.Len(t, sorted, 1)
+	})
+}
+
+func TestActionPrint_Html_NilWriterReturnsError(t *testing.T) {
+	hp := NewHtmlPrinter(false)
+
+	// Posture scan path
+	require.NotPanics(t, func() {
+		err := hp.ActionPrint(context.Background(), cautils.NewOPASessionObjMock(), nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	// Image scan fallback path
+	require.NotPanics(t, func() {
+		err := hp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{{Image: "nginx:1.23"}})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	// No data path
+	require.NotPanics(t, func() {
+		err := hp.ActionPrint(context.Background(), nil, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestSortHTMLControlsBySeverityName_NilDoesNotPanic(t *testing.T) {
+	require.NotPanics(t, func() {
+		sorted := sortHTMLControlsBySeverityName(nil)
+		assert.Nil(t, sorted)
+	})
+}
+
+func TestHtml_NilReceiverSafety(t *testing.T) {
+	var hp *HtmlPrinter
+
+	assert.NotPanics(t, func() {
+		err := hp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := hp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := hp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		hp.Score(100)
+		hp.PrintNextSteps()
+	})
+}

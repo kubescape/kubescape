@@ -88,3 +88,46 @@ func TestCalculateWithTelemetry_ChannelClose(t *testing.T) {
 	err := scoreWrapper.CalculateWithTelemetry(ctx, EPostureReportV2, telemetryChan)
 	assert.NoError(t, err)
 }
+
+func TestNewScoreWrapper_NilSessionObj(t *testing.T) {
+	scoreWrapper := NewScoreWrapper(nil)
+	assert.NotNil(t, scoreWrapper)
+	assert.Nil(t, scoreWrapper.opaSessionObj)
+	assert.NotNil(t, scoreWrapper.scoreUtil)
+
+	err := scoreWrapper.Calculate(EPostureReportV2)
+	assert.Error(t, err)
+	assert.Equal(t, "uninitialized score wrapper", err.Error())
+}
+
+func TestCalculate_NilScoreWrapper(t *testing.T) {
+	var scoreWrapper *ScoreWrapper
+	err := scoreWrapper.Calculate(EPostureReportV2)
+	assert.Error(t, err)
+	assert.Equal(t, "uninitialized score wrapper", err.Error())
+}
+
+func TestCalculate_NilReport(t *testing.T) {
+	scoreWrapper := &ScoreWrapper{
+		opaSessionObj: &cautils.OPASessionObj{Report: nil},
+	}
+	err := scoreWrapper.Calculate(EPostureReportV2)
+	assert.Error(t, err)
+	assert.Equal(t, "nil posture report", err.Error())
+}
+
+func TestCalculateWithTelemetry_NilScoreWrapper(t *testing.T) {
+	var scoreWrapper *ScoreWrapper
+	telemetryChan := make(chan hostsensorutils.SyscallEvent)
+	err := scoreWrapper.CalculateWithTelemetry(context.Background(), EPostureReportV2, telemetryChan)
+	assert.Error(t, err)
+	assert.Equal(t, "uninitialized score wrapper", err.Error())
+}
+
+func TestCalculateWithTelemetry_NilSessionObj(t *testing.T) {
+	scoreWrapper := &ScoreWrapper{}
+	telemetryChan := make(chan hostsensorutils.SyscallEvent)
+	err := scoreWrapper.CalculateWithTelemetry(context.Background(), EPostureReportV2, telemetryChan)
+	assert.Error(t, err)
+	assert.Equal(t, "uninitialized score wrapper", err.Error())
+}

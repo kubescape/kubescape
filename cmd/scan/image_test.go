@@ -675,6 +675,16 @@ func TestGetImageCmd_RunE_RejectsPostureFlags(t *testing.T) {
 			scanInfo: cautils.ScanInfo{LabelsToCopy: []string{"app"}},
 			wantErr:  "--labels-to-copy is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes workload labels",
 		},
+		{
+			name:     "fleet-report is rejected",
+			scanInfo: cautils.ScanInfo{FleetReport: "fleet.json"},
+			wantErr:  "--fleet-report is not supported for image scans: an image scan evaluates vulnerabilities, not multi-cluster fleet reports",
+		},
+		{
+			name:     "reference-cluster is rejected",
+			scanInfo: cautils.ScanInfo{ReferenceCluster: "prod"},
+			wantErr:  "--reference-cluster is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes clusters",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -892,6 +902,56 @@ func TestGetScanCommand_RejectsPostureFlagsOnImageScan(t *testing.T) {
 			name:    "labels-to-copy flag",
 			args:    []string{"image", "--labels-to-copy", "app,team", "nginx:1.27"},
 			wantErr: "--labels-to-copy is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes workload labels",
+		},
+		{
+			name:    "fleet-report flag",
+			args:    []string{"image", "--fleet-report", "fleet.json", "nginx:1.27"},
+			wantErr: "--fleet-report is not supported for image scans: an image scan evaluates vulnerabilities, not multi-cluster fleet reports",
+		},
+		{
+			name:    "reference-cluster flag",
+			args:    []string{"image", "--reference-cluster", "prod", "nginx:1.27"},
+			wantErr: "--reference-cluster is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes clusters",
+		},
+		{
+			name:    "parallel flag",
+			args:    []string{"image", "--parallel", "2", "nginx:1.27"},
+			wantErr: "--parallel is not supported for image scans: an image scan evaluates vulnerabilities, not multi-cluster scans (use --image-scan-concurrency instead)",
+		},
+		{
+			name:    "retries flag",
+			args:    []string{"image", "--retries", "3", "nginx:1.27"},
+			wantErr: "--retries is not supported for image scans: an image scan evaluates vulnerabilities, not Kubernetes cluster API servers",
+		},
+		{
+			name:    "fleet-config flag",
+			args:    []string{"image", "--fleet-config", "fleet.yaml", "nginx:1.27"},
+			wantErr: "--fleet-config is not supported for image scans: an image scan evaluates vulnerabilities, not multi-cluster fleet configurations",
+		},
+		{
+			name:    "fleet-config flag empty",
+			args:    []string{"image", "--fleet-config", "", "nginx:1.27"},
+			wantErr: "--fleet-config is not supported for image scans: an image scan evaluates vulnerabilities, not multi-cluster fleet configurations",
+		},
+		{
+			name:    "scan-contract flag",
+			args:    []string{"image", "--scan-contract", "contract.yaml", "nginx:1.27"},
+			wantErr: "--scan-contract is supported for posture scans, not image scans",
+		},
+		{
+			name:    "scan-contract flag empty",
+			args:    []string{"image", "--scan-contract", "", "nginx:1.27"},
+			wantErr: "--scan-contract is supported for posture scans, not image scans",
+		},
+		{
+			name:    "contract flag",
+			args:    []string{"image", "--contract", "ci", "nginx:1.27"},
+			wantErr: "--contract is supported for posture scans, not image scans",
+		},
+		{
+			name:    "contract-allow flag",
+			args:    []string{"image", "--contract-allow", "policy", "nginx:1.27"},
+			wantErr: "--contract-allow is supported for posture scans, not image scans",
 		},
 	}
 

@@ -34,6 +34,14 @@ const vcsDir = ".git"
 
 // FileWatcherOptions configures a FileWatcher.
 type FileWatcherOptions struct {
+	// AcceptDependencies, when set, reports whether a file at path is accepted
+	// as a dependency regardless of its extension (e.g. Kustomize patch files
+	// and generator inputs), because a render reads the directory it is in,
+	// keeping editor-file and path exclusions. It is called as files change
+	// rather than once, so a directory that becomes, or stops being, one a
+	// render reads is classified as it is when the change is seen.
+	AcceptDependencies func(path string) bool
+
 	// Exclude, when set, reports whether a path is kept out of the watch. It is
 	// called with absolute paths. Excluded directories are not watched, and an
 	// excluded file never signals a change. The root itself is never excluded:
@@ -59,7 +67,8 @@ type FileWatcherOptions struct {
 // For a directory, the files that signal are those a scan would load, by their
 // extension (.yaml, .yml, .json manifests, .tf and .tfvars Terraform files, and
 // .tpl Helm template helpers), less editors' lock files. For a single file,
-// that file signals whatever its extension, and its siblings do not.
+// that file signals whatever its extension, as does its sibling .kubescapeignore;
+// other siblings do not.
 //
 // Changes are signalled on a channel of capacity one that is sent to without
 // blocking, so any number of changes while the reader is busy leave exactly one
@@ -94,6 +103,11 @@ type FileWatcher struct {
 	fs      *fsnotify.Watcher
 	dirs    map[string]struct{} // watched directories; owned by the goroutine once started
 	changes chan struct{}
+
+	// depFiles are the paths last seen as dependency files of a rendered root, so
+	// their removal is recognised after the path is gone or is a directory.
+	// Owned by the goroutine once started, like dirs; made on first use.
+	depFiles map[string]struct{}
 
 	pending map[string]struct{} // directories that appeared, to be registered once settleDelay has passed
 	settle  *time.Timer
@@ -364,7 +378,8 @@ func (w *FileWatcher) handle(event fsnotify.Event) error {
 	gone := event.Has(fsnotify.Remove | fsnotify.Rename)
 
 	if w.file != "" {
-		if name == w.file {
+		// A single-file scan reads exclusions from its parent directory too.
+		if name == w.file || name == filepath.Join(w.dir, cautils.IgnoreFileName) {
 			w.notify(name)
 		}
 		if name == w.dir && gone {
@@ -390,8 +405,10 @@ func (w *FileWatcher) handle(event fsnotify.Event) error {
 	}
 	if filepath.Base(name) == cautils.IgnoreFileName && filepath.Dir(name) == w.root {
 		// The scan reads its exclusions from this file, so what it excludes may have
-		// changed: a directory it no longer excludes is watched from now on, and the
-		// scan runs again. Exclude is expected to read the file as it is now.
+		// changed: a directory it now excludes is no longer watched, one it no
+		// longer excludes is watched from now on, and the scan runs again. Exclude
+		// is expected to read the file as it is now.
+		w.dropExcluded()
 		if _, err := w.registerTree(w.root, true); err != nil {
 			return err
 		}
@@ -460,6 +477,9 @@ func (w *FileWatcher) reconcile() error {
 			return err
 		}
 	} else {
+		// The lost events may include the ignore file's, so what it excludes now
+		// is dropped first, as on its own event, rather than watched again below.
+		w.dropExcluded()
 		live := make(map[string]struct{})
 		for _, path := range w.fs.WatchList() {
 			live[path] = struct{}{}
@@ -648,6 +668,42 @@ func (w *FileWatcher) unregister(dir string) {
 			_ = w.fs.Remove(watched)
 		}
 	}
+	for path := range w.depFiles {
+		if strings.HasPrefix(path, prefix) {
+			delete(w.depFiles, path)
+		}
+	}
+}
+
+// dropExcluded forgets the directories that are now excluded, with what is
+// below them, including those still waiting to be registered.
+func (w *FileWatcher) dropExcluded() {
+	for dir := range w.dirs {
+		if dir != w.root && w.skipDir(dir) {
+			w.unregister(dir)
+		}
+	}
+	for dir := range w.pending {
+		if w.excludedBelowRoot(dir) {
+			delete(w.pending, dir)
+		}
+	}
+}
+
+// excludedBelowRoot reports whether path, or a directory between it and the
+// root, is skipped.
+func (w *FileWatcher) excludedBelowRoot(path string) bool {
+	for dir := path; dir != w.root; {
+		if w.skipDir(dir) {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
+	return false
 }
 
 func (w *FileWatcher) skipDir(path string) bool {
@@ -661,15 +717,86 @@ func (w *FileWatcher) skipDir(path string) bool {
 // files (name~, .name.swp, name.tmp, #name#) are out already, being named with
 // another extension; what is left to rule out is an Emacs lock file, which is a
 // link named like the file it guards. The one manifest without an extension is a
-// kustomization named Kustomization, which kustomize accepts.
+// kustomization named Kustomization, which kustomize accepts. For rendered-input
+// directory watches (AcceptDependencies), dependency files are accepted
+// regardless of extension while preserving editor-file and path exclusions.
 func (w *FileWatcher) relevantFile(path string) bool {
-	if strings.HasPrefix(filepath.Base(path), ".#") {
+	if isEditorOrTempFile(path) {
 		return false
 	}
-	if !cautils.IsYaml(path) && !cautils.IsJson(path) && !cautils.IsKustomizeFile(path) && !isTerraformOrHelmFile(path) {
-		return false
+	if !cautils.IsYaml(path) && !cautils.IsJson(path) && !cautils.IsKustomizeFile(path) && !isTerraformOrHelmFile(path) && !isPatchFile(path) {
+		if w.opts.AcceptDependencies == nil || !w.opts.AcceptDependencies(path) {
+			return false
+		}
+		if !w.mayBeDependency(path) {
+			return false
+		}
 	}
 	return w.opts.Exclude == nil || !w.opts.Exclude(path, false)
+}
+
+// mayBeDependency reports whether a path without a manifest's extension can be
+// a file a render reads. A dependency is a file: a directory that is watched
+// reports what changes in it through its own watch, and one that isn't, .git
+// or one the scan excludes, holds nothing the scan reads.
+//
+// A path last seen as a dependency file still counts once it is gone, or is a
+// directory by the time its removal is handled: what the render read was
+// removed, whatever the name means now. Without that, a removed file named like
+// an excluded directory (a file "extra" with "extra/" excluded) would not
+// count, nor one replaced by a directory of the same name before its removal
+// was seen. A path that is gone and was never seen can't be looked at, so it
+// counts unless it is skipped as a directory would be.
+func (w *FileWatcher) mayBeDependency(path string) bool {
+	info, err := os.Lstat(path)
+	if err == nil && !info.IsDir() {
+		if w.depFiles == nil {
+			w.depFiles = make(map[string]struct{})
+		}
+		w.depFiles[path] = struct{}{}
+		return true
+	}
+	if _, was := w.depFiles[path]; was {
+		// Forgotten only once it is known to be gone or a directory: if it could
+		// not be looked at (permissions, I/O), the record is kept, so its removal
+		// is still recognised later.
+		if err == nil || errors.Is(err, fs.ErrNotExist) {
+			delete(w.depFiles, path)
+		}
+		return true
+	}
+	if err != nil {
+		return !w.skipDir(path)
+	}
+	return false
+}
+
+func isEditorOrTempFile(path string) bool {
+	base := filepath.Base(path)
+	if strings.HasPrefix(base, ".#") {
+		return true // Emacs lock file
+	}
+	if strings.HasPrefix(base, "#") && strings.HasSuffix(base, "#") {
+		return true // Emacs auto-save file
+	}
+	if strings.HasSuffix(base, "~") {
+		return true // Backup file
+	}
+	ext := strings.ToLower(filepath.Ext(base))
+	switch ext {
+	case ".swp", ".swo", ".swx", ".bak", ".tmp", ".orig":
+		return true
+	}
+	return false
+}
+
+func isPatchFile(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".patch", ".diff":
+		return true
+	default:
+		return false
+	}
 }
 
 // isTerraformOrHelmFile reports whether a directory scan reads path besides

@@ -168,3 +168,40 @@ func TestActionPrint_SPDX_PostureScanWithImages(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &documents))
 	assert.Len(t, documents, 2, "a posture scan with --scan-images must emit one document per scanned image")
 }
+
+func TestActionPrint_SPDX_NilWriterReturnsError(t *testing.T) {
+	sp := NewSPDXPrinter()
+	imageScanData := []cautils.ImageScanData{buildSeverityExceptionImageScanData()}
+
+	require.NotPanics(t, func() {
+		err := sp.ActionPrint(context.Background(), nil, imageScanData)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestSPDX_NilReceiverSafety(t *testing.T) {
+	var sp *SPDXPrinter
+
+	assert.NotPanics(t, func() {
+		err := sp.ActionPrint(context.Background(), nil, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := sp.SetWriter(context.Background(), "test")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := sp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		sp.Score(0)
+		sp.PrintNextSteps()
+	})
+}

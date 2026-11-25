@@ -11,7 +11,53 @@ import (
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	k8stesting "k8s.io/client-go/testing"
 )
+
+func TestStorageReadErrorsIncludeResourceDetails(t *testing.T) {
+	for _, failure := range []struct {
+		name    string
+		code    ErrorCode
+		makeErr func(schema.GroupResource) error
+	}{
+		{"forbidden", ErrCodeRBACDenied, func(gr schema.GroupResource) error { return apierrors.NewForbidden(gr, "", errors.New("denied")) }},
+		{"missing", ErrCodeResourceNotFound, func(gr schema.GroupResource) error { return apierrors.NewNotFound(gr, "missing") }},
+	} {
+		for _, tc := range []struct {
+			tool, resource, kind string
+			args                 map[string]any
+		}{
+			{"list_vulnerability_manifests", "vulnerabilitymanifests", "VulnerabilityManifest", map[string]any{"namespace": "team"}},
+			{"list_vulnerabilities_in_manifest", "vulnerabilitymanifests", "VulnerabilityManifest", map[string]any{"namespace": "team", "manifest_name": "missing"}},
+			{"list_vulnerability_matches_for_cve", "vulnerabilitymanifests", "VulnerabilityManifest", map[string]any{"namespace": "team", "manifest_name": "missing", "cve_id": "CVE-2026-0001"}},
+			{"list_sboms", "sbomsyfts", "SBOMSyft", map[string]any{"namespace": "team"}},
+			{"list_sbom_packages", "sbomsyfts", "SBOMSyft", map[string]any{"namespace": "team", "sbom_name": "missing"}},
+			{"list_configuration_security_scan_manifests", "workloadconfigurationscans", "WorkloadConfigurationScan", map[string]any{"namespace": "team"}},
+			{"get_configuration_security_scan_manifest", "workloadconfigurationscans", "WorkloadConfigurationScan", map[string]any{"namespace": "team", "manifest_name": "missing"}},
+			{"list_container_profiles", "containerprofiles", "ContainerProfile", map[string]any{"namespace": "team"}},
+			{"get_container_profile", "containerprofiles", "ContainerProfile", map[string]any{"namespace": "team", "profile_name": "missing"}},
+		} {
+			t.Run(failure.name+"/"+tc.tool, func(t *testing.T) {
+				client := storagefake.NewClientset()
+				client.PrependReactor("*", tc.resource, func(action k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, failure.makeErr(schema.GroupResource{Resource: tc.resource})
+				})
+				ks := &KubescapeMcpserver{ksClient: client.SpdxV1beta1()}
+				result, err := ks.CallTool(context.Background(), tc.tool, tc.args)
+				require.NoError(t, err)
+				require.True(t, result.IsError)
+				var got ToolError
+				require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &got))
+				assert.Equal(t, failure.code, got.Code)
+				assert.Equal(t, tc.kind, got.Details["resource_type"])
+				assert.Equal(t, "team", got.Details["namespace"])
+			})
+		}
+	}
+}
 
 var storageToolNames = []string{
 	"list_vulnerability_manifests",

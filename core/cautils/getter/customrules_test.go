@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 	"github.com/kubescape/kubescape/v4/core/pkg/ruledir"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -532,4 +533,188 @@ spec:
 	require.Error(t, err)
 	assert.Nil(t, fw)
 	assert.Contains(t, err.Error(), "declares no validations")
+}
+
+func TestLoadCustomRules_FromMultiDocumentYAMLFile(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "policies.yaml")
+	content := `# @baseScore 9
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: no-host-ipc
+spec:
+  validations:
+    - expression: "!has(object.spec.hostIPC) || !object.spec.hostIPC"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: no-host-network
+spec:
+  validations:
+    - expression: "!has(object.spec.hostNetwork) || !object.spec.hostNetwork"
+`
+	require.NoError(t, os.WriteFile(f, []byte(content), 0o600))
+
+	fw, err := LoadCustomRules(f)
+	require.NoError(t, err)
+	require.NotNil(t, fw)
+	require.Len(t, fw.Controls, 2)
+
+	controls := make(map[string]reporthandling.Control, len(fw.Controls))
+	for _, control := range fw.Controls {
+		controls[control.ControlID] = control
+	}
+
+	ipc, ok := controls["custom-no-host-ipc"]
+	require.True(t, ok, "first document must become its own control")
+	assert.Equal(t, float32(9), ipc.BaseScore, "severity must come from this document only")
+	require.Len(t, ipc.Rules, 1)
+	assert.Equal(t, reporthandling.CELLanguage, ipc.Rules[0].RuleLanguage)
+	assert.Contains(t, ipc.Rules[0].Rule, "no-host-ipc")
+	assert.NotContains(t, ipc.Rules[0].Rule, "no-host-network")
+	_, err = cel.ParseVAP([]byte(ipc.Rules[0].Rule))
+	require.NoError(t, err, "each rule must remain a standalone, parseable policy")
+
+	network, ok := controls["custom-no-host-network"]
+	require.True(t, ok, "second document must become its own control")
+	assert.Equal(t, float32(defaultCustomRuleBaseScore), network.BaseScore, "a document without an annotation stays medium")
+	require.Len(t, network.Rules, 1)
+	assert.Equal(t, reporthandling.CELLanguage, network.Rules[0].RuleLanguage)
+	assert.Contains(t, network.Rules[0].Rule, "no-host-network")
+	assert.NotContains(t, network.Rules[0].Rule, "no-host-ipc")
+	_, err = cel.ParseVAP([]byte(network.Rules[0].Rule))
+	require.NoError(t, err, "each rule must remain a standalone, parseable policy")
+}
+
+func TestLoadCustomRules_MultiDocumentYAMLLeadingAnnotationAppliesToFirstDocument(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "policies.yaml")
+	content := `# @baseScore 9
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: first-policy
+spec:
+  validations:
+    - expression: "true"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: second-policy
+spec:
+  validations:
+    - expression: "true"
+`
+	require.NoError(t, os.WriteFile(f, []byte(content), 0o600))
+
+	fw, err := LoadCustomRules(f)
+	require.NoError(t, err)
+	require.NotNil(t, fw)
+	require.Len(t, fw.Controls, 2)
+
+	scores := make(map[string]float32, len(fw.Controls))
+	for _, control := range fw.Controls {
+		scores[control.ControlID] = control.BaseScore
+	}
+	assert.Equal(t, float32(9), scores["custom-first-policy"])
+	assert.Equal(t, float32(defaultCustomRuleBaseScore), scores["custom-second-policy"])
+}
+
+// The same file with the leading `---` yamllint's document-start rule asks for.
+func TestLoadCustomRules_LeadingSeparatorBeforeAnnotation(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "policies.yaml")
+	content := `---
+# @baseScore 9
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: first-policy
+spec:
+  validations:
+    - expression: "true"
+`
+	require.NoError(t, os.WriteFile(f, []byte(content), 0o600))
+
+	fw, err := LoadCustomRules(f)
+	require.NoError(t, err)
+	require.NotNil(t, fw)
+	require.Len(t, fw.Controls, 1)
+	assert.Equal(t, "custom-first-policy", fw.Controls[0].ControlID)
+	assert.Equal(t, float32(9), fw.Controls[0].BaseScore)
+}
+
+func TestLoadCustomRules_MultiDocumentYAMLDuplicateNameRejected(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "duplicates.yaml")
+	content := `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: same-name
+spec:
+  validations:
+    - expression: "true"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: same-name
+spec:
+  validations:
+    - expression: "false"
+`
+	require.NoError(t, os.WriteFile(f, []byte(content), 0o600))
+
+	fw, err := LoadCustomRules(f)
+	require.Error(t, err)
+	assert.Nil(t, fw)
+	assert.Contains(t, err.Error(), "same-name")
+	assert.Contains(t, err.Error(), "defined twice")
+}
+
+func TestLoadCustomRules_MultiDocumentYAMLInvalidDocumentRejected(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "mixed.yaml")
+	content := `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: valid-policy
+spec:
+  validations:
+    - expression: "true"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: not-a-policy
+`
+	require.NoError(t, os.WriteFile(f, []byte(content), 0o600))
+
+	fw, err := LoadCustomRules(f)
+	require.Error(t, err)
+	assert.Nil(t, fw)
+	assert.Contains(t, err.Error(), "document 2:")
+	assert.Contains(t, err.Error(), "expected admissionregistration.k8s.io/v1 ValidatingAdmissionPolicy")
+}
+
+func TestLoadCustomRules_DuplicateNameAcrossYAMLFilesIsRejected(t *testing.T) {
+	dir := t.TempDir()
+	policy := func(expression string) string {
+		return `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: same-name
+spec:
+  validations:
+    - expression: "` + expression + `"
+`
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "first.yaml"), []byte(policy("true")), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "second.yaml"), []byte(policy("false")), 0o600))
+
+	fw, err := LoadCustomRules(dir)
+	require.Error(t, err)
+	assert.Nil(t, fw)
+	assert.Contains(t, err.Error(), "same-name")
+	assert.Contains(t, err.Error(), "defined twice")
 }

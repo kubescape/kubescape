@@ -1,6 +1,9 @@
 package fixhandler
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // manifestDocument pairs an editor's document with its position in the source.
 type manifestDocument struct {
@@ -24,6 +27,8 @@ func manifestIdentityOf(obj map[string]any) manifestIdentity {
 		if !ok {
 			return manifestIdentity{}
 		}
+		// Scanned resources carry the namespace trimmed at load; the file keeps the padding.
+		id.namespace = strings.TrimSpace(id.namespace)
 	}
 	return id
 }

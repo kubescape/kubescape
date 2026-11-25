@@ -45,7 +45,7 @@ deny contains msga if {
 		removes_pods(rule, rolebinding)
 		some field, values in {
 			"resources": {"pods", "pods/eviction", "pods/status", "nodes", "*/eviction", "*/status", "*"},
-			"verbs": {"create", "delete", "update", "patch", "*"},
+			"verbs": {"create", "delete", "deletecollection", "update", "patch", "*"},
 			"apiGroups": {"", "*"},
 		}
 		value := rule[field][l]
@@ -95,11 +95,13 @@ can_remove_pods(role, rolebinding) if {
 
 # update/patch on pods: rewrite a pod's labels so its controller treats it as
 # lost and schedules a replacement elsewhere. resourceNames does not blunt this
-# — the labels being rewritten belong to the named pod itself.
+# — the labels being rewritten belong to the named pod itself — as long as it
+# names a pod at all (see names_a_pod).
 removes_pods(rule, _) if {
 	core_api_group(rule)
 	targets(rule, "pods")
 	update_patch_or_wildcard(rule.verbs)
+	names_a_pod(rule)
 }
 
 # update/patch on pods/status reaches the same labels through the subresource.
@@ -107,6 +109,7 @@ removes_pods(rule, _) if {
 	core_api_group(rule)
 	targets_subresource(rule, "pods/status")
 	update_patch_or_wildcard(rule.verbs)
+	names_a_pod(rule)
 }
 
 # The remaining verbs act on a whole object rather than its contents, so
@@ -118,6 +121,16 @@ removes_pods(rule, _) if {
 	unrestricted_rule(rule)
 	targets(rule, "pods")
 	verb_or_wildcard(rule.verbs, "delete")
+}
+
+# deletecollection on pods removes every pod the request selects. The request
+# carries an empty name, and resourceNames is matched literally, so an entry
+# listing "" admits it just as an unrestricted one does.
+removes_pods(rule, _) if {
+	core_api_group(rule)
+	admits_unnamed_requests(rule)
+	targets(rule, "pods")
+	verb_or_wildcard(rule.verbs, "deletecollection")
 }
 
 # evict a pod through the eviction subresource.
@@ -193,6 +206,21 @@ unrestricted_rule(rule) if {
 	count(resource_names(rule)) == 0
 }
 
+# An update or patch is authorized with the name of the pod it changes, which is
+# never empty, and resourceNames is matched literally, with no wildcard, so "*"
+# only names a pod called "*", which no pod can be. An entry narrowed to those
+# two alone reaches no pod.
+names_a_pod(rule) if unrestricted_rule(rule)
+
+names_a_pod(rule) if {
+	some name in resource_names(rule)
+	not name in {"", "*"}
+}
+
+admits_unnamed_requests(rule) if unrestricted_rule(rule)
+
+admits_unnamed_requests(rule) if "" in resource_names(rule)
+
 pairs_with(role, rolebinding) if {
 	endswith(role.kind, "Role")
 	endswith(rolebinding.kind, "Binding")
@@ -221,6 +249,42 @@ is_same_namespace(role, rolebinding) if {
 is_same_namespace(role, rolebinding) if {
 	role.kind == "Role"
 	role.metadata.namespace == rolebinding.metadata.namespace
+}
+
+# A manifest meant for "kubectl apply -n" may leave out the namespace, and the
+# subject aggregator pairs it with either side; comparing the fields would drop it.
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	not release_namespace(role)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	not has_namespace(rolebinding)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(role)
+	rolebinding.metadata.namespace == release_namespace(role)
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	not has_namespace(rolebinding)
+}
+
+has_namespace(obj) if {
+	is_string(obj.metadata.namespace)
+	obj.metadata.namespace != ""
+}
+
+release_namespace(obj) := ns if {
+	is_string(obj.metadata.annotations["meta.helm.sh/release-namespace"])
+	obj.metadata.annotations["meta.helm.sh/release-namespace"] != ""
+	ns := obj.metadata.annotations["meta.helm.sh/release-namespace"]
 }
 
 is_same_subjects(subjectVector, subject) if {
@@ -253,13 +317,27 @@ is_same_subjects(subjectVector, subject) if {
 # apiGroup alone: two ServiceAccounts of the same name in different namespaces
 # share an apiGroup and would be merged into one identity. Both qualifiers are
 # read with a default instead, which keeps namespace-less subjects such as users
-# and groups comparable without conflating namespaced ones.
+# and groups comparable without conflating namespaced ones. An unqualified
+# ServiceAccount subject of a RoleBinding takes that binding's namespace.
 is_same_subject_vector(subjectVector, other) if {
 	subjectVector.kind == other.kind
 	subjectVector.name == other.name
-	object.get(subjectVector, "namespace", "") == object.get(other, "namespace", "")
+	subject_namespace(subjectVector) == subject_namespace(other)
 	object.get(subjectVector, "apiGroup", "") == object.get(other, "apiGroup", "")
 }
+
+subject_namespace(vector) := ns if {
+	ns := vector.namespace
+	is_string(ns)
+	ns != ""
+} else := ns if {
+	vector.kind == "ServiceAccount"
+	binding := vector.relatedObjects[_]
+	binding.kind == "RoleBinding"
+	ns := binding.metadata.namespace
+	is_string(ns)
+	ns != ""
+} else := ""
 
 # resource_names is a rule's resourceNames with an absent or null list read as
 # the empty list. Kubernetes treats all three alike: ResourceNameMatches matches

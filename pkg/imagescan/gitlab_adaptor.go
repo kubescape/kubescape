@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -487,11 +488,14 @@ func (a *GitlabAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 
 			var links []string
 			for _, l := range node.Links {
-				links = append(links, l.URL)
+				u := strings.TrimSpace(l.URL)
+				if u != "" && !slices.Contains(links, u) {
+					links = append(links, u)
+				}
 			}
 
 			vuln := Vulnerability{
-				ID:          node.Title,
+				ID:          strings.TrimSpace(node.Title),
 				Severity:    normalizeGitLabSeverity(node.Severity),
 				Description: node.Description,
 				Links:       links,

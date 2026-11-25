@@ -1407,9 +1407,14 @@ func TestActionPrint_Csv_NeutralizesFormulaInjection(t *testing.T) {
 // posture report. FinalizeResults returns nil, and the printer used to read
 // SummaryDetails from that nil value.
 func TestActionPrint_Csv_NilReportReturnsError(t *testing.T) {
-	cp := NewCsvPrinter(false)
+	tmpCsv, err := os.CreateTemp(t.TempDir(), "csv-nil-report-*.csv")
+	require.NoError(t, err)
+	defer tmpCsv.Close()
 
-	err := cp.ActionPrint(context.Background(), nil, nil)
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpCsv
+
+	err = cp.ActionPrint(context.Background(), nil, nil)
 	require.EqualError(t, err, "no data provided for CSV output")
 
 	err = cp.ActionPrint(context.Background(), &cautils.OPASessionObj{}, nil)
@@ -1438,4 +1443,132 @@ func TestActionPrint_Csv_EmptyReportStillWritesHeader(t *testing.T) {
 	require.Len(t, records, 1)
 	assert.Equal(t, "Control Name", records[0][0])
 	assert.Equal(t, "Control ID", records[0][1])
+}
+
+func TestActionPrint_Csv_NilWriterReturnsError(t *testing.T) {
+	cp := NewCsvPrinter(false)
+
+	// Posture scan path
+	require.NotPanics(t, func() {
+		err := cp.ActionPrint(context.Background(), cautils.NewOPASessionObjMock(), nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+
+	// Image scan fallback path
+	require.NotPanics(t, func() {
+		err := cp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{{Image: "nginx:1.23"}})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "output writer is nil")
+	})
+}
+
+func TestWriteImageScanCompanion_NilWriterDoesNotPanic(t *testing.T) {
+	cp := NewCsvPrinter(false)
+	require.NotPanics(t, func() {
+		err := cp.writeImageScanCompanion(context.Background(), []cautils.ImageScanData{{Image: "nginx:1.23"}})
+		assert.NoError(t, err)
+	})
+}
+
+func TestActionPrint_Csv_NilSummaryControlsDoesNotPanic(t *testing.T) {
+	t.Run("empty report does not panic", func(t *testing.T) {
+		tmpCsv, err := os.CreateTemp("", "csv-nil-summary-controls-empty-*.csv")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Remove(tmpCsv.Name()) })
+
+		session := cautils.NewOPASessionObjMock()
+		session.Report.SummaryDetails.Controls = nil
+
+		cp := NewCsvPrinter(false)
+		cp.writer = tmpCsv
+		require.NotPanics(t, func() {
+			err := cp.ActionPrint(context.Background(), session, nil)
+			require.NoError(t, err)
+		})
+		require.NoError(t, cp.CloseWriter())
+	})
+
+	t.Run("exercises resource-row and skipped-control-row fallbacks", func(t *testing.T) {
+		tmpCsv, err := os.CreateTemp("", "csv-nil-summary-controls-rows-*.csv")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = os.Remove(tmpCsv.Name()) })
+
+		session := csvSessionFixture()
+		session.Report.SummaryDetails.Controls = nil
+		session.Report.SummaryDetails.Frameworks = []reportsummary.FrameworkSummary{
+			{
+				Name: "nsa",
+				Controls: reportsummary.ControlSummaries{
+					"C-0099": reportsummary.ControlSummary{
+						ControlID:   "C-0099",
+						Name:        "",
+						ScoreFactor: 0,
+						StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusSkipped, InnerInfo: "cluster not reachable"},
+					},
+				},
+			},
+		}
+
+		cp := NewCsvPrinter(false)
+		cp.writer = tmpCsv
+		require.NotPanics(t, func() {
+			err := cp.ActionPrint(context.Background(), session, nil)
+			require.NoError(t, err)
+		})
+		require.NoError(t, cp.CloseWriter())
+
+		f, err := os.Open(tmpCsv.Name())
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = f.Close() })
+
+		records, err := csv.NewReader(f).ReadAll()
+		require.NoError(t, err)
+		require.Greater(t, len(records), 1)
+
+		var foundResourceRow, foundSkippedRow bool
+		for _, row := range records[1:] {
+			require.Len(t, row, 13)
+			if row[1] == testControlID1 && row[4] == "demo" {
+				foundResourceRow = true
+				assert.Equal(t, "failed", row[3], "status should be failed")
+				assert.Equal(t, "", row[10], "remediation fallback should be empty string when controls are nil")
+			}
+			if row[1] == "C-0099" && row[4] == "N/A" {
+				foundSkippedRow = true
+				assert.Equal(t, "C-0099", row[0], "control name fallback should be control ID")
+				assert.Equal(t, "Unknown", row[2], "severity fallback should be Unknown")
+				assert.Equal(t, "skipped", row[3], "status should be skipped")
+				assert.Equal(t, "cluster not reachable", row[10], "skip reason should be preserved")
+			}
+		}
+		assert.True(t, foundResourceRow, "expected resource row for demo with nil summary controls")
+		assert.True(t, foundSkippedRow, "expected skipped control row with nil summary controls")
+	})
+}
+
+func TestCsvPrinter_NilReceiverSafety(t *testing.T) {
+	var cp *CsvPrinter
+
+	assert.NotPanics(t, func() {
+		err := cp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := cp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := cp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		cp.Score(100)
+		cp.PrintNextSteps()
+	})
 }

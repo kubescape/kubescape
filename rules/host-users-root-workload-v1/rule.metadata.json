@@ -11,7 +11,8 @@
         "v1"
       ],
       "resources": [
-        "Pod"
+        "Pod",
+        "ReplicationController"
       ]
     },
     {
@@ -23,6 +24,7 @@
       ],
       "resources": [
         "Deployment",
+        "ReplicaSet",
         "StatefulSet",
         "DaemonSet"
       ]

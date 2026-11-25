@@ -335,6 +335,6 @@ func (report *ReportEventReceiver) DisplayMessage() {
 	if report.message != "" && helpers.ToLevel(logger.L().GetLevel()) < helpers.WarningLevel {
 		txt := "View results"
 		cautils.SectionHeadingDisplay(os.Stdout, txt)
-		cautils.SimpleDisplay(os.Stdout, fmt.Sprintf("%s\n\n", report.message))
+		cautils.SimpleDisplay(os.Stdout, "%s\n\n", report.message)
 	}
 }

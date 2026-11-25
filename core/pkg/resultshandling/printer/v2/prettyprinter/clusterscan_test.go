@@ -39,6 +39,11 @@ func TestClusterScan_getWorkloadScanCommand(t *testing.T) {
 	if command != "$ kubescape scan workload kind/name --namespace ns" {
 		t.Errorf("Expected $ kubescape scan workload kind/name --namespace ns, got %s", command)
 	}
+
+	commandNoNs := clusterPrinter.getWorkloadScanCommand("", "ClusterRole", "cluster-admin")
+	if commandNoNs != "$ kubescape scan workload ClusterRole/cluster-admin" {
+		t.Errorf("Expected $ kubescape scan workload ClusterRole/cluster-admin, got %s", commandNoNs)
+	}
 }
 
 func TestNewClusterPrinter(t *testing.T) {
@@ -108,13 +113,13 @@ func TestGetWorkloadScanCommand(t *testing.T) {
 			name:      "Empty",
 			namespace: "",
 			kind:      "",
-			want:      "$ kubescape scan workload /Empty --namespace ",
+			want:      "$ kubescape scan workload /Empty",
 		},
 		{
 			name:      "Empty Namespace",
 			namespace: "",
 			kind:      "Kind",
-			want:      "$ kubescape scan workload Kind/Empty Namespace --namespace ",
+			want:      "$ kubescape scan workload Kind/Empty Namespace",
 		},
 		{
 			name:      "Empty Kind",
@@ -172,4 +177,120 @@ func TestClusterScan_printTopWorkloads_ResourceNameWithPercentVerbs(t *testing.T
 	}
 
 	assert.Contains(t, string(got), name, "resource name must be printed literally, not interpreted as a format string")
+}
+
+func TestClusterScan_printTopWorkloads_ClusterScopedResource(t *testing.T) {
+	f, err := os.CreateTemp("", "print-top-workloads-clusterscoped")
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	cp := &ClusterPrinter{writer: f}
+
+	resource := reporthandling.NewResource(map[string]interface{}{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "ClusterRole",
+		"metadata": map[string]interface{}{
+			"name": "cluster-admin",
+		},
+	})
+
+	cp.printTopWorkloads([]reporthandling.IResource{resource})
+
+	f.Seek(0, 0)
+	gotBytes, err := io.ReadAll(f)
+	if err != nil {
+		panic(err)
+	}
+	got := string(gotBytes)
+
+	assert.Contains(t, got, "1. name: cluster-admin, kind: ClusterRole")
+	assert.NotContains(t, got, "namespace:")
+	assert.Contains(t, got, "$ kubescape scan workload ClusterRole/cluster-admin")
+	assert.NotContains(t, got, "--namespace")
+}
+
+func TestSubPrinters_NilReceiverAndNilWriterSafety(t *testing.T) {
+	t.Run("ClusterPrinter", func(t *testing.T) {
+		var cp *ClusterPrinter
+		assert.NotPanics(t, func() {
+			cp.PrintNextSteps()
+			cp.PrintImageScanning(nil)
+			cp.PrintConfigurationsScanning(nil, nil, nil)
+		})
+
+		cp2 := NewClusterPrinter(nil, false)
+		assert.NotPanics(t, func() {
+			cp2.PrintNextSteps()
+			cp2.PrintImageScanning(nil)
+			cp2.PrintConfigurationsScanning(nil, nil, nil)
+		})
+	})
+
+	t.Run("SummaryPrinter", func(t *testing.T) {
+		var sp *SummaryPrinter
+		assert.NotPanics(t, func() {
+			sp.PrintNextSteps()
+			sp.PrintImageScanning(nil)
+			sp.PrintConfigurationsScanning(nil, nil, nil)
+			_ = sp.getVerboseMode()
+		})
+
+		sp2 := NewSummaryPrinter(nil, false)
+		assert.NotPanics(t, func() {
+			sp2.PrintNextSteps()
+			sp2.PrintImageScanning(nil)
+			sp2.PrintConfigurationsScanning(nil, nil, nil)
+			_ = sp2.getVerboseMode()
+		})
+	})
+
+	t.Run("ImagePrinter", func(t *testing.T) {
+		var ip *ImagePrinter
+		assert.NotPanics(t, func() {
+			ip.PrintNextSteps()
+			ip.PrintImageScanning(nil)
+			ip.PrintConfigurationsScanning(nil, nil, nil)
+		})
+
+		ip2 := NewImagePrinter(nil, false)
+		assert.NotPanics(t, func() {
+			ip2.PrintNextSteps()
+			ip2.PrintImageScanning(nil)
+			ip2.PrintConfigurationsScanning(nil, nil, nil)
+		})
+	})
+
+	t.Run("RepoPrinter", func(t *testing.T) {
+		var rp *RepoPrinter
+		assert.NotPanics(t, func() {
+			rp.PrintNextSteps()
+			rp.PrintImageScanning(nil)
+			rp.PrintConfigurationsScanning(nil, nil, nil)
+		})
+
+		rp2 := NewRepoPrinter(nil, nil, false)
+		assert.NotPanics(t, func() {
+			rp2.PrintNextSteps()
+			rp2.PrintImageScanning(nil)
+			rp2.PrintConfigurationsScanning(nil, nil, nil)
+		})
+	})
+
+	t.Run("WorkloadPrinter", func(t *testing.T) {
+		var wp *WorkloadPrinter
+		assert.NotPanics(t, func() {
+			wp.PrintNextSteps()
+			wp.PrintImageScanning(nil)
+			wp.PrintConfigurationsScanning(nil, nil, nil)
+		})
+
+		wp2 := NewWorkloadPrinter(nil, false)
+		assert.NotPanics(t, func() {
+			wp2.PrintNextSteps()
+			wp2.PrintImageScanning(nil)
+			wp2.PrintConfigurationsScanning(nil, nil, nil)
+		})
+	})
 }

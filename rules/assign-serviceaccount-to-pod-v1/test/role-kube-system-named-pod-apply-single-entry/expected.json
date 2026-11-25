@@ -1,0 +1,80 @@
+[
+    {
+        "alertMessage": "Subject: ServiceAccount-debug-operator can create pods in privileged namespaces and assign them any service account",
+        "failedPaths": [
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].verbs[1]"
+        ],
+        "reviewPaths": [
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].verbs[1]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 9,
+        "alertObject": {
+            "externalObjects": {
+                "kind": "ServiceAccount",
+                "name": "debug-operator",
+                "namespace": "tools",
+                "relatedObjects": [
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "RoleBinding",
+                        "metadata": {
+                            "name": "node-debugger-rb",
+                            "namespace": "kube-system"
+                        },
+                        "roleRef": {
+                            "apiGroup": "rbac.authorization.k8s.io",
+                            "kind": "Role",
+                            "name": "node-debugger"
+                        },
+                        "subjects": [
+                            {
+                                "kind": "ServiceAccount",
+                                "name": "debug-operator",
+                                "namespace": "tools"
+                            }
+                        ]
+                    },
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "Role",
+                        "metadata": {
+                            "name": "node-debugger",
+                            "namespace": "kube-system"
+                        },
+                        "rules": [
+                            {
+                                "apiGroups": [
+                                    ""
+                                ],
+                                "resourceNames": [
+                                    "node-debugger"
+                                ],
+                                "resources": [
+                                    "pods"
+                                ],
+                                "verbs": [
+                                    "create",
+                                    "patch"
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+]

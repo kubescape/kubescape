@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -209,11 +210,13 @@ func validateWorkloadArgs(args []string, scanInfo *cautils.ScanInfo) error {
 		return fmt.Errorf("usage: <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]")
 	}
 
-	if scanInfo.ChartPath != "" && scanInfo.FilePath == "" {
+	chartPath := strings.TrimSpace(scanInfo.ChartPath)
+	filePath := strings.TrimSpace(scanInfo.FilePath)
+	if chartPath != "" && filePath == "" {
 		return fmt.Errorf("usage: --chart-path <chart path> --file-path <file path>")
 	}
 
-	if scanInfo.FilePath != "" && len(args) > 1 {
+	if filePath != "" && len(args) > 1 {
 		return fmt.Errorf("usage: use either --file-path or positional input paths, not both")
 	}
 

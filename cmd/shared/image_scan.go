@@ -2,6 +2,7 @@ package shared
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
@@ -11,7 +12,7 @@ var (
 	ErrRegistryUsernamePassword = errors.New("registry username and password must be provided together")
 	ErrRegistryAuthConflict     = errors.New("registry token cannot be used together with registry username/password")
 	ErrRegistryAuthorityNoAuth  = errors.New("registry authority requires registry credentials")
-	ErrRegistryAuthorityMissing = errors.New("registry credentials for --scan-images require registry authority")
+	ErrRegistryAuthorityMissing = imagescan.ErrRegistryAuthorityMissing
 
 	ErrImageScanAnonymization = errors.New("--hide and --encrypt are not supported for image scans: an image report is the Anchore scan document and its SBOM, whose package identity and relationships are keyed by content-derived IDs that anonymization cannot rewrite. To get anonymized image findings, run a posture scan with --scan-images, where image references are anonymized and no SBOM is emitted")
 )
@@ -21,6 +22,15 @@ type ImageCredentials struct {
 	Username  string
 	Password  string
 	Token     string
+}
+
+func (c ImageCredentials) Trimmed() ImageCredentials {
+	return ImageCredentials{
+		Authority: strings.TrimSpace(c.Authority),
+		Username:  strings.TrimSpace(c.Username),
+		Password:  strings.TrimSpace(c.Password),
+		Token:     strings.TrimSpace(c.Token),
+	}
 }
 
 // ValidateImageScanInfo validates the ScanInfo struct for image scanning commands
@@ -72,13 +82,15 @@ func ValidateWorkloadImageCredentials(credentials ImageCredentials) error {
 	if err := ValidateImageCredentials(credentials); err != nil {
 		return err
 	}
-	if credentials.Authority == "" && hasRegistryAuthenticator(credentials.Username, credentials.Password, credentials.Token) {
-		return ErrRegistryAuthorityMissing
-	}
-	return nil
+	return imagescan.RegistryCredentials(credentials).ValidateWorkloadAuthority()
 }
 
 func ValidateRegistryCredentials(username, password, token, authority string) error {
+	username = strings.TrimSpace(username)
+	password = strings.TrimSpace(password)
+	token = strings.TrimSpace(token)
+	authority = strings.TrimSpace(authority)
+
 	hasUsernamePassword := username != "" || password != ""
 	hasCompleteUsernamePassword := username != "" && password != ""
 	hasToken := token != ""
@@ -97,8 +109,4 @@ func ValidateRegistryCredentials(username, password, token, authority string) er
 	}
 
 	return nil
-}
-
-func hasRegistryAuthenticator(username, password, token string) bool {
-	return token != "" || (username != "" && password != "")
 }

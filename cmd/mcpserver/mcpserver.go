@@ -2,12 +2,14 @@ package mcpserver
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -45,28 +47,35 @@ var newK8sClient = k8sinterface.NewKubernetesApi
 
 // Scan implementations are package-level vars so CallTool tests can observe
 // namespace mapping without running a cluster scan.
-var rbacScanFn = func(s *KubescapeMcpserver, ctx context.Context, namespace string) ([]byte, error) {
-	return s.RunRBACScan(ctx, namespace)
+var rbacScanFn = func(s *KubescapeMcpserver, ctx context.Context, namespace string, filters ...scanFilterArgs) ([]byte, error) {
+	return s.RunRBACScan(ctx, namespace, filters...)
 }
 
-var networkScanFn = func(s *KubescapeMcpserver, ctx context.Context, namespace string) ([]byte, error) {
-	return s.RunNetworkScan(ctx, namespace)
+var networkScanFn = func(s *KubescapeMcpserver, ctx context.Context, namespace string, filters ...scanFilterArgs) ([]byte, error) {
+	return s.RunNetworkScan(ctx, namespace, filters...)
 }
 
-var frameworkScanFn = func(s *KubescapeMcpserver, ctx context.Context, namespace, frameworkName string) ([]byte, error) {
-	return s.RunFrameworkScan(ctx, namespace, frameworkName)
+var frameworkScanFn = func(s *KubescapeMcpserver, ctx context.Context, namespace, frameworkName string, filters ...scanFilterArgs) ([]byte, error) {
+	return s.RunFrameworkScan(ctx, namespace, frameworkName, filters...)
+}
+
+var controlsScanFn = func(s *KubescapeMcpserver, ctx context.Context, namespace string, controlIDs []string, filters ...scanFilterArgs) ([]byte, error) {
+	return s.ScanControls(ctx, namespace, controlIDs, filters...)
 }
 
 // mcpScanNamespace reads the optional CallTool namespace argument. "*" means
-// cluster-wide, the same as omitting the argument.
+// cluster-wide, the same as omitting the argument. Like mcpStringArg, it
+// treats a JSON null as an omitted argument and trims the value, so the scan
+// tools accept the same spellings of "no namespace" as the tools that read
+// namespace through mcpStringArg.
 func mcpScanNamespace(arguments map[string]any) (string, error) {
 	namespace := ""
-	if ns, ok := arguments["namespace"]; ok {
+	if ns, ok := arguments["namespace"]; ok && ns != nil {
 		nsStr, ok := ns.(string)
 		if !ok {
 			return "", fmt.Errorf("namespace argument must be a string")
 		}
-		namespace = nsStr
+		namespace = strings.TrimSpace(nsStr)
 	}
 	if namespace == "*" {
 		namespace = ""
@@ -139,11 +148,17 @@ func mcpIntArg(arguments map[string]any, name string) (int, bool, *mcp.CallToolR
 	if !ok || raw == nil {
 		return 0, false, nil
 	}
-	f, ok := raw.(float64)
-	if !ok || f != float64(int(f)) {
+	switch v := raw.(type) {
+	case float64:
+		if v != float64(int(v)) {
+			return 0, false, mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("%s argument must be an integer", name), map[string]any{"argument": name})
+		}
+		return int(v), true, nil
+	case int:
+		return v, true, nil
+	default:
 		return 0, false, mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("%s argument must be an integer", name), map[string]any{"argument": name})
 	}
-	return int(f), true, nil
 }
 
 // jsonMarshal is a package-level var so tests can inject marshal failures.
@@ -162,9 +177,10 @@ type scanCtxState struct {
 }
 
 type KubescapeMcpserver struct {
-	s          *server.MCPServer
-	ksClientMu sync.Mutex
-	ksClient   spdxv1beta1.SpdxV1beta1Interface
+	scanResults scanResultStore
+	s           *server.MCPServer
+	ksClientMu  sync.Mutex
+	ksClient    spdxv1beta1.SpdxV1beta1Interface
 	// ksClientInit overrides newKsClient for this server instance; used by
 	// tests. Nil means use newKsClient.
 	ksClientInit   func() (spdxv1beta1.SpdxV1beta1Interface, error)
@@ -524,13 +540,12 @@ func parseVulnManifestURI(uri string) (*vulnManifestURI, error) {
 	return parsed, nil
 }
 
-// parseControlIDs extracts a list of trimmed, non-empty control IDs from an
+// parseControlIDsNamed extracts a list of trimmed, non-empty control IDs from an
 // argument value that may be either a comma-separated string or a JSON array
-// of strings. It returns a ToolResultError when the value is absent, has the
-// wrong type, or yields no valid IDs after trimming.
-func parseControlIDs(raw any, present bool) ([]string, *mcp.CallToolResult) {
+// of strings, attributing errors to argName.
+func parseControlIDsNamed(argName string, raw any, present bool) ([]string, *mcp.CallToolResult) {
 	if !present {
-		return nil, mcpToolError(ErrCodeInvalidArgument, "control_ids argument is required", map[string]any{"argument": "control_ids"})
+		return nil, mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("%s argument is required", argName), map[string]any{"argument": argName})
 	}
 	var ids []string
 	switch v := raw.(type) {
@@ -544,19 +559,76 @@ func parseControlIDs(raw any, present bool) ([]string, *mcp.CallToolResult) {
 		for _, item := range v {
 			s, ok := item.(string)
 			if !ok {
-				return nil, mcpToolError(ErrCodeInvalidArgument, "control_ids array elements must be strings", map[string]any{"argument": "control_ids"})
+				return nil, mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("%s array elements must be strings", argName), map[string]any{"argument": argName})
 			}
 			if s = strings.TrimSpace(s); s != "" {
 				ids = append(ids, s)
 			}
 		}
 	default:
-		return nil, mcpToolError(ErrCodeInvalidArgument, "control_ids must be a comma-separated string or array", map[string]any{"argument": "control_ids"})
+		return nil, mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("%s must be a comma-separated string or array", argName), map[string]any{"argument": argName})
 	}
 	if len(ids) == 0 {
-		return nil, mcpToolError(ErrCodeInvalidArgument, "control_ids must contain at least one control ID", map[string]any{"argument": "control_ids"})
+		return nil, mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("%s must contain at least one control ID", argName), map[string]any{"argument": argName})
 	}
 	return ids, nil
+}
+
+// canonicalControlKey formats control IDs into a deterministic, query-escaped,
+// sorted and deduplicated string for tool cache keys.
+func canonicalControlKey(ids []string) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	seen := make(map[string]struct{}, len(ids))
+	sorted := make([]string, 0, len(ids))
+	for _, id := range ids {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			continue
+		}
+		upper := strings.ToUpper(trimmed)
+		if _, ok := seen[upper]; !ok {
+			seen[upper] = struct{}{}
+			sorted = append(sorted, upper)
+		}
+	}
+	sort.Strings(sorted)
+	return url.QueryEscape(strings.Join(sorted, ","))
+}
+
+// canonicalFrameworkName normalizes framework names to lowercase and applies
+// the given default when the framework is omitted or empty.
+func canonicalFrameworkName(framework, defaultName string) string {
+	trimmed := strings.TrimSpace(framework)
+	if trimmed == "" {
+		return strings.ToLower(defaultName)
+	}
+	return strings.ToLower(trimmed)
+}
+
+// scanFrameworkKey builds the coalescing cache key for run_framework_security_scan.
+func scanFrameworkKey(namespace, frameworkName, suffix string) string {
+	if namespace == "*" {
+		namespace = ""
+	}
+	return fmt.Sprintf("framework_scan:%s:%s%s", url.QueryEscape(namespace), url.QueryEscape(strings.ToLower(frameworkName)), suffix)
+}
+
+// scanControlsKey builds the coalescing cache key for scan_controls.
+func scanControlsKey(namespace string, controlIDs []string, suffix string) string {
+	if namespace == "*" {
+		namespace = ""
+	}
+	return fmt.Sprintf("control_scan:%s:%s%s", url.QueryEscape(namespace), canonicalControlKey(controlIDs), suffix)
+}
+
+// parseControlIDs extracts a list of trimmed, non-empty control IDs from an
+// argument value that may be either a comma-separated string or a JSON array
+// of strings. It returns a ToolResultError when the value is absent, has the
+// wrong type, or yields no valid IDs after trimming.
+func parseControlIDs(raw any, present bool) ([]string, *mcp.CallToolResult) {
+	return parseControlIDsNamed("control_ids", raw, present)
 }
 
 // withControlIDsProperty adds control_ids to the tool schema as a required
@@ -711,15 +783,21 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		return res, err
 	}
 	switch name {
+	case "get_scan_results":
+		return ksServer.getScanResults(ctx, arguments)
 	case "run_rbac_security_scan":
 		namespace, err := mcpScanNamespace(arguments)
 		if err != nil {
 			return mcpToolError(ErrCodeInvalidArgument, err.Error(), map[string]any{"argument": "namespace"}), nil
 		}
-		key := fmt.Sprintf("rbac_scan:%s", namespace)
-		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
-			return rbacScanFn(ksServer, scanCtx, namespace)
-		})
+		filters, toolErr := parseScanFilterArgs(arguments, namespace)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		key := fmt.Sprintf("rbac_scan:%s%s", namespace, filters.keySuffix())
+		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return rbacScanFn(ksServer, scanCtx, namespace, filters)
+		}, filters.limit)
 		if err != nil {
 			code := classifyScanError(err)
 			msg := classifyScanErrorMessage(code, "RBAC", err)
@@ -736,11 +814,15 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if toolErr != nil {
 			return toolErr, nil
 		}
+		filters, toolErr := parseLocalIaCFilterArgs(arguments)
+		if toolErr != nil {
+			return toolErr, nil
+		}
 
-		key := fmt.Sprintf("scan_local_iac:%s:%s", url.QueryEscape(path), url.QueryEscape(framework))
-		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
-			return ksServer.runIaCScan(scanCtx, path, framework)
-		})
+		key := fmt.Sprintf("scan_local_iac:%s:%s%s", url.QueryEscape(path), url.QueryEscape(canonicalFrameworkName(framework, "nsa")), filters.keySuffix())
+		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return ksServer.runIaCScan(scanCtx, path, framework, filters)
+		}, filters.limit)
 		if err != nil {
 			code := classifyScanError(err)
 			msg := classifyScanErrorMessage(code, "IaC", err)
@@ -758,105 +840,37 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		key := fmt.Sprintf("scan_local_iac_controls:%s:%s", url.QueryEscape(path), url.QueryEscape(strings.Join(controlIDs, ",")))
-		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
-			return ksServer.runIaCScanControls(scanCtx, path, controlIDs)
-		})
+		filters, toolErr := parseLocalIaCFilterArgs(arguments)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		key := fmt.Sprintf("scan_local_iac_controls:%s:%s%s", url.QueryEscape(path), canonicalControlKey(controlIDs), filters.keySuffix())
+		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return ksServer.runIaCScanControls(scanCtx, path, controlIDs, filters)
+		}, filters.limit)
 		if err != nil {
 			code := classifyScanError(err)
 			msg := classifyScanErrorMessage(code, "IaC control", err)
 			return mcpToolError(code, msg, nil), nil
 		}
 		return mcp.NewToolResultText(string(v.([]byte))), nil
-	case "apply_remediation":
-		path, toolErr := mcpStringArg(arguments, "path")
+	case "scan_manifest":
+		rawManifest, ok := arguments["manifest"]
+		if !ok || rawManifest == nil {
+			return mcpToolError(ErrCodeInvalidArgument, "manifest argument is required and cannot be empty", map[string]any{"argument": "manifest"}), nil
+		}
+		manifest, ok := rawManifest.(string)
+		if !ok {
+			return mcpToolError(ErrCodeInvalidArgument, "manifest argument must be a string", map[string]any{"argument": "manifest"}), nil
+		}
+		if len(strings.TrimSpace(manifest)) == 0 {
+			return mcpToolError(ErrCodeInvalidArgument, "manifest argument cannot be empty", map[string]any{"argument": "manifest"}), nil
+		}
+		if len(manifest) > maxManifestBytes {
+			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("manifest argument exceeds maximum allowed size of %d bytes", maxManifestBytes), map[string]any{"argument": "manifest"}), nil
+		}
+		framework, toolErr := mcpStringArg(arguments, "framework")
 		if toolErr != nil {
-			return toolErr, nil
-		}
-		reportPath, toolErr := mcpStringArg(arguments, "report_path")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		basePath, toolErr := mcpStringArg(arguments, "base_path")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		switch {
-		case path == "" && reportPath == "":
-			return mcpToolError(ErrCodeInvalidArgument, "path argument is required and cannot be empty, unless report_path is supplied instead (exactly one of path or report_path is required)", map[string]any{"argument": "path"}), nil
-		case path != "" && reportPath != "":
-			return mcpToolError(ErrCodeInvalidArgument, "path and report_path are mutually exclusive; supply exactly one", map[string]any{"argument": "report_path"}), nil
-		case path != "" && basePath != "":
-			return mcpToolError(ErrCodeInvalidArgument, "base_path applies only with report_path", map[string]any{"argument": "base_path"}), nil
-		}
-		workspaceRoot, closeWorkspaceRoot, err := ksServer.openWorkspaceRoot()
-		if err != nil {
-			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("cannot open workspace root: %v", err), nil), nil
-		}
-		defer closeWorkspaceRoot()
-		// path is confined to the workspace by the scan it runs. report_path is
-		// read here instead, and base_path is where the files the report names
-		// are read from and returned patched, so both need the same boundary.
-		if reportPath, toolErr = ksServer.containToWorkspace("report_path", reportPath); toolErr != nil {
-			return toolErr, nil
-		}
-		if basePath, toolErr = ksServer.containToWorkspace("base_path", basePath); toolErr != nil {
-			return toolErr, nil
-		}
-		rawControlIDs, hasControlIDs := arguments["control_ids"]
-		controlIDs, toolErr := parseControlIDs(rawControlIDs, hasControlIDs)
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		// report_path and base_path both change the result, so both belong in
-		// the key: two calls that differ only in either must not share one.
-		key := remediationKey(path, reportPath, basePath, controlIDs)
-		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
-			if reportPath != "" {
-				return runApplyRemediationFromReport(scanCtx, reportPath, basePath, controlIDs, workspaceRoot)
-			}
-			return ksServer.runApplyRemediation(scanCtx, path, controlIDs, workspaceRoot)
-		})
-		if err != nil {
-			var inputErr *remediationInputError
-			if errors.As(err, &inputErr) {
-				return mcpToolError(ErrCodeInvalidArgument, inputErr.Error(), nil), nil
-			}
-			code := classifyScanError(err)
-			msg := fmt.Sprintf("failed to compute remediation: %v", err)
-			return mcpToolError(code, msg, nil), nil
-		}
-		return mcp.NewToolResultText(string(v.([]byte))), nil
-	case "suggest_fix":
-		path, toolErr := mcpStringArg(arguments, "path")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		reportPath, toolErr := mcpStringArg(arguments, "report_path")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		basePath, toolErr := mcpStringArg(arguments, "base_path")
-		if toolErr != nil {
-			return toolErr, nil
-		}
-		switch {
-		case path == "" && reportPath == "":
-			return mcpToolError(ErrCodeInvalidArgument, "path argument is required and cannot be empty, unless report_path is supplied instead (exactly one of path or report_path is required)", map[string]any{"argument": "path"}), nil
-		case path != "" && reportPath != "":
-			return mcpToolError(ErrCodeInvalidArgument, "path and report_path are mutually exclusive; supply exactly one", map[string]any{"argument": "report_path"}), nil
-		case path != "" && basePath != "":
-			return mcpToolError(ErrCodeInvalidArgument, "base_path applies only with report_path", map[string]any{"argument": "base_path"}), nil
-		}
-		workspaceRoot, closeWorkspaceRoot, err := ksServer.openWorkspaceRoot()
-		if err != nil {
-			return mcpToolError(ErrCodeInvalidArgument, fmt.Sprintf("cannot open workspace root: %v", err), nil), nil
-		}
-		defer closeWorkspaceRoot()
-		if reportPath, toolErr = ksServer.containToWorkspace("report_path", reportPath); toolErr != nil {
-			return toolErr, nil
-		}
-		if basePath, toolErr = ksServer.containToWorkspace("base_path", basePath); toolErr != nil {
 			return toolErr, nil
 		}
 		var controlIDs []string
@@ -866,23 +880,29 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 				return toolErr, nil
 			}
 		}
-		key := suggestFixKey(path, reportPath, basePath, controlIDs)
-		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
-			if reportPath != "" {
-				return runSuggestFixFromReport(scanCtx, reportPath, basePath, controlIDs, workspaceRoot)
-			}
-			return ksServer.runSuggestFix(scanCtx, path, controlIDs, workspaceRoot)
-		})
+		filters, toolErr := parseLocalIaCFilterArgs(arguments)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+
+		canonicalFramework := ""
+		if len(controlIDs) == 0 {
+			canonicalFramework = canonicalFrameworkName(framework, "nsa")
+		}
+
+		h := sha256.Sum256([]byte(manifest))
+		key := fmt.Sprintf("scan_manifest:%x:%s:%s%s", h[:8], url.QueryEscape(canonicalFramework), canonicalControlKey(controlIDs), filters.keySuffix())
+		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return ksServer.runManifestScan(scanCtx, manifest, framework, controlIDs, filters)
+		}, filters.limit)
 		if err != nil {
-			var inputErr *remediationInputError
-			if errors.As(err, &inputErr) {
-				return mcpToolError(ErrCodeInvalidArgument, inputErr.Error(), nil), nil
-			}
 			code := classifyScanError(err)
-			msg := fmt.Sprintf("failed to suggest fix: %v", err)
+			msg := classifyScanErrorMessage(code, "manifest", err)
 			return mcpToolError(code, msg, nil), nil
 		}
 		return mcp.NewToolResultText(string(v.([]byte))), nil
+	case "apply_remediation", "suggest_fix":
+		return ksServer.handleRemediationTool(ctx, name, arguments)
 	case "verify_remediation":
 		path, toolErr := mcpRequiredStringArg(arguments, "path")
 		if toolErr != nil {
@@ -919,10 +939,14 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if err != nil {
 			return mcpToolError(ErrCodeInvalidArgument, err.Error(), map[string]any{"argument": "namespace"}), nil
 		}
-		key := fmt.Sprintf("network_scan:%s", namespace)
-		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
-			return networkScanFn(ksServer, scanCtx, namespace)
-		})
+		filters, toolErr := parseScanFilterArgs(arguments, namespace)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		key := fmt.Sprintf("network_scan:%s%s", namespace, filters.keySuffix())
+		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return networkScanFn(ksServer, scanCtx, namespace, filters)
+		}, filters.limit)
 		if err != nil {
 			code := classifyScanError(err)
 			msg := classifyScanErrorMessage(code, "Network", err)
@@ -987,7 +1011,15 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		profile, err := ksClient.ContainerProfiles(namespaceStr).Get(ctx, profileNameStr, metav1.GetOptions{})
 		if err != nil {
-			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to get container profile: %v", err), nil), nil
+			return mcpToolError(
+				classifyScanError(err),
+				fmt.Sprintf("failed to get container profile: %v", err),
+				map[string]any{
+					"resource_type": "ContainerProfile",
+					"namespace":     namespaceStr,
+					"name":          profileNameStr,
+				},
+			), nil
 		}
 
 		var rawManifest []byte
@@ -1016,7 +1048,15 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 
 		if err != nil {
-			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to get workload manifest: %v", err), nil), nil
+			return mcpToolError(
+				classifyScanError(err),
+				fmt.Sprintf("failed to get workload manifest: %v", err),
+				map[string]any{
+					"resource_type": strings.ToLower(workloadKindStr),
+					"namespace":     namespaceStr,
+					"name":          workloadNameStr,
+				},
+			), nil
 		}
 		rawManifest, err = jsonMarshal(workloadObj)
 		if err != nil {
@@ -1059,13 +1099,14 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		if namespace == "*" {
-			namespace = ""
+		filters, toolErr := parseScanFilterArgs(arguments, namespace)
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		key := fmt.Sprintf("framework_scan:%s:%s", namespace, url.QueryEscape(frameworkNameStr))
-		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
-			return frameworkScanFn(ksServer, scanCtx, namespace, frameworkNameStr)
-		})
+		key := scanFrameworkKey(namespace, frameworkNameStr, filters.keySuffix())
+		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return frameworkScanFn(ksServer, scanCtx, namespace, frameworkNameStr, filters)
+		}, filters.limit)
 		if err != nil {
 			code := classifyScanError(err)
 			msg := classifyScanErrorMessage(code, "framework", err)
@@ -1074,22 +1115,23 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "scan_controls":
-		namespace, toolErr := mcpStringArg(arguments, "namespace")
+		namespace, err := mcpScanNamespace(arguments)
+		if err != nil {
+			return mcpToolError(ErrCodeInvalidArgument, err.Error(), map[string]any{"argument": "namespace"}), nil
+		}
+		filters, toolErr := parseScanFilterArgs(arguments, namespace)
 		if toolErr != nil {
 			return toolErr, nil
-		}
-		if namespace == "*" {
-			namespace = ""
 		}
 		rawControlIDs, hasControlIDs := arguments["control_ids"]
 		controlIDs, toolErr := parseControlIDs(rawControlIDs, hasControlIDs)
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		key := fmt.Sprintf("control_scan:%s:%s", namespace, url.QueryEscape(strings.Join(controlIDs, ",")))
-		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
-			return ksServer.ScanControls(scanCtx, namespace, controlIDs)
-		})
+		key := scanControlsKey(namespace, controlIDs, filters.keySuffix())
+		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return controlsScanFn(ksServer, scanCtx, namespace, controlIDs, filters)
+		}, filters.limit)
 		if err != nil {
 			code := classifyScanError(err)
 			msg := classifyScanErrorMessage(code, "control", err)
@@ -1128,15 +1170,20 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if toolErr != nil {
 			return toolErr, nil
 		}
+		filters, toolErr := parseScanFilterArgs(arguments, namespace)
+		if toolErr != nil {
+			return toolErr, nil
+		}
 		// Every component here is caller-supplied, so each is escaped: an
 		// unescaped separator in one argument could otherwise collide with a
 		// different request's key and serve it that scan's results.
-		key := fmt.Sprintf("workload_scan:%s:%s:%s:%s",
+		key := fmt.Sprintf("workload_scan:%s:%s:%s:%s%s",
 			url.QueryEscape(workload), url.QueryEscape(namespace),
-			url.QueryEscape(path), url.QueryEscape(framework))
-		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
-			return workloadScanFn(ksServer, scanCtx, workload, namespace, path, framework)
-		})
+			url.QueryEscape(path), url.QueryEscape(strings.ToLower(framework)),
+			filters.keySuffix())
+		v, err := ksServer.doResultScan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return workloadScanFn(ksServer, scanCtx, workload, namespace, path, framework, filters)
+		}, filters.limit)
 		if err != nil {
 			code := classifyScanError(err)
 			msg := classifyScanErrorMessage(code, "workload", err)
@@ -1150,13 +1197,35 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		return mcp.NewToolResultText(string(v.([]byte))), nil
 	case "list_frameworks":
-		result, err := ksServer.ListFrameworks(ctx)
+		search, toolErr := mcpStringArg(arguments, "search")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		result, err := ksServer.ListFrameworks(ctx, search)
 		if err != nil {
 			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list frameworks: %v", err), nil), nil
 		}
 		return mcp.NewToolResultText(string(result)), nil
+	case "list_controls_config":
+		controlID, toolErr := mcpStringArg(arguments, "control_id")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		search, toolErr := mcpStringArg(arguments, "search")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		result, err := ksServer.ListControlsConfig(ctx, search, controlID)
+		if err != nil {
+			return mcpToolError(classifyScanError(err), fmt.Sprintf("failed to list controls config: %v", err), nil), nil
+		}
+		return mcp.NewToolResultText(string(result)), nil
 	case "list_controls":
 		framework, toolErr := mcpStringArg(arguments, "framework")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		search, toolErr := mcpStringArg(arguments, "search")
 		if toolErr != nil {
 			return toolErr, nil
 		}
@@ -1178,7 +1247,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if offset < 0 {
 			return mcpToolError(ErrCodeInvalidArgument, "offset must not be negative", map[string]any{"argument": "offset"}), nil
 		}
-		result, err := ksServer.ListControls(ctx, framework, limit, offset)
+		result, err := ksServer.ListControls(ctx, framework, search, limit, offset)
 		var unknown *unknownFrameworkError
 		if errors.As(err, &unknown) {
 			return mcpToolError(ErrCodeInvalidArgument, err.Error(),
@@ -1196,6 +1265,8 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		return mcp.NewToolResultText(string(result)), nil
 	case "create_admission_policy_binding":
 		return ksServer.CreateAdmissionPolicyBinding(ctx, arguments)
+	case "explain_control":
+		return ksServer.ExplainControl(ctx, arguments)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -1205,6 +1276,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 // server. It only registers definitions; it starts no transport and contacts
 // no cluster, so tests can use it to enumerate the served tool surface.
 func registerTools(ksServer *KubescapeMcpserver) {
+	createScanResultsTool(ksServer)
 	createVulnerabilityToolsAndResources(ksServer)
 	createConfigurationsToolsAndResources(ksServer)
 	createRuntimeToolsAndResources(ksServer)
@@ -1220,6 +1292,7 @@ func registerTools(ksServer *KubescapeMcpserver) {
 	createFrameworkScanningTools(ksServer)
 	createIaCScanningTools(ksServer)
 	createIaCControlScanningTool(ksServer)
+	createManifestScanningTool(ksServer)
 	createRemediationTools(ksServer)
 	createSuggestFixTools(ksServer)
 	createVerifyRemediationTools(ksServer)
@@ -1228,6 +1301,7 @@ func registerTools(ksServer *KubescapeMcpserver) {
 	createPolicyListingTools(ksServer)
 	createAdvancedTools(ksServer)
 	createSecretExposureTools(ksServer)
+	createExplainControlTools(ksServer)
 }
 
 // validateMCPOptions validates and normalizes the transport and port arguments before
@@ -1338,32 +1412,31 @@ func mcpServerEntrypoint(ctx context.Context, transport string, port int, worksp
 }
 
 func createRBACScanningTools(ksServer *KubescapeMcpserver) {
-	runRBACScanTool := mcp.NewTool(
-		"run_rbac_security_scan",
+	opts := []mcp.ToolOption{
 		mcp.WithDescription("Run an on-demand, live RBAC security scan (evaluating only over-permissive cluster bindings) and return the failed resources."),
 		mcp.WithString("namespace",
 			mcp.Description("Namespace to scope the RBAC scan (optional, defaults to cluster-wide if omitted)"),
 		),
-	)
-
+	}
+	opts = append(opts, scanFilterOptions()...)
+	runRBACScanTool := mcp.NewTool("run_rbac_security_scan", opts...)
 	ksServer.s.AddTool(runRBACScanTool, ksServer.toolHandler(runRBACScanTool.Name))
 }
 
 func createNetworkScanningTools(ksServer *KubescapeMcpserver) {
-	runNetworkScanTool := mcp.NewTool(
-		"run_network_security_scan",
+	opts := []mcp.ToolOption{
 		mcp.WithDescription("Run an on-demand, live Network security scan (evaluating only ingress and egress block policies) and return the failed resources."),
 		mcp.WithString("namespace",
 			mcp.Description("Namespace to scope the Network scan (optional, defaults to cluster-wide if omitted)"),
 		),
-	)
-
+	}
+	opts = append(opts, scanFilterOptions()...)
+	runNetworkScanTool := mcp.NewTool("run_network_security_scan", opts...)
 	ksServer.s.AddTool(runNetworkScanTool, ksServer.toolHandler(runNetworkScanTool.Name))
 }
 
 func createFrameworkScanningTools(ksServer *KubescapeMcpserver) {
-	runFrameworkScanTool := mcp.NewTool(
-		"run_framework_security_scan",
+	opts := []mcp.ToolOption{
 		mcp.WithDescription("Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the failed resources along with the compliance score."),
 		mcp.WithString("namespace",
 			mcp.Description("Namespace to scope the Framework scan (optional, defaults to cluster-wide if omitted)"),
@@ -1372,14 +1445,14 @@ func createFrameworkScanningTools(ksServer *KubescapeMcpserver) {
 			mcp.Required(),
 			mcp.Description("Name of the framework to scan (e.g. nsa, mitre, cis-v1.23-t1.0.1)"),
 		),
-	)
-
+	}
+	opts = append(opts, scanFilterOptions()...)
+	runFrameworkScanTool := mcp.NewTool("run_framework_security_scan", opts...)
 	ksServer.s.AddTool(runFrameworkScanTool, ksServer.toolHandler(runFrameworkScanTool.Name))
 }
 
 func createIaCScanningTools(ksServer *KubescapeMcpserver) {
-	iacScanTool := mcp.NewTool(
-		"scan_local_iac",
+	opts := []mcp.ToolOption{
 		mcp.WithDescription("Scan local Infrastructure-as-Code (Helm charts, Kustomize, YAML) for security misconfigurations"),
 		mcp.WithString("path",
 			mcp.Required(),
@@ -1388,33 +1461,53 @@ func createIaCScanningTools(ksServer *KubescapeMcpserver) {
 		mcp.WithString("framework",
 			mcp.Description("Framework to scan against (optional, defaults to nsa)"),
 		),
-	)
-
+	}
+	opts = append(opts, iacScanFilterOptions()...)
+	iacScanTool := mcp.NewTool("scan_local_iac", opts...)
 	ksServer.s.AddTool(iacScanTool, ksServer.toolHandler(iacScanTool.Name))
 }
 
 func createIaCControlScanningTool(ksServer *KubescapeMcpserver) {
-	iacControlScanTool := mcp.NewTool(
-		"scan_local_iac_controls",
+	opts := []mcp.ToolOption{
 		mcp.WithDescription("Scan local Infrastructure-as-Code (Helm charts, Kustomize, YAML) for specific controls by control ID. Use list_controls to discover valid IDs. Prefer scan_local_iac when you want full framework coverage."),
 		mcp.WithString("path",
 			mcp.Required(),
 			mcp.Description("Absolute or relative path to the local directory or file (e.g., /path/to/helm-chart or /path/to/manifest.yaml)"),
 		),
 		withControlIDsProperty("Control IDs to scan against: a comma-separated string (e.g. \"C-0012,C-0017\") or an array of strings (e.g. [\"C-0012\",\"C-0017\"]). At least one ID is required."),
-	)
+	}
+	opts = append(opts, iacScanFilterOptions()...)
+	iacControlScanTool := mcp.NewTool("scan_local_iac_controls", opts...)
 	ksServer.s.AddTool(iacControlScanTool, ksServer.toolHandler(iacControlScanTool.Name))
 }
 
+func createManifestScanningTool(ksServer *KubescapeMcpserver) {
+	opts := []mcp.ToolOption{
+		mcp.WithDescription("Scan a Kubernetes YAML or JSON manifest string in memory for security misconfigurations, without requiring a file path. Supports multi-document YAML manifests."),
+		mcp.WithString("manifest",
+			mcp.Required(),
+			mcp.Description("Raw YAML or JSON Kubernetes manifest content (can contain multiple documents separated by '---')"),
+		),
+		mcp.WithString("framework",
+			mcp.Description("Framework to scan against (optional, defaults to nsa)"),
+		),
+		withOptionalControlIDsProperty("Control IDs to scan against: a comma-separated string (e.g. \"C-0012,C-0017\") or an array of strings (optional). Overrides framework when provided."),
+	}
+	opts = append(opts, iacScanFilterOptions()...)
+	manifestScanTool := mcp.NewTool("scan_manifest", opts...)
+	ksServer.s.AddTool(manifestScanTool, ksServer.toolHandler(manifestScanTool.Name))
+}
+
 func createControlScanningTools(ksServer *KubescapeMcpserver) {
-	runControlScanTool := mcp.NewTool(
-		"scan_controls",
+	opts := []mcp.ToolOption{
 		mcp.WithDescription("Run an on-demand, live security scan restricted to a given set of controls by control ID (e.g. C-0012, C-0017) and return the failed resources. Use list_controls to discover valid IDs first."),
 		withControlIDsProperty("Control IDs to scan: a comma-separated string (e.g. \"C-0012,C-0017\") or an array of strings (e.g. [\"C-0012\",\"C-0017\"]). At least one ID is required."),
 		mcp.WithString("namespace",
 			mcp.Description("Namespace to scope the scan (optional, defaults to cluster-wide if omitted)"),
 		),
-	)
+	}
+	opts = append(opts, scanFilterOptions()...)
+	runControlScanTool := mcp.NewTool("scan_controls", opts...)
 	ksServer.s.AddTool(runControlScanTool, ksServer.toolHandler(runControlScanTool.Name))
 }
 
@@ -1422,18 +1515,37 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 	listFrameworksTool := mcp.NewTool(
 		"list_frameworks",
 		mcp.WithDescription("List the names of all security frameworks available for scanning (e.g. nsa, mitre, cis-v1.23-t1.0.1). Use a returned name as the framework_name argument to run_framework_security_scan."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithString("search",
+			mcp.Description("Optional substring to filter framework names case-insensitively (e.g. \"cis\")"),
+		),
 	)
 	listControlsTool := mcp.NewTool(
 		"list_controls",
-		mcp.WithDescription("List the available security controls with their IDs, names, and the frameworks they belong to. Returns total, returned, truncated, and controls; pass framework to filter and use next_offset to request the next page. Use a returned ID as a control_ids value in scan_controls."),
+		mcp.WithDescription("List the available security controls with their IDs, names, and the frameworks they belong to. Returns total, returned, truncated, and controls; pass framework or search to filter and use next_offset to request the next page. Use a returned ID as a control_ids value in scan_controls."),
+		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithString("framework",
 			mcp.Description("Only return the controls of this framework, e.g. \"NSA\" (optional, case-insensitive; see list_frameworks)"),
+		),
+		mcp.WithString("search",
+			mcp.Description("Substring to search for in control IDs, names, or frameworks (optional, case-insensitive; e.g. \"privileged\", \"container\", \"CIS-1.1\")"),
 		),
 		mcp.WithNumber("limit",
 			mcp.Description("Maximum number of controls to return (optional, default 100, maximum 500)"),
 		),
 		mcp.WithNumber("offset",
 			mcp.Description("Number of controls to skip; pass the previous response's next_offset to get the next page (optional, default 0)"),
+		),
+	)
+	listControlsConfigTool := mcp.NewTool(
+		"list_controls_config",
+		mcp.WithDescription("List configurable control parameters, their resolved values, descriptions, and the security controls that consume them. Pass control_id to inspect parameters affecting a specific control, or search to filter by keyword."),
+		mcp.WithReadOnlyHintAnnotation(true),
+		mcp.WithString("control_id",
+			mcp.Description("Optional control ID (e.g. \"C-0016\") to only list configuration inputs read by that control"),
+		),
+		mcp.WithString("search",
+			mcp.Description("Optional keyword to filter configuration entries by name, title, description, or control ID case-insensitively"),
 		),
 	)
 	listAdmissionPoliciesTool := mcp.NewTool(
@@ -1462,6 +1574,7 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 	)
 	ksServer.s.AddTool(listFrameworksTool, ksServer.toolHandler(listFrameworksTool.Name))
 	ksServer.s.AddTool(listControlsTool, ksServer.toolHandler(listControlsTool.Name))
+	ksServer.s.AddTool(listControlsConfigTool, ksServer.toolHandler(listControlsConfigTool.Name))
 	ksServer.s.AddTool(validateScanSelectionTool, ksServer.toolHandler(validateScanSelectionTool.Name))
 	ksServer.s.AddTool(listAdmissionPoliciesTool, ksServer.toolHandler(listAdmissionPoliciesTool.Name))
 	ksServer.s.AddTool(createAdmissionPolicyBindingTool, ksServer.toolHandler(createAdmissionPolicyBindingTool.Name))

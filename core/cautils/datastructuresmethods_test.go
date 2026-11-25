@@ -273,6 +273,13 @@ func TestIsRuleKubescapeVersionCompatible(t *testing.T) {
 	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_133.Attributes, buildNumberMock, make(map[string]struct{})))
 	assert.True(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_134.Attributes, buildNumberMock, make(map[string]struct{})))
 
+	// a non-semver build number ("dev" from go build / make build) behaves like a local build
+	buildNumberMock = "dev"
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_131.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_132.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_133.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.True(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_134.Attributes, buildNumberMock, make(map[string]struct{})))
+
 	// should only use rules that version is in range of use
 	buildNumberMock = "v1.0.130"
 	assert.True(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_131.Attributes, buildNumberMock, make(map[string]struct{})))
@@ -637,4 +644,113 @@ func TestIsRuleKubescapeVersionCompatible_NoWarningForValidSemverWithoutV(t *tes
 	require.NoError(t, err)
 	assert.NotContains(t, string(b), "invalid useFromKubescapeVersion")
 	assert.NotContains(t, string(b), "invalid useUntilKubescapeVersion")
+}
+
+func TestPolicies_Set_NilSafety(t *testing.T) {
+	control := reporthandling.Control{
+		ControlID: "C-0001",
+		Rules: []reporthandling.PolicyRule{
+			{PortalBase: armotypes.PortalBase{Name: "test-rule"}},
+		},
+	}
+	framework := reporthandling.Framework{
+		PortalBase: armotypes.PortalBase{
+			Name: "test-framework",
+		},
+		Controls: []reporthandling.Control{control},
+	}
+
+	// 1. Calling Set on nil policies pointer should not panic.
+	var nilPolicies *Policies
+	assert.NotPanics(t, func() {
+		nilPolicies.Set([]reporthandling.Framework{framework}, nil, reporthandling.ScopeFile)
+	})
+
+	// 2. Calling Set on &Policies{} with nil Controls map should not panic and initialize Controls.
+	emptyPolicies := &Policies{}
+	assert.Nil(t, emptyPolicies.Controls)
+	assert.NotPanics(t, func() {
+		emptyPolicies.Set([]reporthandling.Framework{framework}, nil, reporthandling.ScopeFile)
+	})
+	assert.NotNil(t, emptyPolicies.Controls)
+	assert.Contains(t, emptyPolicies.Controls, "C-0001")
+	assert.Contains(t, emptyPolicies.Frameworks, "test-framework")
+}
+
+func TestPolicies_Set_DeduplicatesFrameworkNames(t *testing.T) {
+	control1 := reporthandling.Control{
+		ControlID: "C-0001",
+		Rules: []reporthandling.PolicyRule{
+			{Name: "rule-1"},
+		},
+	}
+	control2 := reporthandling.Control{
+		ControlID: "C-0002",
+		Rules: []reporthandling.PolicyRule{
+			{Name: "rule-2"},
+		},
+	}
+	frameworkA1 := reporthandling.Framework{
+		Name:     "cis-aks",
+		Controls: []reporthandling.Control{control1},
+	}
+	frameworkA2 := reporthandling.Framework{
+		Name:     "cis-aks",
+		Controls: []reporthandling.Control{control2},
+	}
+	frameworkB := reporthandling.Framework{
+		Name:     "nsa",
+		Controls: []reporthandling.Control{control1},
+	}
+
+	policies := NewPolicies()
+	// Set with duplicate framework names in input slice
+	policies.Set([]reporthandling.Framework{frameworkA1, frameworkA2, frameworkB}, nil, reporthandling.ScopeFile)
+	assert.Equal(t, []string{"cis-aks", "nsa"}, policies.Frameworks)
+
+	// Repeated call to Set should not introduce duplicates into existing Frameworks slice
+	policies.Set([]reporthandling.Framework{frameworkA1, frameworkB}, nil, reporthandling.ScopeFile)
+	assert.Equal(t, []string{"cis-aks", "nsa"}, policies.Frameworks)
+}
+
+func TestShouldSkipRuleWithWarned_NilWarnedMap(t *testing.T) {
+	ruleInvalidUntil := reporthandling.PolicyRule{
+		PortalBase: armotypes.PortalBase{
+			Name: "rule-invalid-until",
+			Attributes: map[string]any{
+				"useUntilKubescapeVersion": "invalid-semver",
+			},
+		},
+	}
+	ruleInvalidFrom := reporthandling.PolicyRule{
+		PortalBase: armotypes.PortalBase{
+			Name: "rule-invalid-from",
+			Attributes: map[string]any{
+				"useFromKubescapeVersion": "invalid-semver",
+			},
+		},
+	}
+	ruleNonStringUntil := reporthandling.PolicyRule{
+		PortalBase: armotypes.PortalBase{
+			Name: "rule-nonstring-until",
+			Attributes: map[string]any{
+				"useUntilKubescapeVersion": 123,
+			},
+		},
+	}
+	ruleNonStringFrom := reporthandling.PolicyRule{
+		PortalBase: armotypes.PortalBase{
+			Name: "rule-nonstring-from",
+			Attributes: map[string]any{
+				"useFromKubescapeVersion": true,
+			},
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		assert.True(t, ShouldSkipRuleWithWarned(reporthandling.Control{}, ruleInvalidUntil, reporthandling.ScopeCluster, nil))
+		assert.False(t, ShouldSkipRuleWithWarned(reporthandling.Control{}, ruleInvalidFrom, reporthandling.ScopeCluster, nil))
+		assert.True(t, ShouldSkipRuleWithWarned(reporthandling.Control{}, ruleNonStringUntil, reporthandling.ScopeCluster, nil))
+		assert.True(t, ShouldSkipRuleWithWarned(reporthandling.Control{}, ruleNonStringFrom, reporthandling.ScopeCluster, nil))
+	})
 }

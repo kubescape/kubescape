@@ -145,3 +145,21 @@ func TestRootCmd_NilKubescape(t *testing.T) {
 	err := cmd.Execute()
 	require.EqualError(t, err, "uninitialized kubescape interface")
 }
+
+func TestLoggerCompletionPreservesCase(t *testing.T) {
+	previous := rootInfo
+	t.Cleanup(func() {
+		rootInfo = previous
+	})
+
+	cmd := getRootCmd(nil, "", "", "")
+
+	complete, ok := cmd.GetFlagCompletionFunc("logger")
+	require.True(t, ok)
+
+	suggestions, directive := complete(cmd, nil, "W")
+
+	assert.Contains(t, suggestions, "Warning")
+	assert.NotContains(t, suggestions, "warning")
+	assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+}

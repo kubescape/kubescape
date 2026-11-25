@@ -195,3 +195,41 @@ func TestBuildNamespaceSummaries_UnsetComplianceScoreFallsBackTo100(t *testing.T
 	require.Len(t, summaries, 1)
 	assert.Equal(t, float32(100), summaries[0].ComplianceScore)
 }
+
+// TestBuildNamespaceSummaries_PaddedNamespaceNormalized tests that surrounding
+// whitespace in resource namespaces is trimmed and whitespace-only namespaces
+// fall back to ClusterScopedNamespace.
+func TestBuildNamespaceSummaries_PaddedNamespaceNormalized(t *testing.T) {
+	pod1 := namespacedPod("pod-1", " prod ")
+	pod2 := namespacedPod("pod-2", "prod")
+	podWhitespace := namespacedPod("pod-ws", "   ")
+
+	allResources := map[string]workloadinterface.IMetadata{
+		pod1.GetID():          pod1,
+		pod2.GetID():          pod2,
+		podWhitespace.GetID(): podWhitespace,
+	}
+
+	ctrl := reportsummary.ControlSummary{ControlID: "C-1"}
+	ctrl.Append(&apis.StatusInfo{InnerStatus: apis.StatusPassed}, pod1.GetID())
+	ctrl.Append(&apis.StatusInfo{InnerStatus: apis.StatusPassed}, pod2.GetID())
+	ctrl.Append(&apis.StatusInfo{InnerStatus: apis.StatusFailed}, podWhitespace.GetID())
+
+	summaries := BuildNamespaceSummaries(reportsummary.ControlSummaries{"C-1": ctrl}, allResources)
+	require.Len(t, summaries, 2)
+
+	byNamespace := make(map[string]NamespaceSummary, len(summaries))
+	for _, s := range summaries {
+		byNamespace[s.Namespace] = s
+	}
+
+	prod, ok := byNamespace["prod"]
+	require.True(t, ok, "padded ' prod ' and 'prod' must be merged into single 'prod' namespace")
+	assert.Equal(t, 2, prod.ResourceCount)
+	assert.Equal(t, float32(100), prod.ComplianceScore)
+
+	clusterScoped, ok := byNamespace[ClusterScopedNamespace]
+	require.True(t, ok, "whitespace-only namespace must fall back to ClusterScopedNamespace")
+	assert.Equal(t, 1, clusterScoped.ResourceCount)
+	assert.Equal(t, float32(0), clusterScoped.ComplianceScore)
+}

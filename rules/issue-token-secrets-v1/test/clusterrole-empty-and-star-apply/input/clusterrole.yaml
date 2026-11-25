@@ -1,0 +1,11 @@
+# "" authorizes a plain create, but a patch narrowed to "" and "*" reaches no secret,
+# so the created secret cannot be turned into a token secret through apply.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: named-secret-applier
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["", "*"]
+  verbs: ["create", "patch"]
