@@ -276,7 +276,7 @@ func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) (
 
 	tenant := tenantConfigFunc(ctx, downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
 
-	g, err := policyGetterFunc(ctx, nil, tenant.GetAccountID(), true, nil, false)
+	g, err := policyGetterFunc(ctx, nil, tenant.GetAccountID(), true, nil, false, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +378,7 @@ func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]
 
 	tenant := tenantConfigFunc(ctx, downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
 
-	g, err := policyGetterFunc(ctx, nil, tenant.GetAccountID(), false, nil, false)
+	g, err := policyGetterFunc(ctx, nil, tenant.GetAccountID(), false, nil, false, nil)
 	if err != nil {
 		return nil, err
 	}

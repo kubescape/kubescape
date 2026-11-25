@@ -591,7 +591,7 @@ func withAttackTracksGetter(t *testing.T, g getter.IAttackTracksGetter, err erro
 func withPolicyGetter(t *testing.T, g getter.IPolicyGetter, err error) {
 	t.Helper()
 	orig := policyGetterFunc
-	policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
+	policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool, []cautils.PolicyIdentifier) (getter.IPolicyGetter, error) {
 		return g, err
 	}
 	t.Cleanup(func() { policyGetterFunc = orig })

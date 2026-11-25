@@ -168,7 +168,7 @@ func naturalSortControls(entries []metav1.ControlListEntry) []metav1.ControlList
 
 func listFrameworks(ctx context.Context, listPolicies *metav1.ListPolicies) ([]string, error) {
 	tenant := cautils.GetTenantConfig(ctx, listPolicies.AccountID, listPolicies.AccessKey, "", "", getKubernetesApi()) // change k8sinterface
-	policyGetter, err := getPolicyGetter(ctx, nil, tenant.GetAccountID(), true, nil, false)
+	policyGetter, err := getPolicyGetter(ctx, nil, tenant.GetAccountID(), true, nil, false, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +179,7 @@ func listFrameworks(ctx context.Context, listPolicies *metav1.ListPolicies) ([]s
 func listControls(ctx context.Context, listPolicies *metav1.ListPolicies) ([]metav1.ControlListEntry, error) {
 	tenant := cautils.GetTenantConfig(ctx, listPolicies.AccountID, listPolicies.AccessKey, "", "", getKubernetesApi()) // change k8sinterface
 
-	policyGetter, err := getPolicyGetter(ctx, nil, tenant.GetAccountID(), false, nil, false)
+	policyGetter, err := getPolicyGetter(ctx, nil, tenant.GetAccountID(), false, nil, false, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -575,7 +575,7 @@ func listControlsConfig(ctx context.Context, listPolicies *metav1.ListPolicies) 
 	if err != nil {
 		return nil, err
 	}
-	policyGetter, err := getPolicyGetter(ctx, nil, tenant.GetAccountID(), false, downloadReleasedPolicy, false)
+	policyGetter, err := getPolicyGetter(ctx, nil, tenant.GetAccountID(), false, downloadReleasedPolicy, false, nil)
 	if err != nil {
 		return nil, err
 	}
