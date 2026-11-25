@@ -984,3 +984,38 @@ func TestResourceTable_NilSafety(t *testing.T) {
 		assert.Len(t, formatted, 2)
 	})
 }
+
+// A manifest controls metadata, so its name and namespace must not reach the
+// terminal as escape sequences (OSC 52 clipboard writes, OSC 8 links).
+func TestResourceTableStripsControlCharacters(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "resource-table-*.txt")
+	assert.NoError(t, err)
+
+	const resourceID = "/v1/ns/Pod/evil"
+	session := cautils.NewOPASessionObjMock()
+	session.AllResources[resourceID] = workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name":      "a\x1b]52;c;ZWNobw==\x07b",
+			"namespace": "ns\x1b]8;;https://evil.example/\x07",
+		},
+	})
+	session.ResourcesResult[resourceID] = resourcesresults.Result{
+		ResourceID: resourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{{
+			ControlID: "C-0001",
+			Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		}},
+	}
+
+	(&PrettyPrinter{writer: f}).resourceTable(session)
+
+	assert.NoError(t, f.Close())
+	out, err := os.ReadFile(f.Name())
+	assert.NoError(t, err)
+	assert.Contains(t, string(out), "Name: a]52;c;ZWNobw==b\n")
+	assert.Contains(t, string(out), "Namespace: ns]8;;https://evil.example/\n")
+	assert.NotContains(t, string(out), "\x1b]")
+	assert.NotContains(t, string(out), "\x07")
+}

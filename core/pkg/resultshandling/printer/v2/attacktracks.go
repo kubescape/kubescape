@@ -118,9 +118,9 @@ func (prettyPrinter *PrettyPrinter) printAttackTracks(opaSessionObj *cautils.OPA
 		}
 
 		fmt.Fprintf(prettyPrinter.writer, "\n%s\n", getSeparator("^"))
-		fmt.Fprintf(prettyPrinter.writer, "Name: %s\n", resourceObj.GetName())
-		fmt.Fprintf(prettyPrinter.writer, "Kind: %s\n", resourceObj.GetKind())
-		fmt.Fprintf(prettyPrinter.writer, "Namespace: %s\n\n", resourceObj.GetNamespace())
+		fmt.Fprintf(prettyPrinter.writer, "Name: %s\n", sanitizeText(resourceObj.GetName()))
+		fmt.Fprintf(prettyPrinter.writer, "Kind: %s\n", sanitizeText(resourceObj.GetKind()))
+		fmt.Fprintf(prettyPrinter.writer, "Namespace: %s\n\n", sanitizeText(resourceObj.GetNamespace()))
 
 		fmt.Fprintf(prettyPrinter.writer, "Score: %.2f\n", resource.Score)
 		fmt.Fprintf(prettyPrinter.writer, "Severity: %s\n", apis.SeverityNumberToString(resource.Severity))

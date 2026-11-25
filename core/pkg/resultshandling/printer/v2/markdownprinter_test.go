@@ -554,7 +554,7 @@ func TestMdSanitizeText(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, mdSanitizeText(tc.input))
+			assert.Equal(t, tc.want, sanitizeText(tc.input))
 		})
 	}
 }
