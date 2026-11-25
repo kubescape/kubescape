@@ -1666,7 +1666,7 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 	overlayExecutions := make([]overlayExecution, 0, len(overlayDirs))
 	for _, dir := range overlayDirs {
 		fixes := overlayFixesByDir[dir]
-		plan, err := planOverlayChanges(dir, fixes)
+		plan, err := planOverlayChanges(dir, fixes, h.sourceRoot)
 		if err != nil {
 			errors = append(errors, fmt.Errorf("failed to plan kustomize overlay fixes in %s: %w", dir, err))
 			continue
@@ -1711,11 +1711,25 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 				if overwritten, ok := scanned.overwritesScannedManifest(destPatchPath); ok {
 					return 0, []error{fmt.Errorf("output directory %q holds scanned manifests: writing overlay patch %q would overwrite %q. Choose a directory outside the scanned ones, or omit --output-dir to fix the manifests in place", h.fixInfo.OutputDir, sanitizeForLog(destPatchPath), sanitizeForLog(overwritten))}
 				}
+				for origPath, ordinaryDest := range outputPaths {
+					destClean := filepath.Clean(destPatchPath)
+					ordClean := filepath.Clean(ordinaryDest)
+					if ordClean == destClean || isLexicallyWithin(destClean, ordClean) || isLexicallyWithin(ordClean, destClean) {
+						return 0, []error{fmt.Errorf("conflict: overlay patch destination %q conflicts with ordinary output destination for %q", sanitizeForLog(destPatchPath), sanitizeForLog(origPath))}
+					}
+				}
 			}
-			if exec.plan.updatedKust != exec.plan.originalKust {
+			if exec.plan.updatedKust != exec.plan.originalKust || len(exec.plan.patches) > 0 {
 				destKustPath := filepath.Join(exec.destOverlayDir, exec.plan.kustFileName)
 				if overwritten, ok := scanned.overwritesScannedManifest(destKustPath); ok {
 					return 0, []error{fmt.Errorf("output directory %q holds scanned manifests: writing %s %q would overwrite %q. Choose a directory outside the scanned ones, or omit --output-dir to fix the manifests in place", h.fixInfo.OutputDir, exec.plan.kustFileName, sanitizeForLog(destKustPath), sanitizeForLog(overwritten))}
+				}
+				for origPath, ordinaryDest := range outputPaths {
+					destClean := filepath.Clean(destKustPath)
+					ordClean := filepath.Clean(ordinaryDest)
+					if origPath != exec.plan.kustFile && (ordClean == destClean || isLexicallyWithin(destClean, ordClean) || isLexicallyWithin(ordClean, destClean)) {
+						return 0, []error{fmt.Errorf("conflict: overlay %s destination %q conflicts with ordinary output destination for %q", exec.plan.kustFileName, sanitizeForLog(destKustPath), sanitizeForLog(origPath))}
+					}
 				}
 			}
 		}
@@ -1730,11 +1744,11 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 	}
 
 	for _, exec := range overlayExecutions {
-		if err := applyKustomizeOverlayChanges(ctx, exec.plan, output, exec.destOverlayDir); err != nil {
+		if err := applyKustomizeOverlayChanges(ctx, exec.plan, output, exec.destOverlayDir, h.sourceRoot); err != nil {
 			errors = append(errors, fmt.Errorf("failed to apply kustomize overlay fixes in %s: %w", exec.dir, err))
 			continue
 		}
-		if len(exec.plan.patches) > 0 || exec.plan.updatedKust != exec.plan.originalKust {
+		if exec.plan.hasModifications(output != nil) {
 			for _, fix := range exec.fixes {
 				updatedFiles[fix.FilePath] = true
 			}

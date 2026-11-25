@@ -45,7 +45,8 @@ type KustomizeSkippedResource struct {
 type kustomizePatchOp struct {
 	Op    string      `yaml:"op"`
 	Path  string      `yaml:"path"`
-	Value interface{} `yaml:"value"`
+	From  string      `yaml:"from,omitempty"`
+	Value interface{} `yaml:"value,omitempty"`
 }
 
 // kustomizeTarget identifies which Kubernetes resources a patch applies to.

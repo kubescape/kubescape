@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
@@ -85,9 +87,15 @@ func overlayPatchFileName(resource *reporthandling.Resource, target ...kustomize
 	group, version := parseGroupVersion(resource.GetApiVersion())
 	name := resource.GetName()
 	namespace := resource.GetNamespace()
-	if len(target) > 0 && target[0].Name != "" {
-		name = target[0].Name
-		namespace = target[0].Namespace
+	if len(target) > 0 {
+		if target[0].Group != "" || target[0].Version != "" {
+			group = target[0].Group
+			version = target[0].Version
+		}
+		if target[0].Name != "" {
+			name = target[0].Name
+			namespace = target[0].Namespace
+		}
 	}
 	key := resourceKey{
 		Group:     group,
@@ -132,13 +140,317 @@ func compareFixPaths(pathA, pathB string) bool {
 	return len(partsA) < len(partsB)
 }
 
+// findContainersInObject extracts the container slice with the given field name (e.g. "containers" or "initContainers")
+// from a workload object (Deployment, DaemonSet, StatefulSet, Job, CronJob, Pod).
+func findContainersInObject(obj map[string]interface{}, containerField string) []interface{} {
+	if obj == nil {
+		return nil
+	}
+	spec, ok := obj["spec"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	// Direct Pod spec
+	if cList, ok := spec[containerField].([]interface{}); ok {
+		return cList
+	}
+	// CronJob: spec.jobTemplate.spec.template.spec.containers
+	if jobTemplate, ok := spec["jobTemplate"].(map[string]interface{}); ok {
+		if jtSpec, ok := jobTemplate["spec"].(map[string]interface{}); ok {
+			if tmpl, ok := jtSpec["template"].(map[string]interface{}); ok {
+				if tSpec, ok := tmpl["spec"].(map[string]interface{}); ok {
+					if cList, ok := tSpec[containerField].([]interface{}); ok {
+						return cList
+					}
+				}
+			}
+		}
+	}
+	// Deployment, DaemonSet, StatefulSet, Job: spec.template.spec.containers
+	if tmpl, ok := spec["template"].(map[string]interface{}); ok {
+		if tSpec, ok := tmpl["spec"].(map[string]interface{}); ok {
+			if cList, ok := tSpec[containerField].([]interface{}); ok {
+				return cList
+			}
+		}
+	}
+	return nil
+}
+
+var bareYAMLPathKey = regexp.MustCompile(`^[A-Za-z0-9_/-]+$`)
+
+func formatYAMLPath(parts []yamlPathPart) string {
+	var sb strings.Builder
+	for i, p := range parts {
+		if p.sequence {
+			fmt.Fprintf(&sb, "[%d]", p.index)
+		} else {
+			if i > 0 {
+				sb.WriteString(".")
+			}
+			if !bareYAMLPathKey.MatchString(p.key) {
+				fmt.Fprintf(&sb, "%q", p.key)
+			} else {
+				sb.WriteString(p.key)
+			}
+		}
+	}
+	return sb.String()
+}
+
+func stringContainsContainerMod(s string) bool {
+	lower := strings.ToLower(s)
+	return strings.Contains(lower, "container")
+}
+
+func patchTargetsResource(targetMap map[string]interface{}, kind, name string) bool {
+	if targetMap == nil {
+		return false
+	}
+	tKind, _ := targetMap["kind"].(string)
+	tName, _ := targetMap["name"].(string)
+	if tKind != "" && !strings.EqualFold(tKind, kind) {
+		return false
+	}
+	if tName != "" {
+		if tName == name || strings.Contains(name, tName) || strings.Contains(tName, name) {
+			return true
+		}
+		return false
+	}
+	return true
+}
+
+func stringContainsResourceAndContainers(content, targetKind, targetName string) bool {
+	if content == "" {
+		return false
+	}
+	if !stringContainsContainerMod(content) {
+		return false
+	}
+	if targetKind != "" && !strings.Contains(content, targetKind) {
+		return false
+	}
+	if targetName != "" && !strings.Contains(content, targetName) {
+		return false
+	}
+	return true
+}
+
+func readPatchContent(pPath string, overlayDir string, sourceRoot *os.Root) string {
+	if pPath == "" {
+		return ""
+	}
+	cleanPath := filepath.Clean(filepath.FromSlash(pPath))
+	if overlayDir != "" && !filepath.IsAbs(cleanPath) {
+		cleanPath = filepath.Join(overlayDir, cleanPath)
+	}
+	if sourceRoot != nil {
+		if rel, err := pathRelativeToRoot(sourceRoot, cleanPath); err == nil {
+			if content, err := readBoundedManifestFromRoot(sourceRoot, rel); err == nil {
+				return string(content)
+			}
+		}
+		return ""
+	}
+	if dirRoot, err := os.OpenRoot(filepath.Dir(cleanPath)); err == nil {
+		defer dirRoot.Close()
+		if content, err := readBoundedManifestFromRoot(dirRoot, filepath.Base(cleanPath)); err == nil {
+			return string(content)
+		}
+	}
+	return ""
+}
+
+func hasPrecedingContainerPatches(meta kustomizationMeta, targetKind, targetName, selfPatchName, overlayDir string, sourceRoot *os.Root) bool {
+	for _, raw := range meta.Patches {
+		switch p := raw.(type) {
+		case string:
+			if selfPatchName != "" && (p == selfPatchName || filepath.Base(p) == selfPatchName) {
+				continue
+			}
+			content := readPatchContent(p, overlayDir, sourceRoot)
+			if stringContainsResourceAndContainers(content, targetKind, targetName) {
+				return true
+			}
+		case map[string]interface{}:
+			pPath, _ := p["path"].(string)
+			if selfPatchName != "" && (pPath == selfPatchName || filepath.Base(pPath) == selfPatchName) {
+				continue
+			}
+			target, _ := p["target"].(map[string]interface{})
+			targetsWorkload := target == nil || patchTargetsResource(target, targetKind, targetName)
+			if !targetsWorkload {
+				continue
+			}
+			if inlinePatch, ok := p["patch"].(string); ok && inlinePatch != "" {
+				if stringContainsContainerMod(inlinePatch) {
+					return true
+				}
+			}
+			if pPath != "" {
+				content := readPatchContent(pPath, overlayDir, sourceRoot)
+				if stringContainsContainerMod(content) {
+					return true
+				}
+			}
+		}
+	}
+
+	for _, raw := range meta.PatchesStrategicMerge {
+		switch p := raw.(type) {
+		case string:
+			if selfPatchName != "" && (p == selfPatchName || filepath.Base(p) == selfPatchName) {
+				continue
+			}
+			content := readPatchContent(p, overlayDir, sourceRoot)
+			if stringContainsResourceAndContainers(content, targetKind, targetName) {
+				return true
+			}
+		case map[string]interface{}:
+			if inlinePatch, ok := p["patch"].(string); ok {
+				if stringContainsResourceAndContainers(inlinePatch, targetKind, targetName) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+func hasSubsequentJson6902ContainerPatches(meta kustomizationMeta, targetKind, targetName, overlayDir string, sourceRoot *os.Root) bool {
+	for _, raw := range meta.PatchesJson6902 {
+		p, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		target, _ := p["target"].(map[string]interface{})
+		if target != nil && !patchTargetsResource(target, targetKind, targetName) {
+			continue
+		}
+		if inlinePatch, ok := p["patch"].(string); ok && stringContainsContainerMod(inlinePatch) {
+			return true
+		}
+		if pPath, ok := p["path"].(string); ok && pPath != "" {
+			content := readPatchContent(pPath, overlayDir, sourceRoot)
+			if stringContainsContainerMod(content) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// remapContainerFixPath resolves the container index in fp against the origin object state
+// (as it exists when Kustomize patches run) rather than the rendered object state.
+// If preceding patches modify containers before the remediation point, the intermediate
+// patched state cannot be safely established from origin alone, and the layout is rejected.
+// If the container was injected by a subsequent overlay transformation (e.g. patchesJson6902),
+// the index is mapped back to the origin container position.
+func remapContainerFixPath(renderedObj, originObj map[string]interface{}, fp armotypes.FixPath, meta kustomizationMeta, selfPatchName, overlayDir string, sourceRoot *os.Root) (armotypes.FixPath, error) {
+	parts, err := parseYAMLPath(fp.Path)
+	if err != nil || len(parts) < 2 {
+		return fp, nil
+	}
+
+	for i := 0; i < len(parts)-1; i++ {
+		pKey := parts[i]
+		pSeq := parts[i+1]
+		if !pKey.sequence && pSeq.sequence && (pKey.key == "containers" || pKey.key == "initContainers" || pKey.key == "ephemeralContainers") {
+			renderedContainers := findContainersInObject(renderedObj, pKey.key)
+			if renderedContainers == nil || pSeq.index >= len(renderedContainers) {
+				return fp, nil
+			}
+			cMap, ok := renderedContainers[pSeq.index].(map[string]interface{})
+			if !ok {
+				return fp, nil
+			}
+			cName, _ := cMap["name"].(string)
+			if cName == "" {
+				return fp, nil
+			}
+
+			if originObj != nil {
+				originContainers := findContainersInObject(originObj, pKey.key)
+				originIdx := -1
+				for oIdx, oC := range originContainers {
+					if oMap, ok := oC.(map[string]interface{}); ok {
+						if oMap["name"] == cName {
+							originIdx = oIdx
+							break
+						}
+					}
+				}
+				if originIdx == -1 {
+					return fp, fmt.Errorf("unsupported: cannot resolve container index for container %q at Kustomize patches stage: container not present in origin manifest", cName)
+				}
+				if originIdx != pSeq.index {
+					targetKind := ""
+					targetName := ""
+					if renderedObj != nil {
+						targetKind, _ = renderedObj["kind"].(string)
+						if metaMap, ok := renderedObj["metadata"].(map[string]interface{}); ok {
+							targetName, _ = metaMap["name"].(string)
+						}
+					}
+					if hasPrecedingContainerPatches(meta, targetKind, targetName, selfPatchName, overlayDir, sourceRoot) {
+						return fp, fmt.Errorf("unsupported: cannot resolve container index for container %q in %s/%s: preceding patches modify resource container layout before remediation", cName, targetKind, targetName)
+					}
+					if !hasSubsequentJson6902ContainerPatches(meta, targetKind, targetName, overlayDir, sourceRoot) {
+						return fp, fmt.Errorf("unsupported: cannot resolve container index for container %q in %s/%s: container index shifted by unknown transformation", cName, targetKind, targetName)
+					}
+					parts[i+1].index = originIdx
+					fp.Path = formatYAMLPath(parts)
+				}
+			} else {
+				targetKind := ""
+				targetName := ""
+				if renderedObj != nil {
+					targetKind, _ = renderedObj["kind"].(string)
+					if metaMap, ok := renderedObj["metadata"].(map[string]interface{}); ok {
+						targetName, _ = metaMap["name"].(string)
+					}
+				}
+				if hasPrecedingContainerPatches(meta, targetKind, targetName, selfPatchName, overlayDir, sourceRoot) ||
+					hasSubsequentJson6902ContainerPatches(meta, targetKind, targetName, overlayDir, sourceRoot) {
+					return fp, fmt.Errorf("unsupported: cannot resolve container index for container %q in %s/%s: origin manifest is unreadable and overlay modifies containers", cName, targetKind, targetName)
+				}
+			}
+			break
+		}
+	}
+
+	return fp, nil
+}
+
 // buildOverlayPatchForResource compiles all FixPaths for a resource into RFC 6902 patch operations.
-func buildOverlayPatchForResource(fix ResourceFixInfo) ([]kustomizePatchOp, error) {
+func buildOverlayPatchForResource(fix ResourceFixInfo, opts ...interface{}) ([]kustomizePatchOp, error) {
 	if fix.Resource == nil {
 		return nil, errors.New("resource is nil")
 	}
 
+	var meta kustomizationMeta
+	var sourceRoot *os.Root
+	var overlayDir string
+	for _, opt := range opts {
+		switch v := opt.(type) {
+		case kustomizationMeta:
+			meta = v
+		case *os.Root:
+			sourceRoot = v
+		case string:
+			overlayDir = v
+		}
+	}
+
 	workingObj := deepCopyMap(fix.Resource.GetObject())
+
+	originObj, _ := tryResolveOriginObject(fix, meta, sourceRoot)
+	targetExecutionObj := workingObj
+	if originObj != nil {
+		targetExecutionObj = deepCopyMap(originObj)
+	}
 
 	exprKeys := make([]string, 0, len(fix.YamlExpressions))
 	for k := range fix.YamlExpressions {
@@ -148,6 +460,8 @@ func buildOverlayPatchForResource(fix ResourceFixInfo) ([]kustomizePatchOp, erro
 		return compareFixPaths(exprKeys[i], exprKeys[j])
 	})
 
+	selfPatchName := overlayPatchFileName(fix.Resource)
+
 	var concreteFixPaths []armotypes.FixPath
 	for _, key := range exprKeys {
 		fp := fix.YamlExpressions[key]
@@ -155,7 +469,13 @@ func buildOverlayPatchForResource(fix ResourceFixInfo) ([]kustomizePatchOp, erro
 			continue
 		}
 		expanded := expandWildcardFixPaths(workingObj, fp)
-		concreteFixPaths = append(concreteFixPaths, expanded...)
+		for _, efp := range expanded {
+			remapped, err := remapContainerFixPath(workingObj, originObj, efp, meta, selfPatchName, overlayDir, sourceRoot)
+			if err != nil {
+				return nil, err
+			}
+			concreteFixPaths = append(concreteFixPaths, remapped)
+		}
 	}
 
 	// Sort concreteFixPaths so indexed additions (e.g. args[0], args[1]) are resolved in order
@@ -165,7 +485,7 @@ func buildOverlayPatchForResource(fix ResourceFixInfo) ([]kustomizePatchOp, erro
 
 	var ops []kustomizePatchOp
 	for _, fp := range concreteFixPaths {
-		patchOps, err := resolveFixPathOps(workingObj, fp)
+		patchOps, err := resolveFixPathOps(targetExecutionObj, fp)
 		if err != nil {
 			return nil, err
 		}
@@ -175,7 +495,13 @@ func buildOverlayPatchForResource(fix ResourceFixInfo) ([]kustomizePatchOp, erro
 }
 
 // mergePatchOps combines existing JSON 6902 patch operations with new operations.
-// If an operation targets the same path, the new operation replaces the existing one.
+// If an operation targets the same path:
+//   - If the existing operation was "add" and the new operation is "replace", we keep "add"
+//     with the new value so that a fresh build (where the field does not yet exist in the base)
+//     creates the field rather than failing on "replace".
+//   - Otherwise, the new operation replaces the existing operation.
+//
+// Any "from" field on RFC 6902 copy/move operations is preserved.
 // New paths are appended, preserving the order of existing operations.
 func mergePatchOps(existing, newOps []kustomizePatchOp) []kustomizePatchOp {
 	if len(existing) == 0 {
@@ -195,7 +521,14 @@ func mergePatchOps(existing, newOps []kustomizePatchOp) []kustomizePatchOp {
 
 	for _, op := range newOps {
 		if idx, exists := pathToIdx[op.Path]; exists {
-			merged[idx] = op
+			if merged[idx].Op == "add" && op.Op == "replace" {
+				merged[idx].Value = op.Value
+			} else {
+				if op.From == "" && merged[idx].From != "" {
+					op.From = merged[idx].From
+				}
+				merged[idx] = op
+			}
 		} else {
 			pathToIdx[op.Path] = len(merged)
 			merged = append(merged, op)
@@ -205,20 +538,67 @@ func mergePatchOps(existing, newOps []kustomizePatchOp) []kustomizePatchOp {
 	return merged
 }
 
+// findMergeKeyPatches searches for a 'patches' sequence inherited via YAML merge keys (<<:)
+func findMergeKeyPatches(doc *yaml.Node) *yaml.Node {
+	for i := 0; i < len(doc.Content)-1; i += 2 {
+		key := doc.Content[i]
+		val := doc.Content[i+1]
+		if key.Value == "<<" || key.Tag == "!!merge" {
+			mappings := []*yaml.Node{}
+			if val.Kind == yaml.AliasNode && val.Alias != nil && val.Alias.Kind == yaml.MappingNode {
+				mappings = append(mappings, val.Alias)
+			} else if val.Kind == yaml.MappingNode {
+				mappings = append(mappings, val)
+			} else if val.Kind == yaml.SequenceNode {
+				for _, item := range val.Content {
+					if item.Kind == yaml.AliasNode && item.Alias != nil && item.Alias.Kind == yaml.MappingNode {
+						mappings = append(mappings, item.Alias)
+					} else if item.Kind == yaml.MappingNode {
+						mappings = append(mappings, item)
+					}
+				}
+			}
+			for _, m := range mappings {
+				for j := 0; j < len(m.Content)-1; j += 2 {
+					if strings.EqualFold(m.Content[j].Value, "patches") && m.Content[j+1].Kind == yaml.SequenceNode {
+						return m.Content[j+1]
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func isSamePatchPath(p1, p2 string) bool {
+	clean1 := path.Clean(filepath.ToSlash(strings.TrimSpace(p1)))
+	clean2 := path.Clean(filepath.ToSlash(strings.TrimSpace(p2)))
+	return clean1 == clean2
+}
+
+func applySourceEdits(source string, edits []yamlSourceEdit) string {
+	sort.Slice(edits, func(i, j int) bool { return edits[i].start > edits[j].start })
+	for _, edit := range edits {
+		source = source[:edit.start] + edit.text + source[edit.end:]
+	}
+	return source
+}
+
 // addPatchToKustomizationYAML parses kustomization.yaml preserving comments and formatting,
 // and appends a surgical patch entry under patches: if not already present.
 // It constructs the entry using yaml.Node to avoid type ambiguity for names like "123" or "true",
-// and escapes the target name and namespace with regexp.QuoteMeta.
+// escapes the target name and namespace with regexp.QuoteMeta, and limits source modifications
+// to the patch registration itself so all surrounding formatting and comments remain untouched.
 func addPatchToKustomizationYAML(kustContent string, patchRelPath string, target kustomizeTarget) (string, error) {
-	var node yaml.Node
-	if err := yaml.Unmarshal([]byte(kustContent), &node); err != nil {
+	docs, err := decodeDocumentRoots(kustContent)
+	if err != nil {
 		return "", fmt.Errorf("failed to parse kustomization yaml: %w", err)
 	}
-	if len(node.Content) == 0 {
+	if len(docs) == 0 || len(docs[0].Content) == 0 {
 		return "", errors.New("empty kustomization yaml")
 	}
 
-	doc := node.Content[0]
+	doc := docs[0].Content[0]
 	if doc.Kind != yaml.MappingNode {
 		return "", errors.New("kustomization yaml root is not a mapping")
 	}
@@ -236,48 +616,32 @@ func addPatchToKustomizationYAML(kustContent string, patchRelPath string, target
 		return "", errors.New("kustomization yaml has multiple case-insensitive 'patches' fields")
 	}
 
-	if patchesNode != nil && (patchesNode.Tag == "!!null" || (patchesNode.Kind == yaml.ScalarNode && (patchesNode.Value == "" || patchesNode.Value == "null" || patchesNode.Value == "~"))) {
-		patchesNode.Kind = yaml.SequenceNode
-		patchesNode.Tag = "!!seq"
-		patchesNode.Value = ""
-		patchesNode.Content = nil
-	}
-
-	if patchesNode != nil && patchesNode.Kind != yaml.SequenceNode {
+	if patchesNode != nil && patchesNode.Kind != yaml.SequenceNode && (patchesNode.Tag != "!!null" && patchesNode.Kind != yaml.ScalarNode) {
 		return "", errors.New("'patches' field in kustomization yaml is not a sequence")
-	}
-
-	if patchesNode == nil {
-		keyNode := &yaml.Node{
-			Kind:  yaml.ScalarNode,
-			Tag:   "!!str",
-			Value: "patches",
-		}
-		valNode := &yaml.Node{
-			Kind: yaml.SequenceNode,
-			Tag:  "!!seq",
-		}
-		doc.Content = append(doc.Content, keyNode, valNode)
-		patchesNode = valNode
 	}
 
 	// Normalize patchRelPath to forward slashes for Kustomize compatibility across OSes
 	patchRelPathSlash := filepath.ToSlash(patchRelPath)
 
-	// Check if already present to ensure idempotency
-	for _, item := range patchesNode.Content {
-		if item.Kind == yaml.MappingNode {
-			for j := 0; j < len(item.Content); j += 2 {
-				if item.Content[j].Value == "path" && (item.Content[j+1].Value == patchRelPath || item.Content[j+1].Value == patchRelPathSlash) {
-					return kustContent, nil
-				}
-			}
-		}
-	}
-
 	targetMap := &yaml.Node{
 		Kind: yaml.MappingNode,
 		Tag:  "!!map",
+	}
+	var groupSelector string
+	if target.Group == "" {
+		groupSelector = "^$"
+	} else {
+		groupSelector = "^" + regexp.QuoteMeta(target.Group) + "$"
+	}
+	targetMap.Content = append(targetMap.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "group"},
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: groupSelector},
+	)
+	if target.Version != "" {
+		targetMap.Content = append(targetMap.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "version"},
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: target.Version},
+		)
 	}
 	if target.Kind != "" {
 		targetMap.Content = append(targetMap.Content,
@@ -309,27 +673,175 @@ func addPatchToKustomizationYAML(kustContent string, patchRelPath string, target
 		},
 	}
 
-	patchesNode.Content = append(patchesNode.Content, entryNode)
+	s := newYAMLSource(kustContent, docs)
 
-	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	if err := enc.Encode(&node); err != nil {
-		return "", fmt.Errorf("failed to encode kustomization yaml: %w", err)
+	// Case 1: patchesNode already exists as a sequence
+	if patchesNode != nil && patchesNode.Kind == yaml.SequenceNode {
+		existingIdx := -1
+		for idx, item := range patchesNode.Content {
+			if item.Kind == yaml.MappingNode {
+				for j := 0; j < len(item.Content)-1; j += 2 {
+					if item.Content[j].Value == "path" && isSamePatchPath(item.Content[j+1].Value, patchRelPath) {
+						existingIdx = idx
+						break
+					}
+				}
+			}
+			if existingIdx != -1 {
+				break
+			}
+		}
+
+		if existingIdx != -1 {
+			// Already registered. Check if it's already the last entry
+			if existingIdx == len(patchesNode.Content)-1 {
+				return kustContent, nil
+			}
+			// It is not the last entry; to ensure this remediation patch remains effective
+			// and is not overridden by later entries, move the existing entry intact to the end.
+			existingNode := copyYAMLValue(patchesNode.Content[existingIdx])
+			remEdits, err := s.remove(patchesNode, existingIdx)
+			if err != nil {
+				return "", fmt.Errorf("failed to reorder patch entry: %w", err)
+			}
+			intermediate := applySourceEdits(kustContent, remEdits)
+			intermediateDocs, decErr := decodeDocumentRoots(intermediate)
+			if decErr == nil && len(intermediateDocs) > 0 && len(intermediateDocs[0].Content) > 0 {
+				interS := newYAMLSource(intermediate, intermediateDocs)
+				interDoc := intermediateDocs[0].Content[0]
+				var interPatches *yaml.Node
+				for i := 0; i < len(interDoc.Content)-1; i += 2 {
+					if strings.EqualFold(interDoc.Content[i].Value, "patches") {
+						interPatches = interDoc.Content[i+1]
+						break
+					}
+				}
+				if interPatches != nil && interPatches.Kind == yaml.SequenceNode {
+					insEdits, err := interS.insert(interPatches, []*yaml.Node{existingNode})
+					if err != nil {
+						return "", fmt.Errorf("failed to insert reordered patch entry: %w", err)
+					}
+					return applySourceEdits(intermediate, insEdits), nil
+				}
+			}
+			return intermediate, nil
+		}
+
+		// Not present yet: insert into patches sequence
+		edits, err := s.insert(patchesNode, []*yaml.Node{entryNode})
+		if err != nil {
+			return "", fmt.Errorf("failed to insert patch entry: %w", err)
+		}
+		return applySourceEdits(kustContent, edits), nil
 	}
 
-	return buf.String(), nil
+	// Case 2: patchesNode exists but is null/empty scalar
+	if patchesNode != nil && (patchesNode.Tag == "!!null" || (patchesNode.Kind == yaml.ScalarNode && (patchesNode.Value == "" || patchesNode.Value == "null" || patchesNode.Value == "~"))) {
+		newSeq := &yaml.Node{
+			Kind:    yaml.SequenceNode,
+			Tag:     "!!seq",
+			Content: []*yaml.Node{entryNode},
+		}
+		edits, err := s.replace(patchesNode, newSeq)
+		if err != nil {
+			return "", fmt.Errorf("failed to replace null patches: %w", err)
+		}
+		return applySourceEdits(kustContent, edits), nil
+	}
+
+	if patchesNode != nil {
+		return "", fmt.Errorf("'patches' field in kustomization yaml is not a sequence")
+	}
+
+	// Case 3: patchesNode == nil (patches not at top level)
+	// Check if inherited through a merge key (<<:)
+	if inherited := findMergeKeyPatches(doc); inherited != nil {
+		existingIdx := -1
+		for idx, item := range inherited.Content {
+			if item.Kind == yaml.MappingNode {
+				for j := 0; j < len(item.Content)-1; j += 2 {
+					if item.Content[j].Value == "path" && isSamePatchPath(item.Content[j+1].Value, patchRelPath) {
+						existingIdx = idx
+						break
+					}
+				}
+			}
+			if existingIdx != -1 {
+				break
+			}
+		}
+
+		if existingIdx != -1 {
+			// If already registered and already the last entry, nothing to do
+			if existingIdx == len(inherited.Content)-1 {
+				return kustContent, nil
+			}
+		}
+
+		var newContent []*yaml.Node
+		for idx, item := range inherited.Content {
+			if idx == existingIdx {
+				continue
+			}
+			newContent = append(newContent, copyYAMLValue(item))
+		}
+		if existingIdx != -1 {
+			newContent = append(newContent, copyYAMLValue(inherited.Content[existingIdx]))
+		} else {
+			newContent = append(newContent, entryNode)
+		}
+		valNode := &yaml.Node{
+			Kind:    yaml.SequenceNode,
+			Tag:     "!!seq",
+			Content: newContent,
+		}
+		keyNode := &yaml.Node{
+			Kind:  yaml.ScalarNode,
+			Tag:   "!!str",
+			Value: "patches",
+		}
+		edits, err := s.insert(doc, []*yaml.Node{keyNode, valNode})
+		if err != nil {
+			return "", fmt.Errorf("failed to insert patches field: %w", err)
+		}
+		return applySourceEdits(kustContent, edits), nil
+	}
+
+	// No merge keys, add top-level patches
+	keyNode := &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Tag:   "!!str",
+		Value: "patches",
+	}
+	valNode := &yaml.Node{
+		Kind:    yaml.SequenceNode,
+		Tag:     "!!seq",
+		Content: []*yaml.Node{entryNode},
+	}
+	edits, err := s.insert(doc, []*yaml.Node{keyNode, valNode})
+	if err != nil {
+		return "", fmt.Errorf("failed to insert patches field: %w", err)
+	}
+	return applySourceEdits(kustContent, edits), nil
 }
 
 type kustomizationMeta struct {
-	NamePrefix string `yaml:"namePrefix"`
-	NameSuffix string `yaml:"nameSuffix"`
-	Namespace  string `yaml:"namespace"`
+	NamePrefix            string        `yaml:"namePrefix"`
+	NameSuffix            string        `yaml:"nameSuffix"`
+	Namespace             string        `yaml:"namespace"`
+	Patches               []interface{} `yaml:"patches"`
+	PatchesStrategicMerge []interface{} `yaml:"patchesStrategicMerge"`
+	PatchesJson6902       []interface{} `yaml:"patchesJson6902"`
 }
 
-// tryResolveOriginManifest attempts to find and inspect the origin resource manifest on disk
-// to extract its original unadorned metadata.name and metadata.namespace before overlay transformations.
-func tryResolveOriginManifest(fix ResourceFixInfo, kustMeta kustomizationMeta) (string, string, bool) {
+// tryResolveOriginObject attempts to find and decode the origin resource object on disk
+// before overlay transformations, returning the parsed object map and whether resolution succeeded.
+func tryResolveOriginObject(fix ResourceFixInfo, kustMeta kustomizationMeta, sourceRoots ...*os.Root) (map[string]interface{}, bool) {
+	var sourceRoot *os.Root
+	if len(sourceRoots) > 0 && sourceRoots[0] != nil {
+		sourceRoot = sourceRoots[0]
+	}
+
 	var candidates []string
 	if fix.reportedPath != "" {
 		candidates = append(candidates, fix.reportedPath)
@@ -342,9 +854,14 @@ func tryResolveOriginManifest(fix ResourceFixInfo, kustMeta kustomizationMeta) (
 
 	targetKind := ""
 	renderedName := ""
+	targetGroup := ""
+	targetVersion := ""
 	if fix.Resource != nil {
 		targetKind = fix.Resource.GetKind()
 		renderedName = fix.Resource.GetName()
+		if fix.Resource.GetApiVersion() != "" {
+			targetGroup, targetVersion = parseGroupVersion(fix.Resource.GetApiVersion())
+		}
 	}
 
 	for _, cand := range candidates {
@@ -352,54 +869,88 @@ func tryResolveOriginManifest(fix ResourceFixInfo, kustMeta kustomizationMeta) (
 			continue
 		}
 		candClean := filepath.Clean(cand)
-		st, err := os.Stat(candClean)
-		if err != nil || st.IsDir() || !st.Mode().IsRegular() {
-			continue
+		var data []byte
+		var readErr error
+		if sourceRoot != nil {
+			rel, rErr := pathRelativeToRoot(sourceRoot, candClean)
+			if rErr != nil {
+				continue
+			}
+			data, readErr = readBoundedManifestFromRoot(sourceRoot, rel)
+		} else {
+			dirRoot, rErr := os.OpenRoot(filepath.Dir(candClean))
+			if rErr != nil {
+				continue
+			}
+			data, readErr = readBoundedManifestFromRoot(dirRoot, filepath.Base(candClean))
+			dirRoot.Close()
 		}
-
-		data, err := os.ReadFile(candClean)
-		if err != nil {
+		if readErr != nil {
 			continue
 		}
 
 		decoder := yaml.NewDecoder(bytes.NewReader(data))
 		for {
-			var doc struct {
-				Kind     string `yaml:"kind"`
-				Metadata struct {
-					Name      string `yaml:"name"`
-					Namespace string `yaml:"namespace"`
-				} `yaml:"metadata"`
-			}
-			if err := decoder.Decode(&doc); err != nil {
+			var obj map[string]interface{}
+			if err := decoder.Decode(&obj); err != nil {
 				break
 			}
-			if doc.Kind != targetKind {
+			kind, _ := obj["kind"].(string)
+			if kind != targetKind {
+				continue
+			}
+			apiVer, _ := obj["apiVersion"].(string)
+			if targetVersion != "" && apiVer != "" {
+				cGroup, cVersion := parseGroupVersion(apiVer)
+				if cGroup != targetGroup || cVersion != targetVersion {
+					continue
+				}
+			}
+			meta, _ := obj["metadata"].(map[string]interface{})
+			name, _ := meta["name"].(string)
+			ns, _ := meta["namespace"].(string)
+			if kustMeta.Namespace == "" && fix.Resource != nil && fix.Resource.GetNamespace() != "" && ns != "" && ns != fix.Resource.GetNamespace() {
 				continue
 			}
 
-			expectedRendered := kustMeta.NamePrefix + doc.Metadata.Name + kustMeta.NameSuffix
-			if doc.Metadata.Name == renderedName || expectedRendered == renderedName {
-				return doc.Metadata.Name, doc.Metadata.Namespace, true
+			expectedRendered := kustMeta.NamePrefix + name + kustMeta.NameSuffix
+			if name == renderedName || expectedRendered == renderedName {
+				return obj, true
 			}
 		}
 	}
 
-	return "", "", false
+	return nil, false
+}
+
+// tryResolveOriginManifest attempts to find and inspect the origin resource manifest on disk
+// to extract its original unadorned metadata.name and metadata.namespace before overlay transformations.
+func tryResolveOriginManifest(fix ResourceFixInfo, kustMeta kustomizationMeta, sourceRoots ...*os.Root) (string, string, bool) {
+	obj, ok := tryResolveOriginObject(fix, kustMeta, sourceRoots...)
+	if !ok {
+		return "", "", false
+	}
+	meta, _ := obj["metadata"].(map[string]interface{})
+	name, _ := meta["name"].(string)
+	ns, _ := meta["namespace"].(string)
+	return name, ns, true
 }
 
 // resolveTargetIdentity resolves the resource's kind, name, and namespace at the Kustomize patches stage.
 // Because Kustomize applies patches before applying transformers like namePrefix, nameSuffix, and namespace,
 // an overlay target must select against the pre-transformation identity. If identity cannot be resolved,
 // it returns an error reporting the fix as unsupported.
-func resolveTargetIdentity(overlayDir string, kustMeta kustomizationMeta, fix ResourceFixInfo) (kustomizeTarget, error) {
+func resolveTargetIdentity(overlayDir string, kustMeta kustomizationMeta, fix ResourceFixInfo, sourceRoots ...*os.Root) (kustomizeTarget, error) {
 	renderedKind := fix.Resource.GetKind()
 	renderedName := fix.Resource.GetName()
 	renderedNamespace := fix.Resource.GetNamespace()
+	group, version := parseGroupVersion(fix.Resource.GetApiVersion())
 
 	// 1. Try to resolve from origin manifest on disk if available
-	if name, ns, ok := tryResolveOriginManifest(fix, kustMeta); ok {
+	if name, ns, ok := tryResolveOriginManifest(fix, kustMeta, sourceRoots...); ok {
 		return kustomizeTarget{
+			Group:     group,
+			Version:   version,
 			Kind:      renderedKind,
 			Name:      name,
 			Namespace: ns,
@@ -434,6 +985,8 @@ func resolveTargetIdentity(overlayDir string, kustMeta kustomizationMeta, fix Re
 	}
 
 	return kustomizeTarget{
+		Group:     group,
+		Version:   version,
 		Kind:      renderedKind,
 		Name:      targetName,
 		Namespace: targetNamespace,
@@ -459,14 +1012,79 @@ type overlayFixPlan struct {
 	patches      []overlayPatchItem
 }
 
-// planOverlayChanges inspects the overlay directory and produces an execution plan.
-// It uses os.OpenRoot to confine file operations to the overlay directory and rejects
-// non-regular kustomization files. Existing patch files are read and merged with new ops.
-func planOverlayChanges(overlayDir string, fixes []ResourceFixInfo) (*overlayFixPlan, error) {
-	cleanOverlay := filepath.Clean(overlayDir)
-	root, err := os.OpenRoot(cleanOverlay)
+// readBoundedManifestFromRoot reads a manifest or patch file from an os.Root handle,
+// enforcing regular file mode (rejecting FIFOs without blocking) and bounded size limit.
+func readBoundedManifestFromRoot(root *os.Root, relPath string) ([]byte, error) {
+	cleanRel := filepath.Clean(relPath)
+	file, err := root.OpenFile(cleanRel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open overlay directory %s: %w", cleanOverlay, err)
+		return nil, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", ErrManifestNotRegular, relPath)
+	}
+	limit := getMaxManifestSize()
+	if info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrManifestTooLarge, relPath, limit)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrManifestTooLarge, relPath, limit)
+	}
+	return data, nil
+}
+
+func (p *overlayFixPlan) hasModifications(isExport bool) bool {
+	if isExport {
+		return len(p.patches) > 0 || p.updatedKust != p.originalKust
+	}
+	if p.updatedKust != p.originalKust {
+		return true
+	}
+	for _, patch := range p.patches {
+		if patch.isNewFile || patch.updatedContent != patch.originalContent {
+			return true
+		}
+	}
+	return false
+}
+
+// planOverlayChanges inspects the overlay directory and produces an execution plan.
+// It uses os.OpenRoot (or callerRoot if provided) to confine file operations to the overlay
+// directory, and uses readBoundedManifestFromRoot to reject non-regular files (FIFOs) and oversized files.
+// Existing patch files are read and merged with new ops.
+func planOverlayChanges(overlayDir string, fixes []ResourceFixInfo, sourceRoots ...*os.Root) (*overlayFixPlan, error) {
+	cleanOverlay := filepath.Clean(overlayDir)
+	var root *os.Root
+	var err error
+	var callerRoot *os.Root
+	if len(sourceRoots) > 0 && sourceRoots[0] != nil {
+		callerRoot = sourceRoots[0]
+	}
+
+	if callerRoot != nil {
+		rel, rErr := pathRelativeToRoot(callerRoot, cleanOverlay)
+		if rErr != nil {
+			return nil, fmt.Errorf("overlay directory %q is outside source root: %w", cleanOverlay, rErr)
+		}
+		root, err = callerRoot.OpenRoot(rel)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open overlay directory %s from source root: %w", cleanOverlay, err)
+		}
+	} else {
+		root, err = os.OpenRoot(cleanOverlay)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open overlay directory %s: %w", cleanOverlay, err)
+		}
 	}
 	defer root.Close()
 
@@ -488,7 +1106,7 @@ func planOverlayChanges(overlayDir string, fixes []ResourceFixInfo) (*overlayFix
 		return nil, fmt.Errorf("kustomization file not found in %s", cleanOverlay)
 	}
 
-	kustBytes, err := root.ReadFile(kustFileName)
+	kustBytes, err := readBoundedManifestFromRoot(root, kustFileName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read %s in %s: %w", kustFileName, cleanOverlay, err)
 	}
@@ -508,7 +1126,7 @@ func planOverlayChanges(overlayDir string, fixes []ResourceFixInfo) (*overlayFix
 		if fix.Resource == nil {
 			continue
 		}
-		ops, err := buildOverlayPatchForResource(fix)
+		ops, err := buildOverlayPatchForResource(fix, kustMeta, callerRoot, plan.overlayDir)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build patch for %s/%s: %w", fix.Resource.GetKind(), fix.Resource.GetName(), err)
 		}
@@ -516,7 +1134,7 @@ func planOverlayChanges(overlayDir string, fixes []ResourceFixInfo) (*overlayFix
 			continue
 		}
 
-		target, err := resolveTargetIdentity(plan.overlayDir, kustMeta, fix)
+		target, err := resolveTargetIdentity(plan.overlayDir, kustMeta, fix, callerRoot)
 		if err != nil {
 			return nil, err
 		}
@@ -540,16 +1158,13 @@ func planOverlayChanges(overlayDir string, fixes []ResourceFixInfo) (*overlayFix
 		}
 
 		if existingIdx == -1 {
-			existingBytes, err := root.ReadFile(relPatchPath)
+			existingBytes, err := readBoundedManifestFromRoot(root, relPatchPath)
 			if err != nil {
 				if !errors.Is(err, os.ErrNotExist) {
 					return nil, fmt.Errorf("failed to read existing patch %s in %s: %w", relPatchPath, plan.overlayDir, err)
 				}
 			} else {
 				isNewFile = false
-				if st, sErr := root.Stat(relPatchPath); sErr == nil && !st.Mode().IsRegular() {
-					return nil, fmt.Errorf("%w: %q", ErrManifestNotRegular, relPatchPath)
-				}
 				originalContent = string(existingBytes)
 				if err := yaml.Unmarshal(existingBytes, &existingOps); err != nil {
 					return nil, fmt.Errorf("failed to parse existing patch %s in %s: %w", relPatchPath, plan.overlayDir, err)
@@ -591,10 +1206,10 @@ func planOverlayChanges(overlayDir string, fixes []ResourceFixInfo) (*overlayFix
 }
 
 // applyKustomizeOverlayChanges applies the planned overlay changes.
-// When output is nil, changes are written in-place confined via os.OpenRoot.
+// When output is nil, changes are written in-place confined via os.OpenRoot (or callerRoot).
 // When output is non-nil, changes are written under destOverlayDir in the output tree.
-func applyKustomizeOverlayChanges(ctx context.Context, plan *overlayFixPlan, output *outputTree, destOverlayDir string) error {
-	if len(plan.patches) == 0 && plan.updatedKust == plan.originalKust {
+func applyKustomizeOverlayChanges(ctx context.Context, plan *overlayFixPlan, output *outputTree, destOverlayDir string, sourceRoots ...*os.Root) error {
+	if !plan.hasModifications(output != nil) {
 		return nil
 	}
 
@@ -605,7 +1220,7 @@ func applyKustomizeOverlayChanges(ctx context.Context, plan *overlayFixPlan, out
 				return fmt.Errorf("failed to write patch file %s: %w", destPatchPath, err)
 			}
 		}
-		if plan.updatedKust != plan.originalKust {
+		if plan.updatedKust != plan.originalKust || len(plan.patches) > 0 {
 			destKustPath := filepath.Join(destOverlayDir, plan.kustFileName)
 			if err := output.write(destKustPath, plan.updatedKust, 0600); err != nil {
 				return fmt.Errorf("failed to write %s: %w", destKustPath, err)
@@ -614,9 +1229,27 @@ func applyKustomizeOverlayChanges(ctx context.Context, plan *overlayFixPlan, out
 		return nil
 	}
 
-	root, err := os.OpenRoot(plan.overlayDir)
-	if err != nil {
-		return fmt.Errorf("failed to open overlay directory %s: %w", plan.overlayDir, err)
+	var root *os.Root
+	var err error
+	var callerRoot *os.Root
+	if len(sourceRoots) > 0 && sourceRoots[0] != nil {
+		callerRoot = sourceRoots[0]
+	}
+
+	if callerRoot != nil {
+		rel, rErr := pathRelativeToRoot(callerRoot, plan.overlayDir)
+		if rErr != nil {
+			return fmt.Errorf("overlay directory %q is outside source root: %w", plan.overlayDir, rErr)
+		}
+		root, err = callerRoot.OpenRoot(rel)
+		if err != nil {
+			return fmt.Errorf("failed to open overlay directory %s from source root: %w", plan.overlayDir, err)
+		}
+	} else {
+		root, err = os.OpenRoot(plan.overlayDir)
+		if err != nil {
+			return fmt.Errorf("failed to open overlay directory %s: %w", plan.overlayDir, err)
+		}
 	}
 	defer root.Close()
 
