@@ -1,7 +1,10 @@
 package opaprocessor
 
 import (
+	"reflect"
+	"slices"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -31,15 +34,50 @@ func buildExceptionAudit(
 ) *cautils.ExceptionAudit {
 	items := make(map[string]*cautils.ExceptionAuditItem, len(loadedExceptions))
 	active := make(map[string]struct{}, len(activeExceptions))
+	// sources groups the distinct exceptions sharing an exceptionAuditKey. Exceptions
+	// without a GUID (local files, SecurityException CRDs) are keyed by name, which is
+	// not unique, so each distinct one gets its own item.
+	sources := make(map[string][]exceptionAuditSource, len(loadedExceptions))
+
+	add := func(exception armotypes.PostureExceptionPolicy) string {
+		key := exceptionAuditKey(exception)
+		id := key
+		if n := len(sources[key]); n > 0 {
+			// "\x00" sorts first, keeping same-named items together.
+			id = key + "\x00" + strconv.Itoa(n)
+		}
+		sources[key] = append(sources[key], exceptionAuditSource{id: id, exception: exception})
+		item := exceptionAuditItem(exception, policies, processor)
+		items[id] = &item
+		return id
+	}
+	// resolve returns the item of the loaded exception that exception was derived from.
+	resolve := func(exception armotypes.PostureExceptionPolicy) string {
+		candidates := sources[exceptionAuditKey(exception)]
+		if len(candidates) == 1 {
+			return candidates[0].id
+		}
+		for _, candidate := range candidates {
+			if exceptionDerivedFrom(exception, candidate.exception) {
+				return candidate.id
+			}
+		}
+		return add(exception)
+	}
 
 	for _, exception := range loadedExceptions {
 		key := exceptionAuditKey(exception)
-		item := exceptionAuditItem(exception, policies, processor)
-		items[key] = &item
+		if exception.GUID != "" && len(sources[key]) > 0 {
+			continue
+		}
+		if slices.ContainsFunc(sources[key], func(s exceptionAuditSource) bool { return reflect.DeepEqual(s.exception, exception) }) {
+			continue
+		}
+		add(exception)
 	}
 
 	for _, exception := range activeExceptions {
-		active[exceptionAuditKey(exception)] = struct{}{}
+		active[resolve(exception)] = struct{}{}
 	}
 
 	for resourceID, result := range results {
@@ -56,11 +94,7 @@ func buildExceptionAudit(
 					if len(exceptions.FilterExceptionsByFrameworks([]armotypes.PostureExceptionPolicy{exception}, cautils.ControlFilters(summary, controlID).FrameworkNames, controlID, rule.GetName())) == 0 {
 						continue
 					}
-					key := exceptionAuditKey(exception)
-					if _, ok := items[key]; !ok {
-						item := exceptionAuditItem(exception, policies, processor)
-						items[key] = &item
-					}
+					key := resolve(exception)
 					items[key].MatchCount++
 					items[key].MatchedResources = append(items[key].MatchedResources, exceptionAuditMatch(resourceID, controlID, rule.GetName(), resource))
 				}
@@ -72,11 +106,7 @@ func buildExceptionAudit(
 	// entries at all), so without this an exception that only suppresses a manual
 	// control is reported as unused even though it is actively applied.
 	for _, match := range manualControlMatches {
-		key := exceptionAuditKey(match.exception)
-		if _, ok := items[key]; !ok {
-			item := exceptionAuditItem(match.exception, policies, processor)
-			items[key] = &item
-		}
+		key := resolve(match.exception)
 		items[key].MatchCount++
 		items[key].MatchedResources = append(items[key].MatchedResources, cautils.ExceptionAuditMatch{ControlID: match.controlID})
 	}
@@ -143,6 +173,29 @@ func exceptionAuditKey(exception armotypes.PostureExceptionPolicy) string {
 		return exception.GUID
 	}
 	return exceptionAuditName(exception)
+}
+
+type exceptionAuditSource struct {
+	id        string
+	exception armotypes.PostureExceptionPolicy
+}
+
+// exceptionDerivedFrom reports whether match, an exception copy attached to a rule
+// result, came from loaded. The exceptions processor narrows PosturePolicies to the
+// ones matching the rule, and resourceScopedExceptions gives scope-less exceptions a
+// resource designator; every other field is copied unchanged.
+func exceptionDerivedFrom(match, loaded armotypes.PostureExceptionPolicy) bool {
+	if len(loaded.Resources) > 0 && !reflect.DeepEqual(match.Resources, loaded.Resources) {
+		return false
+	}
+	for _, policy := range match.PosturePolicies {
+		if !slices.ContainsFunc(loaded.PosturePolicies, func(p armotypes.PosturePolicy) bool { return reflect.DeepEqual(p, policy) }) {
+			return false
+		}
+	}
+	match.Resources, loaded.Resources = nil, nil
+	match.PosturePolicies, loaded.PosturePolicies = nil, nil
+	return reflect.DeepEqual(match, loaded)
 }
 
 func exceptionAuditName(exception armotypes.PostureExceptionPolicy) string {

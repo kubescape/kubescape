@@ -218,6 +218,103 @@ func TestBuildExceptionAuditDoesNotCollapseDuplicateNamesWithDifferentGUIDs(t *t
 	assert.ElementsMatch(t, []string{"C-0001", "C-0002"}, gotControlIDs)
 }
 
+// Exceptions from --exceptions files and SecurityException CRDs have no GUID, and
+// CRD-derived names ("<name>/<controlID>") are only unique per namespace, so
+// same-named exceptions must still get one audit item each.
+func TestBuildExceptionAuditDoesNotCollapseDuplicateNamesWithoutGUID(t *testing.T) {
+	expiredAt := time.Now().Add(-time.Hour)
+	resource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "web", "namespace": "prod"},
+	})
+	policies := &cautils.Policies{Controls: map[string]reporthandling.Control{
+		"C-0057": {ControlID: "C-0057"},
+		"C-0017": {ControlID: "C-0017"},
+	}}
+
+	for _, tc := range []struct {
+		name         string
+		staleExpires *time.Time
+		wantStale    string
+		wantExpired  int
+		wantUnused   int
+		wantActive   int
+	}{
+		{name: "unused", wantStale: exceptionAuditStatusUnused, wantUnused: 1, wantActive: 2},
+		{name: "expired", staleExpires: &expiredAt, wantStale: exceptionAuditStatusExpired, wantExpired: 1, wantActive: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Same name, different namespaces, as two SecurityException CRDs produce.
+			applied := auditException("allow-privileged/C-0057", "C-0057", nil)
+			applied.PosturePolicies = append(applied.PosturePolicies, armotypes.PosturePolicy{ControlID: "C-0057", FrameworkName: "nsa"})
+			applied.Attributes = map[string]any{"securityExceptionNamespace": "team-a"}
+			stale := auditException("allow-privileged/C-0057", "C-0017", tc.staleExpires)
+			stale.Attributes = map[string]any{"securityExceptionNamespace": "team-b"}
+
+			// The copy attached to the rule result has its posture policies narrowed
+			// and, being scope-less, a resource designator added.
+			matched := applied
+			matched.PosturePolicies = applied.PosturePolicies[:1]
+			matched.Resources = resourceScopedExceptions([]armotypes.PostureExceptionPolicy{applied}, resource.GetID())[0].Resources
+
+			active := []armotypes.PostureExceptionPolicy{applied, stale}
+			if tc.staleExpires != nil {
+				active = active[:1]
+			}
+			audit := buildExceptionAudit(
+				[]armotypes.PostureExceptionPolicy{applied, stale},
+				active,
+				map[string]resourcesresults.Result{
+					resource.GetID(): {
+						ResourceID: resource.GetID(),
+						AssociatedControls: []resourcesresults.ResourceAssociatedControl{{
+							ControlID: "C-0057",
+							ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{
+								Name:      "rule-privilege-escalation",
+								Exception: []armotypes.PostureExceptionPolicy{matched},
+							}},
+						}},
+					},
+				},
+				cautils.NewMapResourceCatalog(map[string]workloadinterface.IMetadata{resource.GetID(): resource}),
+				policies,
+				exceptions.NewProcessor(),
+				nil,
+				nil,
+			)
+
+			require.Len(t, audit.Items, 2)
+			assert.Equal(t, 2, audit.Summary.Total)
+			assert.Equal(t, tc.wantActive, audit.Summary.Active)
+			assert.Equal(t, 1, audit.Summary.Matched)
+			assert.Equal(t, tc.wantUnused, audit.Summary.Unused)
+			assert.Equal(t, tc.wantExpired, audit.Summary.Expired)
+
+			byControl := map[string]cautils.ExceptionAuditItem{}
+			for _, item := range audit.Items {
+				require.Len(t, item.ControlIDs, 1)
+				byControl[item.ControlIDs[0]] = item
+			}
+			assert.Equal(t, exceptionAuditStatusMatched, byControl["C-0057"].Status)
+			assert.Equal(t, 1, byControl["C-0057"].MatchCount)
+			assert.Equal(t, tc.wantStale, byControl["C-0017"].Status)
+			assert.Equal(t, 0, byControl["C-0017"].MatchCount)
+		})
+	}
+}
+
+func TestBuildExceptionAuditMergesIdenticalExceptions(t *testing.T) {
+	exception := auditException("dup", "C-0001", nil)
+	audit := buildExceptionAudit(
+		[]armotypes.PostureExceptionPolicy{exception, exception},
+		[]armotypes.PostureExceptionPolicy{exception, exception},
+		nil, nil, nil, exceptions.NewProcessor(), nil, nil,
+	)
+	require.Len(t, audit.Items, 1)
+	assert.Equal(t, 1, audit.Summary.Active)
+}
+
 func auditException(name, controlID string, expirationDate *time.Time) armotypes.PostureExceptionPolicy {
 	return auditExceptionWithGUID("", name, controlID, expirationDate)
 }
