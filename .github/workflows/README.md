@@ -18,6 +18,15 @@ A PR that touches `core/pkg/rbacgraph/`, `go.mod` or `go.sum` also triggers `rba
 
 A weekly run of `k8scveindex-feed.yaml` checks that the embedded Kubernetes CVE feed's `updated_at` timestamp is not in the future or more than 30 days old. The same check runs on PRs that touch the CVE index package or its workflow, and reports the `go generate ./core/pkg/k8scveindex` command when the check fails. If the upstream timestamp is also more than 30 days old, regenerating will not make the check pass. This time-sensitive check is opt-in and does not fail the regular package tests.
 
+### Issue triage and assignment
+
+`contribution-policy.yaml` handles issue assignment commands and checks linked
+issues for triage and ownership. Its scheduled run reminds contributors about
+inactive assignments and requested changes before releasing assignments or
+closing PRs. It uses GitHub metadata and executes only scripts checked out from
+the workflow's trusted commit. It is disabled until maintainers configure the
+rollout timestamp. See [policy and activation instructions](../CONTRIBUTION_POLICY.md).
+
 ### Reviewing a PR
 
 The E2E system tests do not live in this repository. `00-pr-scanner.yaml` dispatches them to a private repository and polls for the result.

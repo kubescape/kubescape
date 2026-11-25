@@ -1,0 +1,48 @@
+name: Contribution policy automation
+
+on:
+  issues:
+    types: [opened, reopened, labeled, unlabeled, assigned, unassigned, closed]
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, reopened, edited, synchronize, closed, labeled, unlabeled]
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+# Serialize live assignment counts across issues; retain queued commands.
+concurrency:
+  group: contribution-policy
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  policy:
+    if: >-
+      github.repository == 'kubescape/kubescape' &&
+      vars.CONTRIBUTION_POLICY_START != '' &&
+      (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      statuses: write
+    steps:
+      # Never check out the PR head or execute code supplied by its author.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: .github
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          POLICY_START: ${{ vars.CONTRIBUTION_POLICY_START }}
+        with:
+          script: |
+            const { run } = require('./.github/scripts/contribution-policy.cjs');
+            await run({ github, context, core, start: process.env.POLICY_START });
