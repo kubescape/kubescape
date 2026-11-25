@@ -113,6 +113,9 @@ func TestFileWatcherMergesDependencyDirectoryAliases(t *testing.T) {
 }
 
 func TestFileWatcherFollowsAncestorOfRenderDependency(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows cannot rename a directory with open watch handles in its subtree")
+	}
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
 	root, shared := filepath.Join(dir, "overlay"), filepath.Join(dir, "shared")
