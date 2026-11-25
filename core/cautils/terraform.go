@@ -184,16 +184,18 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 
 	workloads := map[string][]workloadinterface.IMetadata{}
 	for i, file := range files {
-		manifests, fileErrs := extractKubernetesManifests(file.Body, evalCtx, references)
+		manifests, fileErrs := extractKubernetesManifestResources(file.Body, evalCtx, references)
 		errs = append(errs, fileErrs...)
 
-		typedManifests, typedErrs := extractTypedResources(file.Body, evalCtx, references)
+		typedManifests, typedErrs := extractTypedResourceManifests(file.Body, evalCtx, references)
 		errs = append(errs, typedErrs...)
 		manifests = append(manifests, typedManifests...)
 
 		src := parsedPaths[i]
-		for j, m := range manifests {
-			data, err := json.Marshal(m)
+		for j, manifest := range manifests {
+			workloadPath := terraformWorkloadPath(src, j)
+			recordTerraformSourceLocation(workloadPath, manifest.source)
+			data, err := json.Marshal(manifest.object)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("%s: manifest %d: %w", src, j, err))
 				continue
@@ -208,7 +210,7 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 					continue
 				}
 				lw := localworkload.NewLocalWorkload(w.GetObject())
-				lw.SetPath(fmt.Sprintf("%s:%d", src, j))
+				lw.SetPath(workloadPath)
 				workloads[src] = append(workloads[src], lw)
 			}
 		}
@@ -261,6 +263,13 @@ func collectVariableDefaults(body hcl.Body, defaults map[string]cty.Value, decla
 // skips only that resource, with a warning. references checks count and
 // for_each for unresolved references, including ones hidden in locals.
 func extractKubernetesManifests(body hcl.Body, evalCtx *hcl.EvalContext, references ...terraformReferenceChecker) ([]map[string]interface{}, []error) {
+	manifests, errs := extractKubernetesManifestResources(body, evalCtx, references...)
+	return terraformManifestObjects(manifests), errs
+}
+
+// extractKubernetesManifestResources is extractKubernetesManifests, keeping
+// the source range of the kubernetes_manifest block each manifest came from.
+func extractKubernetesManifestResources(body hcl.Body, evalCtx *hcl.EvalContext, references ...terraformReferenceChecker) ([]terraformManifest, []error) {
 	var reference terraformReferenceChecker
 	if len(references) > 0 {
 		reference = references[0]
@@ -273,7 +282,7 @@ func extractKubernetesManifests(body hcl.Body, evalCtx *hcl.EvalContext, referen
 	}
 	content, _, _ := body.PartialContent(schema)
 
-	var manifests []map[string]interface{}
+	var manifests []terraformManifest
 	for _, block := range content.Blocks {
 		if len(block.Labels) < 2 || block.Labels[0] != "kubernetes_manifest" {
 			continue
@@ -310,7 +319,7 @@ func extractKubernetesManifests(body hcl.Body, evalCtx *hcl.EvalContext, referen
 				errs = append(errs, fmt.Errorf("resource %q: manifest is not an object", block.Labels[1]))
 				continue
 			}
-			manifests = append(manifests, m)
+			manifests = append(manifests, terraformManifest{object: m, source: block.DefRange})
 		}
 	}
 	return manifests, errs
