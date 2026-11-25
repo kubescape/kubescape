@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -176,8 +177,44 @@ func TestLoadPolicyGetterDownloadSuccess(t *testing.T) {
 func TestLoadPolicyGetterFallsBackToLocalCache(t *testing.T) {
 	drp := &fakeStoreLoader{fallback: true}
 	pg := loadPolicyGetter(drp)
-	_, isLocal := pg.(*getter.LoadPolicy)
+	_, isLocal := pg.(cachedPolicy)
 	assert.True(t, isLocal, "download failure with fallback must switch to the local policy cache, got %T", pg)
+}
+
+// The fallback getter is built before any tool names a framework, so a
+// framework that is not native must still be read from its own cache file.
+func TestLoadPolicyGetterFallbackServesCachedFrameworksByName(t *testing.T) {
+	originalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	t.Cleanup(func() { getter.DefaultLocalStore = originalStore })
+
+	for _, fw := range []reporthandling.Framework{
+		{PortalBase: armotypes.PortalBase{Name: "NSA"}},
+		{PortalBase: armotypes.PortalBase{Name: "WorkloadScan"}},
+	} {
+		path, err := getter.PolicyCachePath(fw.Name)
+		require.NoError(t, err)
+		require.NoError(t, getter.SaveInFile(fw, path))
+	}
+
+	pg := loadPolicyGetter(&fakeStoreLoader{fallback: true})
+
+	fw, err := pg.GetFramework("workloadscan")
+	require.NoError(t, err)
+	assert.Equal(t, "WorkloadScan", fw.Name)
+
+	fw, err = pg.GetFramework("nsa")
+	require.NoError(t, err)
+	assert.Equal(t, "NSA", fw.Name)
+
+	names, err := pg.ListFrameworks()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"NSA"}, names, "listing stays the native cache files, as in the CLI")
+
+	for _, name := range []string{"clusterscan", "../workloadscan"} {
+		_, err = pg.GetFramework(name)
+		assert.ErrorIs(t, err, getter.ErrFrameworkNotMatching, name)
+	}
 }
 
 func TestLoadPolicyGetterKeepsDownloaderOnHardError(t *testing.T) {
@@ -193,7 +230,7 @@ func TestFallbackGetterIsPublishedBeforeReadiness(t *testing.T) {
 
 	pg, err := ks.readyPolicyGetter(context.Background())
 	require.NoError(t, err)
-	_, isLocal := pg.(*getter.LoadPolicy)
+	_, isLocal := pg.(cachedPolicy)
 	assert.True(t, isLocal, "callers must observe the fallback getter, not the downloader, got %T", pg)
 }
 
