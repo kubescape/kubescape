@@ -153,3 +153,23 @@ func TestCollectPolicies_ConcurrentSameClusterDoesNotRaceOnGetters(t *testing.T)
 	}
 	wg.Wait()
 }
+
+func TestRegistry_SweepNilSafety(t *testing.T) {
+	reg := &policyHandlerRegistry{
+		entries: map[string]*policyHandlerEntry{
+			"nil-entry": nil,
+			"nil-handler": {
+				handler:    nil,
+				refCount:   0,
+				lastAccess: time.Now().Add(-10 * time.Minute),
+			},
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		reg.mu.Lock()
+		reg.sweepLocked(time.Now(), time.Minute)
+		reg.mu.Unlock()
+	})
+	assert.Equal(t, 1, reg.size(), "nil-handler entry should be evicted while nil entry is safely skipped")
+}
