@@ -19,9 +19,7 @@ deny contains msga if {
 
 	rule := role.rules[p]
 
-	# a rule restricted to named pods cannot be pointed at an arbitrary pod's ephemeral containers
-	# (an omitted or explicitly empty resourceNames list is unrestricted)
-	count(resource_names(rule)) == 0
+	names_a_pod(rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -136,3 +134,18 @@ resource_names(rule) := names if {
 	names := object.get(rule, "resourceNames", [])
 	names != null
 } else := []
+
+# Adding an ephemeral container is a request on the pods/ephemeralcontainers
+# subresource, which carries the name of its parent pod, so an entry narrowed to
+# named pods still lets the subject attach a container to each of those pods.
+# The attack needs no arbitrary target: a container in the named pod already
+# runs code with that pod's volumes and service account token. resourceNames is
+# matched literally, so "*" only names a pod called "*", which no pod can be,
+# and "" names no object at all; an entry narrowed to those two alone reaches no
+# pod. An omitted, null or empty list is unrestricted.
+names_a_pod(rule) if count(resource_names(rule)) == 0
+
+names_a_pod(rule) if {
+	some name in resource_names(rule)
+	not name in {"", "*"}
+}
