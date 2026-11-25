@@ -70,7 +70,7 @@ func openPolicyFile(path string) (*os.File, error) {
 		return nil, fmt.Errorf("%w: %q", ErrPolicyNotRegular, path)
 	}
 
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	file, err := openForRead(path, os.O_RDONLY|syscall.O_NONBLOCK)
 	if err != nil {
 		return nil, err
 	}
