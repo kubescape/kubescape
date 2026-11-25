@@ -108,7 +108,7 @@ func (h *FixHandler) BuildPatch(ctx context.Context, resourcesToFix []ResourceFi
 			return nil, fmt.Errorf("patch export cancelled: %w", err)
 		}
 		fixes := overlayFixesByDir[dir]
-		plan, err := planOverlayChanges(dir, fixes)
+		plan, err := planOverlayChanges(dir, fixes, h.sourceRoot)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("failed to plan kustomize overlay fixes in %s: %w", dir, err))
 			continue

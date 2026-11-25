@@ -2,6 +2,7 @@ package fixhandler
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,7 +67,8 @@ func TestMergePatchOps(t *testing.T) {
 	assert.Equal(t, "/spec/template/spec/containers/0/securityContext/readOnlyRootFilesystem", merged[0].Path)
 	assert.Equal(t, "/spec/template/spec/containers/0/securityContext/allowPrivilegeEscalation", merged[1].Path)
 
-	// 2. Overwrite op targeting the same path
+	// 2. Overwrite op targeting the same path: keep "add" when new op is "replace"
+	// so a fresh build starting from an untouched base still creates the missing field.
 	updatedOp := []kustomizePatchOp{
 		{
 			Op:    "replace",
@@ -77,13 +79,38 @@ func TestMergePatchOps(t *testing.T) {
 	mergedUpdate := mergePatchOps(merged, updatedOp)
 	require.Len(t, mergedUpdate, 2)
 	assert.Equal(t, false, mergedUpdate[0].Value)
-	assert.Equal(t, "replace", mergedUpdate[0].Op)
+	assert.Equal(t, "add", mergedUpdate[0].Op, "must keep add so field is created on fresh build")
 
-	// 3. Merge with empty existing
+	// 3. Overwriting an existing "replace" with another "replace" keeps "replace"
+	replaceExisting := []kustomizePatchOp{
+		{
+			Op:    "replace",
+			Path:  "/spec/template/spec/containers/0/securityContext/readOnlyRootFilesystem",
+			Value: true,
+		},
+	}
+	mergedReplace := mergePatchOps(replaceExisting, updatedOp)
+	require.Len(t, mergedReplace, 1)
+	assert.Equal(t, false, mergedReplace[0].Value)
+	assert.Equal(t, "replace", mergedReplace[0].Op)
+
+	// 4. Preserves "from" on RFC 6902 copy/move operations
+	copyExisting := []kustomizePatchOp{
+		{
+			Op:   "copy",
+			From: "/spec/template/spec/containers/0/securityContext",
+			Path: "/spec/template/spec/containers/1/securityContext",
+		},
+	}
+	mergedCopy := mergePatchOps(copyExisting, newOps)
+	require.Len(t, mergedCopy, 2)
+	assert.Equal(t, "/spec/template/spec/containers/0/securityContext", mergedCopy[0].From)
+
+	// 5. Merge with empty existing
 	mergedEmptyExisting := mergePatchOps(nil, newOps)
 	require.Equal(t, newOps, mergedEmptyExisting)
 
-	// 4. Merge with empty new
+	// 6. Merge with empty new
 	mergedEmptyNew := mergePatchOps(existing, nil)
 	require.Equal(t, existing, mergedEmptyNew)
 }
@@ -95,16 +122,20 @@ resources:
   - ../../base
 `
 	target := kustomizeTarget{
+		Group:     "apps",
+		Version:   "v1",
 		Kind:      "Deployment",
 		Name:      "nginx",
 		Namespace: "prod",
 	}
 
-	// First addition: creates patches section with namespace
+	// First addition: creates patches section with group, version and namespace
 	res1, err := addPatchToKustomizationYAML(initial, "patches/deploy-patch.yaml", target)
 	require.NoError(t, err)
 	assert.Contains(t, res1, "patches:")
 	assert.Contains(t, res1, "path: patches/deploy-patch.yaml")
+	assert.Contains(t, res1, "group: ^apps$")
+	assert.Contains(t, res1, "version: v1")
 	assert.Contains(t, res1, "kind: Deployment")
 	assert.Contains(t, res1, "name: nginx")
 	assert.Contains(t, res1, "namespace: prod")
@@ -114,6 +145,11 @@ resources:
 	require.NoError(t, err)
 	count := strings.Count(res2, "patches/deploy-patch.yaml")
 	assert.Equal(t, 1, count, "patch path must not be duplicated")
+
+	// Equivalent path check: ./patches/deploy-patch.yaml should be recognized as patches/deploy-patch.yaml
+	resEquiv, err := addPatchToKustomizationYAML(res2, "./patches/deploy-patch.yaml", target)
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(resEquiv, "deploy-patch.yaml"), "equivalent path ./patches/... must not create duplicate entry")
 
 	// Adding another patch for a resource with numeric/boolean names and regex meta
 	target2 := kustomizeTarget{
@@ -134,6 +170,99 @@ resources:
 	res4, err := addPatchToKustomizationYAML(res3, "patches/cm-patch.yaml", target3)
 	require.NoError(t, err)
 	assert.Contains(t, res4, `my-app\.v1\+config`)
+}
+
+func TestAddPatchToKustomizationYAML_MergeKeys(t *testing.T) {
+	initial := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+common_patches: &common_patches
+  patches:
+    - path: patches/common.yaml
+      target:
+        kind: Deployment
+<<: *common_patches
+resources:
+  - ../../base
+`
+	target := kustomizeTarget{
+		Group:   "apps",
+		Version: "v1",
+		Kind:    "Deployment",
+		Name:    "nginx",
+	}
+	res, err := addPatchToKustomizationYAML(initial, "patches/deploy.yaml", target)
+	require.NoError(t, err)
+	assert.Contains(t, res, "patches/common.yaml", "must preserve inherited patches from merge key")
+	assert.Contains(t, res, "patches/deploy.yaml", "must append new patch")
+
+	// Deduplication test: inherited sequence with ./patches/deploy.yaml should not be duplicated when adding patches/deploy.yaml
+	equivInherited := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+common_patches: &common_patches
+  patches:
+    - path: ./patches/deploy.yaml
+      target:
+        kind: Deployment
+<<: *common_patches
+resources:
+  - ../../base
+`
+	resDedupe, err := addPatchToKustomizationYAML(equivInherited, "patches/deploy.yaml", target)
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(resDedupe, "deploy.yaml"), "inherited equivalent patch must not be duplicated")
+}
+
+func TestAddPatchToKustomizationYAML_PatchOrderEffectiveness(t *testing.T) {
+	initial := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+patches:
+  - path: patches/deploy.yaml
+    options:
+      allowNameChange: true
+    target:
+      kind: Deployment
+      name: nginx
+  - path: patches/override.yaml
+    target:
+      kind: Deployment
+      name: nginx
+`
+	target := kustomizeTarget{
+		Kind: "Deployment",
+		Name: "nginx",
+	}
+	// Re-running for deploy.yaml when a later patch override.yaml exists
+	// must move deploy.yaml to the end so remediation remains effective.
+	res, err := addPatchToKustomizationYAML(initial, "patches/deploy.yaml", target)
+	require.NoError(t, err)
+	idxDeploy := strings.Index(res, "patches/deploy.yaml")
+	idxOverride := strings.Index(res, "patches/override.yaml")
+	assert.Greater(t, idxDeploy, idxOverride, "remediation patch must be moved after override.yaml")
+	assert.Contains(t, res, "allowNameChange: true", "must preserve custom fields like options intact when moving entry")
+}
+
+func TestAddPatchToKustomizationYAML_PreservesFormattingOutsideRegistration(t *testing.T) {
+	initial := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Important comment header
+resources:
+    - ../../base
+    - other.yaml
+
+# Another comment
+`
+	target := kustomizeTarget{
+		Group:   "apps",
+		Version: "v1",
+		Kind:    "Deployment",
+		Name:    "nginx",
+	}
+	res, err := addPatchToKustomizationYAML(initial, "patches/deploy.yaml", target)
+	require.NoError(t, err)
+	assert.Contains(t, res, "    - ../../base", "must preserve 4-space indentation in resources")
+	assert.Contains(t, res, "# Important comment header")
+	assert.Contains(t, res, "# Another comment")
 }
 
 func TestResolveKustomizeOverlaySource(t *testing.T) {
@@ -928,6 +1057,7 @@ func TestApplyChanges_Overlay_OutputDir_RejectsOverwritingScannedManifest(t *tes
 	require.NotEmpty(t, errs, "must reject destination that overwrites scanned manifest")
 	assert.Equal(t, 0, count, "must not write any files when pre-validation fails")
 	assert.Contains(t, errs[0].Error(), "holds scanned manifests")
+	assert.Contains(t, errs[0].Error(), patchName)
 
 	// Ensure collision file was NOT overwritten
 	contentAfter, err := os.ReadFile(collisionFile)
@@ -1248,6 +1378,7 @@ resources: []
 			isKustomizeOverlay:  true,
 			kustomizeOverlayDir: overlayDir,
 			FilePath:            filepath.Join(overlayDir, "kustomization.yaml"),
+			relativePath:        filepath.Join("overlays", "prod", "kustomization.yaml"),
 			YamlExpressions: map[string]armotypes.FixPath{
 				"spec.template.spec.containers[0].securityContext.privileged": {
 					Path:  "spec.template.spec.containers[0].securityContext.privileged",
@@ -1260,4 +1391,696 @@ resources: []
 	_, err := planOverlayChanges(overlayDir, fixes)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported: cannot resolve resource identity at Kustomize patches stage")
+}
+
+func TestApplyKustomizeOverlay_TargetGroupAndVersionDifferentiation(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlays", "prod")
+	require.NoError(t, os.MkdirAll(overlayDir, 0755))
+
+	overlayKust := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []
+`
+	require.NoError(t, os.WriteFile(filepath.Join(overlayDir, "kustomization.yaml"), []byte(overlayKust), 0600))
+
+	res := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "networking.k8s.io/v1",
+			"kind":       "Ingress",
+			"metadata": map[string]interface{}{
+				"name":      "my-ingress",
+				"namespace": "prod",
+			},
+		},
+	}
+
+	fixes := []ResourceFixInfo{
+		{
+			Resource:            res,
+			isKustomizeOverlay:  true,
+			kustomizeOverlayDir: overlayDir,
+			FilePath:            filepath.Join(overlayDir, "kustomization.yaml"),
+			relativePath:        filepath.Join("overlays", "prod", "kustomization.yaml"),
+			YamlExpressions: map[string]armotypes.FixPath{
+				"metadata.annotations.ssl-redirect": {
+					Path:  "metadata.annotations.ssl-redirect",
+					Value: "true",
+				},
+			},
+		},
+	}
+
+	plan, err := planOverlayChanges(overlayDir, fixes)
+	require.NoError(t, err)
+	require.Len(t, plan.patches, 1)
+	assert.Equal(t, "networking.k8s.io", plan.patches[0].target.Group)
+	assert.Equal(t, "v1", plan.patches[0].target.Version)
+	assert.Contains(t, plan.updatedKust, `^networking\.k8s\.io$`)
+	assert.Contains(t, plan.updatedKust, "version: v1")
+}
+
+func TestApplyKustomizeOverlay_ContainerIndexResolutionWithPatchesJson6902(t *testing.T) {
+	tmpDir := t.TempDir()
+	baseDir := filepath.Join(tmpDir, "base")
+	overlayDir := filepath.Join(tmpDir, "overlays", "prod")
+	require.NoError(t, os.MkdirAll(baseDir, 0755))
+	require.NoError(t, os.MkdirAll(overlayDir, 0755))
+
+	baseDeployment := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: nginx
+`
+	baseKust := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+`
+	// Overlay inserts a sidecar container at index 0 via patchesJson6902
+	overlayKust := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patchesJson6902:
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: my-app
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0
+        value:
+          name: sidecar
+          image: busybox
+`
+	baseDeployPath := filepath.Join(baseDir, "deployment.yaml")
+	require.NoError(t, os.WriteFile(baseDeployPath, []byte(baseDeployment), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(baseDir, "kustomization.yaml"), []byte(baseKust), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(overlayDir, "kustomization.yaml"), []byte(overlayKust), 0600))
+
+	// Rendered resource: sidecar is at index 0, app is shifted to index 1
+	res := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name": "my-app",
+			},
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{
+								"name":  "sidecar",
+								"image": "busybox",
+							},
+							map[string]interface{}{
+								"name":  "app",
+								"image": "nginx",
+							},
+						},
+					},
+				},
+			},
+		},
+		Source: &reporthandling.Source{
+			FileType:               reporthandling.SourceTypeKustomizeDirectory,
+			KustomizeDirectoryName: overlayDir,
+			Path:                   tmpDir,
+			RelativePath:           "base/deployment.yaml",
+		},
+	}
+
+	// Fix targets the "app" container which is reported at rendered index 1
+	fixes := []ResourceFixInfo{
+		{
+			Resource:            res,
+			isKustomizeOverlay:  true,
+			kustomizeOverlayDir: overlayDir,
+			FilePath:            filepath.Join(overlayDir, "kustomization.yaml"),
+			reportedPath:        baseDeployPath,
+			YamlExpressions: map[string]armotypes.FixPath{
+				"spec.template.spec.containers[1].securityContext.readOnlyRootFilesystem": {
+					Path:  "spec.template.spec.containers[1].securityContext.readOnlyRootFilesystem",
+					Value: "true",
+				},
+			},
+		},
+	}
+
+	handler := &FixHandler{
+		localBasePath: tmpDir,
+		reportObj:     &reporthandlingv2.PostureReport{},
+	}
+
+	count, errs := handler.ApplyChanges(context.Background(), fixes)
+	require.Empty(t, errs)
+	assert.Equal(t, 1, count)
+
+	// Build with Kustomize krusty to verify final rendered containers
+	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	m, err := k.Run(filesys.MakeFsOnDisk(), overlayDir)
+	require.NoError(t, err)
+	yamlBytes, err := m.AsYaml()
+	require.NoError(t, err)
+
+	var doc struct {
+		Spec struct {
+			Template struct {
+				Spec struct {
+					Containers []struct {
+						Name            string                 `yaml:"name"`
+						SecurityContext map[string]interface{} `yaml:"securityContext"`
+					} `yaml:"containers"`
+				} `yaml:"spec"`
+			} `yaml:"template"`
+		} `yaml:"spec"`
+	}
+	require.NoError(t, yaml.Unmarshal(yamlBytes, &doc))
+	require.Len(t, doc.Spec.Template.Spec.Containers, 2)
+
+	// Sidecar at index 0 must be UNCHANGED (no readOnlyRootFilesystem)
+	assert.Equal(t, "sidecar", doc.Spec.Template.Spec.Containers[0].Name)
+	assert.Nil(t, doc.Spec.Template.Spec.Containers[0].SecurityContext)
+
+	// App at index 1 must have received readOnlyRootFilesystem=true
+	assert.Equal(t, "app", doc.Spec.Template.Spec.Containers[1].Name)
+	require.NotNil(t, doc.Spec.Template.Spec.Containers[1].SecurityContext)
+	assert.Equal(t, true, doc.Spec.Template.Spec.Containers[1].SecurityContext["readOnlyRootFilesystem"])
+
+	// And base manifest on disk must be 100% untouched
+	baseContentAfter, err := os.ReadFile(baseDeployPath)
+	require.NoError(t, err)
+	assert.Equal(t, baseDeployment, string(baseContentAfter))
+}
+
+func TestApplyKustomizeOverlay_InjectedContainerUnsupported(t *testing.T) {
+	tmpDir := t.TempDir()
+	baseDir := filepath.Join(tmpDir, "base")
+	overlayDir := filepath.Join(tmpDir, "overlays", "prod")
+	require.NoError(t, os.MkdirAll(baseDir, 0755))
+	require.NoError(t, os.MkdirAll(overlayDir, 0755))
+
+	baseDeployment := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: nginx
+`
+	baseDeployPath := filepath.Join(baseDir, "deployment.yaml")
+	require.NoError(t, os.WriteFile(baseDeployPath, []byte(baseDeployment), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(overlayDir, "kustomization.yaml"), []byte("resources: [../../base]"), 0600))
+
+	// Rendered resource includes an injected sidecar that is NOT in the origin manifest
+	res := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name": "my-app",
+			},
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{
+								"name":  "sidecar",
+								"image": "busybox",
+							},
+						},
+					},
+				},
+			},
+		},
+		Source: &reporthandling.Source{
+			FileType:               reporthandling.SourceTypeKustomizeDirectory,
+			KustomizeDirectoryName: overlayDir,
+			Path:                   tmpDir,
+			RelativePath:           "base/deployment.yaml",
+		},
+	}
+
+	fixes := []ResourceFixInfo{
+		{
+			Resource:            res,
+			isKustomizeOverlay:  true,
+			kustomizeOverlayDir: overlayDir,
+			FilePath:            filepath.Join(overlayDir, "kustomization.yaml"),
+			reportedPath:        baseDeployPath,
+			YamlExpressions: map[string]armotypes.FixPath{
+				"spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem": {
+					Path:  "spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem",
+					Value: "true",
+				},
+			},
+		},
+	}
+
+	_, err := planOverlayChanges(overlayDir, fixes)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported: cannot resolve container index for container \"sidecar\"")
+}
+
+func TestApplyKustomizeOverlay_PrecedingPatchesModifyContainersUnsupported(t *testing.T) {
+	tmpDir := t.TempDir()
+	baseDir := filepath.Join(tmpDir, "base")
+	overlayDir := filepath.Join(tmpDir, "overlays", "prod")
+	require.NoError(t, os.MkdirAll(baseDir, 0755))
+	require.NoError(t, os.MkdirAll(overlayDir, 0755))
+
+	baseDeployment := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: nginx
+`
+	baseDeployPath := filepath.Join(baseDir, "deployment.yaml")
+	require.NoError(t, os.WriteFile(baseDeployPath, []byte(baseDeployment), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(baseDir, "kustomization.yaml"), []byte("resources: [deployment.yaml]"), 0600))
+
+	// Overlay has an existing patch in patches: that inserts a sidecar before remediation
+	overlayKust := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  - target:
+      kind: Deployment
+      name: my-app
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0
+        value:
+          name: sidecar
+          image: busybox
+`
+	require.NoError(t, os.WriteFile(filepath.Join(overlayDir, "kustomization.yaml"), []byte(overlayKust), 0600))
+
+	// Rendered resource: sidecar is at 0, app is at 1
+	res := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name": "my-app",
+			},
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"containers": []interface{}{
+							map[string]interface{}{
+								"name":  "sidecar",
+								"image": "busybox",
+							},
+							map[string]interface{}{
+								"name":  "app",
+								"image": "nginx",
+							},
+						},
+					},
+				},
+			},
+		},
+		Source: &reporthandling.Source{
+			FileType:               reporthandling.SourceTypeKustomizeDirectory,
+			KustomizeDirectoryName: overlayDir,
+			Path:                   tmpDir,
+			RelativePath:           "base/deployment.yaml",
+		},
+	}
+
+	fixes := []ResourceFixInfo{
+		{
+			Resource:            res,
+			isKustomizeOverlay:  true,
+			kustomizeOverlayDir: overlayDir,
+			FilePath:            filepath.Join(overlayDir, "kustomization.yaml"),
+			reportedPath:        baseDeployPath,
+			YamlExpressions: map[string]armotypes.FixPath{
+				"spec.template.spec.containers[1].securityContext.readOnlyRootFilesystem": {
+					Path:  "spec.template.spec.containers[1].securityContext.readOnlyRootFilesystem",
+					Value: "true",
+				},
+			},
+		},
+	}
+
+	_, err := planOverlayChanges(overlayDir, fixes)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "preceding patches modify resource container layout before remediation")
+}
+
+func TestApplyKustomizeOverlay_DestinationConflictWithOrdinaryOutput(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlays", "prod")
+	outDir := filepath.Join(tmpDir, "out")
+	require.NoError(t, os.MkdirAll(overlayDir, 0755))
+	require.NoError(t, os.MkdirAll(outDir, 0755))
+
+	kustContent := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []
+`
+	require.NoError(t, os.WriteFile(filepath.Join(overlayDir, "kustomization.yaml"), []byte(kustContent), 0600))
+
+	res := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name": "my-app",
+			},
+		},
+	}
+	patchName := overlayPatchFileName(res)
+	ordinaryFile := filepath.Join(tmpDir, "manifests", "ordinary.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(ordinaryFile), 0755))
+	require.NoError(t, os.WriteFile(ordinaryFile, []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: my-cm\n"), 0600))
+
+	fixes := []ResourceFixInfo{
+		{
+			Resource:            res,
+			isKustomizeOverlay:  true,
+			kustomizeOverlayDir: overlayDir,
+			FilePath:            filepath.Join(overlayDir, "kustomization.yaml"),
+			relativePath:        filepath.Join("overlays", "prod", "kustomization.yaml"),
+			YamlExpressions: map[string]armotypes.FixPath{
+				"spec.replicas": {
+					Path:  "spec.replicas",
+					Value: "2",
+				},
+			},
+		},
+		{
+			FilePath:     ordinaryFile,
+			relativePath: filepath.Join("overlays", "prod", "patches", patchName),
+			Resource: &reporthandling.Resource{
+				Object: map[string]interface{}{"kind": "ConfigMap"},
+			},
+			YamlExpressions: map[string]armotypes.FixPath{
+				"metadata.name": {Path: "metadata.name", Value: "conflict"},
+			},
+		},
+	}
+
+	handler := &FixHandler{
+		localBasePath: tmpDir,
+		fixInfo: &metav1.FixInfo{
+			OutputDir: outDir,
+		},
+		reportObj: &reporthandlingv2.PostureReport{},
+	}
+
+	count, errs := handler.ApplyChanges(context.Background(), fixes)
+	require.NotEmpty(t, errs)
+	assert.Equal(t, 0, count)
+	assert.Contains(t, errs[0].Error(), "conflict: overlay patch destination")
+}
+
+func TestApplyKustomizeOverlay_DestinationDirectoryConflictWithOrdinaryOutput(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlays", "prod")
+	outDir := filepath.Join(tmpDir, "out")
+	require.NoError(t, os.MkdirAll(overlayDir, 0755))
+	require.NoError(t, os.MkdirAll(outDir, 0755))
+
+	kustContent := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []
+`
+	require.NoError(t, os.WriteFile(filepath.Join(overlayDir, "kustomization.yaml"), []byte(kustContent), 0600))
+
+	res := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name": "my-app",
+			},
+		},
+	}
+	patchName := overlayPatchFileName(res)
+	ordinaryFile := filepath.Join(tmpDir, "manifests", "ordinary.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(ordinaryFile), 0755))
+	require.NoError(t, os.WriteFile(ordinaryFile, []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: my-cm\n"), 0600))
+
+	// Ordinary file's output destination would make patchName a directory: patches/<patchName>/child.yaml
+	fixes := []ResourceFixInfo{
+		{
+			Resource:            res,
+			isKustomizeOverlay:  true,
+			kustomizeOverlayDir: overlayDir,
+			FilePath:            filepath.Join(overlayDir, "kustomization.yaml"),
+			relativePath:        filepath.Join("overlays", "prod", "kustomization.yaml"),
+			YamlExpressions: map[string]armotypes.FixPath{
+				"spec.replicas": {
+					Path:  "spec.replicas",
+					Value: "2",
+				},
+			},
+		},
+		{
+			FilePath:     ordinaryFile,
+			relativePath: filepath.Join("overlays", "prod", "patches", patchName, "child.yaml"),
+			Resource: &reporthandling.Resource{
+				Object: map[string]interface{}{"kind": "ConfigMap"},
+			},
+			YamlExpressions: map[string]armotypes.FixPath{
+				"metadata.name": {Path: "metadata.name", Value: "conflict"},
+			},
+		},
+	}
+
+	handler := &FixHandler{
+		localBasePath: tmpDir,
+		fixInfo: &metav1.FixInfo{
+			OutputDir: outDir,
+		},
+		reportObj: &reporthandlingv2.PostureReport{},
+	}
+
+	count, errs := handler.ApplyChanges(context.Background(), fixes)
+	require.NotEmpty(t, errs)
+	assert.Equal(t, 0, count)
+	assert.Contains(t, errs[0].Error(), "conflict: overlay patch destination")
+}
+
+func TestApplyKustomizeOverlay_ExportCopiesKustomizationWhenAlreadyRegistered(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlays", "prod")
+	outDir := filepath.Join(tmpDir, "out")
+	require.NoError(t, os.MkdirAll(overlayDir, 0755))
+
+	res := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata": map[string]interface{}{
+				"name": "my-app",
+			},
+		},
+	}
+	patchName := overlayPatchFileName(res)
+
+	// Patch is ALREADY registered in kustomization.yaml
+	initialKust := fmt.Sprintf(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []
+patches:
+  - path: patches/%s
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: my-app
+`, patchName)
+
+	require.NoError(t, os.WriteFile(filepath.Join(overlayDir, "kustomization.yaml"), []byte(initialKust), 0600))
+	require.NoError(t, os.MkdirAll(filepath.Join(overlayDir, "patches"), 0755))
+	initialPatch := `- op: add
+  path: /spec/replicas
+  value: 1
+`
+	require.NoError(t, os.WriteFile(filepath.Join(overlayDir, "patches", patchName), []byte(initialPatch), 0600))
+
+	fixes := []ResourceFixInfo{
+		{
+			Resource:            res,
+			isKustomizeOverlay:  true,
+			kustomizeOverlayDir: overlayDir,
+			FilePath:            filepath.Join(overlayDir, "kustomization.yaml"),
+			relativePath:        filepath.Join("overlays", "prod", "kustomization.yaml"),
+			YamlExpressions: map[string]armotypes.FixPath{
+				"spec.replicas": {
+					Path:  "spec.replicas",
+					Value: "3",
+				},
+			},
+		},
+	}
+
+	handler := &FixHandler{
+		localBasePath: tmpDir,
+		fixInfo: &metav1.FixInfo{
+			OutputDir: outDir,
+		},
+		reportObj: &reporthandlingv2.PostureReport{},
+	}
+
+	count, errs := handler.ApplyChanges(context.Background(), fixes)
+	require.Empty(t, errs)
+	assert.Equal(t, 1, count)
+
+	// kustomization.yaml MUST be copied to outDir even though its content did not change
+	exportedKust := filepath.Join(outDir, "overlays", "prod", "kustomization.yaml")
+	require.FileExists(t, exportedKust, "kustomization.yaml must be exported even when patch was already registered")
+}
+
+func TestApplyKustomizeOverlay_ZeroWritesReportsZeroCount(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlays", "prod")
+	require.NoError(t, os.MkdirAll(overlayDir, 0755))
+
+	overlayKust := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []
+`
+	require.NoError(t, os.WriteFile(filepath.Join(overlayDir, "kustomization.yaml"), []byte(overlayKust), 0600))
+
+	res := &reporthandling.Resource{
+		Object: map[string]interface{}{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata":   map[string]interface{}{"name": "my-app"},
+		},
+	}
+
+	fixes := []ResourceFixInfo{
+		{
+			Resource:            res,
+			isKustomizeOverlay:  true,
+			kustomizeOverlayDir: overlayDir,
+			FilePath:            filepath.Join(overlayDir, "kustomization.yaml"),
+			YamlExpressions:     map[string]armotypes.FixPath{}, // No operations
+		},
+	}
+
+	handler := &FixHandler{
+		localBasePath: tmpDir,
+		reportObj:     &reporthandlingv2.PostureReport{},
+	}
+
+	count, errs := handler.ApplyChanges(context.Background(), fixes)
+	require.Empty(t, errs)
+	assert.Equal(t, 0, count, "zero-write plan must report 0 updated files")
+}
+
+func TestApplyKustomizeOverlay_SourceRootContainment(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+
+	overlayDir := filepath.Join(outside, "overlays", "prod")
+	require.NoError(t, os.MkdirAll(overlayDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(overlayDir, "kustomization.yaml"), []byte("resources: []"), 0600))
+
+	root, err := os.OpenRoot(workspace)
+	require.NoError(t, err)
+	defer root.Close()
+
+	_, err = planOverlayChanges(overlayDir, []ResourceFixInfo{}, root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "outside source root")
+}
+
+func TestReadPatchContent_OutsideSourceRoot(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+
+	outsidePatch := filepath.Join(outside, "patch.yaml")
+	require.NoError(t, os.WriteFile(outsidePatch, []byte("containers: []"), 0600))
+
+	root, err := os.OpenRoot(workspace)
+	require.NoError(t, err)
+	defer root.Close()
+
+	// When sourceRoot is provided, external patch path must return empty and not be opened
+	content := readPatchContent(outsidePatch, workspace, root)
+	assert.Empty(t, content)
+
+	// When sourceRoot is nil, fallback opens the path
+	contentNoRoot := readPatchContent(outsidePatch, workspace, nil)
+	assert.Equal(t, "containers: []", contentNoRoot)
+}
+
+func TestFormatYAMLPath_QuotesNonBareKeys(t *testing.T) {
+	parts := []yamlPathPart{
+		{key: "spec"},
+		{key: "containers"},
+		{sequence: true, index: 1},
+		{key: "env"},
+		{key: "app:config key"},
+		{key: "sub.field"},
+	}
+	got := formatYAMLPath(parts)
+	assert.Equal(t, `spec.containers[1].env."app:config key"."sub.field"`, got)
+}
+
+func TestRemapContainerFixPath_UnreadableOriginWithContainerPatchesUnsupported(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlays", "prod")
+	require.NoError(t, os.MkdirAll(overlayDir, 0755))
+
+	meta := kustomizationMeta{
+		PatchesJson6902: []interface{}{
+			map[string]interface{}{
+				"target": map[string]interface{}{
+					"kind": "Deployment",
+					"name": "my-app",
+				},
+				"patch": "- op: add\n  path: /spec/template/spec/containers/0\n  value:\n    name: sidecar\n",
+			},
+		},
+	}
+
+	renderedObj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]interface{}{"name": "my-app"},
+		"spec": map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{"name": "app"},
+					},
+				},
+			},
+		},
+	}
+
+	fp := armotypes.FixPath{
+		Path:  "spec.template.spec.containers[0].securityContext.runAsNonRoot",
+		Value: "true",
+	}
+
+	_, err := remapContainerFixPath(renderedObj, nil, fp, meta, "", overlayDir, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "origin manifest is unreadable")
 }
