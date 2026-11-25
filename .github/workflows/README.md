@@ -23,9 +23,9 @@ A weekly run of `k8scveindex-feed.yaml` checks that the embedded Kubernetes CVE 
 `contribution-policy.yaml` handles issue assignment commands and checks linked
 issues for triage and ownership. Its scheduled run reminds contributors about
 inactive assignments and requested changes before releasing assignments or
-closing PRs. It uses GitHub metadata and executes only scripts checked out from
-the workflow's trusted commit. It is disabled until maintainers configure the
-rollout timestamp. See [policy and activation instructions](../CONTRIBUTION_POLICY.md).
+closing PRs. It calls the commit-pinned shared action in `kubescape/workflows` without
+checking out contributor code. It is disabled until maintainers configure the
+rollout timestamp. See the [shared policy and activation instructions](https://github.com/kubescape/workflows/blob/main/docs/contribution-policy.md).
 
 ### Reviewing a PR
 

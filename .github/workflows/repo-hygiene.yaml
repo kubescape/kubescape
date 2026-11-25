@@ -66,9 +66,6 @@ jobs:
       - name: Validate workflow, Dependabot and security-insights configuration
         run: go test -v ./internal/ghworkflows/...
 
-      - name: Test contribution policy automation
-        run: node --test .github/scripts/tests/contribution-policy.test.cjs
-
       # Runs cue vet on security-insights.yml with the schema for its
       # schema-version. Pinned to a commit after v1.0.0 because v1.0.0 calls
       # cue vet without -d '#SecurityInsights', and then every file on schema
