@@ -136,7 +136,7 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 			}
 
 			for _, level := range helpers.SupportedLevels() {
-				if loggerName == zaplogger.LoggerName && strings.EqualFold(level, "success") {
+				if strings.EqualFold(loggerName, zaplogger.LoggerName) && strings.EqualFold(level, "success") {
 					continue
 				}
 				if strings.HasPrefix(

@@ -192,6 +192,17 @@ func TestLoggerCompletionZapExcludesSuccess(t *testing.T) {
 		suggestions, _ := complete(cmd, nil, "s")
 		assert.NotContains(t, suggestions, "success")
 	})
+
+	t.Run("via env var mixed case", func(t *testing.T) {
+		t.Setenv("KS_LOGGER_NAME", "Zap")
+		cmd := getRootCmd(nil, "", "", "")
+
+		complete, ok := cmd.GetFlagCompletionFunc("logger")
+		require.True(t, ok)
+
+		suggestions, _ := complete(cmd, nil, "s")
+		assert.NotContains(t, suggestions, "success")
+	})
 }
 
 func TestLoggerCompletionNonZapIncludesSuccess(t *testing.T) {
