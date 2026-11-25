@@ -176,6 +176,13 @@ func TestImageSeverityToInt(t *testing.T) {
 }
 
 func TestGetColorForVulnerabilitySeverity_CaseInsensitive(t *testing.T) {
+	previousLevel := gchalk.GetLevel()
+	gchalk.SetLevel(gchalk.LevelAnsi256)
+	t.Cleanup(func() { gchalk.SetLevel(previousLevel) })
+
+	// Without ANSI colors, every severity renders as plain text and hides regressions.
+	require.Contains(t, GetColorForVulnerabilitySeverity("Critical")("test"), "\x1b[")
+
 	tests := []struct {
 		name     string
 		severity string
