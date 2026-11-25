@@ -198,7 +198,7 @@ func TestGettersAirGappedUseCache(t *testing.T) {
 	ctx := context.Background()
 	for _, accountID := range []string{"", "123456789012"} {
 		t.Run("accountID="+accountID, func(t *testing.T) {
-			policyGetter, err := getPolicyGetter(ctx, nil, accountID, true, nil, true)
+			policyGetter, err := getPolicyGetter(ctx, nil, accountID, true, nil, true, nil)
 			assert.NoError(t, err)
 			assert.Equal(t, "*getter.LoadPolicy", reflect.TypeOf(policyGetter).String())
 			configInputsGetter, _, err := getConfigInputsGetter(ctx, "", accountID, nil, false, true)
@@ -289,7 +289,7 @@ func TestScanAllWithUseDefaultResolvesCachePaths(t *testing.T) {
 	assert.ElementsMatch(t, wantPaths, scanInfo.UseFrom)
 	assert.True(t, isAirGappedMode(scanInfo), "cached paths must put the scan in air-gapped mode")
 
-	policyGetter, err := getPolicyGetter(context.Background(), scanInfo.UseFrom, "123456789012", scanInfo.FrameworkScan, nil, isAirGappedMode(scanInfo))
+	policyGetter, err := getPolicyGetter(context.Background(), scanInfo.UseFrom, "123456789012", scanInfo.FrameworkScan, nil, isAirGappedMode(scanInfo), nil)
 	require.NoError(t, err)
 	assert.Equal(t, "*getter.LoadPolicy", reflect.TypeOf(policyGetter).String())
 }
@@ -811,12 +811,27 @@ func TestGetDefaultFrameworksPaths(t *testing.T) {
 	}
 }
 
+func TestCachedFrameworksPaths(t *testing.T) {
+	native := getDefaultFrameworksPaths()
+	assert.Equal(t, native, cachedFrameworksPaths(nil))
+
+	workloadscan, err := getter.PolicyCachePath("workloadscan")
+	require.NoError(t, err)
+	got := cachedFrameworksPaths([]cautils.PolicyIdentifier{
+		{Identifier: "workloadscan", Kind: apisv1.KindFramework},
+		{Identifier: "NSA", Kind: apisv1.KindFramework}, // native, already listed
+		{Identifier: "C-0001", Kind: apisv1.KindControl},
+		{Identifier: "../x", Kind: apisv1.KindFramework}, // not a valid cache name
+	})
+	assert.Equal(t, append(native, workloadscan), got)
+}
+
 // getDownloadReleasedPolicy should always have a non-nil result
 func TestGetDownloadReleasedPolicy(t *testing.T) {
 	ctx := context.Background()
 	downloadReleasedPolicy := getter.NewDownloadReleasedPolicy()
 
-	result, err := getDownloadReleasedPolicy(ctx, downloadReleasedPolicy)
+	result, err := getDownloadReleasedPolicy(ctx, downloadReleasedPolicy, nil)
 
 	require.NoError(t, err)
 	assert.NotNil(t, result)
@@ -835,7 +850,7 @@ func TestPinnedVersionGettersReturnHardError(t *testing.T) {
 	}
 
 	t.Run("getPolicyGetter", func(t *testing.T) {
-		g, err := getPolicyGetter(ctx, nil, "", true, newPinned(), false)
+		g, err := getPolicyGetter(ctx, nil, "", true, newPinned(), false, nil)
 		require.Error(t, err)
 		require.Nil(t, g)
 	})

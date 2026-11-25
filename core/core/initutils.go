@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
@@ -328,7 +329,7 @@ func isScanTypeForSubmission(scanType cautils.ScanTypes) bool {
 }
 
 // setPolicyGetter set the policy getter - local file/github release/Kubescape Cloud API
-func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, accountID string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) (getter.IPolicyGetter, error) {
+func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, accountID string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool, policyIdentifiers []cautils.PolicyIdentifier) (getter.IPolicyGetter, error) {
 	if len(loadPoliciesFromFile) > 0 {
 		return getter.NewLoadPolicy(loadPoliciesFromFile), nil
 	}
@@ -348,7 +349,7 @@ func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, account
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
-	return getDownloadReleasedPolicy(ctx, downloadReleasedPolicy)
+	return getDownloadReleasedPolicy(ctx, downloadReleasedPolicy, policyIdentifiers)
 
 }
 
@@ -428,15 +429,36 @@ func releasedPolicyStoreFor(scanInfo *cautils.ScanInfo) *getter.DownloadReleased
 	return own
 }
 
-func getDownloadReleasedPolicy(ctx context.Context, downloadReleasedPolicy *getter.DownloadReleasedPolicy) (getter.IPolicyGetter, error) {
+func getDownloadReleasedPolicy(ctx context.Context, downloadReleasedPolicy *getter.DownloadReleasedPolicy, policyIdentifiers []cautils.PolicyIdentifier) (getter.IPolicyGetter, error) {
 	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallbackContext(ctx); err != nil {
 		// pinned version: hard error, do not silently serve cached policies
 		return nil, err
 	} else if fallback { // if failed to pull policy, fallback to cache
 		logger.L().Ctx(ctx).Warning("failed to get policies from github release, loading policies from cache")
-		return getter.NewLoadPolicy(getDefaultFrameworksPaths()), nil
+		return getter.NewLoadPolicy(cachedFrameworksPaths(policyIdentifiers)), nil
 	}
 	return downloadReleasedPolicy, nil
+}
+
+// cachedFrameworksPaths returns the NativeFrameworks cache files plus the file
+// each requested framework is cached under by a scan (getter.PolicyCachePath),
+// so the default scan's workloadscan or clusterscan, or any framework scanned
+// before, can still be served from the cache. Without requested frameworks it
+// is just the NativeFrameworks, which also decide what a scan of all
+// frameworks evaluates.
+func cachedFrameworksPaths(policyIdentifiers []cautils.PolicyIdentifier) []string {
+	paths := getDefaultFrameworksPaths()
+	for _, policy := range policyIdentifiers {
+		if policy.Kind != apisv1.KindFramework {
+			continue
+		}
+		path, err := getter.PolicyCachePath(policy.Identifier)
+		if err != nil || slices.Contains(paths, path) {
+			continue
+		}
+		paths = append(paths, path)
+	}
+	return paths
 }
 
 func getDefaultFrameworksPaths() []string {
