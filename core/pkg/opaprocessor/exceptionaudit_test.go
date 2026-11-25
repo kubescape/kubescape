@@ -304,6 +304,67 @@ func TestBuildExceptionAuditDoesNotCollapseDuplicateNamesWithoutGUID(t *testing.
 	}
 }
 
+// Same-named exceptions whose rule-result copies are narrowed to the same control by
+// the exceptions processor must each keep their own match, including when one
+// exception's controls are a subset of the other's.
+func TestUpdateResults_ExceptionAuditKeepsNarrowedSameNameMatchesApart(t *testing.T) {
+	resource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": "nginx", "namespace": "default"},
+	})
+
+	for _, tc := range []struct {
+		name          string
+		first, second []string
+	}{
+		{name: "overlapping controls", first: []string{"C-0001", "C-0002"}, second: []string{"C-0001", "C-0003"}},
+		{name: "subset controls", first: []string{"C-0001", "C-0002"}, second: []string{"C-0001"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exception := func(controlIDs []string) armotypes.PostureExceptionPolicy {
+				e := armotypes.PostureExceptionPolicy{PortalBase: armotypes.PortalBase{Name: "shared"}}
+				for _, id := range controlIDs {
+					e.PosturePolicies = append(e.PosturePolicies, armotypes.PosturePolicy{ControlID: id})
+				}
+				return e
+			}
+
+			session := cautils.NewOPASessionObjMock()
+			session.AuditExceptions = true
+			session.AllResources[resource.GetID()] = resource
+			session.ResourcesResult[resource.GetID()] = resourcesresults.Result{
+				ResourceID: resource.GetID(),
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{{
+					ControlID:               "C-0001",
+					Name:                    "control-1",
+					Status:                  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{Name: "rule-a", Status: apis.StatusFailed}},
+				}},
+			}
+			session.Exceptions = []armotypes.PostureExceptionPolicy{exception(tc.first), exception(tc.second)}
+			session.AllPolicies = &cautils.Policies{Controls: map[string]reporthandling.Control{
+				"C-0001": {ControlID: "C-0001"},
+				"C-0002": {ControlID: "C-0002"},
+				"C-0003": {ControlID: "C-0003"},
+			}}
+			session.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{"C-0001": {ControlID: "C-0001"}}
+
+			opap := &OPAProcessor{OPASessionObj: session}
+			opap.updateResults(context.Background())
+
+			audit := opap.ExceptionAudit
+			require.NotNil(t, audit)
+			require.Len(t, audit.Items, 2)
+			assert.Equal(t, 2, audit.Summary.Active)
+			assert.Equal(t, 2, audit.Summary.Matched)
+			for _, item := range audit.Items {
+				assert.Equal(t, 1, item.MatchCount, "item %v", item.ControlIDs)
+			}
+		})
+	}
+}
+
 func TestBuildExceptionAuditMergesIdenticalExceptions(t *testing.T) {
 	exception := auditException("dup", "C-0001", nil)
 	audit := buildExceptionAudit(
