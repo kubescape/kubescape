@@ -1718,25 +1718,92 @@ func TestKustomizeOriginForFileNamesWithAColon(t *testing.T) {
 		})
 		assert.Equal(t, originUnavailable, originModeFor(app).mode)
 	})
+
+	t.Run("an invalid local file named like Git shorthand is still rejected", func(t *testing.T) {
+		app := t.TempDir()
+		writeKustomizeFiles(t, app, map[string]string{
+			"kustomization.yaml": "resources:\n- \"gh:org/repo\"\n",
+			// Missing metadata.name: Kustomize's accumulateFile rejects it and
+			// falls back to loader.New, which treats gh:org/repo as Git shorthand.
+			"gh:org/repo": "{kind: Deployment}\n",
+		})
+		assert.Equal(t, originUnavailable, originModeFor(app).mode)
+	})
+
+	t.Run("a remote http patch URL is rejected", func(t *testing.T) {
+		app := t.TempDir()
+		writeKustomizeFiles(t, app, map[string]string{
+			"deployment.yaml":    demoDeployment,
+			"kustomization.yaml": "resources:\n- deployment.yaml\npatches:\n- path: https://example.com/patch.yaml\n  target:\n    kind: Deployment\n",
+		})
+		assert.Equal(t, originUnavailable, originModeFor(app).mode)
+	})
 }
 
 // Kustomize reads a patchesStrategicMerge entry as patch content first, and as
 // a file name only when it is not, so a patch on one line is content.
 func TestKustomizeOriginForAOneLineStrategicMergePatch(t *testing.T) {
-	root := t.TempDir()
-	writeKustomizeFiles(t, root, map[string]string{
-		"base/kustomization.yaml": "resources:\n- deployment.yaml\n",
-		"base/deployment.yaml":    demoDeployment,
-		"overlay/kustomization.yaml": `resources:
+	t.Run("a spec-only patch on one line keeps attribution", func(t *testing.T) {
+		root := t.TempDir()
+		writeKustomizeFiles(t, root, map[string]string{
+			"base/kustomization.yaml": "resources:\n- deployment.yaml\n",
+			"base/deployment.yaml":    demoDeployment,
+			"overlay/kustomization.yaml": `resources:
 - ../base
 patchesStrategicMerge:
 - '{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "demo"}, "spec": {"replicas": 2}}'
 `,
+		})
+		overlay := filepath.Join(root, "overlay")
+		require.Equal(t, originWrapper, originModeFor(overlay).mode)
+		byName, origins := renderedKustomizeWorkloads(t, overlay)
+		assert.Equal(t, filepath.Join(root, "base", "deployment.yaml"), origins[byName["Deployment/demo"].GetID()])
 	})
-	overlay := filepath.Join(root, "overlay")
-	require.Equal(t, originWrapper, originModeFor(overlay).mode)
-	byName, origins := renderedKustomizeWorkloads(t, overlay)
-	assert.Equal(t, filepath.Join(root, "base", "deployment.yaml"), origins[byName["Deployment/demo"].GetID()])
+
+	t.Run("a one-line inline patch modifying metadata suppresses attribution", func(t *testing.T) {
+		app := t.TempDir()
+		writeKustomizeFiles(t, app, map[string]string{
+			"deployment.yaml": demoDeployment,
+			"kustomization.yaml": `resources:
+- deployment.yaml
+patchesStrategicMerge:
+- '{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "demo", "labels": {"a": "b"}}}'
+`,
+		})
+		assert.Equal(t, originUnavailable, originModeFor(app).mode)
+	})
+
+	t.Run("a one-line map rejected by Kustomize inline parse is inspected as a file path", func(t *testing.T) {
+		app := t.TempDir()
+		patchName := "{kind: Deployment}"
+		if err := os.WriteFile(filepath.Join(app, patchName), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  annotations:
+    config.kubernetes.io/origin: |
+      path: service.yaml
+`), 0o600); err != nil {
+			t.Skipf("this file system does not allow %q as a file name: %v", patchName, err)
+		}
+		writeKustomizeFiles(t, app, map[string]string{
+			"deployment.yaml": demoDeployment,
+			"service.yaml":    "apiVersion: v1\nkind: Service\nmetadata:\n  name: demo\n",
+			"kustomization.yaml": `resources:
+- deployment.yaml
+- service.yaml
+buildMetadata: [originAnnotations]
+patchesStrategicMerge:
+- '{kind: Deployment}'
+`,
+		})
+
+		require.Equal(t, originUnavailable, originModeFor(app).mode)
+		byName, origins := renderedKustomizeWorkloads(t, app)
+		require.Equal(t, "service.yaml", takeOriginPath(byName["Deployment/demo"].GetObject(), false),
+			"Kustomize rejected the inline parse and loaded the patch file of that name")
+		assert.Empty(t, origins)
+	})
 }
 
 func TestStrategicMergeEntry(t *testing.T) {
@@ -1747,6 +1814,7 @@ func TestStrategicMergeEntry(t *testing.T) {
 	}{
 		{"a file name", "replicas.yaml", types.Patch{Path: "replicas.yaml"}},
 		{"a file name with a colon", "replicas:v2.yaml", types.Patch{Path: "replicas:v2.yaml"}},
+		{"a map without metadata.name is a file name", "{kind: Deployment}", types.Patch{Path: "{kind: Deployment}"}},
 		{"a patch on one line", `{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "demo"}}`,
 			types.Patch{Patch: `{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "demo"}}`}},
 		{"a patch on several lines", "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\n",

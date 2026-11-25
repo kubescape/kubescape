@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/api/provider"
+	"sigs.k8s.io/kustomize/api/resmap"
 	"sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 	kyaml "sigs.k8s.io/kustomize/kyaml/yaml"
@@ -300,15 +301,13 @@ func (w *originWalk) inspectKustomizationNode(file, lexicalDir string, isRoot bo
 			refPath = filepath.Join(dir, refPath)
 		}
 		// A local file is read as one even when its name looks like Git
-		// shorthand, as demo:v1.yaml does. Only a URL Kustomize fetches over
-		// HTTP is read from the network instead.
-		readAsFile := false
-		if i < maybeFiles && !isRemoteFile(ref) {
-			info, err := os.Stat(refPath)
-			readAsFile = err == nil && info.Mode().IsRegular()
-		}
-		if !readAsFile && isRemoteReference(ref) {
-			return false, nil, false
+		// shorthand, as demo:v1.yaml does, provided Kustomize's accumulateFile
+		// accepts it; otherwise accumulateResources falls back to loader.New.
+		// Only a URL Kustomize fetches over HTTP is read from the network instead.
+		if isRemoteReference(ref) {
+			if i >= maybeFiles || isRemoteFile(ref) || !isKustomizeResourceFile(dir, refPath) {
+				return false, nil, false
+			}
 		}
 		refCanonical, err := filepath.EvalSymlinks(refPath)
 		if err != nil {
@@ -432,6 +431,26 @@ func isRemoteReference(ref string) bool {
 func isRemoteFile(path string) bool {
 	u, err := url.Parse(path)
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https")
+}
+
+// isKustomizeResourceFile reports whether Kustomize's accumulateFile accepts
+// path under dir as a local resource file. When accumulateFile fails,
+// accumulateResources falls back to loader.New (base directory or Git repo).
+func isKustomizeResourceFile(dir, path string) bool {
+	canonical, err := filepath.EvalSymlinks(path)
+	if err != nil || !pathcontainment.IsPathContained(dir, canonical) {
+		return false
+	}
+	info, err := os.Stat(canonical)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	content, err := readKustomizationFile(canonical)
+	if err != nil {
+		return false
+	}
+	_, err = resmap.NewFactory(provider.NewDepProvider().GetResourceFactory()).NewResMapFromBytes(content)
+	return err == nil
 }
 
 // strategicMergeEntry is the patch a patchesStrategicMerge entry stands for.
