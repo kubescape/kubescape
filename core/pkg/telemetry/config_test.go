@@ -159,32 +159,55 @@ func TestResolveConfigFlagWinsOverEnvironment(t *testing.T) {
 
 func TestResolveConfigProtocol(t *testing.T) {
 	tests := []struct {
-		name    string
-		value   string
-		want    string
-		wantErr bool
+		name  string
+		value string
+		want  string
 	}{
 		{name: "default", value: "", want: ProtocolGRPC},
 		{name: "grpc", value: ProtocolGRPC, want: ProtocolGRPC},
 		{name: "http protobuf", value: ProtocolHTTP, want: ProtocolHTTP},
 		{name: "http alias", value: "http", want: ProtocolHTTP},
-		{name: "json is unsupported", value: "http/json", wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.value != "" {
-				t.Setenv(EnvProtocol, tt.value)
-			}
+			t.Setenv(EnvProtocol, tt.value)
 
 			cfg, err := ResolveConfig("localhost:4317", "")
 
-			if tt.wantErr {
-				require.Error(t, err)
-				return
-			}
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, cfg.Protocol)
+		})
+	}
+}
+
+func TestResolveConfigUnsupportedProtocol(t *testing.T) {
+	tests := []struct {
+		name         string
+		flagEndpoint string
+		envEndpoint  string
+	}{
+		{name: "no endpoint"},
+		{name: "explicit endpoint", flagEndpoint: "localhost:4317"},
+		{name: "generic endpoint", envEndpoint: EnvEndpoint},
+		{name: "traces endpoint", envEndpoint: EnvTracesEndpoint},
+		{name: "metrics endpoint", envEndpoint: EnvMetricsEndpoint},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEndpointEnvironment(t)
+			t.Setenv(EnvProtocol, "http/json")
+			if tt.envEndpoint != "" {
+				t.Setenv(tt.envEndpoint, "http://localhost:4318")
+			}
+
+			cfg, err := ResolveConfig(tt.flagEndpoint, "")
+			if tt.flagEndpoint == "" && tt.envEndpoint == "" {
+				require.NoError(t, err)
+				assert.False(t, cfg.Enabled())
+				return
+			}
+			require.EqualError(t, err, `invalid OTEL_EXPORTER_OTLP_PROTOCOL "http/json": supported protocols are "grpc" and "http/protobuf"`)
 		})
 	}
 }

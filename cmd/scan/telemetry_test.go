@@ -71,6 +71,7 @@ func TestInstallTelemetrySkipsCommandsWithoutRunE(t *testing.T) {
 
 func TestWrapWithTelemetryDisabledRunsCommandUntouched(t *testing.T) {
 	clearTelemetryEnvironment(t)
+	t.Setenv(telemetry.EnvProtocol, "http/json")
 
 	ks := &contextKubescape{ctx: context.Background()}
 	var observedCtx context.Context
