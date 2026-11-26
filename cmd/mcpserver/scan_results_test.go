@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -109,18 +110,38 @@ func TestScanResultRetentionLimits(t *testing.T) {
 	_, err = store.page("alice", id, 0, 100, now)
 	require.ErrorIs(t, err, errScanResultsUnavailable)
 
+	before, err := snapshotMetadataSize(doc)
+	require.NoError(t, err)
+	registered := doc
+	registered.ScanID = strings.Repeat("0", 64)
+	expiry := now.Add(scanResultsTTL)
+	registered.ExpiresAt = &expiry
+	after, err := snapshotMetadataSize(registered)
+	require.NoError(t, err)
+	baseSize := scanResultsMaxBytes - (after - before)
+
 	var byteLimited scanResultStore
-	_, err = byteLimited.firstPage("alice", doc, scanResultsMaxBytes, now)
-	require.NoError(t, err)
-	_, err = byteLimited.firstPage("alice", doc, scanResultsMaxBytes, now)
-	require.NoError(t, err)
+	for i := 0; i < 2; i++ {
+		data, err := byteLimited.firstPage("alice", doc, baseSize, now)
+		require.NoError(t, err)
+		require.NotEmpty(t, decodeResultPage(t, data).ScanID)
+	}
 	require.Len(t, byteLimited.entries, 1)
 	require.Equal(t, scanResultsMaxBytes, byteLimited.bytes)
+
+	var overBudget scanResultStore
+	data, err = overBudget.firstPage("alice", doc, baseSize+1, now)
+	require.NoError(t, err)
+	require.Empty(t, decodeResultPage(t, data).ScanID)
+	require.Empty(t, overBudget.entries)
+
 }
 
 func TestScanResultConcurrentClients(t *testing.T) {
 	ks := &KubescapeMcpserver{}
-	_, data := resultTestDocument(t)
+	doc, _ := resultTestDocument(t)
+	data, err := marshalScanPage(doc, 0, maxFailedResources)
+	require.NoError(t, err)
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
@@ -128,8 +149,10 @@ func TestScanResultConcurrentClients(t *testing.T) {
 			defer wg.Done()
 			ctx := resultTestContext(fmt.Sprintf("client-%d", i))
 			v, err := ks.doResultScan(ctx, "same-scan", func(ctx context.Context) (interface{}, error) {
-				require.Equal(t, true, ctx.Value(fullScanResultsKey{}))
-				return data, nil
+				prepared := ctx.Value(preparedScanResultsKey{}).(*preparedScanResults)
+				return data, prepared.buildSnapshot(doc.scanResponse, len(doc.Resources), func(i int) any {
+					return doc.Resources[i]
+				})
 			})
 			require.NoError(t, err)
 			page := decodeResultPage(t, v.([]byte))
