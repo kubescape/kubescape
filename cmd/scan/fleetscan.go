@@ -27,6 +27,8 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
 	"github.com/spf13/cobra"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
 )
 
 // validateKubeContextsSupported rejects --kube-contexts up front for any
@@ -215,8 +217,8 @@ func validateRetries(cmd *cobra.Command, scanInfo *cautils.ScanInfo) error {
 	return nil
 }
 
-// printerDestinations returns every file the printers will actually write for
-// one context's --output path, one per requested format.
+// printerDestinations returns every file the printers may write for one
+// context's --output path, including the CSV companion when scanning images.
 //
 // This is not the same as the --output path itself. Each printer passes the
 // path through printer.ResolveOutputFile, which appends the format's extension
@@ -225,7 +227,7 @@ func validateRetries(cmd *cobra.Command, scanInfo *cautils.ScanInfo) error {
 // fleet report, agree on a real destination while looking distinct.
 //
 // Formats that print to stdout and the discard sink contribute no destination.
-func printerDestinations(outputPath string, formats []string) []string {
+func printerDestinations(outputPath string, formats []string, scanImages bool) []string {
 	if strings.TrimSpace(outputPath) == os.DevNull {
 		return nil
 	}
@@ -245,6 +247,9 @@ func printerDestinations(outputPath string, formats []string) []string {
 		}
 		seen[resolved] = struct{}{}
 		destinations = append(destinations, resolved)
+		if format == printer.CsvFormat && scanImages {
+			destinations = append(destinations, printer.CsvImageCompanionPath(resolved))
+		}
 	}
 	return destinations
 }
@@ -274,11 +279,11 @@ func validateFleetScanInvocation(scanInfo *cautils.ScanInfo) (map[string]string,
 	}
 
 	formats := scanInfo.Formats()
-	outputPaths, err := perContextOutputPaths(scanInfo.Output, scanInfo.KubeContexts, formats)
+	outputPaths, err := perContextOutputPaths(scanInfo.Output, scanInfo.KubeContexts, formats, scanInfo.ScanImages)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateFleetReportPath(scanInfo.FleetReport, outputPaths, formats); err != nil {
+	if err := validateFleetReportPath(scanInfo.FleetReport, outputPaths, formats, scanInfo.ScanImages); err != nil {
 		return nil, err
 	}
 	return outputPaths, nil
@@ -292,11 +297,11 @@ func validateFleetScanInvocation(scanInfo *cautils.ScanInfo) (map[string]string,
 //
 // It compares against the destinations the printers resolve to, not the raw
 // --output paths, since those differ whenever a format appends an extension.
-func validateFleetReportPath(fleetReport string, outputPaths map[string]string, formats []string) error {
+func validateFleetReportPath(fleetReport string, outputPaths map[string]string, formats []string, scanImages bool) error {
 	if !fleetReportRequested(fleetReport) {
 		return nil
 	}
-	return fleetReportAliasesPerContextReport(fleetReport, outputPaths, formats)
+	return fleetReportAliasesPerContextReport(fleetReport, outputPaths, formats, scanImages)
 }
 
 // fleetReportAliasesPerContextReport catches aliases that string comparison
@@ -310,7 +315,7 @@ func validateFleetReportPath(fleetReport string, outputPaths map[string]string, 
 // --fleet-report side. File identity via os.SameFile is kept as a second check
 // for what a path walk cannot see, such as a hard link; it only applies when
 // both files exist.
-func fleetReportAliasesPerContextReport(fleetReport string, outputPaths map[string]string, formats []string) error {
+func fleetReportAliasesPerContextReport(fleetReport string, outputPaths map[string]string, formats []string, scanImages bool) error {
 	target, err := resolvePath(fleetReport)
 	if err != nil {
 		return fmt.Errorf("--fleet-report %q: %w", fleetReport, err)
@@ -318,7 +323,7 @@ func fleetReportAliasesPerContextReport(fleetReport string, outputPaths map[stri
 	fleetInfo, fleetExists := existingFileTarget(fleetReport)
 
 	for kubeContext, path := range outputPaths {
-		for _, destination := range printerDestinations(path, formats) {
+		for _, destination := range printerDestinations(path, formats, scanImages) {
 			resolved, err := resolvePath(destination)
 			if err != nil {
 				return fmt.Errorf("--output for %q: %w", kubeContext, err)
@@ -544,7 +549,7 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 		report.Divergence = fleet.BuildDivergence(report.ControlMatrix, baseScanInfo.ReferenceCluster)
 		// Re-check after the per-context files exist so os.SameFile can detect
 		// hard-link aliases that were not observable before the scans ran.
-		fleetReportErr = fleetReportAliasesPerContextReport(baseScanInfo.FleetReport, outputPaths, baseScanInfo.Formats())
+		fleetReportErr = fleetReportAliasesPerContextReport(baseScanInfo.FleetReport, outputPaths, baseScanInfo.Formats(), baseScanInfo.ScanImages)
 		if fleetReportErr == nil {
 			fleetReportErr = writeFleetReport(baseScanInfo.FleetReport, &report)
 		}
@@ -836,11 +841,12 @@ func writeFleetReport(path string, report *fleet.FleetReport) error {
 // would ever surface the clobbered report as an error. Failing fast here
 // with the colliding context names named explicitly is far more useful than
 // discovering it later from a report that doesn't match its own context.
-func perContextOutputPaths(output string, kubeContexts, formats []string) (map[string]string, error) {
+func perContextOutputPaths(output string, kubeContexts, formats []string, scanImages bool) (map[string]string, error) {
 	output = fleetOutputFile(output, formats)
 	paths := make(map[string]string, len(kubeContexts))
-	collisions := make(map[string][]string)   // lowered-destination -> contexts that derived it
-	collisionPaths := make(map[string]string) // lowered-destination -> first original spelling
+	collisions := make(map[string][]string)   // comparison key -> contexts that derived it
+	collisionPaths := make(map[string]string) // comparison key -> first original spelling
+	caseFolder := cases.Fold()
 
 	for _, kubeContext := range kubeContexts {
 		path, err := perContextOutputPath(output, kubeContext)
@@ -857,12 +863,11 @@ func perContextOutputPaths(output string, kubeContexts, formats []string) (map[s
 		// --output paths differ only by an extension a format then appends,
 		// such as "report.prod" and "report.prod.json" under --format json,
 		// are still caught.
-		for _, destination := range printerDestinations(path, formats) {
-			// Case-fold so that paths differing only by case - e.g.
-			// report.Prod.json vs report.prod.json - are caught: on
-			// case-insensitive filesystems (macOS APFS, Windows NTFS)
-			// both resolve to the same file.
-			key := strings.ToLower(destination)
+		for _, destination := range printerDestinations(path, formats, scanImages) {
+			// Normalize around case folding so names that differ in case or
+			// Unicode composition share a key.
+			folded := caseFolder.String(norm.NFD.String(destination))
+			key := norm.NFD.String(folded)
 			collisions[key] = append(collisions[key], kubeContext)
 			if _, ok := collisionPaths[key]; !ok {
 				collisionPaths[key] = destination // keep the first spelling for the error message
