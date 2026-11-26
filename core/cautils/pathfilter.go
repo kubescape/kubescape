@@ -438,11 +438,10 @@ func ignoreRoot(input string, depthOpt ...int) string {
 	return literalDir(input)
 }
 
-// GlobInputRoot returns the directory that a scan input that is a glob reads from,
-// and true. File discovery lists the directory part of such an input recursively and
-// matches the file names against the last element, so "manifests/*.yaml" reads
-// everything below "manifests". An input that exists, as a file or a directory, or
-// that is not a glob, is its own root and gives false.
+// GlobInputRoot returns the directory a glob scan input reads from, and true.
+// For example, "manifests/*.yaml" and "manifests/**/deploy.yaml" both read from
+// "manifests". Existing files and directories and non-glob inputs give false
+// and return the input itself.
 func GlobInputRoot(input string) (string, bool) {
 	if isFile(input) || isDir(input) || !hasGlobMeta(input) {
 		return input, false

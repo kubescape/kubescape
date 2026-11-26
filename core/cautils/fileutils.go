@@ -19,6 +19,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/edsrzf/mmap-go"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -1471,7 +1472,7 @@ func ReadFile(fileContent []byte, fileFormat FileFormat) ([]workloadinterface.IM
 	}
 }
 
-// listFiles returns the list of absolute paths, full file path and list of errors. The list of abs paths and full path have the same length
+// listFiles returns the absolute file paths and discovery errors for a scan input.
 func listFiles(pattern string, filter *PathFilter) ([]string, []error) {
 	return listFilesOrDirectories(pattern, false, filter)
 }
@@ -1479,6 +1480,19 @@ func listFiles(pattern string, filter *PathFilter) ([]string, []error) {
 // listDirs returns the list of absolute paths, full directories path and list of errors. The list of abs paths and full path have the same length
 func listDirs(pattern string, filter *PathFilter) ([]string, []error) {
 	return listFilesOrDirectories(pattern, true, filter)
+}
+
+// ScanGlobPaths lists files and renderer directories selected by a scan glob.
+func ScanGlobPaths(pattern string, filter *PathFilter) ([]string, []error) {
+	files, fileErrs := listFiles(pattern, filter)
+	dirs, dirErrs := listDirs(pattern, filter)
+	for _, dir := range dirs {
+		isHelm, _ := IsHelmDirectory(dir)
+		if isHelm || isKustomizeDirectory(dir) || isTerraformDirectory(dir) {
+			files = append(files, dir)
+		}
+	}
+	return files, append(fileErrs, dirErrs...)
 }
 
 func listFilesOrDirectories(pattern string, onlyDirectories bool, filter *PathFilter) ([]string, []error) {
@@ -1502,14 +1516,14 @@ func listFilesOrDirectories(pattern string, onlyDirectories bool, filter *PathFi
 		return paths, errs
 	}
 
-	root, shouldMatch := filepath.Split(pattern)
-
-	if isDir(pattern) {
-		root = pattern
-		shouldMatch = "*"
-	}
-	if shouldMatch == "" {
-		shouldMatch = "*"
+	root, shouldMatch := pattern, "*"
+	if !isDir(pattern) {
+		root = literalDir(pattern)
+		relativePattern, err := filepath.Rel(root, pattern)
+		if err != nil {
+			return paths, append(errs, err)
+		}
+		shouldMatch = relativePattern
 	}
 
 	f, err := glob(root, shouldMatch, onlyDirectories, filter)
@@ -2161,8 +2175,13 @@ func IsJson(filePath string) bool {
 
 func glob(root, pattern string, onlyDirectories bool, filter *PathFilter) ([]string, error) {
 	var matches []string
+	// Basename-only patterns have historically matched at every depth.
+	separator := string(filepath.Separator)
+	patternSeparators := strings.Count(pattern, separator)
+	matchRelativePath := patternSeparators > 0
+	fixedDepth := matchRelativePath && !strings.Contains(pattern, "**")
 
-	// filepath.Walk does not follow symlinks, the root included, so a scan of a
+	// filepath.WalkDir does not follow symlinks, the root included, so a scan of a
 	// directory given as a symlink (a linked checkout, say) would list nothing.
 	// Walk its target and report each path under the root as given, which is
 	// the form the rest of the scan keeps.
@@ -2173,7 +2192,7 @@ func glob(root, pattern string, onlyDirectories bool, filter *PathFilter) ([]str
 		}
 	}
 
-	err := filepath.Walk(walkRoot, func(path string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(walkRoot, func(path string, entry os.DirEntry, err error) error {
 		if walkRoot != root {
 			if rel, relErr := filepath.Rel(walkRoot, path); relErr == nil {
 				path = filepath.Join(root, rel)
@@ -2183,40 +2202,36 @@ func glob(root, pattern string, onlyDirectories bool, filter *PathFilter) ([]str
 			return err
 		}
 
-		if filter.Excluded(path, info.IsDir()) {
-			if info.IsDir() {
+		if filter.Excluded(path, entry.IsDir()) {
+			if entry.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		// listing only directories
-		if onlyDirectories {
-			if info.IsDir() {
-				if matched, err := filepath.Match(pattern, filepath.Base(path)); err != nil {
-					return err
-				} else if matched {
-					matches = append(matches, path)
-				}
+		match, name := filepath.Match, filepath.Base(path)
+		var next error
+		if matchRelativePath {
+			name, err = filepath.Rel(root, path)
+			if err != nil {
+				return err
 			}
-			return nil
+			match = doublestar.PathMatch
+			if fixedDepth && entry.IsDir() && strings.Count(name, separator) >= patternSeparators {
+				next = filepath.SkipDir
+			}
 		}
-
-		// listing only files
-		if info.IsDir() {
-			return nil
+		if entry.IsDir() != onlyDirectories || (!entry.IsDir() && !IsYaml(path) && !IsJson(path)) {
+			return next
 		}
-		fileFormat := getFileFormat(path)
-		if fileFormat != JSON_FILE_FORMAT && fileFormat != YAML_FILE_FORMAT {
-			return nil
-		}
-		if matched, err := filepath.Match(pattern, filepath.Base(path)); err != nil {
+		matched, err := match(pattern, name)
+		if err != nil {
 			return err
-		} else if matched {
+		}
+		if matched {
 			matches = append(matches, path)
 		}
-
-		return nil
+		return next
 	})
 	if err != nil {
 		return matches, err

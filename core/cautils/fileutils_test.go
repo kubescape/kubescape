@@ -34,6 +34,65 @@ func TestListFiles(t *testing.T) {
 	assert.Equal(t, 13, len(files))
 }
 
+func TestListFilesNestedGlob(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "manifests[old]")
+	for _, name := range []string{"deploy.yaml", "app/deploy.yaml", "app/deep/deploy.yaml", "app/service.json", "other/notes.txt"} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750))
+		require.NoError(t, os.WriteFile(path, nil, 0o600))
+	}
+
+	for _, tt := range []struct {
+		pattern string
+		want    []string
+	}{
+		{"*/deploy.yaml", []string{"app/deploy.yaml"}},
+		{"**/*.yaml", []string{"deploy.yaml", "app/deploy.yaml", "app/deep/deploy.yaml"}},
+		{"[a]pp/deploy.yaml", []string{"app/deploy.yaml"}},
+		{"*.yaml", []string{"deploy.yaml", "app/deploy.yaml", "app/deep/deploy.yaml"}},
+		{"deploy.yaml", []string{"deploy.yaml"}},
+	} {
+		t.Run(tt.pattern, func(t *testing.T) {
+			files, errs := listFiles(filepath.Join(root, filepath.FromSlash(tt.pattern)), nil)
+			require.Empty(t, errs)
+			var want []string
+			for _, name := range tt.want {
+				want = append(want, filepath.Join(root, filepath.FromSlash(name)))
+			}
+			assert.ElementsMatch(t, want, files)
+		})
+	}
+
+	filter, err := NewPathFilter(root, []string{"app/deep/"})
+	require.NoError(t, err)
+	files, errs := listFiles(filepath.Join(root, "**", "*.yaml"), filter)
+	require.Empty(t, errs)
+	assert.ElementsMatch(t, []string{filepath.Join(root, "deploy.yaml"), filepath.Join(root, "app", "deploy.yaml")}, files)
+
+	dirs, errs := listDirs(filepath.Join(root, "*", "deep"), nil)
+	require.Empty(t, errs)
+	assert.Equal(t, []string{filepath.Join(root, "app", "deep")}, dirs)
+}
+
+func TestListFilesNestedGlobSkipsDirectoriesBeyondFixedDepth(t *testing.T) {
+	root := t.TempDir()
+	archive := filepath.Join(root, "a", "archive")
+	require.NoError(t, os.MkdirAll(archive, 0o750))
+	require.NoError(t, os.Chmod(archive, 0))
+	t.Cleanup(func() { require.NoError(t, os.Chmod(archive, 0o750)) })
+	if _, err := os.ReadDir(archive); !os.IsPermission(err) {
+		t.Skip("cannot make the archive directory unreadable")
+	}
+
+	manifest := filepath.Join(root, "b", "deploy.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(manifest), 0o750))
+	require.NoError(t, os.WriteFile(manifest, nil, 0o600))
+
+	files, errs := listFiles(filepath.Join(root, "*", "deploy.yaml"), nil)
+	require.Empty(t, errs)
+	assert.Equal(t, []string{manifest}, files)
+}
+
 func TestLoadResourcesFromFilesDoesNotSubstituteNestedBasenameForMissingExactPath(t *testing.T) {
 	root := t.TempDir()
 	nestedDir := filepath.Join(root, "nested")

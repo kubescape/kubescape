@@ -559,8 +559,9 @@ func hasKubernetesManifestSignatures(data []byte, isJson bool) bool {
 // checkDirectoryCollision recursively inspects a directory input to verify that the
 // output destination does not alias any genuine manifest file within the directory.
 // It respects scanner path exclusion filters, prevents symlink cycles, and fails closed
-// if directory traversal encounters an unexpected error.
-func checkDirectoryCollision(dirPath string, scanInfo *cautils.ScanInfo, destInfo fs.FileInfo, outputFile string, visitedDirs map[any]bool) error {
+// if directory traversal encounters an unexpected error. A selected renderer can
+// consume any file in its directory, independently of plain-manifest exclusions.
+func checkDirectoryCollision(dirPath string, scanInfo *cautils.ScanInfo, destInfo fs.FileInfo, outputFile string, visitedDirs map[any]bool, rendererInput bool) error {
 	resolvedDir, err := filepath.EvalSymlinks(dirPath)
 	if err != nil {
 		resolvedDir = dirPath
@@ -579,7 +580,10 @@ func checkDirectoryCollision(dirPath string, scanInfo *cautils.ScanInfo, destInf
 	}
 	visitedDirs[dirInfo] = true
 
-	pathFilter, _ := cautils.NewScanPathFilter(dirPath, scanInfo.ExcludePaths, !scanInfo.NoIgnoreFile)
+	var pathFilter *cautils.PathFilter
+	if !rendererInput {
+		pathFilter, _ = cautils.NewScanPathFilter(dirPath, scanInfo.ExcludePaths, !scanInfo.NoIgnoreFile)
+	}
 
 	var collisionErr error
 	walkErr := filepath.WalkDir(resolvedDir, func(source string, d fs.DirEntry, walkErr error) error {
@@ -592,7 +596,7 @@ func checkDirectoryCollision(dirPath string, scanInfo *cautils.ScanInfo, destInf
 
 		if d.IsDir() {
 			// Do not skip the walk root itself even if its name begins with a dot (e.g. .manifests)
-			if source != resolvedDir && strings.HasPrefix(d.Name(), ".") {
+			if !rendererInput && source != resolvedDir && strings.HasPrefix(d.Name(), ".") {
 				return filepath.SkipDir
 			}
 			if pathFilter != nil && pathFilter.Excluded(source, true) {
@@ -611,7 +615,7 @@ func checkDirectoryCollision(dirPath string, scanInfo *cautils.ScanInfo, destInf
 			if pathFilter != nil && pathFilter.Excluded(source, true) {
 				return nil
 			}
-			if err := checkDirectoryCollision(source, scanInfo, destInfo, outputFile, visitedDirs); err != nil {
+			if err := checkDirectoryCollision(source, scanInfo, destInfo, outputFile, visitedDirs, rendererInput); err != nil {
 				collisionErr = err
 				return fs.SkipAll
 			}
@@ -623,6 +627,11 @@ func checkDirectoryCollision(dirPath string, scanInfo *cautils.ScanInfo, destInf
 		}
 
 		if os.SameFile(destInfo, targetInfo) {
+			if rendererInput {
+				collisionErr = fmt.Errorf("output path %q would overwrite renderer input %q; choose a different output file", outputFile, source)
+				return fs.SkipAll
+			}
+
 			isManifest, manifestErr := isGenuineManifest(source)
 			if isManifest || errors.Is(manifestErr, ErrManifestTooLargeToClassify) {
 				collisionErr = fmt.Errorf("output path %q would overwrite input manifest %q; choose a different output file", outputFile, source)
@@ -645,26 +654,41 @@ func checkDirectoryCollision(dirPath string, scanInfo *cautils.ScanInfo, destInf
 // matched by a glob pattern, checking both directly matched files and nested directories.
 // Bare relative glob patterns without a directory prefix (e.g. "*.yaml") search the
 // current directory recursively while honoring scanner exclusion rules.
-func checkGlobCollision(rawPath string, scanInfo *cautils.ScanInfo, destInfo fs.FileInfo, outputFile string) error {
-	if matches, globErr := filepath.Glob(rawPath); globErr == nil {
-		for _, match := range matches {
-			matchInfo, err := os.Stat(match)
-			if err != nil {
-				continue
+func checkGlobCollision(rawPath, scanRoot string, scanInfo *cautils.ScanInfo, destInfo fs.FileInfo, outputFile string) error {
+	nestedPattern := scanRoot != filepath.Dir(rawPath)
+	var matches []string
+	if nestedPattern {
+		filter, err := cautils.NewScanPathFilter(scanRoot, scanInfo.ExcludePaths, !scanInfo.NoIgnoreFile)
+		if err != nil {
+			return fmt.Errorf("failed preparing output collision check for %q: %w", rawPath, err)
+		}
+		var discoveryErrs []error
+		matches, discoveryErrs = cautils.ScanGlobPaths(rawPath, filter)
+		if err := errors.Join(discoveryErrs...); err != nil {
+			return fmt.Errorf("failed checking output collision for %q: %w", rawPath, err)
+		}
+	} else {
+		matches, _ = filepath.Glob(rawPath)
+	}
+	for _, match := range matches {
+		matchInfo, err := os.Stat(match)
+		if err != nil {
+			continue
+		}
+		if matchInfo.IsDir() {
+			if err := checkDirectoryCollision(match, scanInfo, destInfo, outputFile, nil, nestedPattern); err != nil {
+				return err
 			}
-			if matchInfo.IsDir() {
-				if err := checkDirectoryCollision(match, scanInfo, destInfo, outputFile, nil); err != nil {
-					return err
-				}
-			} else {
-				if os.SameFile(destInfo, matchInfo) {
-					isManifest, manifestErr := isGenuineManifest(match)
-					if isManifest || errors.Is(manifestErr, ErrManifestTooLargeToClassify) {
-						return fmt.Errorf("output path %q would overwrite input manifest %q; choose a different output file", outputFile, match)
-					}
-				}
+		} else if os.SameFile(destInfo, matchInfo) {
+			isManifest, manifestErr := isGenuineManifest(match)
+			if isManifest || errors.Is(manifestErr, ErrManifestTooLargeToClassify) {
+				return fmt.Errorf("output path %q would overwrite input manifest %q; choose a different output file", outputFile, match)
 			}
 		}
+	}
+
+	if nestedPattern {
+		return nil
 	}
 
 	root, pattern := filepath.Split(rawPath)
@@ -753,7 +777,7 @@ func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo, tra
 				return fmt.Errorf("output path %q would overwrite %s %q; choose a different output file", outputFile, label, inputPath)
 			}
 			if traverseDirs {
-				return checkDirectoryCollision(inputPath, scanInfo, destInfo, outputFile, nil)
+				return checkDirectoryCollision(inputPath, scanInfo, destInfo, outputFile, nil, false)
 			}
 			return nil
 		}
@@ -875,7 +899,7 @@ func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo, tra
 						return fmt.Errorf("output path %q would overwrite %s %q; choose a different output file", outputFile, label, pattern)
 					}
 					if traverseDirs {
-						if err := checkDirectoryCollision(candidate, scanInfo, destInfo, outputFile, nil); err != nil {
+						if err := checkDirectoryCollision(candidate, scanInfo, destInfo, outputFile, nil, false); err != nil {
 							return err
 						}
 					}
@@ -883,8 +907,8 @@ func validateScanOutputSafety(outputFile string, scanInfo *cautils.ScanInfo, tra
 				continue
 			}
 
-			if strings.ContainsAny(candidate, "*?[]") {
-				if err := checkGlobCollision(candidate, scanInfo, destInfo, outputFile); err != nil {
+			if scanRoot, isGlob := cautils.GlobInputRoot(candidate); isGlob {
+				if err := checkGlobCollision(candidate, scanRoot, scanInfo, destInfo, outputFile); err != nil {
 					return err
 				}
 			}

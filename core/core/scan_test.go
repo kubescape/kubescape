@@ -1443,6 +1443,126 @@ func TestGetOutputPrinters_GlobDiscoveryCollision(t *testing.T) {
 		assert.Nil(t, printers)
 	})
 
+	t.Run("globstar rejects collision with a deeply nested manifest", func(t *testing.T) {
+		baseDir := t.TempDir()
+		subDir := filepath.Join(baseDir, "group", "app")
+		require.NoError(t, os.MkdirAll(subDir, 0o700))
+		manifest := filepath.Join(subDir, "deploy.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        manifest,
+			InputPatterns: []string{filepath.Join(baseDir, "**", "*.yaml")},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite input manifest")
+		assert.Nil(t, printers)
+		got, err := os.ReadFile(manifest)
+		require.NoError(t, err)
+		assert.Equal(t, manifestContent, got)
+	})
+
+	t.Run("nested glob honors exclusions for an output manifest", func(t *testing.T) {
+		baseDir := t.TempDir()
+		subDir := filepath.Join(baseDir, "skip")
+		require.NoError(t, os.MkdirAll(subDir, 0o700))
+		manifest := filepath.Join(subDir, "deploy.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        manifest,
+			InputPatterns: []string{filepath.Join(baseDir, "*", "deploy.yaml")},
+			ExcludePaths:  []string{"skip/deploy.yaml"},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.NoError(t, err)
+		require.NotEmpty(t, printers)
+		_ = closePrinters(printers...)
+	})
+
+	t.Run("globstar allows an output under an ordinary matched directory", func(t *testing.T) {
+		baseDir := t.TempDir()
+		subDir := filepath.Join(baseDir, "group", "app")
+		require.NoError(t, os.MkdirAll(subDir, 0o700))
+		manifest := filepath.Join(subDir, "deploy.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        manifest,
+			InputPatterns: []string{filepath.Join(baseDir, "**", "app")},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.NoError(t, err)
+		require.NotEmpty(t, printers)
+		_ = closePrinters(printers...)
+	})
+
+	t.Run("globstar fails closed when discovery cannot read a directory", func(t *testing.T) {
+		baseDir := t.TempDir()
+		unreadable := filepath.Join(baseDir, "a")
+		require.NoError(t, os.Mkdir(unreadable, 0o700))
+		require.NoError(t, os.Chmod(unreadable, 0))
+		t.Cleanup(func() { require.NoError(t, os.Chmod(unreadable, 0o700)) })
+		if _, err := os.ReadDir(unreadable); !os.IsPermission(err) {
+			t.Skip("cannot make the directory unreadable")
+		}
+		manifest := filepath.Join(baseDir, "z", "deploy.yaml")
+		require.NoError(t, os.Mkdir(filepath.Dir(manifest), 0o700))
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        manifest,
+			InputPatterns: []string{filepath.Join(baseDir, "**", "*.yaml")},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "failed checking output collision")
+		assert.Nil(t, printers)
+		got, err := os.ReadFile(manifest)
+		require.NoError(t, err)
+		assert.Equal(t, manifestContent, got)
+	})
+
+	t.Run("globstar rejects collision inside a deeply nested chart", func(t *testing.T) {
+		baseDir := t.TempDir()
+		chartDir := filepath.Join(baseDir, "group", "app", "chart")
+		templateDir := filepath.Join(chartDir, "templates")
+		require.NoError(t, os.MkdirAll(templateDir, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: test-chart\nversion: 0.1.0\n"), 0o600))
+		manifest := filepath.Join(templateDir, "deploy.yaml")
+		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.YamlFormat,
+			Output:        manifest,
+			InputPatterns: []string{filepath.Join(baseDir, "**", "chart")},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite renderer input")
+		assert.Nil(t, printers)
+		got, err := os.ReadFile(manifest)
+		require.NoError(t, err)
+		assert.Equal(t, manifestContent, got)
+
+		scanInfo.ExcludePaths = []string{"group/app/chart/templates/deploy.yaml"}
+		printers, err = GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite renderer input")
+		assert.Nil(t, printers)
+	})
+
 	t.Run("glob matching directory rejects manifest collision inside matched directory", func(t *testing.T) {
 		baseDir := t.TempDir()
 		teamDir := filepath.Join(baseDir, "team-alpha")
