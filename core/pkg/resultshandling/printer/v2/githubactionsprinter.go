@@ -486,7 +486,7 @@ func (gp *GitHubActionsPrinter) collectAnnotations(ctx context.Context, opaSessi
 			continue
 		}
 
-		resourceSource := opaSessionObj.ResourceSource[resourceID]
+		resourceSource := reportedSource(opaSessionObj, resourceID)
 		relPath := resourceSource.RelativePath
 
 		if relPath == "" {

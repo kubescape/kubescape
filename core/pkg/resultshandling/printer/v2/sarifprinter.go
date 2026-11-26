@@ -29,6 +29,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/fixhandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -806,7 +807,7 @@ func (sp *SARIFPrinter) writeConfigurationSARIF(ctx context.Context, w io.Writer
 			continue
 		}
 
-		resourceSource := opaSessionObj.ResourceSource[resourceID]
+		resourceSource := reportedSource(opaSessionObj, resourceID)
 		relPath := resourceSource.RelativePath
 
 		// Github Code Scanning considers results not associated to a file path
@@ -1052,11 +1053,11 @@ func lookupFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *l
 		return locationresolver.Location{}, false
 	}
 	fixPaths := AssistedRemediationPathsToString(ac)
-	if len(fixPaths) == 0 || fixPaths[0] == "" {
-		return locationresolver.Location{}, false
-	}
 	docIndex, ok := getDocIndex(opaSessionObj, resourceID)
 	if !ok {
+		docIndex, fixPaths, ok = rbacSubjectPaths(opaSessionObj, resourceID, fixPaths)
+	}
+	if !ok || len(fixPaths) == 0 || fixPaths[0] == "" {
 		return locationresolver.Location{}, false
 	}
 	location, _ := locationResolver.ResolveLocation(fixPaths[0], docIndex)
@@ -1298,6 +1299,60 @@ func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, 
 		return 0, false
 	}
 	return docIndex, true
+}
+
+// rbacSubjectBinding returns the binding an RBAC subject was built from, and its
+// index in the subject's relatedObjects. A scan builds a subject from a binding and
+// a role, so the subject has no manifest of its own: it is reported where the
+// binding names it.
+func rbacSubjectBinding(resource workloadinterface.IMetadata) (workloadinterface.IMetadata, int, bool) {
+	subject, ok := resource.(*objectsenvelopes.RegoResponseVectorObject)
+	if !ok {
+		return nil, 0, false
+	}
+	for i, related := range subject.GetRelatedObjects() {
+		if strings.HasSuffix(related.GetKind(), "Binding") {
+			return related, i, true
+		}
+	}
+	return nil, 0, false
+}
+
+// reportedSource returns the manifest a failed resource is reported in. An RBAC
+// subject without a source of its own uses its binding's.
+func reportedSource(opaSessionObj *cautils.OPASessionObj, resourceID string) reporthandling.Source {
+	source := opaSessionObj.ResourceSource[resourceID]
+	if source.RelativePath != "" {
+		return source
+	}
+	resource, _ := opaSessionObj.GetResource(resourceID)
+	if binding, _, ok := rbacSubjectBinding(resource); ok {
+		return opaSessionObj.ResourceSource[binding.GetID()]
+	}
+	return source
+}
+
+// rbacSubjectPaths returns the binding's document and the subject's paths inside
+// it. A subject's paths are written as relatedObjects[i].<path>, and only the
+// binding's can be resolved in the binding's document.
+func rbacSubjectPaths(opaSessionObj *cautils.OPASessionObj, resourceID string, paths []string) (int, []string, bool) {
+	resource, _ := opaSessionObj.GetResource(resourceID)
+	binding, index, ok := rbacSubjectBinding(resource)
+	if !ok {
+		return 0, nil, false
+	}
+	docIndex, ok := getDocIndex(opaSessionObj, binding.GetID())
+	if !ok {
+		return 0, nil, false
+	}
+	prefix := fmt.Sprintf("relatedObjects[%d].", index)
+	var bindingPaths []string
+	for _, path := range paths {
+		if rest, found := strings.CutPrefix(path, prefix); found {
+			bindingPaths = append(bindingPaths, rest)
+		}
+	}
+	return docIndex, bindingPaths, true
 }
 
 func getBasePathFromMetadata(opaSessionObj *cautils.OPASessionObj) string {
