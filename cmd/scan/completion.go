@@ -4,31 +4,13 @@ import (
 	"strings"
 
 	"github.com/kubescape/kubescape/v4/cmd/shared"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/spf13/cobra"
 )
 
 // completeValues matches valid values against the typed prefix.
 func completeValues(values []string) cobra.CompletionFunc {
-	return func(
-		cmd *cobra.Command,
-		args []string,
-		toComplete string,
-	) ([]string, cobra.ShellCompDirective) {
-		var matches []string
-
-		for _, value := range values {
-			if strings.HasPrefix(
-				strings.ToLower(value),
-				strings.ToLower(toComplete),
-			) {
-				if len(toComplete) <= len(value) {
-					matches = append(matches, toComplete+value[len(toComplete):])
-				}
-			}
-		}
-
-		return matches, cobra.ShellCompDirectiveNoFileComp
-	}
+	return shared.CompleteValues(values)
 }
 
 // completeCommaSeparated completes comma-separated values without
@@ -84,19 +66,18 @@ func completeCommaSeparated(values []string) cobra.CompletionFunc {
 // registerScanFlagCompletions registers value completion
 // for supported scan flags.
 func registerScanFlagCompletions(cmd *cobra.Command) {
-	severityValues := []string{
-		"low",
-		"medium",
-		"high",
-		"critical",
-	}
-
 	completions := map[string][]string{
 		"view":                        shared.SupportedViews,
-		"severity-threshold":          severityValues,
-		"baseline-severity-threshold": severityValues,
-		"min-severity":                severityValues,
-		"max-severity":                severityValues,
+		"severity-threshold":          shared.SeverityLevels,
+		"baseline-severity-threshold": shared.SeverityLevels,
+		"min-severity":                shared.SeverityLevels,
+		"max-severity":                shared.SeverityLevels,
+		"whole-cluster-policy": {
+			string(cautils.WholeClusterPolicyProjected),
+			string(cautils.WholeClusterPolicyFallback),
+			string(cautils.WholeClusterPolicySkip),
+			string(cautils.WholeClusterPolicyVerify),
+		},
 	}
 
 	for flagName, values := range completions {

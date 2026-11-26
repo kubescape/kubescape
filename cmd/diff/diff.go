@@ -141,7 +141,26 @@ Image scan reports ("scan image --format json") are compared by vulnerability in
 	diffCmd.Flags().StringVarP(&diffInfo.Output, "output", "o", "", "Output file; defaults to stdout")
 	diffCmd.Flags().StringVar(&diffInfo.Granularity, "granularity", string(resultsdiff.GranularityEvidence), `Comparison unit for posture reports: "evidence" or "control"`)
 
+	registerDiffFlagCompletions(diffCmd)
+
 	return diffCmd
+}
+
+func registerDiffFlagCompletions(cmd *cobra.Command) {
+	completions := map[string][]string{
+		"format":             diffFormats(),
+		"severity-threshold": shared.SeverityLevels,
+		"granularity": {
+			string(resultsdiff.GranularityEvidence),
+			string(resultsdiff.GranularityControl),
+		},
+	}
+
+	for flagName, values := range completions {
+		if err := cmd.RegisterFlagCompletionFunc(flagName, shared.CompleteValues(values)); err != nil {
+			panic(err)
+		}
+	}
 }
 
 func isVulnerabilityDiff(base, head string) bool {
