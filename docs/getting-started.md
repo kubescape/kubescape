@@ -259,6 +259,18 @@ To include dependencies, review their sources and explicitly prepare the chart
 with Helm before scanning, for example `helm dependency build /path/to/chart/`.
 That Helm command can access the network and modify the chart directory.
 
+Every regular file in a scanned Helm chart directory that is not excluded by
+`.helmignore`—including non-template assets and packaged `.tgz` dependencies—must
+be within `KUBESCAPE_MAX_FILE_SIZE` (default 32 MiB). Helm's directory loader
+also rejects any non-ignored regular file larger than 5 MiB regardless of
+`KUBESCAPE_MAX_FILE_SIZE`, so raising the environment variable above 5 MiB does
+not allow oversized loose files in a chart directory; `KUBESCAPE_MAX_FILE_SIZE`
+only tightens the limit below 5 MiB or bounds `.tgz` chart archives and their
+entries. Use `.helmignore` to exclude large non-chart assets or whole
+dependencies; root `.helmignore` rules do not exclude individual entries inside
+`charts/*.tgz` archives, so repackage a dependency without the oversized file if
+needed.
+
 #### Scan a Kustomize directory
 
 Kubescape automatically detects a Kustomize directory by the 

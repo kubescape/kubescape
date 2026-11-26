@@ -2090,6 +2090,7 @@ Kubescape respects the following environment variables:
 | `KS_SKIP_UPDATE_CHECK` | Set to `true` to skip the version check that `scan` and `version` send to `version-check.ks-services.co` (see [Actors and actions](architecture.md#actors-and-actions) for what it sends). `update` checks regardless, since checking for a release is what it is for. `KUBESCAPE_SKIP_UPDATE_CHECK` is the deprecated name |
 | `KUBECONFIG` | Path to kubeconfig file |
 | `KUBESCAPE_MASTER_KEY` | 32-character master key used to encrypt and decrypt report metadata |
+| `KUBESCAPE_MAX_FILE_SIZE` | Maximum file size in bytes for local manifest, Kustomize, Terraform, cache, and Helm chart reads (default: `33554432` / 32 MiB). For Helm chart directories, it applies to every regular file not excluded by `.helmignore` (including non-template assets and packaged `.tgz` dependencies, though Helm's directory loader still rejects non-ignored loose files over 5 MiB) and to `.tgz` chart archives and their individual entries |
 | `HTTPS_PROXY` | HTTPS proxy URL |
 | `HTTP_PROXY` | HTTP proxy URL |
 | `NO_PROXY` | Hosts to exclude from proxy |
