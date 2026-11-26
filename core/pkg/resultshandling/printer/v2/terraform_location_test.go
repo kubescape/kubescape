@@ -53,13 +53,18 @@ resource "kubernetes_deployment_v1" "web" {
 }
 `), 0o600))
 
-	workloads, errs := cautils.NewTerraformDirectory(dir).GetWorkloads(dir)
+	td := cautils.NewTerraformDirectory(dir)
+	workloads, errs := td.GetWorkloads(dir)
 	require.Empty(t, errs)
 
+	// The files loader records each Terraform resource's block on the scan's
+	// session, by resource ID.
 	session := cautils.NewOPASessionObjMock()
+	session.TerraformSourceLocations = map[string]cautils.SourceLocation{}
 	ids := map[string]string{}
 	for _, w := range workloads[path] {
 		session.AllResources[w.GetID()] = w
+		session.TerraformSourceLocations[w.GetID()] = td.SourceLocations()[w.(*localworkload.LocalWorkload).GetPath()]
 		ids[w.GetKind()] = w.GetID()
 	}
 	require.Contains(t, ids, "Deployment")

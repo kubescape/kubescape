@@ -1252,15 +1252,7 @@ func terraformResourceLocation(opaSessionObj *cautils.OPASessionObj, resourceID 
 	if opaSessionObj == nil {
 		return locationresolver.Location{}, false
 	}
-	resource, ok := opaSessionObj.GetResource(resourceID)
-	if !ok || resource == nil {
-		return locationresolver.Location{}, false
-	}
-	lw, ok := resource.(*localworkload.LocalWorkload)
-	if !ok {
-		return locationresolver.Location{}, false
-	}
-	source, ok := cautils.TerraformSourceLocation(lw.GetPath())
+	source, ok := opaSessionObj.TerraformSourceLocations[resourceID]
 	if !ok {
 		return locationresolver.Location{}, false
 	}

@@ -1163,6 +1163,16 @@ func LoadResourcesFromTerraformFiltered(ctx context.Context, basePath string, fi
 // LoadResourcesFromTerraformFilteredWithSkips also reports nested modules that
 // failed to render, so best-effort repository scans can mark coverage incomplete.
 func LoadResourcesFromTerraformFilteredWithSkips(ctx context.Context, basePath string, filter *PathFilter, workspaceOpt ...string) (map[string][]workloadinterface.IMetadata, []SkippedManifest, error) {
+	workloads, skips, _, err := LoadResourcesFromTerraformWithLocations(ctx, basePath, filter, workspaceOpt...)
+	return workloads, skips, err
+}
+
+// LoadResourcesFromTerraformWithLocations behaves like
+// LoadResourcesFromTerraformFilteredWithSkips, and also returns the start of
+// the resource block each workload was converted from, keyed by the
+// workload's path ("<file>:<index>"). The locations belong to this load only.
+func LoadResourcesFromTerraformWithLocations(ctx context.Context, basePath string, filter *PathFilter, workspaceOpt ...string) (map[string][]workloadinterface.IMetadata, []SkippedManifest, map[string]SourceLocation, error) {
+	locations := map[string]SourceLocation{}
 	var workspaceDir string
 	if len(workspaceOpt) > 0 {
 		workspaceDir = workspaceOpt[0]
@@ -1170,18 +1180,18 @@ func LoadResourcesFromTerraformFilteredWithSkips(ctx context.Context, basePath s
 
 	if IsTerraformFile(basePath) {
 		if filter.Excluded(basePath, false) {
-			return nil, nil, nil
+			return nil, nil, nil, nil
 		}
 		if workspaceDir != "" && !pathcontainment.IsPathContained(workspaceDir, basePath) {
-			return nil, nil, fmt.Errorf("%w: Terraform file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, basePath)
+			return nil, nil, nil, fmt.Errorf("%w: Terraform file %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, basePath)
 		}
 		dir := filepath.Dir(basePath)
 		td := NewTerraformDirectory(dir, workspaceDir)
 		wls, errs := td.GetWorkloads(dir)
 		if len(errs) > 0 {
-			return wls, nil, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(errs...))
+			return wls, nil, td.SourceLocations(), fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(errs...))
 		}
-		return wls, nil, nil
+		return wls, nil, td.SourceLocations(), nil
 	}
 
 	dirs, discoveryErrs := listTerraformDirs(basePath, filter)
@@ -1189,7 +1199,7 @@ func LoadResourcesFromTerraformFilteredWithSkips(ctx context.Context, basePath s
 		logger.L().Ctx(ctx).Warning("Skipping path while discovering Terraform directories", helpers.Error(err))
 	}
 	if len(dirs) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	explicitTerraformDir := isTerraformDirectory(basePath)
@@ -1199,13 +1209,14 @@ func LoadResourcesFromTerraformFilteredWithSkips(ctx context.Context, basePath s
 	for _, dir := range dirs {
 		if workspaceDir != "" && !pathcontainment.IsPathContained(workspaceDir, dir) {
 			if explicitTerraformDir && dir == basePath {
-				return nil, skips, fmt.Errorf("%w: Terraform directory %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, dir)
+				return nil, skips, nil, fmt.Errorf("%w: Terraform directory %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, dir)
 			}
 			logger.L().Ctx(ctx).Warning("Skipping Terraform directory outside workspace root", helpers.String("path", dir))
 			continue
 		}
 		td := NewTerraformDirectory(dir, workspaceDir)
 		wls, dirErrs := td.GetWorkloads(dir)
+		maps.Copy(locations, td.SourceLocations())
 		if len(dirErrs) > 0 {
 			// Override blocks with no primary definition are skipped without
 			// affecting the rest of the configuration, so the workloads it
@@ -1215,7 +1226,7 @@ func LoadResourcesFromTerraformFilteredWithSkips(ctx context.Context, basePath s
 				if overridesOnly {
 					maps.Copy(sourceToWorkloads, wls)
 				}
-				return sourceToWorkloads, skips, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(dirErrs...))
+				return sourceToWorkloads, skips, locations, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(dirErrs...))
 			}
 			if overridesOnly {
 				logger.L().Ctx(ctx).Warning("Nested Terraform configuration has override blocks that could not be applied; scanning the resources it defines without them",
@@ -1232,7 +1243,7 @@ func LoadResourcesFromTerraformFilteredWithSkips(ctx context.Context, basePath s
 		}
 		maps.Copy(sourceToWorkloads, wls)
 	}
-	return sourceToWorkloads, skips, nil
+	return sourceToWorkloads, skips, locations, nil
 }
 
 // LoadResourcesFromFiles globs input for plain YAML/JSON manifests and loads them. renderedCharts
