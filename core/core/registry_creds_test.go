@@ -136,6 +136,39 @@ func TestExtractCredsFromAuthsFollowsKubeletKeyMatching(t *testing.T) {
 			repository: "team-b/app",
 		},
 		{
+			name:       "path-scoped key does not apply to sibling repository with shared prefix",
+			auths:      map[string]dockerAuthConfig{"registry.example.com/team": basic("team")},
+			domain:     "registry.example.com",
+			repository: "team-evil/app",
+		},
+		{
+			name:       "path-scoped key with trailing slash does not apply to sibling repository with shared prefix",
+			auths:      map[string]dockerAuthConfig{"registry.example.com/team/": basic("team")},
+			domain:     "registry.example.com",
+			repository: "team-evil/app",
+		},
+		{
+			name:         "path-scoped key applies to exact matching repository",
+			auths:        map[string]dockerAuthConfig{"registry.example.com/team": basic("team")},
+			domain:       "registry.example.com",
+			repository:   "team",
+			expectedUser: "team",
+		},
+		{
+			name:         "uppercase registry host key matches lowercase image domain",
+			auths:        map[string]dockerAuthConfig{"https://Registry.Example.COM/team": basic("team")},
+			domain:       "registry.example.com",
+			repository:   "team/app",
+			expectedUser: "team",
+		},
+		{
+			name:         "registry API version path without trailing slash is ignored",
+			auths:        map[string]dockerAuthConfig{"https://index.docker.io/v1": basic("hub")},
+			domain:       "docker.io",
+			repository:   "library/nginx",
+			expectedUser: "hub",
+		},
+		{
 			name:         "path-scoped key is tried before the bare host",
 			auths:        map[string]dockerAuthConfig{"registry.example.com": basic("host"), "https://registry.example.com/team": basic("team")},
 			domain:       "registry.example.com",
@@ -264,6 +297,38 @@ func TestResolveRegistryCredentialsMatchesWildcardKey(t *testing.T) {
 		Username:  "user",
 		Password:  "password",
 	}, resolved[0].credentials)
+}
+
+func TestResolveRegistryCredentialsRespectsPathSegmentBoundary(t *testing.T) {
+	const namespace = "default"
+	client := fake.NewClientset(&corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "team-auth", Namespace: namespace},
+		Type:       corev1.SecretTypeDockerConfigJson,
+		Data: map[string][]byte{
+			corev1.DockerConfigJsonKey: []byte(`{"auths":{"registry.example.com/team":{"username":"team-user","password":"team-password"}}}`),
+		},
+	})
+	k8sAPI := &k8sinterface.KubernetesApi{KubernetesClient: client}
+	workload := workloadinterface.NewWorkloadObj(map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]interface{}{
+			"name":      "app",
+			"namespace": namespace,
+		},
+		"spec": map[string]interface{}{
+			"imagePullSecrets": []interface{}{
+				map[string]interface{}{"name": "team-auth"},
+			},
+		},
+	})
+	cache := newPullSecretCache(k8sAPI)
+
+	assert.Empty(t, resolveRegistryCredentials(context.Background(), cache, workload, "registry.example.com/team-evil/app:tag"))
+
+	matched := resolveRegistryCredentials(context.Background(), cache, workload, "registry.example.com/team/app:tag")
+	require.Len(t, matched, 1)
+	assert.Equal(t, "team-user", matched[0].credentials.Username)
 }
 
 func TestResolveRegistryCredentialsSkipsUnusableSecrets(t *testing.T) {
