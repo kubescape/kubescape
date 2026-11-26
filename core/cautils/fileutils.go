@@ -71,8 +71,9 @@ var (
 type FileFormat string
 
 const (
-	YAML_FILE_FORMAT FileFormat = "yaml"
-	JSON_FILE_FORMAT FileFormat = "json"
+	YAML_FILE_FORMAT    FileFormat = "yaml"
+	JSON_FILE_FORMAT    FileFormat = "json"
+	TerraformFileFormat FileFormat = "tf"
 
 	// DefaultMaxFileSize is the default per-file read cap for the file-scan path.
 	// 32 MiB is large enough for any legitimate manifest (the largest chart in the
@@ -1474,12 +1475,12 @@ func ReadFile(fileContent []byte, fileFormat FileFormat) ([]workloadinterface.IM
 
 // listFiles returns the absolute file paths and discovery errors for a scan input.
 func listFiles(pattern string, filter *PathFilter) ([]string, []error) {
-	return listFilesOrDirectories(pattern, false, filter)
+	return listFilesOrDirectories(pattern, globManifestFiles, filter)
 }
 
 // listDirs returns the list of absolute paths, full directories path and list of errors. The list of abs paths and full path have the same length
 func listDirs(pattern string, filter *PathFilter) ([]string, []error) {
-	return listFilesOrDirectories(pattern, true, filter)
+	return listFilesOrDirectories(pattern, globDirectories, filter)
 }
 
 // ScanGlobPaths lists files and renderer directories selected by a scan glob.
@@ -1487,15 +1488,33 @@ func ScanGlobPaths(pattern string, filter *PathFilter) ([]string, []error) {
 	files, fileErrs := listFiles(pattern, filter)
 	dirs, dirErrs := listDirs(pattern, filter)
 	for _, dir := range dirs {
-		isHelm, _ := IsHelmDirectory(dir)
-		if isHelm || isKustomizeDirectory(dir) || isTerraformDirectory(dir) {
+		if isScanRendererDirectory(dir) {
 			files = append(files, dir)
 		}
 	}
 	return files, append(fileErrs, dirErrs...)
 }
 
-func listFilesOrDirectories(pattern string, onlyDirectories bool, filter *PathFilter) ([]string, []error) {
+// ScanGlobCollisionPaths lists matched manifest candidates and renderer
+// directories for report destination validation.
+func ScanGlobCollisionPaths(pattern string, filter *PathFilter) ([]string, []error) {
+	return listFilesOrDirectories(pattern, globOutputPaths, filter)
+}
+
+func isScanRendererDirectory(dir string) bool {
+	isHelm, _ := IsHelmDirectory(dir)
+	return isHelm || isKustomizeDirectory(dir) || isTerraformDirectory(dir)
+}
+
+type globPathKind uint8
+
+const (
+	globManifestFiles globPathKind = iota
+	globDirectories
+	globOutputPaths
+)
+
+func listFilesOrDirectories(pattern string, kind globPathKind, filter *PathFilter) ([]string, []error) {
 	var paths []string
 	errs := []error{}
 
@@ -1504,7 +1523,7 @@ func listFilesOrDirectories(pattern string, onlyDirectories bool, filter *PathFi
 		pattern = filepath.Join(o, pattern)
 	}
 
-	if !onlyDirectories && isFile(pattern) {
+	if kind != globDirectories && isFile(pattern) {
 		if !filter.Excluded(pattern, false) {
 			paths = append(paths, pattern)
 		}
@@ -1526,7 +1545,7 @@ func listFilesOrDirectories(pattern string, onlyDirectories bool, filter *PathFi
 		shouldMatch = relativePattern
 	}
 
-	f, err := glob(root, shouldMatch, onlyDirectories, filter)
+	f, err := glob(root, shouldMatch, kind, filter)
 	paths = append(paths, f...)
 	if err != nil {
 		errs = append(errs, err)
@@ -2173,8 +2192,23 @@ func IsJson(filePath string) bool {
 	return slices.Contains(JSON_PREFIX, strings.ToLower(strings.TrimPrefix(filepath.Ext(filePath), ".")))
 }
 
-func glob(root, pattern string, onlyDirectories bool, filter *PathFilter) ([]string, error) {
-	var matches []string
+// OutputCollisionFileFormat identifies files that could be scan inputs for collision checks.
+func OutputCollisionFileFormat(filePath string) FileFormat {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch {
+	case ext == ".tf":
+		return TerraformFileFormat
+	case ext == ".json" || IsJson(filePath):
+		return JSON_FILE_FORMAT
+	case ext == ".yaml" || ext == ".yml" || IsYaml(filePath):
+		return YAML_FILE_FORMAT
+	default:
+		return ""
+	}
+}
+
+func glob(root, pattern string, kind globPathKind, filter *PathFilter) ([]string, error) {
+	var matches, rendererDirs []string
 	// Basename-only patterns have historically matched at every depth.
 	separator := string(filepath.Separator)
 	patternSeparators := strings.Count(pattern, separator)
@@ -2202,8 +2236,11 @@ func glob(root, pattern string, onlyDirectories bool, filter *PathFilter) ([]str
 			return err
 		}
 
-		if filter.Excluded(path, entry.IsDir()) {
-			if entry.IsDir() {
+		isDirectory := entry.IsDir()
+		checkSymlink := kind == globOutputPaths && matchRelativePath && entry.Type()&os.ModeSymlink != 0
+		excluded := filter.Excluded(path, isDirectory)
+		if excluded && !checkSymlink {
+			if isDirectory {
 				return filepath.SkipDir
 			}
 			return nil
@@ -2217,26 +2254,86 @@ func glob(root, pattern string, onlyDirectories bool, filter *PathFilter) ([]str
 				return err
 			}
 			match = doublestar.PathMatch
-			if fixedDepth && entry.IsDir() && strings.Count(name, separator) >= patternSeparators {
+			if fixedDepth && isDirectory && strings.Count(name, separator) >= patternSeparators {
 				next = filepath.SkipDir
 			}
 		}
-		if entry.IsDir() != onlyDirectories || (!entry.IsDir() && !IsYaml(path) && !IsJson(path)) {
+		if kind == globOutputPaths {
+			if checkSymlink {
+				matches = append(matches, globFilesThroughSymlink(path, name, pattern, filter)...)
+			}
+			if excluded || !isDirectory && OutputCollisionFileFormat(path) == "" {
+				return next
+			}
+		} else if isDirectory != (kind == globDirectories) || (!isDirectory && !IsYaml(path) && !IsJson(path)) {
 			return next
 		}
 		matched, err := match(pattern, name)
 		if err != nil {
 			return err
 		}
-		if matched {
+		if !matched && kind == globOutputPaths && matchRelativePath && !isDirectory {
+			// Legacy direct file matches can use syntax with different meanings in doublestar.
+			matched, _ = filepath.Match(pattern, name)
+		}
+		if !matched {
+			return next
+		}
+		if kind == globOutputPaths && isDirectory {
+			if isScanRendererDirectory(path) {
+				rendererDirs = append(rendererDirs, path)
+			}
+		} else if kind != globOutputPaths || isGlobRegularFile(path, entry) {
 			matches = append(matches, path)
 		}
 		return next
 	})
-	if err != nil {
-		return matches, err
+	return append(matches, rendererDirs...), err
+}
+
+// globFilesThroughSymlink keeps the bounded directory-symlink matches of filepath.Glob.
+func globFilesThroughSymlink(link, relativePath, pattern string, filter *PathFilter) []string {
+	separator := string(filepath.Separator)
+	depth := strings.Count(relativePath, separator) + 1
+	parts := strings.SplitN(pattern, separator, depth+1)
+	if len(parts) <= depth {
+		return nil
 	}
-	return matches, nil
+	matched, _ := filepath.Match(strings.Join(parts[:depth], separator), relativePath)
+	if !matched || filter.Excluded(link, true) || !isDir(link) {
+		return nil
+	}
+	return globFilesAtFixedDepth(link, parts[depth], filter)
+}
+
+func globFilesAtFixedDepth(dir, pattern string, filter *PathFilter) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		// filepath.Glob skips directories it cannot read.
+		return nil
+	}
+
+	component, remaining, nested := strings.Cut(pattern, string(filepath.Separator))
+	var matches []string
+	for _, entry := range entries {
+		matched, _ := filepath.Match(component, entry.Name())
+		if !matched {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		if nested {
+			if !filter.Excluded(path, true) && (entry.IsDir() || entry.Type()&os.ModeSymlink != 0 && isDir(path)) {
+				matches = append(matches, globFilesAtFixedDepth(path, remaining, filter)...)
+			}
+		} else if OutputCollisionFileFormat(path) != "" && !filter.Excluded(path, false) && isGlobRegularFile(path, entry) {
+			matches = append(matches, path)
+		}
+	}
+	return matches
+}
+
+func isGlobRegularFile(path string, entry os.DirEntry) bool {
+	return entry.Type().IsRegular() || entry.Type()&os.ModeSymlink != 0 && isFile(path)
 }
 
 // isFile checks if a given path is a file

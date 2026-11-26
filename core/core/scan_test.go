@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1465,6 +1466,71 @@ func TestGetOutputPrinters_GlobDiscoveryCollision(t *testing.T) {
 		assert.Equal(t, manifestContent, got)
 	})
 
+	t.Run("Terraform globs reject hard-linked outputs", func(t *testing.T) {
+		cases := []struct {
+			name    string
+			root    string
+			subdir  string
+			pattern string
+			symlink bool
+		}{
+			{name: "single directory level", root: "modules", subdir: "app", pattern: "*"},
+			{name: "recursive under a literal root", root: "modules[old]", subdir: filepath.Join("group", "app"), pattern: "**"},
+			{name: "through a symlinked directory", root: "modules", subdir: "app", pattern: "*", symlink: true},
+			{name: "through a symlinked directory with globstar", root: "modules", subdir: "app", pattern: "**", symlink: true},
+			{name: "through a symlinked directory and matched child", root: "modules", subdir: filepath.Join("app", "group"), pattern: filepath.Join("*", "group*"), symlink: true},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				baseDir := t.TempDir()
+				modulesDir := filepath.Join(baseDir, tc.root)
+				moduleDir := filepath.Join(modulesDir, tc.subdir)
+				if tc.symlink {
+					if runtime.GOOS == "windows" {
+						t.Skip("skipping symlink tests on windows")
+					}
+					require.NoError(t, os.MkdirAll(modulesDir, 0o700))
+					link, remaining, _ := strings.Cut(tc.subdir, string(filepath.Separator))
+					target := filepath.Join(baseDir, "linked-module")
+					require.NoError(t, os.MkdirAll(filepath.Join(target, remaining), 0o700))
+					require.NoError(t, os.Symlink(target, filepath.Join(modulesDir, link)))
+				} else {
+					require.NoError(t, os.MkdirAll(moduleDir, 0o700))
+				}
+				manifest := filepath.Join(moduleDir, "main.tf")
+				terraformContent := []byte("locals { example = true }\n")
+				require.NoError(t, os.WriteFile(manifest, terraformContent, 0o600))
+
+				output := filepath.Join(baseDir, "report.yaml")
+				require.NoError(t, os.Link(manifest, output))
+				scanInfo := &cautils.ScanInfo{
+					ScanType:      cautils.ScanTypeControl,
+					Format:        printer.YamlFormat,
+					Output:        output,
+					InputPatterns: []string{filepath.Join(modulesDir, tc.pattern, "main.tf")},
+				}
+
+				printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+				t.Cleanup(func() { _ = closePrinters(printers...) })
+				assert.ErrorContains(t, err, fmt.Sprintf("would overwrite input manifest %q", manifest))
+				assert.Nil(t, printers)
+				got, err := os.ReadFile(manifest)
+				require.NoError(t, err)
+				assert.Equal(t, terraformContent, got)
+
+				scanInfo.ExcludePaths = []string{filepath.ToSlash(tc.subdir) + "/"}
+				assert.NoError(t, ValidateOutputPrinters(scanInfo))
+
+				if tc.symlink {
+					link, _, _ := strings.Cut(filepath.ToSlash(tc.subdir), "/")
+					scanInfo.ExcludePaths = []string{link, "!" + link + "/"}
+					assert.ErrorContains(t, ValidateOutputPrinters(scanInfo), "would overwrite input manifest")
+				}
+			})
+		}
+	})
+
 	t.Run("nested glob honors exclusions for an output manifest", func(t *testing.T) {
 		baseDir := t.TempDir()
 		subDir := filepath.Join(baseDir, "skip")
@@ -1532,6 +1598,11 @@ func TestGetOutputPrinters_GlobDiscoveryCollision(t *testing.T) {
 		got, err := os.ReadFile(manifest)
 		require.NoError(t, err)
 		assert.Equal(t, manifestContent, got)
+
+		scanInfo.ExcludePaths = []string{"a/"}
+		printers, err = GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.ErrorContains(t, err, "would overwrite input manifest")
+		assert.Nil(t, printers)
 	})
 
 	t.Run("globstar rejects collision inside a deeply nested chart", func(t *testing.T) {

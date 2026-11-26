@@ -415,20 +415,17 @@ func isGenuineManifest(filePath string) (bool, error) {
 	if strings.TrimSpace(filePath) == "" {
 		return false, nil
 	}
+	format := cautils.OutputCollisionFileFormat(filePath)
+	if format == "" {
+		return false, nil
+	}
 	statInfo, err := os.Stat(filePath)
 	if err != nil || statInfo.IsDir() || !statInfo.Mode().IsRegular() || statInfo.Size() == 0 {
 		return false, nil
 	}
 
-	ext := strings.ToLower(filepath.Ext(filePath))
-	if ext == ".tf" {
+	if format == cautils.TerraformFileFormat {
 		return true, nil
-	}
-
-	isYaml := cautils.IsYaml(filePath) || ext == ".yaml" || ext == ".yml"
-	isJson := cautils.IsJson(filePath) || ext == ".json"
-	if !isYaml && !isJson {
-		return false, nil
 	}
 
 	if statInfo.Size() > cautils.DefaultMaxFileSize {
@@ -460,17 +457,12 @@ func isGenuineManifest(filePath string) (bool, error) {
 		return false, nil
 	}
 
-	format := cautils.YAML_FILE_FORMAT
-	if isJson {
-		format = cautils.JSON_FILE_FORMAT
-	}
-
 	workloads, _ := cautils.ReadFile(data, format)
 	if len(workloads) > 0 {
 		return true, nil
 	}
 
-	return hasKubernetesManifestSignatures(data, isJson), nil
+	return hasKubernetesManifestSignatures(data, format == cautils.JSON_FILE_FORMAT), nil
 }
 
 // hasKubernetesManifestSignatures checks if the data contains document-level Kubernetes
@@ -663,7 +655,7 @@ func checkGlobCollision(rawPath, scanRoot string, scanInfo *cautils.ScanInfo, de
 			return fmt.Errorf("failed preparing output collision check for %q: %w", rawPath, err)
 		}
 		var discoveryErrs []error
-		matches, discoveryErrs = cautils.ScanGlobPaths(rawPath, filter)
+		matches, discoveryErrs = cautils.ScanGlobCollisionPaths(rawPath, filter)
 		if err := errors.Join(discoveryErrs...); err != nil {
 			return fmt.Errorf("failed checking output collision for %q: %w", rawPath, err)
 		}
