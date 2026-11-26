@@ -175,6 +175,260 @@ func TestRemoveData(t *testing.T) {
 	}
 }
 
+func newResultWithPaths(resourceID string, deletePaths, reviewPaths []string) resourcesresults.Result {
+	var paths []armotypes.PosturePaths
+	for _, p := range deletePaths {
+		paths = append(paths, armotypes.PosturePaths{DeletePath: p})
+	}
+	for _, p := range reviewPaths {
+		paths = append(paths, armotypes.PosturePaths{ReviewPath: p})
+	}
+	return resourcesresults.Result{
+		ResourceID: resourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: "C-0012",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{Name: "test-rule", Status: apis.StatusFailed, Paths: paths},
+				},
+			},
+		},
+	}
+}
+
+//nolint:gosec // G101: test fixture for secret preservation verification
+func TestCleanProcessedResource_ShowSecrets(t *testing.T) {
+	//nolint:gosec // G101: test fixture for secret preservation verification
+	secretRaw := `{"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "example-secret", "namespace": "default", "annotations": {"kubectl.kubernetes.io/last-applied-configuration": "{}"}}, "type": "Opaque", "data": {"key": "dGVzdA=="}, "stringData": {"field": "sensitive-value"}}`
+	//nolint:gosec // G101: test fixture for secret preservation verification
+	cmRaw := `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "example-cm", "namespace": "default"}, "data": {"setting": "config-value"}}`
+	//nolint:gosec // G101: test fixture for secret preservation verification
+	podRaw := `{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "example-pod", "namespace": "default"}, "spec": {"containers": [{"name": "app", "image": "nginx", "args": ["--api-key=cli-secret"], "envFrom": [{"secretRef": {"name": "other"}}], "env": [{"name": "APP_CONFIG", "value": "runtime-value"}]}]}}`
+
+	t.Run("secret resource is scrubbed on disk/JSON while evidence paths are captured", func(t *testing.T) {
+		obj, err := workloadinterface.NewWorkload([]byte(secretRaw))
+		require.NoError(t, err)
+		resID := obj.GetID()
+
+		session := &cautils.OPASessionObj{
+			ShowSecrets:     true,
+			AllResources:    map[string]workloadinterface.IMetadata{resID: obj},
+			ResourcesResult: map[string]resourcesresults.Result{resID: newResultWithPaths(resID, []string{"data[key]"}, []string{"stringData[field]"})},
+		}
+		opap := NewOPAProcessor(session, nil, "test", "", "", false, nil)
+		opap.cleanProcessedResource(resID, obj)
+
+		// In-memory resource must still be completely scrubbed.
+		workload := workloadinterface.NewWorkloadObj(obj.GetObject())
+		_, found := workload.GetAnnotation("kubectl.kubernetes.io/last-applied-configuration")
+		assert.False(t, found)
+
+		d, ok := workloadinterface.InspectMap(workload.GetObject(), "data")
+		require.True(t, ok)
+		assert.Equal(t, "XXXXXX", d.(map[string]any)["key"])
+
+		sd, ok := workloadinterface.InspectMap(workload.GetObject(), "stringData")
+		require.True(t, ok)
+		assert.Equal(t, "XXXXXX", sd.(map[string]any)["field"])
+
+		// Evidence paths are captured pre-scrub for evidence printers.
+		assert.Equal(t, "dGVzdA==", session.PreservedValuesForResource(resID)["data[key]"])
+		assert.Equal(t, "sensitive-value", session.PreservedValuesForResource(resID)["stringData[field]"])
+	})
+
+	t.Run("configmap resource is scrubbed while evidence path is captured", func(t *testing.T) {
+		obj, err := workloadinterface.NewWorkload([]byte(cmRaw))
+		require.NoError(t, err)
+		resID := obj.GetID()
+
+		session := &cautils.OPASessionObj{
+			ShowSecrets:     true,
+			AllResources:    map[string]workloadinterface.IMetadata{resID: obj},
+			ResourcesResult: map[string]resourcesresults.Result{resID: newResultWithPaths(resID, []string{"data[setting]"}, nil)},
+		}
+		opap := NewOPAProcessor(session, nil, "test", "", "", false, nil)
+		opap.cleanProcessedResource(resID, obj)
+
+		workload := workloadinterface.NewWorkloadObj(obj.GetObject())
+		d, ok := workloadinterface.InspectMap(workload.GetObject(), "data")
+		require.True(t, ok)
+		assert.Equal(t, "XXXXXX", d.(map[string]any)["setting"])
+		assert.Equal(t, "config-value", session.PreservedValuesForResource(resID)["data[setting]"])
+	})
+
+	t.Run("pod env, envFrom, and args are scrubbed while evidence path is captured", func(t *testing.T) {
+		obj, err := workloadinterface.NewWorkload([]byte(podRaw))
+		require.NoError(t, err)
+		resID := obj.GetID()
+
+		session := &cautils.OPASessionObj{
+			ShowSecrets:     true,
+			AllResources:    map[string]workloadinterface.IMetadata{resID: obj},
+			ResourcesResult: map[string]resourcesresults.Result{resID: newResultWithPaths(resID, []string{"spec.containers[0].env[0].value"}, nil)},
+		}
+		opap := NewOPAProcessor(session, nil, "test", "", "", false, nil)
+		opap.cleanProcessedResource(resID, obj)
+
+		workload := workloadinterface.NewWorkloadObj(obj.GetObject())
+		containers, err := workload.GetContainers()
+		require.NoError(t, err)
+		require.Len(t, containers, 1)
+		require.Len(t, containers[0].Env, 1)
+		assert.Equal(t, "XXXXXX", containers[0].Env[0].Value)
+		assert.Nil(t, containers[0].EnvFrom)
+		assert.Equal(t, []string{"--api-key=XXXXXX"}, containers[0].Args)
+
+		assert.Equal(t, "runtime-value", session.PreservedValuesForResource(resID)["spec.containers[0].env[0].value"])
+	})
+
+	t.Run("metadata identifier and parent paths are not captured", func(t *testing.T) {
+		obj, err := workloadinterface.NewWorkload([]byte(podRaw))
+		require.NoError(t, err)
+		resID := obj.GetID()
+
+		session := &cautils.OPASessionObj{
+			ShowSecrets:  true,
+			AllResources: map[string]workloadinterface.IMetadata{resID: obj},
+			ResourcesResult: map[string]resourcesresults.Result{
+				resID: newResultWithPaths(resID, []string{
+					"metadata.name",
+					`metadata["name"]`,
+					`metadata['namespace']`,
+					"metadata",
+					"spec.containers[0].env[0].value",
+				}, nil),
+			},
+		}
+		opap := NewOPAProcessor(session, nil, "test", "", "", false, nil)
+		opap.cleanProcessedResource(resID, obj)
+
+		preserved := session.PreservedValuesForResource(resID)
+		require.NotNil(t, preserved)
+		assert.Equal(t, "runtime-value", preserved["spec.containers[0].env[0].value"])
+		assert.NotContains(t, preserved, "metadata.name")
+		assert.NotContains(t, preserved, `metadata["name"]`)
+		assert.NotContains(t, preserved, `metadata['namespace']`)
+		assert.NotContains(t, preserved, "metadata")
+	})
+
+	t.Run("configmap data key named metadata is captured under --show-secrets", func(t *testing.T) {
+		cmWithMetadataKey := `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "app-config", "namespace": "default"}, "data": {"metadata": "secret-config-value"}}`
+		obj, err := workloadinterface.NewWorkload([]byte(cmWithMetadataKey))
+		require.NoError(t, err)
+		resID := obj.GetID()
+
+		session := &cautils.OPASessionObj{
+			ShowSecrets:  true,
+			AllResources: map[string]workloadinterface.IMetadata{resID: obj},
+			ResourcesResult: map[string]resourcesresults.Result{
+				resID: newResultWithPaths(resID, []string{`data["metadata"]`}, nil),
+			},
+		}
+		opap := NewOPAProcessor(session, nil, "test", "", "", false, nil)
+		opap.cleanProcessedResource(resID, obj)
+
+		workload := workloadinterface.NewWorkloadObj(obj.GetObject())
+		d, ok := workloadinterface.InspectMap(workload.GetObject(), "data")
+		require.True(t, ok)
+		assert.Equal(t, "XXXXXX", d.(map[string]any)["metadata"])
+
+		assert.Equal(t, "secret-config-value", session.PreservedValuesForResource(resID)[`data["metadata"]`])
+	})
+
+	t.Run("JSON-valued environment variable is captured under --show-secrets", func(t *testing.T) {
+		podWithJSONEnv := `{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "json-env-pod", "namespace": "default"}, "spec": {"containers": [{"name": "app", "env": [{"name": "CONFIG_JSON", "value": "{\"namespace\":\"production\",\"setting\":\"val123\"}"}]}]}}`
+		obj, err := workloadinterface.NewWorkload([]byte(podWithJSONEnv))
+		require.NoError(t, err)
+		resID := obj.GetID()
+
+		session := &cautils.OPASessionObj{
+			ShowSecrets:  true,
+			AllResources: map[string]workloadinterface.IMetadata{resID: obj},
+			ResourcesResult: map[string]resourcesresults.Result{
+				resID: newResultWithPaths(resID, []string{"spec.containers[0].env[0].value"}, nil),
+			},
+		}
+		opap := NewOPAProcessor(session, nil, "test", "", "", false, nil)
+		opap.cleanProcessedResource(resID, obj)
+
+		workload := workloadinterface.NewWorkloadObj(obj.GetObject())
+		containers, err := workload.GetContainers()
+		require.NoError(t, err)
+		require.Len(t, containers, 1)
+		require.Len(t, containers[0].Env, 1)
+		assert.Equal(t, "XXXXXX", containers[0].Env[0].Value)
+
+		assert.Equal(t, `{"namespace":"production","setting":"val123"}`, session.PreservedValuesForResource(resID)["spec.containers[0].env[0].value"])
+	})
+
+	t.Run("whole ConfigMap data map is captured under --show-secrets when control selects data", func(t *testing.T) {
+		cmRaw := `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "app-cm", "namespace": "default"}, "data": {"namespace": "production", "setting": "custom-val"}}`
+		obj, err := workloadinterface.NewWorkload([]byte(cmRaw))
+		require.NoError(t, err)
+		resID := obj.GetID()
+
+		session := &cautils.OPASessionObj{
+			ShowSecrets:  true,
+			AllResources: map[string]workloadinterface.IMetadata{resID: obj},
+			ResourcesResult: map[string]resourcesresults.Result{
+				resID: newResultWithPaths(resID, []string{"data"}, nil),
+			},
+		}
+		opap := NewOPAProcessor(session, nil, "test", "", "", false, nil)
+		opap.cleanProcessedResource(resID, obj)
+
+		workload := workloadinterface.NewWorkloadObj(obj.GetObject())
+		d, ok := workloadinterface.InspectMap(workload.GetObject(), "data")
+		require.True(t, ok)
+		assert.Equal(t, "XXXXXX", d.(map[string]any)["namespace"])
+		assert.Equal(t, "XXXXXX", d.(map[string]any)["setting"])
+
+		preserved := session.PreservedValuesForResource(resID)
+		require.NotNil(t, preserved)
+		assert.Contains(t, preserved["data"], `"namespace":"production"`)
+		assert.Contains(t, preserved["data"], `"setting":"custom-val"`)
+	})
+
+	t.Run("env var name paths are not captured under --show-secrets", func(t *testing.T) {
+		podRaw := `{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "test-pod", "namespace": "default"}, "spec": {"containers": [{"name": "app", "env": [{"name": "SECRET_KEY", "value": "val123"}]}]}}`
+		obj, err := workloadinterface.NewWorkload([]byte(podRaw))
+		require.NoError(t, err)
+		resID := obj.GetID()
+
+		session := &cautils.OPASessionObj{
+			ShowSecrets:  true,
+			AllResources: map[string]workloadinterface.IMetadata{resID: obj},
+			ResourcesResult: map[string]resourcesresults.Result{
+				resID: newResultWithPaths(resID, []string{"spec.containers[0].env[0].name", "spec.containers[0].env[0].value"}, nil),
+			},
+		}
+		opap := NewOPAProcessor(session, nil, "test", "", "", false, nil)
+		opap.cleanProcessedResource(resID, obj)
+
+		preserved := session.PreservedValuesForResource(resID)
+		require.NotNil(t, preserved)
+		assert.Equal(t, "val123", preserved["spec.containers[0].env[0].value"])
+		assert.NotContains(t, preserved, "spec.containers[0].env[0].name")
+	})
+
+	t.Run("nothing is captured when ShowSecrets is false", func(t *testing.T) {
+		obj, err := workloadinterface.NewWorkload([]byte(podRaw))
+		require.NoError(t, err)
+		resID := obj.GetID()
+
+		session := &cautils.OPASessionObj{
+			ShowSecrets:     false,
+			AllResources:    map[string]workloadinterface.IMetadata{resID: obj},
+			ResourcesResult: map[string]resourcesresults.Result{resID: newResultWithPaths(resID, []string{"spec.containers[0].env[0].value"}, nil)},
+		}
+		opap := NewOPAProcessor(session, nil, "test", "", "", false, nil)
+		opap.cleanProcessedResource(resID, obj)
+
+		assert.Nil(t, session.PreservedValuesForResource(resID))
+	})
+}
+
 // TestRemoveData_ReturnsReferenceBackedEnvVarNamesOnly guards the contract
 // removeData/removePodData/removeContainersData now carry for kubescape#3567:
 // the only signal that survives the scrub for a reference-backed env var is

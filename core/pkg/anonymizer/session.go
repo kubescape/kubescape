@@ -14,6 +14,7 @@ import (
 	cloudsupportv1 "github.com/kubescape/k8s-interface/cloudsupport/v1"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/pathparse"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
@@ -61,9 +62,11 @@ type sessionTransform struct {
 // synchronization primitives. Read-only configuration is assigned directly.
 func cloneSessionForTransform(session *cautils.OPASessionObj) (*sessionTransform, error) {
 	working := &cautils.OPASessionObj{
-		LabelsToCopy:          append([]string(nil), session.LabelsToCopy...),
-		EnvVarSecretRefs:      session.EnvVarSecretRefs,
-		SourcePathsAnonymized: session.SourcePathsAnonymized,
+		LabelsToCopy:            append([]string(nil), session.LabelsToCopy...),
+		EnvVarSecretRefs:        session.EnvVarSecretRefs,
+		ShowSecrets:             session.ShowSecrets,
+		PreservedEvidenceValues: maps.Clone(session.PreservedEvidenceValues),
+		SourcePathsAnonymized:   session.SourcePathsAnonymized,
 	}
 
 	resourcesResult, err := cloneJSON(session.ResourcesResult)
@@ -411,6 +414,7 @@ func commitTransformedSession(session *cautils.OPASessionObj, transaction *sessi
 	session.ResourcesResult = working.ResourcesResult
 	session.ResourceSource = working.ResourceSource
 	session.SourcePathsAnonymized = working.SourcePathsAnonymized
+	session.PreservedEvidenceValues = working.PreservedEvidenceValues
 	session.ResourcesPrioritized = working.ResourcesPrioritized
 	session.ResourceAttackTracks = working.ResourceAttackTracks
 	session.Metadata = working.Metadata
@@ -608,6 +612,30 @@ func transformSessionInPlace(session *cautils.OPASessionObj, transformer Transfo
 		newResourceAttackTracks[newID] = attackTracks
 	}
 	session.ResourceAttackTracks = newResourceAttackTracks
+
+	if len(session.PreservedEvidenceValues) > 0 {
+		newPreserved := make(map[string]map[string]string, len(session.PreservedEvidenceValues))
+		for oldID, vals := range session.PreservedEvidenceValues {
+			newID, err := resolveMappedID(transformer, idMapping, oldID, "ref")
+			if err != nil {
+				return err
+			}
+			newVals := make(map[string]string, len(vals))
+			for p, v := range vals {
+				transformedVal, keep, err := transformPreservedEvidenceValue(p, v, transformer)
+				if err != nil {
+					return err
+				}
+				if keep {
+					newVals[p] = transformedVal
+				}
+			}
+			if len(newVals) > 0 {
+				newPreserved[newID] = newVals
+			}
+		}
+		session.PreservedEvidenceValues = newPreserved
+	}
 
 	if session.Metadata != nil {
 		if err := transformRepoContextMetadata(session.Metadata.ContextMetadata.RepoContextMetadata, transformer); err != nil {
@@ -1081,6 +1109,46 @@ func transformValue(transformer Transformer, prefix string, value string) (strin
 	}
 
 	return transformer.Transform(prefix, value)
+}
+
+// transformPreservedEvidenceValue ensures that identifier paths rewritten by
+// the anonymizer (such as metadata.name, metadata.namespace, annotations, labels)
+// are transformed rather than leaking plaintext identifiers into preserved evidence.
+// Parent paths resolving to metadata objects are rejected (keep = false) so
+// embedded identifier fields cannot leak through.
+func transformPreservedEvidenceValue(path, val string, transformer Transformer) (string, bool, error) {
+	if !pathparse.IsPayloadPath(path) && pathparse.HasObjectMetaIdentifiers(val) {
+		// Preserved object- or list-valued evidence containing ObjectMeta identifier
+		// fields (e.g. from parent/ancestor paths like spec.template, spec, metadata)
+		// must not expose unredacted identifiers in plaintext when anonymization is active.
+		return "", false, nil
+	}
+
+	if pathparse.IsEnvVarNamePath(path) {
+		transformed, err := transformValue(transformer, "env", val)
+		return transformed, true, err
+	}
+
+	switch pathparse.ClassifyMetadataPath(path) {
+	case pathparse.PathKindResourceName:
+		transformed, err := transformValue(transformer, "res", val)
+		return transformed, true, err
+	case pathparse.PathKindNamespace:
+		transformed, err := transformValue(transformer, "ns", val)
+		return transformed, true, err
+	case pathparse.PathKindLabels:
+		transformed, err := transformValue(transformer, "lbl", val)
+		return transformed, true, err
+	case pathparse.PathKindAnnotations:
+		transformed, err := transformValue(transformer, "ann", val)
+		return transformed, true, err
+	case pathparse.PathKindMetadataParent:
+		// Parent path containing entire metadata object with identifier fields:
+		// Reject the path so plaintext identifiers never leak in output.
+		return "", false, nil
+	default:
+		return val, true, nil
+	}
 }
 
 func transformResourceMetadata(

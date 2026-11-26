@@ -1,14 +1,10 @@
 package printer
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"maps"
-	"reflect"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -23,82 +19,12 @@ import (
 // imports locationresolver, so the dependency only runs one way.
 type pathSegment = pathparse.Segment
 
-// anyToString converts a value to its string representation.
-// It handles all numeric types that may appear in JSON-decoded or
-// programmatically-constructed Kubernetes objects. Maps and slices are
-// rendered as compact JSON rather than dropped, so a failing path whose
-// value is an object or array (e.g. a container's full securityContext, an
-// env var list) still surfaces something instead of falling back to the
-// bare path with no value at all.
 func anyToString(v any) (string, bool) {
-	switch val := v.(type) {
-	case nil:
-		return "null", true
-	case bool:
-		return strconv.FormatBool(val), true
-	case string:
-		if val == "" {
-			return `""`, true
-		}
-		return val, true
-	case float64:
-		if val == float64(int64(val)) {
-			return strconv.FormatInt(int64(val), 10), true
-		}
-		return strconv.FormatFloat(val, 'f', -1, 64), true
-	case int:
-		return strconv.Itoa(val), true
-	case int32:
-		return strconv.FormatInt(int64(val), 10), true
-	case int64:
-		return strconv.FormatInt(val, 10), true
-	case uint:
-		return strconv.FormatUint(uint64(val), 10), true
-	case uint32:
-		return strconv.FormatUint(uint64(val), 10), true
-	case uint64:
-		return strconv.FormatUint(val, 10), true
-	case json.Number:
-		return val.String(), true
-	case map[string]any, []any:
-		b, err := json.Marshal(val)
-		if err != nil {
-			return "", false
-		}
-		return string(b), true
-	default:
-		return "", false
-	}
+	return pathparse.AnyToString(v)
 }
 
-// normalizeForPathExtraction converts obj into a tree built entirely from
-// encoding/json's generic decoding types (map[string]any, []any, float64,
-// string, bool, nil). Earlier processing stages (for example
-// opaprocessor.removePodData, which reads containers via
-// workload.GetContainers() and writes the resulting []corev1.Container back
-// into the object map) can leave typed structs in place of the plain
-// map/slice shape the manifest originally had. extractValueAtPath only knows
-// how to walk map[string]any and []any, so those typed sections would
-// otherwise be invisible to it - which is most posture findings, since they
-// target container-scoped fields. Round-tripping through JSON once per
-// resource makes the whole tree walkable regardless of how it got there.
-//
-// Numbers are decoded as json.Number rather than float64. A float64 cannot
-// hold every integer above 2^53, so the default decoding would report
-// metadata.generation 9007199254740993 as 9007199254740992; json.Number keeps
-// the literal digits, and anyToString renders them unchanged.
 func normalizeForPathExtraction(obj map[string]any) map[string]any {
-	b, err := json.Marshal(obj)
-	if err != nil {
-		return obj
-	}
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.UseNumber()
-	var normalized map[string]any
-	if err := dec.Decode(&normalized); err != nil {
-		return obj
-	}
-	return normalized
+	return pathparse.NormalizeForPathExtraction(obj)
 }
 
 // extractValueAtPath is extractValue for an object that carries its own kind,
@@ -478,75 +404,12 @@ func redactSensitiveDescendants(kind string, segments []pathSegment, v any) any 
 
 // resolveSegments walks obj along segments and returns the value found there.
 func resolveSegments(obj map[string]any, segments []pathSegment) (any, bool) {
-	var cur any = obj
-	for _, seg := range segments {
-		switch v := cur.(type) {
-		case map[string]any:
-			next, ok := v[seg.Key]
-			if !ok {
-				return nil, false
-			}
-			if seg.Index >= 0 {
-				elem, ok := indexList(next, seg.Index)
-				if !ok {
-					return nil, false
-				}
-				cur = elem
-			} else {
-				cur = next
-			}
-		default:
-			// A named segment is a map lookup, and this is not a map. Every
-			// segment the parser produces carries a key, so reaching here means
-			// the path asks for a field of a list - "env['ignored'][1]" - which
-			// no resource has.
-			//
-			// It fails rather than indexing past the name. Indexing anyway
-			// would resolve the path by quietly discarding a segment, and
-			// isSensitivePath reads that same segment: it would see "ignored"
-			// where traversal saw the env list, judge the path harmless, and
-			// print a credential the two functions disagreed about. Traversal
-			// and classification have to give the same answer about what a path
-			// means, and the safe direction for a malformed path is to resolve
-			// nothing.
-			if seg.Key != "" {
-				return nil, false
-			}
-			elem, ok := indexList(v, seg.Index)
-			if !ok {
-				return nil, false
-			}
-			cur = elem
-		}
-	}
-	return cur, true
+	return pathparse.ResolveSegments(obj, segments)
 }
 
-// indexList returns the element at index i of a slice. JSON-decoded objects
-// use []any; conversions often produce []map[string]any instead, and the
-// previous []any-only assert dropped those lookups. Other slice types are
-// indexed through reflection. Out-of-range indexes fail closed.
+// indexList returns the element at index i of a slice.
 func indexList(v any, i int) (any, bool) {
-	if i < 0 {
-		return nil, false
-	}
-	switch arr := v.(type) {
-	case []any:
-		if i >= len(arr) {
-			return nil, false
-		}
-		return arr[i], true
-	case []map[string]any:
-		if i >= len(arr) {
-			return nil, false
-		}
-		return arr[i], true
-	}
-	rv := reflect.ValueOf(v)
-	if rv.Kind() != reflect.Slice || i >= rv.Len() {
-		return nil, false
-	}
-	return rv.Index(i).Interface(), true
+	return pathparse.IndexList(v, i)
 }
 
 // secretFieldPatterns lists normalized field-name substrings that mark a
@@ -898,37 +761,19 @@ func fixPathsToStringFiltered(control *resourcesresults.ResourceAssociatedContro
 	return paths
 }
 
-// AssistedRemediationPathsWithCurrentValuesFiltered is like AssistedRemediationPathsWithCurrentValues
-// but redacts sensitive field values (Secret.data, Secret.stringData) unless showSecrets is true.
-// enrichedPathsForFieldUnredacted is like enrichedPathsForField but never suppresses values
-// for sensitive paths — used when --show-secrets is set and the operator explicitly wants
-// Secret.data / Secret.stringData values surfaced.
-func enrichedPathsForFieldUnredacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
-	var paths []string
-	obj := normalizeForPathExtraction(resource.GetObject())
-	kind := resource.GetKind()
-	for j := range control.ResourceAssociatedRules {
-		for k := range control.ResourceAssociatedRules[j].Paths {
-			p := getPath(control.ResourceAssociatedRules[j].Paths[k])
-			if p == "" {
-				continue
-			}
-			if val, ok := extractValue(kind, obj, p); ok {
-				paths = append(paths, p+" (current: "+val+")")
-				continue
-			}
-			paths = append(paths, p)
-		}
+func firstPreserved(preserved ...map[string]string) map[string]string {
+	if len(preserved) > 0 {
+		return preserved[0]
 	}
-	return paths
+	return nil
 }
 
-func reviewPathsWithCurrentValuesUnredacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
-	return enrichedPathsForFieldUnredacted(control, resource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
+func reviewPathsWithCurrentValuesUnredacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, preserved ...map[string]string) []string {
+	return enrichedPathsForFieldWithShowSecrets(control, resource, func(p armotypes.PosturePaths) string { return p.ReviewPath }, true, firstPreserved(preserved...))
 }
 
-func AssistedRemediationPathsWithCurrentValuesFiltered(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) []string {
-	return assistedRemediationPaths(control, resource, showSecrets, false)
+func AssistedRemediationPathsWithCurrentValuesFiltered(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool, preserved ...map[string]string) []string {
+	return assistedRemediationPaths(control, resource, showSecrets, false, firstPreserved(preserved...))
 }
 
 // evidencePathsWithCurrentValues is AssistedRemediationPathsWithCurrentValuesFiltered
@@ -940,8 +785,8 @@ func AssistedRemediationPathsWithCurrentValuesFiltered(control *resourcesresults
 // It is separate from the exported function on purpose: that one also feeds
 // the HTML, SARIF, GitLab SAST and GitHub Actions printers, and changing it
 // would change four report formats to improve one table.
-func evidencePathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) []string {
-	return assistedRemediationPaths(control, resource, showSecrets, true)
+func evidencePathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool, preserved ...map[string]string) []string {
+	return assistedRemediationPaths(control, resource, showSecrets, true, firstPreserved(preserved...))
 }
 
 // assistedRemediationPaths renders a control's fix, delete and review paths as
@@ -949,7 +794,7 @@ func evidencePathsWithCurrentValues(control *resourcesresults.ResourceAssociated
 // appends the current value to each delete path, and marks any delete or review
 // path that does not resolve as unresolved. Review paths carry their value in
 // every view.
-func assistedRemediationPaths(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets, deleteValues bool) []string {
+func assistedRemediationPaths(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets, deleteValues bool, preserved map[string]string) []string {
 	if control == nil {
 		return nil
 	}
@@ -962,14 +807,14 @@ func assistedRemediationPaths(control *resourcesresults.ResourceAssociatedContro
 	fixPaths := fixPathsToStringFiltered(control, kind, showSecrets)
 	deletePaths := deletePathsToString(control)
 	if deleteValues {
-		deletePaths = deletePathsWithCurrentValues(control, resource, showSecrets)
+		deletePaths = deletePathsWithCurrentValues(control, resource, showSecrets, preserved)
 	}
 	var enrichedReview []string
 	switch {
 	case deleteValues:
-		enrichedReview = reviewPathsForEvidence(control, resource, showSecrets)
+		enrichedReview = reviewPathsForEvidence(control, resource, showSecrets, preserved)
 	case showSecrets:
-		enrichedReview = reviewPathsWithCurrentValuesUnredacted(control, resource)
+		enrichedReview = reviewPathsWithCurrentValuesUnredacted(control, resource, preserved)
 	default:
 		enrichedReview = reviewPathsWithCurrentValuesRedacted(control, resource)
 	}
@@ -987,7 +832,7 @@ func assistedRemediationPaths(control *resourcesresults.ResourceAssociatedContro
 // object or list (a whole securityContext, say) has its credential-shaped
 // descendants masked rather than printed. A path that does not resolve is
 // marked unresolvedValue (see evidenceSuffix).
-func deletePathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) []string {
+func deletePathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool, preserved map[string]string) []string {
 	var paths []string
 	obj := normalizeForPathExtraction(resource.GetObject())
 	kind := resource.GetKind()
@@ -997,16 +842,22 @@ func deletePathsWithCurrentValues(control *resourcesresults.ResourceAssociatedCo
 			if p == "" {
 				continue
 			}
-			paths = append(paths, p+evidenceSuffix(kind, obj, p, showSecrets))
+			paths = append(paths, p+evidenceSuffix(kind, obj, p, showSecrets, preserved))
 		}
 	}
 	return paths
 }
 
 // currentValueSuffix returns " (current: <value>)" for path, or "" when the
-// path does not resolve.
-func currentValueSuffix(kind string, obj map[string]any, path string, showSecrets bool) string {
+// path does not resolve. When showSecrets is true, any pre-scrub value recorded
+// in preserved takes precedence over reading the scrubbed resource.
+func currentValueSuffix(kind string, obj map[string]any, path string, showSecrets bool, preserved map[string]string) string {
 	if showSecrets {
+		if preserved != nil {
+			if val, ok := preserved[path]; ok {
+				return " (current: " + val + ")"
+			}
+		}
 		if val, ok := extractValue(kind, obj, path); ok {
 			return " (current: " + val + ")"
 		}
@@ -1034,8 +885,8 @@ const unresolvedValue = "<unresolved>"
 // that returns "" because the path does not resolve, this returns the
 // unresolved marker. A path that resolves but has no printable value still
 // gets no suffix, since it is not unresolved.
-func evidenceSuffix(kind string, obj map[string]any, path string, showSecrets bool) string {
-	if suffix := currentValueSuffix(kind, obj, path, showSecrets); suffix != "" {
+func evidenceSuffix(kind string, obj map[string]any, path string, showSecrets bool, preserved map[string]string) string {
+	if suffix := currentValueSuffix(kind, obj, path, showSecrets, preserved); suffix != "" {
 		return suffix
 	}
 	if !pathResolves(obj, path) {
@@ -1049,7 +900,7 @@ func evidenceSuffix(kind string, obj map[string]any, path string, showSecrets bo
 // set, and marked unresolved when the path selects nothing. The other outputs
 // keep reviewPathsWithCurrentValuesRedacted and its Unredacted twin, which
 // leave such a path bare.
-func reviewPathsForEvidence(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) []string {
+func reviewPathsForEvidence(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool, preserved map[string]string) []string {
 	var paths []string
 	obj := normalizeForPathExtraction(resource.GetObject())
 	kind := resource.GetKind()
@@ -1059,13 +910,13 @@ func reviewPathsForEvidence(control *resourcesresults.ResourceAssociatedControl,
 			if p == "" {
 				continue
 			}
-			paths = append(paths, p+evidenceSuffix(kind, obj, p, showSecrets))
+			paths = append(paths, p+evidenceSuffix(kind, obj, p, showSecrets, preserved))
 		}
 	}
 	return paths
 }
 
-func enrichedPathsForFieldRedacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
+func enrichedPathsForFieldWithShowSecrets(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string, showSecrets bool, preserved map[string]string) []string {
 	var paths []string
 	obj := normalizeForPathExtraction(resource.GetObject())
 	kind := resource.GetKind()
@@ -1075,14 +926,14 @@ func enrichedPathsForFieldRedacted(control *resourcesresults.ResourceAssociatedC
 			if p == "" {
 				continue
 			}
-			paths = append(paths, p+currentValueSuffix(kind, obj, p, false))
+			paths = append(paths, p+currentValueSuffix(kind, obj, p, showSecrets, preserved))
 		}
 	}
 	return paths
 }
 
 func reviewPathsWithCurrentValuesRedacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
-	return enrichedPathsForFieldRedacted(control, resource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
+	return enrichedPathsForFieldWithShowSecrets(control, resource, func(p armotypes.PosturePaths) string { return p.ReviewPath }, false, nil)
 }
 
 func AssistedRemediationPathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {

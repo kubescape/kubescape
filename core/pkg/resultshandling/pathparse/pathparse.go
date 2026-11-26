@@ -1,6 +1,7 @@
 package pathparse
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -313,4 +314,161 @@ func TruncateAtValueSeparator(path string) string {
 		}
 	}
 	return strings.TrimPrefix(path, ".")
+}
+
+// PathKind represents the category of a path for evidence and anonymization.
+type PathKind int
+
+const (
+	PathKindOther PathKind = iota
+	PathKindResourceName
+	PathKindNamespace
+	PathKindLabels
+	PathKindAnnotations
+	PathKindMetadataParent
+)
+
+// ClassifyMetadataPath inspects path's parsed segments and classifies whether it
+// targets a Kubernetes ObjectMeta identifier (name, namespace, labels, annotations)
+// or the metadata parent object itself. It restricts classification to actual
+// metadata locations (resource root or workload pod template), avoiding false
+// matches on ConfigMap or Secret data keys such as data["metadata"].
+func ClassifyMetadataPath(path string) PathKind {
+	segments, err := ParsePath(path)
+	if err != nil || len(segments) == 0 {
+		return PathKindOther
+	}
+	// Payload data in ConfigMaps/Secrets is never a Kubernetes ObjectMeta.
+	if segments[0].Key == "data" || segments[0].Key == "stringData" || segments[0].Key == "binaryData" {
+		return PathKindOther
+	}
+	for i, seg := range segments {
+		if seg.Key == "metadata" {
+			// A metadata segment is only an ObjectMeta if at the resource root
+			// (metadata...) or under a pod template (...template.metadata...).
+			if i != 0 && segments[i-1].Key != "template" {
+				continue
+			}
+			if i == len(segments)-1 {
+				return PathKindMetadataParent
+			}
+			child := segments[i+1]
+			switch child.Key {
+			case "name":
+				return PathKindResourceName
+			case "namespace":
+				return PathKindNamespace
+			case "labels":
+				return PathKindLabels
+			case "annotations":
+				return PathKindAnnotations
+			default:
+				return PathKindMetadataParent
+			}
+		}
+	}
+	return PathKindOther
+}
+
+// IsPayloadPath reports whether path begins with a Secret or ConfigMap payload key
+// ("data", "stringData", "binaryData") or targets a container environment variable value
+// (ending with .value under an env segment) whose contents are user payload data
+// rather than Kubernetes ObjectMeta identifiers or manifest structural objects.
+func IsPayloadPath(path string) bool {
+	segments, err := ParsePath(path)
+	if err != nil || len(segments) == 0 {
+		return false
+	}
+	first := segments[0].Key
+	if first == "data" || first == "stringData" || first == "binaryData" {
+		return true
+	}
+	if len(segments) >= 2 {
+		last := segments[len(segments)-1]
+		prev := segments[len(segments)-2]
+		if last.Key == "value" && prev.Key == "env" {
+			return true
+		}
+	}
+	return false
+}
+
+// IsEnvVarNamePath reports whether path targets an environment variable's name
+// (e.g. ...env[*].name). Env var names are not secret credentials scrubbed to XXXXXX
+// and must not be preserved as evidence under --show-secrets so they receive proper
+// anonymization under --hide or --encrypt.
+func IsEnvVarNamePath(path string) bool {
+	segments, err := ParsePath(path)
+	if err != nil || len(segments) < 2 {
+		return false
+	}
+	last := segments[len(segments)-1]
+	prev := segments[len(segments)-2]
+	return last.Key == "name" && prev.Key == "env"
+}
+
+// HasObjectMetaIdentifiers reports whether val is a JSON-encoded object or array
+// containing Kubernetes ObjectMeta identifier fields (such as metadata.name,
+// namespace, labels, or annotations).
+func HasObjectMetaIdentifiers(val string) bool {
+	trimmed := strings.TrimSpace(val)
+	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+		return false
+	}
+	var parsed any
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+		return false
+	}
+	return containsObjectMetaIdentifiers(parsed)
+}
+
+func containsObjectMetaIdentifiers(v any) bool {
+	switch val := v.(type) {
+	case map[string]any:
+		if meta, ok := val["metadata"]; ok {
+			if metaMap, isMap := meta.(map[string]any); isMap {
+				for _, idKey := range []string{"name", "namespace", "labels", "annotations"} {
+					if _, has := metaMap[idKey]; has {
+						return true
+					}
+				}
+			}
+		}
+		hasIdentifier := false
+		for _, idKey := range []string{"name", "namespace", "labels", "annotations"} {
+			if _, has := val[idKey]; has {
+				hasIdentifier = true
+				break
+			}
+		}
+		if hasIdentifier {
+			if _, hasCreation := val["creationTimestamp"]; hasCreation {
+				return true
+			}
+			if _, hasUID := val["uid"]; hasUID {
+				return true
+			}
+			if _, hasResourceVersion := val["resourceVersion"]; hasResourceVersion {
+				return true
+			}
+			if _, hasNamespace := val["namespace"]; hasNamespace {
+				return true
+			}
+			if _, hasLabels := val["labels"]; hasLabels {
+				return true
+			}
+		}
+		for _, child := range val {
+			if containsObjectMetaIdentifiers(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, elem := range val {
+			if containsObjectMetaIdentifiers(elem) {
+				return true
+			}
+		}
+	}
+	return false
 }

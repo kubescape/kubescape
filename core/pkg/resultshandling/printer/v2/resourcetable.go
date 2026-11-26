@@ -142,7 +142,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 				return cautils.TraceKustomizePatch(resource, paths, source)
 			}
 		}
-		resourceRows := generateResourceRows(result.ListControls(), summary, resource, prettyPrinter.showEvidence, prettyPrinter.showSecrets, sourcePath, lineFor, patchFor)
+		resourceRows := generateResourceRowsWithPreserved(result.ListControls(), summary, resource, prettyPrinter.showEvidence, prettyPrinter.showSecrets, sourcePath, lineFor, opaSessionObj.PreservedValuesForResource(resourceID), patchFor)
 
 		short := utils.CheckShortTerminalWidth(resourceRows, generateResourceHeader(false))
 		if short {
@@ -453,6 +453,10 @@ func valuesMatch(a, b any) bool {
 }
 
 func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata, showEvidence bool, showSecrets bool, sourcePath string, lineFor func(string) (int, bool), patchFor ...func([]string) string) []table.Row {
+	return generateResourceRowsWithPreserved(controls, summaryDetails, resource, showEvidence, showSecrets, sourcePath, lineFor, nil, patchFor...)
+}
+
+func generateResourceRowsWithPreserved(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata, showEvidence bool, showSecrets bool, sourcePath string, lineFor func(string) (int, bool), preserved map[string]string, patchFor ...func([]string) string) []table.Row {
 	var rows []table.Row
 
 	for i := range controls {
@@ -465,7 +469,7 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 		row[resourceColumnURL] = cautils.GetControlLink(controls[i].GetID())
 		if showEvidence {
 			displayed := cautils.EvidenceControl(summaryDetails, controls[i])
-			paths := evidencePathsWithCurrentValues(&displayed, resource, showSecrets)
+			paths := evidencePathsWithCurrentValues(&displayed, resource, showSecrets, preserved)
 			addContainerNameToAssistedRemediation(resource, &paths)
 			annotatePathLines(&paths, &displayed, lineFor)
 			srcDisplay := sourcePath

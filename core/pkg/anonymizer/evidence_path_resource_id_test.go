@@ -7,6 +7,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/diff"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -149,4 +150,131 @@ func TestHiddenReportsDiffNamesNoPhantomEvidenceResource(t *testing.T) {
 	var out strings.Builder
 	require.NoError(t, diff.PrintPretty(&out, changes))
 	assert.NotContains(t, out.String(), "Evidence resource:")
+}
+
+func TestAnonymizationPreservesEvidenceValuesWithTransformedIdentifiers(t *testing.T) {
+	dek := make([]byte, 32)
+	for i := range dek {
+		dek[i] = byte(i + 1)
+	}
+	masterKey := []byte("01234567890123456789012345678901")
+
+	for _, tc := range []struct {
+		name      string
+		apply     func(*resultshandling.ResultsHandler) error
+		isEncrypt bool
+	}{
+		{"hide (Apply)", Apply, false},
+		{"encrypt (ApplyEncrypted)", func(h *resultshandling.ResultsHandler) error {
+			return ApplyEncrypted(h, dek, masterKey)
+		}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session, podID, _ := evidencePathSession(t)
+			session.PreservedEvidenceValues = map[string]map[string]string{
+				podID: {
+					"metadata.name":                   "nginx",
+					`metadata["name"]`:                "nginx",
+					"metadata.namespace":              "default",
+					`metadata['namespace']`:           "default",
+					"metadata":                        `{"name":"nginx","namespace":"default"}`,
+					"spec.template":                   `{"metadata":{"labels":{"app":"nginx"}}}`,
+					`data["metadata"]`:                "config-val",
+					"spec.containers[0].env[0].name":  "SECRET_KEY",
+					"spec.containers[0].env[0].value": "env-payload-val",
+					"spec.containers[0].env[1].value": `{"namespace":"production","setting":"val123"}`,
+				},
+			}
+			require.NoError(t, tc.apply(&resultshandling.ResultsHandler{ScanData: session}))
+
+			var newPodID string
+			for id := range session.ResourcesResult {
+				newPodID = id
+			}
+			require.NotEmpty(t, newPodID)
+			preserved := session.PreservedEvidenceValues[newPodID]
+			require.NotNil(t, preserved)
+
+			transformedPod := session.AllResources[newPodID]
+			require.NotNil(t, transformedPod)
+			transformedName := transformedPod.GetName()
+			transformedNamespace := transformedPod.GetNamespace()
+			require.NotEmpty(t, transformedName)
+			require.NotEmpty(t, transformedNamespace)
+
+			// Require each identifier key to exist in preserved evidence
+			require.Contains(t, preserved, "metadata.name")
+			require.Contains(t, preserved, `metadata["name"]`)
+			require.Contains(t, preserved, "metadata.namespace")
+			require.Contains(t, preserved, `metadata['namespace']`)
+
+			// Retain the check that identifiers are not the original plaintext
+			assert.NotEqual(t, "nginx", preserved["metadata.name"])
+			assert.NotEqual(t, "nginx", preserved[`metadata["name"]`])
+			assert.NotEqual(t, "default", preserved["metadata.namespace"])
+			assert.NotEqual(t, "default", preserved[`metadata['namespace']`])
+
+			if tc.isEncrypt {
+				// Under encryption, values must be valid AES256_GCM ciphertexts
+				// that decrypt back to the original values using the report key.
+				require.NotNil(t, session.Metadata)
+				require.NotNil(t, session.Metadata.EncryptionMetadata)
+				reportKey, err := reportcrypto.UnwrapReportKey(
+					session.Metadata.EncryptionMetadata.EncryptedDEK,
+					masterKey,
+				)
+				require.NoError(t, err)
+
+				assert.Contains(t, preserved["metadata.name"], "ENC[AES256_GCM,")
+				decryptedName, err := reportKey.DecryptString(preserved["metadata.name"])
+				require.NoError(t, err)
+				assert.Equal(t, "nginx", decryptedName)
+
+				assert.Contains(t, preserved[`metadata["name"]`], "ENC[AES256_GCM,")
+				decryptedName2, err := reportKey.DecryptString(preserved[`metadata["name"]`])
+				require.NoError(t, err)
+				assert.Equal(t, "nginx", decryptedName2)
+
+				assert.Contains(t, preserved["metadata.namespace"], "ENC[AES256_GCM,")
+				decryptedNs, err := reportKey.DecryptString(preserved["metadata.namespace"])
+				require.NoError(t, err)
+				assert.Equal(t, "default", decryptedNs)
+
+				assert.Contains(t, preserved[`metadata['namespace']`], "ENC[AES256_GCM,")
+				decryptedNs2, err := reportKey.DecryptString(preserved[`metadata['namespace']`])
+				require.NoError(t, err)
+				assert.Equal(t, "default", decryptedNs2)
+
+				// Environment variable names must be encrypted under ApplyEncrypted
+				assert.Contains(t, preserved["spec.containers[0].env[0].name"], "ENC[AES256_GCM,")
+				decryptedEnvName, err := reportKey.DecryptString(preserved["spec.containers[0].env[0].name"])
+				require.NoError(t, err)
+				assert.Equal(t, "SECRET_KEY", decryptedEnvName)
+			} else {
+				// Under pseudonymization (--hide), values must match the exact transformed Pod name or namespace
+				assert.Equal(t, transformedName, preserved["metadata.name"])
+				assert.Equal(t, transformedName, preserved[`metadata["name"]`])
+				assert.Equal(t, transformedNamespace, preserved["metadata.namespace"])
+				assert.Equal(t, transformedNamespace, preserved[`metadata['namespace']`])
+
+				// Environment variable names must be pseudonymized under Apply
+				assert.NotEqual(t, "SECRET_KEY", preserved["spec.containers[0].env[0].name"])
+				assert.Contains(t, preserved["spec.containers[0].env[0].name"], "env-")
+			}
+
+			// Parent path "metadata" must be rejected to prevent leaking plaintext JSON
+			_, hasMetadataParent := preserved["metadata"]
+			assert.False(t, hasMetadataParent, "parent path 'metadata' must be rejected")
+
+			// Ancestor path "spec.template" containing metadata must also be rejected
+			_, hasSpecTemplate := preserved["spec.template"]
+			assert.False(t, hasSpecTemplate, "ancestor path 'spec.template' containing metadata must be rejected")
+
+			// Secrets and ConfigMap data keys named metadata must remain preserved
+			assert.Equal(t, "config-val", preserved[`data["metadata"]`])
+			assert.Equal(t, "env-payload-val", preserved["spec.containers[0].env[0].value"])
+			// JSON-valued environment variables must remain preserved
+			assert.Equal(t, `{"namespace":"production","setting":"val123"}`, preserved["spec.containers[0].env[1].value"])
+		})
+	}
 }

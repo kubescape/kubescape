@@ -264,7 +264,7 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj, showSecrets bo
 					helpers.String("resourceID", resourceID))
 				continue
 			}
-			ctlResults := buildResourceControlResultTable(result.AssociatedControls, summary, resource, showSecrets)
+			ctlResults := buildResourceControlResultTable(result.AssociatedControls, summary, resource, showSecrets, opaSessionObj.PreservedValuesForResource(resourceID))
 			resourceTableView = append(resourceTableView, ResourceResult{resource, ctlResults})
 		}
 	}
@@ -272,7 +272,7 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj, showSecrets bo
 	return resourceTableView
 }
 
-func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary, resource workloadinterface.IMetadata, showSecrets bool) ResourceControlResult {
+func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary, resource workloadinterface.IMetadata, showSecrets bool, preserved ...map[string]string) ResourceControlResult {
 	ctlSeverity := ""
 	if control != nil {
 		ctlSeverity = apis.ControlSeverityToString(control.GetScoreFactor())
@@ -280,13 +280,13 @@ func buildResourceControlResult(resourceControl resourcesresults.ResourceAssocia
 	ctlName := resourceControl.GetName()
 	ctlID := resourceControl.GetID()
 	ctlURL := cautils.GetControlLink(resourceControl.GetID())
-	failedPaths := AssistedRemediationPathsWithCurrentValuesFiltered(&resourceControl, resource, showSecrets)
+	failedPaths := AssistedRemediationPathsWithCurrentValuesFiltered(&resourceControl, resource, showSecrets, preserved...)
 	addContainerNameToAssistedRemediation(resource, &failedPaths)
 
 	return ResourceControlResult{ctlSeverity, ctlName, ctlID, ctlURL, failedPaths}
 }
 
-func buildResourceControlResultTable(resourceControls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata, showSecrets bool) []ResourceControlResult {
+func buildResourceControlResultTable(resourceControls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata, showSecrets bool, preserved ...map[string]string) []ResourceControlResult {
 	var ctlResults []ResourceControlResult
 	for _, resourceControl := range resourceControls {
 		if cautils.ControlStatus(summaryDetails, &resourceControl).IsFailed() {
@@ -297,7 +297,7 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 			if control == nil {
 				continue
 			}
-			ctlResult := buildResourceControlResult(cautils.EvidenceControl(summaryDetails, resourceControl), control, resource, showSecrets)
+			ctlResult := buildResourceControlResult(cautils.EvidenceControl(summaryDetails, resourceControl), control, resource, showSecrets, preserved...)
 
 			ctlResults = append(ctlResults, ctlResult)
 		}

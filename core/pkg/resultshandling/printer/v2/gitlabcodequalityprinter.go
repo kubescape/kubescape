@@ -162,7 +162,7 @@ func (cp *GitLabCodeQualityPrinter) collectIssues(ctx context.Context, opaSessio
 
 			evidence := cautils.EvidenceControl(&opaSessionObj.Report.SummaryDetails, ac)
 			line := codeQualityLine(opaSessionObj, locationResolver, &evidence, resource.resourceID)
-			issues = append(issues, toCodeQualityIssue(ctl, &evidence, res, resource.resourceID, resource.relPath, line, cp.showSecrets))
+			issues = append(issues, toCodeQualityIssue(ctl, &evidence, res, resource.resourceID, resource.relPath, line, cp.showSecrets, opaSessionObj.PreservedValuesForResource(resource.resourceID)))
 		}
 	}
 
@@ -178,7 +178,7 @@ func (cp *GitLabCodeQualityPrinter) collectIssues(ctx context.Context, opaSessio
 	return issues
 }
 
-func toCodeQualityIssue(ctl reportsummary.IControlSummary, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, resourceID, filePath string, line int, showSecrets bool) codeQualityIssue {
+func toCodeQualityIssue(ctl reportsummary.IControlSummary, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, resourceID, filePath string, line int, showSecrets bool, preserved ...map[string]string) codeQualityIssue {
 	controlID := ctl.GetID()
 	description := fmt.Sprintf("%s %s", controlID, ctl.GetName())
 	if resource != nil {
@@ -189,7 +189,7 @@ func toCodeQualityIssue(ctl reportsummary.IControlSummary, ac *resourcesresults.
 		Type:        gitLabCodeQualityIssueType,
 		CheckName:   controlID,
 		Description: description,
-		Content:     codeQualityContent{Body: codeQualityBody(ctl, ac, resource, showSecrets)},
+		Content:     codeQualityContent{Body: codeQualityBody(ctl, ac, resource, showSecrets, preserved...)},
 		Categories:  []string{gitLabCodeQualityCategory},
 		Severity:    codeQualitySeverity(ctl.GetScoreFactor()),
 		Fingerprint: codeQualityFingerprint(controlID, resource, resourceID, filePath),
@@ -248,7 +248,7 @@ func codeQualityLine(opaSessionObj *cautils.OPASessionObj, resolver *locationres
 	return 1
 }
 
-func codeQualityBody(ctl reportsummary.IControlSummary, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) string {
+func codeQualityBody(ctl reportsummary.IControlSummary, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool, preserved ...map[string]string) string {
 	var sections []string
 	if d := strings.TrimSpace(ctl.GetDescription()); d != "" {
 		sections = append(sections, d)
@@ -257,7 +257,7 @@ func codeQualityBody(ctl reportsummary.IControlSummary, ac *resourcesresults.Res
 		sections = append(sections, "**Remediation:** "+r)
 	}
 	if resource != nil {
-		if paths := AssistedRemediationPathsWithCurrentValuesFiltered(ac, resource, showSecrets); len(paths) > 0 {
+		if paths := AssistedRemediationPathsWithCurrentValuesFiltered(ac, resource, showSecrets, preserved...); len(paths) > 0 {
 			sections = append(sections, "**Failed paths:**\n\n- `"+strings.Join(paths, "`\n- `")+"`")
 		}
 	}

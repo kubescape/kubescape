@@ -1,12 +1,16 @@
 package printer
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -177,4 +181,110 @@ func TestC0012EvidenceWithoutTheFieldDoesNotPanic(t *testing.T) {
 	require.NotPanics(t, func() { cell = c0012Cell(t, control, deployment, false, nil) })
 	assert.Contains(t, cell, "spec.template.spec.containers[0].env[1].name (current: <unresolved>)")
 	assert.NotContains(t, cell, "(line")
+}
+
+func TestC0012EvidenceLiteralSecretRevealedWithShowSecrets(t *testing.T) {
+	const (
+		namePath  = "spec.template.spec.containers[0].env[0].name"
+		valuePath = "spec.template.spec.containers[0].env[0].value"
+	)
+	deployment := &mockResource{
+		kind: "Deployment",
+		obj: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "Deployment",
+			"metadata":   map[string]any{"name": "checkout-api"},
+			"spec": map[string]any{"template": map[string]any{"spec": map[string]any{
+				"containers": []any{
+					map[string]any{
+						"name": "api",
+						"env": []any{
+							map[string]any{"name": "DB_PASSWORD", "value": "mock-secret-val"},
+						},
+					},
+				},
+			}}},
+		},
+	}
+	control := c0012Control(map[string][]string{
+		"rule-credentials-in-env-var": {namePath, valuePath},
+	})
+	lines := map[string]int{namePath: 21, valuePath: 22}
+
+	t.Run("default redacts secret value", func(t *testing.T) {
+		cell := c0012Cell(t, control, deployment, false, lines)
+		assert.Contains(t, cell, namePath+" (current: DB_PASSWORD) (api) (line 21)")
+		assert.Contains(t, cell, valuePath+" (current: "+redactedValue+") (api) (line 22)")
+		assert.NotContains(t, cell, "mock-secret-val")
+	})
+
+	t.Run("--show-secrets reveals literal secret value", func(t *testing.T) {
+		cell := c0012Cell(t, control, deployment, true, lines)
+		assert.Contains(t, cell, namePath+" (current: DB_PASSWORD) (api) (line 21)")
+		assert.Contains(t, cell, valuePath+" (current: mock-secret-val) (api) (line 22)")
+	})
+
+	t.Run("--show-secrets reveals preserved value on scrubbed resource while JSON stays scrubbed", func(t *testing.T) {
+		scrubbed := &mockResource{
+			kind: "Deployment",
+			obj: map[string]any{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata":   map[string]any{"name": "checkout-api"},
+				"spec": map[string]any{"template": map[string]any{"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name": "api",
+							"env": []any{
+								map[string]any{"name": "DB_PASSWORD", "value": scrubbedPlaceholder},
+							},
+						},
+					},
+				}}},
+			},
+		}
+		resID := "apps/v1/Deployment/default/checkout-api"
+		preserved := map[string]string{valuePath: "mock-secret-val"}
+		summary := &reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				control.ControlID: {ControlID: control.ControlID, Name: control.Name, ScoreFactor: 8.0},
+			},
+		}
+
+		// With showSecrets=true, evidence resolves from preserved map even though resource has XXXXXX.
+		rows := generateResourceRowsWithPreserved([]resourcesresults.ResourceAssociatedControl{*control}, summary,
+			scrubbed, true, true, "manifest.yaml", stubLineFor(lines), preserved)
+		require.Len(t, rows, 1)
+		cell, ok := rows[0][resourceColumnPath].(string)
+		require.True(t, ok)
+		assert.Contains(t, cell, valuePath+" (current: mock-secret-val) (api) (line 22)")
+		assert.NotContains(t, cell, scrubbedPlaceholder)
+
+		// With showSecrets=false, preserved map is ignored and output stays redacted.
+		rowsRedacted := generateResourceRowsWithPreserved([]resourcesresults.ResourceAssociatedControl{*control}, summary,
+			scrubbed, true, false, "manifest.yaml", stubLineFor(lines), preserved)
+		require.Len(t, rowsRedacted, 1)
+		cellRedacted, ok := rowsRedacted[0][resourceColumnPath].(string)
+		require.True(t, ok)
+		assert.Contains(t, cellRedacted, valuePath+" (current: "+redactedValue+") (api) (line 22)")
+		assert.NotContains(t, cellRedacted, "mock-secret-val")
+
+		// JSON output must never carry the literal secret in raw resources or evidence.
+		wl := workloadinterface.NewWorkloadObj(scrubbed.obj)
+		session := &cautils.OPASessionObj{
+			ShowSecrets:             true,
+			PreservedEvidenceValues: map[string]map[string]string{resID: preserved},
+			AllResources:            map[string]workloadinterface.IMetadata{resID: wl},
+			ResourcesResult: map[string]resourcesresults.Result{
+				resID: {ResourceID: resID, AssociatedControls: []resourcesresults.ResourceAssociatedControl{*control}},
+			},
+			Report: &reporthandlingv2.PostureReport{SummaryDetails: *summary},
+		}
+		var jsonBuf bytes.Buffer
+		require.NoError(t, writeConfigurationJSON(&jsonBuf, session, nil))
+		jsonOut := jsonBuf.String()
+		assert.NotContains(t, jsonOut, "mock-secret-val")
+		assert.Contains(t, jsonOut, scrubbedPlaceholder)
+		assert.Contains(t, jsonOut, `"value":"DB_PASSWORD"`)
+	})
 }

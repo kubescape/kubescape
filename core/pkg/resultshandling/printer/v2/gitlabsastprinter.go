@@ -424,7 +424,7 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 			evidence := cautils.EvidenceControl(&opaSessionObj.Report.SummaryDetails, ac)
 			location := resolveFixLocation(opaSessionObj, locationResolver, &evidence, resource.resourceID)
 			res, _ := opaSessionObj.GetResource(resource.resourceID)
-			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, &evidence, res, resource.resourceID, resource.relPath, location, gp.showSecrets))
+			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, &evidence, res, resource.resourceID, resource.relPath, location, gp.showSecrets, opaSessionObj.PreservedValuesForResource(resource.resourceID)))
 		}
 	}
 
@@ -473,14 +473,14 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 // toGitLabVulnerability maps a failed control on a resource to a GitLab SAST vulnerability.
 // ac and resource are used to populate the Solution field with fix paths and current field values,
 // matching what the pretty-printer and HTML printer already emit.
-func toGitLabVulnerability(ctl reportsummary.IControlSummary, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, resourceID, filePath string, location locationresolver.Location, showSecrets bool) gitLabVulnerability {
+func toGitLabVulnerability(ctl reportsummary.IControlSummary, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, resourceID, filePath string, location locationresolver.Location, showSecrets bool, preserved ...map[string]string) gitLabVulnerability {
 	controlID := ctl.GetID()
 	// Kubescape severities (Critical/High/Medium/Low/Unknown) are all valid GitLab severities
 	severity := apis.ControlSeverityToString(ctl.GetScoreFactor())
 
 	var solution string
 	if resource != nil {
-		if paths := AssistedRemediationPathsWithCurrentValuesFiltered(ac, resource, showSecrets); len(paths) > 0 {
+		if paths := AssistedRemediationPathsWithCurrentValuesFiltered(ac, resource, showSecrets, preserved...); len(paths) > 0 {
 			solution = strings.Join(paths, "\n")
 		}
 	}

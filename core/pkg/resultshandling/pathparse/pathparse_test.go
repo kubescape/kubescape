@@ -403,3 +403,167 @@ func TestParsePath_SafeFieldPathsAreUnchanged(t *testing.T) {
 // the key the path names, rather than the map containing it. Dropping the
 // bracket did not fail - it returned the whole map, which reads as a successful
 // lookup of the wrong field.
+
+func TestClassifyMetadataPath(t *testing.T) {
+	cases := []struct {
+		path string
+		want PathKind
+	}{
+		{"metadata.name", PathKindResourceName},
+		{`metadata["name"]`, PathKindResourceName},
+		{`metadata['name']`, PathKindResourceName},
+		{"spec.template.metadata.name", PathKindResourceName},
+		{`spec.template.metadata["name"]`, PathKindResourceName},
+		{"metadata.namespace", PathKindNamespace},
+		{`metadata["namespace"]`, PathKindNamespace},
+		{`metadata['namespace']`, PathKindNamespace},
+		{"metadata", PathKindMetadataParent},
+		{"spec.template.metadata", PathKindMetadataParent},
+		{"metadata.labels", PathKindLabels},
+		{`metadata.labels["app"]`, PathKindLabels},
+		{`metadata['labels']['app.kubernetes.io/name']`, PathKindLabels},
+		{"metadata.annotations", PathKindAnnotations},
+		{`metadata.annotations["foo"]`, PathKindAnnotations},
+		{`metadata['annotations']['foo.bar/baz']`, PathKindAnnotations},
+		{"data[key]", PathKindOther},
+		{`data["setting"]`, PathKindOther},
+		{`data["metadata"]`, PathKindOther},
+		{`data['metadata']`, PathKindOther},
+		{`stringData["metadata"]`, PathKindOther},
+		{`binaryData["metadata"]`, PathKindOther},
+		{"spec.containers[0].env[0].value", PathKindOther},
+		{"spec.containers[0].image", PathKindOther},
+		{"", PathKindOther},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			assert.Equal(t, tc.want, ClassifyMetadataPath(tc.path))
+		})
+	}
+}
+
+func TestIsPayloadPath(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{`data["foo"]`, true},
+		{`data["metadata"]`, true},
+		{`stringData["secret"]`, true},
+		{`binaryData["cert"]`, true},
+		{"spec.containers[0].env[0].value", true},
+		{"spec.template.spec.containers[0].env[0].value", true},
+		{"spec.containers[0].env[0].name", false},
+		{"spec.containers[0].env[0]", false},
+		{"metadata.name", false},
+		{"spec.template", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			assert.Equal(t, tc.want, IsPayloadPath(tc.path))
+		})
+	}
+}
+
+func TestIsEnvVarNamePath(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"spec.containers[0].env[0].name", true},
+		{"spec.template.spec.containers[0].env[0].name", true},
+		{"spec.initContainers[0].env[0].name", true},
+		{"spec.containers[0].env[0].value", false},
+		{"spec.containers[0].env[0]", false},
+		{"metadata.name", false},
+		{"data[key]", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			assert.Equal(t, tc.want, IsEnvVarNamePath(tc.path))
+		})
+	}
+}
+
+func TestExtractRawValueResolved(t *testing.T) {
+	manifest := map[string]any{
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{
+					"name": "nginx",
+				},
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name": "web",
+							"env": []any{
+								map[string]any{
+									"name":  "JSON_CONFIG",
+									"value": `{"namespace":"production","setting":"val123"}`,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Environment variable string value: must NOT be reported as structured
+	val, isStructured, ok := ExtractRawValueResolved(manifest, "spec.template.spec.containers[0].env[0].value")
+	require.True(t, ok)
+	assert.False(t, isStructured)
+	assert.Equal(t, `{"namespace":"production","setting":"val123"}`, val)
+
+	// Template ancestor object: must be reported as structured
+	val, isStructured, ok = ExtractRawValueResolved(manifest, "spec.template")
+	require.True(t, ok)
+	assert.True(t, isStructured)
+	assert.Contains(t, val, `"name":"nginx"`)
+}
+
+func TestHasObjectMetaIdentifiers(t *testing.T) {
+	cases := []struct {
+		name string
+		val  string
+		want bool
+	}{
+		{
+			name: "spec.template with labels",
+			val:  `{"metadata":{"labels":{"app":"nginx"}}}`,
+			want: true,
+		},
+		{
+			name: "parent metadata object",
+			val:  `{"name":"nginx","namespace":"default"}`,
+			want: true,
+		},
+		{
+			name: "metadata object with creationTimestamp and name",
+			val:  `{"name":"nginx","creationTimestamp":"2023-01-01T00:00:00Z"}`,
+			want: true,
+		},
+		{
+			name: "nested workload template",
+			val:  `{"template":{"metadata":{"name":"pod-name"}}}`,
+			want: true,
+		},
+		{
+			name: "scalar string",
+			val:  "sample-scalar-val",
+			want: false,
+		},
+		{
+			name: "json config data without metadata",
+			val:  `{"host":"localhost","port":5432,"db":"mydb"}`,
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, HasObjectMetaIdentifiers(tc.val))
+		})
+	}
+}

@@ -1132,6 +1132,7 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 			defer shutdownRecorder()
 		}
 		reportResults := opaprocessor.NewOPAProcessor(scanData, deps, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint, exceptionRecorder)
+		reportResults.ShowSecrets = scanInfo.ShowSecrets
 		reportResults.ControlTimeout = scanInfo.ControlTimeout
 		reportResults.SetWholeClusterPolicy(scanInfo.GetWholeClusterPolicy())
 		if cacheStore := loadIncrementalCacheIfEnabled(ctxOpa, scanInfo, scanData); cacheStore != nil {
@@ -1630,6 +1631,7 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 		defer shutdownRecorder()
 	}
 	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, clusterName, excludedNamespaces, includeNamespaces, enableRegoPrint, exceptionRecorder)
+	reportResults.ShowSecrets = scanInfo.ShowSecrets
 	reportResults.ControlTimeout = controlTimeout
 	reportResults.SetWholeClusterPolicy(scanInfo.GetWholeClusterPolicy())
 	if cacheStore := loadIncrementalCacheIfEnabled(ctx, scanInfo, scanData); cacheStore != nil {
