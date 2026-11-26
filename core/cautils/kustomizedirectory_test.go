@@ -525,6 +525,7 @@ func installFakeHelmBinary(t *testing.T) {
 			echoLines = append(echoLines, "echo "+line)
 		}
 		script = "@echo off\r\n" +
+			"if defined KUBESCAPE_TEST_HELM_MARKER (echo %1>>\"%KUBESCAPE_TEST_HELM_MARKER%\")\r\n" +
 			"if \"%1\"==\"version\" (\r\n" +
 			"  echo " + fakeHelmVersionOutput + "\r\n" +
 			"  exit /b 0\r\n" +
@@ -533,6 +534,9 @@ func installFakeHelmBinary(t *testing.T) {
 	} else {
 		name = "helm"
 		script = "#!/bin/sh\n" +
+			"if [ -n \"$KUBESCAPE_TEST_HELM_MARKER\" ]; then\n" +
+			"  echo \"$1\" >> \"$KUBESCAPE_TEST_HELM_MARKER\"\n" +
+			"fi\n" +
 			"if [ \"$1\" = \"version\" ]; then\n" +
 			"  echo '" + fakeHelmVersionOutput + "'\n" +
 			"  exit 0\n" +
@@ -736,4 +740,143 @@ func TestKustomizeInputOwnershipForPath_OversizedFileRejected(t *testing.T) {
 	_, err = KustomizeInputOwnershipForPath(context.Background(), dir)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrKustomizationFileTooLarge)
+}
+
+func TestKustomizeDirectory_GetWorkloads_OversizedReferencedFileRejected(t *testing.T) {
+	const deploymentYAML = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo
+  template:
+    metadata:
+      labels:
+        app: demo
+    spec:
+      containers:
+        - name: demo
+          image: nginx:1.25
+`
+
+	t.Run("oversized resource file", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "128")
+
+		dir := resolvedTempDir(t)
+		writeManifestFixture(t, dir, "kustomization.yaml", "resources:\n- deploy.yaml\n")
+		writeManifestFixture(t, dir, "deploy.yaml", deploymentYAML)
+
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		assert.Nil(t, workloads)
+		require.NotEmpty(t, errs)
+		assert.ErrorIs(t, errs[0], ErrKustomizationFileTooLarge)
+	})
+
+	t.Run("oversized patch file", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "300")
+
+		dir := resolvedTempDir(t)
+		writeManifestFixture(t, dir, "kustomization.yaml", "resources:\n- deploy.yaml\npatches:\n- path: patch.yaml\n")
+		writeManifestFixture(t, dir, "deploy.yaml", deploymentYAML)
+		writeManifestFixture(t, dir, "patch.yaml", deploymentYAML+strings.Repeat("# pad\n", 40))
+
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		assert.Nil(t, workloads)
+		require.NotEmpty(t, errs)
+		assert.ErrorIs(t, errs[0], ErrKustomizationFileTooLarge)
+	})
+
+	t.Run("within configured limit builds normally", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "4096")
+
+		dir := resolvedTempDir(t)
+		writeManifestFixture(t, dir, "kustomization.yaml", "resources:\n- deploy.yaml\n")
+		writeManifestFixture(t, dir, "deploy.yaml", deploymentYAML)
+
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		require.Empty(t, errs)
+		require.Len(t, workloads[dir], 1)
+	})
+
+	t.Run("oversized sibling kustomization file rejected even when primary succeeds", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "128")
+
+		dir := resolvedTempDir(t)
+		writeManifestFixture(t, dir, "kustomization.yaml", "resources:\n- deploy.yaml\n")
+		writeManifestFixture(t, dir, "kustomization.yml", "resources:\n- deploy.yaml\n"+strings.Repeat("# pad\n", 40))
+		writeManifestFixture(t, dir, "deploy.yaml", "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: ok\n")
+
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		assert.Nil(t, workloads)
+		require.NotEmpty(t, errs)
+		assert.ErrorIs(t, errs[0], ErrKustomizationFileTooLarge)
+	})
+
+	t.Run("oversized local helm chart template rejected before invoking helm", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "256")
+		installFakeHelmBinary(t)
+		marker := filepath.Join(t.TempDir(), "helm-invoked")
+		t.Setenv("KUBESCAPE_TEST_HELM_MARKER", marker)
+
+		dir := resolvedTempDir(t)
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "charts", "app", "templates"), 0o750))
+		writeManifestFixture(t, dir, "kustomization.yaml", "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nhelmCharts:\n- name: app\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "Chart.yaml"), "apiVersion: v2\nname: app\nversion: 0.1.0\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "templates", "big.yaml"), deploymentYAML)
+
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		assert.Nil(t, workloads)
+		require.NotEmpty(t, errs)
+		assert.ErrorIs(t, errs[0], ErrKustomizationFileTooLarge)
+
+		_, statErr := os.Stat(marker)
+		assert.True(t, os.IsNotExist(statErr), "helm must not be invoked when chart input validation fails; statErr=%v", statErr)
+	})
+
+	t.Run("helmignore excluded oversized file allows valid chart build", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "256")
+		installFakeHelmBinary(t)
+
+		dir := resolvedTempDir(t)
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "charts", "app", "templates"), 0o750))
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "charts", "app", "fixtures"), 0o750))
+		writeManifestFixture(t, dir, "kustomization.yaml", "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nhelmCharts:\n- name: app\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", ".helmignore"), "fixtures/\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "Chart.yaml"), "apiVersion: v2\nname: app\nversion: 0.1.0\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "values.yaml"), "{}\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "templates", "cm.yaml"), "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test-config\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "fixtures", "sample.bin"), strings.Repeat("x", 512))
+
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		require.Empty(t, errs)
+		require.Len(t, workloads[dir], 1)
+	})
+
+	t.Run("invalid helmignore parse error rejected even when sibling kustomization succeeds", func(t *testing.T) {
+		installFakeHelmBinary(t)
+
+		dir := resolvedTempDir(t)
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "charts", "app", "templates"), 0o750))
+		writeManifestFixture(t, dir, "kustomization.yaml", "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nhelmCharts:\n- name: app\n")
+		writeManifestFixture(t, dir, "kustomization.yml", "resources:\n- ns.yaml\n")
+		writeManifestFixture(t, dir, "ns.yaml", "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: sibling\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", ".helmignore"), "**\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "Chart.yaml"), "apiVersion: v2\nname: app\nversion: 0.1.0\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "values.yaml"), "{}\n")
+
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		assert.Nil(t, workloads)
+		require.NotEmpty(t, errs)
+		assert.Contains(t, errs[0].Error(), "**")
+	})
 }

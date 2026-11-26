@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,12 +11,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
+	helmignore "helm.sh/helm/v3/pkg/ignore"
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/api/provider"
 	"sigs.k8s.io/kustomize/api/resmap"
@@ -73,22 +76,38 @@ func openKustomizationFile(path string) (*os.File, error) {
 	return file, nil
 }
 
+func openBoundedKustomizationFile(path string) (*os.File, int64, error) {
+	file, err := openKustomizationFile(path)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	limit := getMaxFileSize()
+	info, err := file.Stat()
+	if err == nil && info.Size() > limit {
+		file.Close()
+		return nil, 0, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrKustomizationFileTooLarge, path, limit)
+	}
+	return file, limit, nil
+}
+
+func validateKustomizationFile(path string) error {
+	file, _, err := openBoundedKustomizationFile(path)
+	if err != nil {
+		return err
+	}
+	return file.Close()
+}
+
 // readKustomizationFile returns the contents of the Kustomization file at path, reading at most
 // getMaxFileSize() bytes (configurable via KUBESCAPE_MAX_FILE_SIZE, defaulting to
 // DefaultMaxFileSize) so that reading remains bounded.
 func readKustomizationFile(path string) ([]byte, error) {
-	file, err := openKustomizationFile(path)
+	file, limit, err := openBoundedKustomizationFile(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-
-	limit := getMaxFileSize()
-
-	info, err := file.Stat()
-	if err == nil && info.Size() > limit {
-		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrKustomizationFileTooLarge, path, limit)
-	}
 
 	data, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
@@ -512,6 +531,31 @@ type kustomizeHelmFileSystem struct {
 	generatorFactory   *resmap.Factory
 	dependencies       map[string]bool // true for a Helm chart directory
 	dependencyRoot     string
+	validationErr      error
+	mu                 sync.Mutex
+}
+
+func (fs *kustomizeHelmFileSystem) recordValidationErr(err error) {
+	if err == nil {
+		return
+	}
+	fs.mu.Lock()
+	if fs.validationErr == nil {
+		fs.validationErr = err
+	}
+	fs.mu.Unlock()
+}
+
+func (fs *kustomizeHelmFileSystem) recordedValidationErr() error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if fs.validationErr != nil {
+		return fs.validationErr
+	}
+	if bfs, ok := fs.FileSystem.(*boundedOnDiskFileSystem); ok {
+		return bfs.recordedValidationErr()
+	}
+	return nil
 }
 
 // Remember the requested file's role before the loader resolves symlinks. The
@@ -562,7 +606,7 @@ func (fs *kustomizeHelmFileSystem) ReadFile(path string) ([]byte, error) {
 	// The loader has accepted this resolved path under its restrictions.
 	fs.observeDependency(path, false)
 	contents, err := fs.FileSystem.ReadFile(path)
-	if err != nil || (fs.usesHelm && fs.dependencies == nil) {
+	if err != nil {
 		return contents, err
 	}
 	if root, configuration := fs.kustomizationFiles[path]; configuration {
@@ -571,12 +615,20 @@ func (fs *kustomizeHelmFileSystem) ReadFile(path string) ([]byte, error) {
 			config.FixKustomization()
 			for _, chart := range config.HelmCharts {
 				fs.usesHelm = true
-				fs.observeChart(root, config.HelmGlobals, chart)
+				if chartErr := fs.observeChart(root, config.HelmGlobals, chart); chartErr != nil {
+					fs.recordValidationErr(chartErr)
+					return nil, chartErr
+				}
 			}
 			for _, generator := range config.Generators {
 				// Use the same inline-vs-file decision and List expansion as
 				// Kustomize's configureExternalGenerators.
-				if fs.observeGenerators([]byte(generator), root) {
+				handled, genErr := fs.observeGenerators([]byte(generator), root)
+				if genErr != nil {
+					fs.recordValidationErr(genErr)
+					return nil, genErr
+				}
+				if handled {
 					continue
 				}
 				if fs.generatorFiles == nil {
@@ -592,7 +644,10 @@ func (fs *kustomizeHelmFileSystem) ReadFile(path string) ([]byte, error) {
 	// Only inspect files selected as generators; a plain resource with the
 	// same kind does not make the build invoke Helm.
 	if root, generator := fs.generatorRoot(path); generator {
-		fs.observeGenerators(contents, root)
+		if _, genErr := fs.observeGenerators(contents, root); genErr != nil {
+			fs.recordValidationErr(genErr)
+			return nil, genErr
+		}
 	}
 	return contents, err
 }
@@ -611,37 +666,148 @@ func (fs *kustomizeHelmFileSystem) generatorRoot(path string) (string, bool) {
 	return "", false
 }
 
-func (fs *kustomizeHelmFileSystem) observeChart(root string, globals *types.HelmGlobals, chart types.HelmChart) {
+func (fs *kustomizeHelmFileSystem) observeChart(root string, globals *types.HelmGlobals, chart types.HelmChart) error {
 	if fs.dependencies != nil && chart.Name != "" {
 		fs.observeDependency(kustomizeChartDirectory(root, globals, chart), true)
 	}
+	return validateKustomizeHelmChartInputs(root, globals, chart)
+}
+
+func validateKustomizeHelmChartInputs(root string, globals *types.HelmGlobals, chart types.HelmChart) error {
+	validateExistingFile := func(path string) error {
+		if path == "" {
+			return nil
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(root, path)
+		}
+		err := validateKustomizationFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+
+	if err := validateExistingFile(chart.ValuesFile); err != nil {
+		return err
+	}
+	for _, valuesFile := range chart.AdditionalValuesFiles {
+		if err := validateExistingFile(valuesFile); err != nil {
+			return err
+		}
+	}
+
+	if chart.Name == "" {
+		return nil
+	}
+	chartPath := kustomizeChartDirectory(root, globals, chart)
+	info, err := os.Stat(chartPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return validateKustomizationFile(chartPath)
+	}
+
+	rules, err := loadHelmIgnoreRules(filepath.Join(chartPath, helmignore.HelmIgnore))
+	if err != nil {
+		return err
+	}
+
+	return filepath.WalkDir(chartPath, func(entryPath string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if errors.Is(walkErr, os.ErrNotExist) {
+				return nil
+			}
+			return walkErr
+		}
+		rel, relErr := filepath.Rel(chartPath, entryPath)
+		if relErr != nil {
+			return relErr
+		}
+		if rel == "." {
+			return nil
+		}
+		relSlash := filepath.ToSlash(rel)
+		if d.IsDir() {
+			dirInfo, infoErr := d.Info()
+			if errors.Is(infoErr, os.ErrNotExist) {
+				return nil
+			}
+			if infoErr != nil {
+				return infoErr
+			}
+			if rules.Ignore(relSlash, dirInfo) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		entryInfo, statErr := os.Stat(entryPath)
+		if errors.Is(statErr, os.ErrNotExist) {
+			return nil
+		}
+		if statErr != nil {
+			return statErr
+		}
+		if rules.Ignore(relSlash, entryInfo) {
+			return nil
+		}
+		if entryInfo.IsDir() {
+			return nil
+		}
+		err := validateKustomizationFile(entryPath)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	})
+}
+
+func loadHelmIgnoreRules(ignorePath string) (*helmignore.Rules, error) {
+	ignoreBytes, err := readKustomizationFile(ignorePath)
+	var rules *helmignore.Rules
+	if errors.Is(err, os.ErrNotExist) {
+		rules = helmignore.Empty()
+	} else if err != nil {
+		return nil, err
+	} else {
+		rules, err = helmignore.Parse(bytes.NewReader(ignoreBytes))
+		if err != nil {
+			return nil, err
+		}
+	}
+	rules.AddDefaults()
+	return rules, nil
 }
 
 // observeGenerators returns whether contents is a valid inline resource map.
 // Failed observation never changes the renderer's own parsing or error handling.
-func (fs *kustomizeHelmFileSystem) observeGenerators(contents []byte, loaderRoot string) bool {
+func (fs *kustomizeHelmFileSystem) observeGenerators(contents []byte, loaderRoot string) (bool, error) {
 	if fs.generatorFactory == nil {
 		fs.generatorFactory = resmap.NewFactory(provider.NewDepProvider().GetResourceFactory())
 	}
 	generators, err := fs.generatorFactory.NewResMapFromBytes(contents)
 	if err != nil {
-		return false
+		return false, nil
 	}
 	for _, generator := range generators.Resources() {
 		if generator.GetApiVersion() == "builtin" && generator.GetKind() == "HelmChartInflationGenerator" {
 			fs.usesHelm = true
-			if fs.dependencies != nil {
-				var config struct {
-					types.HelmGlobals
-					types.HelmChart
-				}
-				if data, err := generator.AsYAML(); err == nil && yaml.Unmarshal(data, &config) == nil {
-					fs.observeChart(loaderRoot, &config.HelmGlobals, config.HelmChart)
+			var config struct {
+				types.HelmGlobals
+				types.HelmChart
+			}
+			if data, err := generator.AsYAML(); err == nil && yaml.Unmarshal(data, &config) == nil {
+				if chartErr := fs.observeChart(loaderRoot, &config.HelmGlobals, config.HelmChart); chartErr != nil {
+					return true, chartErr
 				}
 			}
 		}
 	}
-	return true
+	return true, nil
 }
 
 // Kustomize flattens component errors into strings. Probe the command separately
@@ -714,9 +880,37 @@ func isKustomizeHelmError(err error, helmCommand string) bool {
 	return false
 }
 
+// boundedOnDiskFileSystem wraps an on-disk filesys.FileSystem so that every
+// ReadFile enforces regular-file checks, O_NONBLOCK open, and getMaxFileSize().
+type boundedOnDiskFileSystem struct {
+	filesys.FileSystem
+	mu            sync.Mutex
+	validationErr error
+}
+
+func (fs *boundedOnDiskFileSystem) ReadFile(path string) ([]byte, error) {
+	data, err := readKustomizationFile(path)
+	if errors.Is(err, ErrKustomizationFileTooLarge) || errors.Is(err, ErrKustomizationFileNotRegular) {
+		fs.mu.Lock()
+		if fs.validationErr == nil {
+			fs.validationErr = err
+		}
+		fs.mu.Unlock()
+	}
+	return data, err
+}
+
+func (fs *boundedOnDiskFileSystem) recordedValidationErr() error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.validationErr
+}
+
 // kustomizeDisk is the file system the plain build reads, as a variable so a
 // test can change files while the build is reading them.
-var kustomizeDisk = filesys.MakeFsOnDisk
+var kustomizeDisk = func() filesys.FileSystem {
+	return &boundedOnDiskFileSystem{FileSystem: filesys.MakeFsOnDisk()}
+}
 
 // Get Workloads, creates the yaml files(K8s resources) using Kustomize and
 // renders the workloads from the yaml files (k8s resources)
@@ -778,8 +972,16 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	for dependency, chart := range fSys.dependencies {
 		kd.onDependency(dependency, chart)
 	}
+	if vErr := fSys.recordedValidationErr(); vErr != nil {
+		if err == nil {
+			err = vErr
+		} else if !errors.Is(err, vErr) {
+			err = errors.Join(err, vErr)
+		}
+	}
 	if err != nil {
-		if fSys.usesHelm || isKustomizeHelmError(err, helmCommand) {
+		if !errors.Is(err, ErrKustomizationFileTooLarge) && !errors.Is(err, ErrKustomizationFileNotRegular) &&
+			(fSys.usesHelm || isKustomizeHelmError(err, helmCommand)) {
 			err = errors.Join(err, validateKustomizeHelmCommand(helmCommand))
 		}
 		return nil, []error{err}
