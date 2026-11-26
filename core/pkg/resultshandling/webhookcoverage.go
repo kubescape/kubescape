@@ -7,6 +7,14 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/webhookcoverage"
 )
 
+// BuildWebhookCoverage runs the resources collected in scanData through the
+// admission webhook matcher, exactly as HandleResults does, so a caller that
+// does not go through HandleResults (such as the MCP server) gets the same
+// analysis. It returns nil when no webhook configurations were collected.
+func BuildWebhookCoverage(scanData *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) *webhookcoverage.Analysis {
+	return buildWebhookCoverage(scanData, scanInfo)
+}
+
 // buildWebhookCoverage runs the collected resources through the admission
 // webhook matcher. It returns nil when no webhook configurations were
 // collected. The analysis is informational: it is stored on the session and
