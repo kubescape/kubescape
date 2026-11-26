@@ -94,6 +94,10 @@ func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (newFailures int, err error
 		if err := diff.PrintMarkdown(w, cs, diffInfo.SeverityThreshold); err != nil {
 			return 0, fmt.Errorf("writing Markdown diff: %w", err)
 		}
+	case printer.GitHubActionsFormat:
+		if err := diff.PrintGitHubActions(w, cs, diffInfo.SeverityThreshold); err != nil {
+			return 0, fmt.Errorf("writing GitHub Actions diff: %w", err)
+		}
 	default:
 		if err := diff.PrintPretty(w, cs); err != nil {
 			return 0, fmt.Errorf("writing pretty diff: %w", err)
@@ -124,9 +128,13 @@ func writeVulnerabilityDiff(diffInfo *metav1.DiffInfo, cs *diff.VulnerabilityCha
 		write = func(w io.Writer) error { return diff.PrintVulnerabilitySummaryYAML(w, cs, diffInfo.SeverityThreshold) }
 	case diff.SummaryCSVFormat:
 		write = func(w io.Writer) error { return diff.PrintVulnerabilitySummaryCSV(w, cs, diffInfo.SeverityThreshold) }
+	case printer.GitHubActionsFormat:
+		write = func(w io.Writer) error {
+			return diff.PrintVulnerabilityGitHubActions(w, cs, diffInfo.SeverityThreshold)
+		}
 	default:
 		return 0, fmt.Errorf("format %q is not supported for image vulnerability reports, supported formats: %s",
-			diffInfo.Format, strings.Join([]string{printer.PrettyFormat, printer.JsonFormat, printer.YamlFormat, printer.MarkdownFormat, printer.JunitResultFormat, printer.SARIFFormat, diff.SummaryJSONFormat, diff.SummaryYAMLFormat, diff.SummaryCSVFormat}, ", "))
+			diffInfo.Format, strings.Join([]string{printer.PrettyFormat, printer.JsonFormat, printer.YamlFormat, printer.MarkdownFormat, printer.JunitResultFormat, printer.SARIFFormat, diff.SummaryJSONFormat, diff.SummaryYAMLFormat, diff.SummaryCSVFormat, printer.GitHubActionsFormat}, ", "))
 	}
 
 	var w io.Writer = os.Stdout
