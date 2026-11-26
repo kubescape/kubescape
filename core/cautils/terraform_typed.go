@@ -3,6 +3,7 @@ package cautils
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/hashicorp/hcl/v2"
@@ -258,6 +259,9 @@ var rbdAttributeNames = map[string]string{
 // attributeKeyFor is attributeNameFor for an attribute of the block at path,
 // for the attributes whose Kubernetes name depends on the block they are in.
 func attributeKeyFor(path, name string) string {
+	if name == "data" && isSecretResource(path) {
+		return "stringData"
+	}
 	if strings.HasSuffix(path, ".rbd") {
 		if key, ok := rbdAttributeNames[name]; ok {
 			return key
@@ -362,6 +366,25 @@ func isConvertiblePortField(path, name string) bool {
 	return isNetworkPolicyPortField(path, name) || isLegacyIngressBackendPortField(path, name) || isIngressBackendServicePortNumberField(path, name)
 }
 
+// isSecretResource reports whether path is the top level of a Secret
+// resource. The provider takes its data attribute as plain text and sends it
+// as the Secret's stringData; data in Kubernetes holds base64 values.
+func isSecretResource(path string) bool {
+	return (strings.HasPrefix(path, "kubernetes_secret.") || strings.HasPrefix(path, "kubernetes_secret_v1.")) &&
+		strings.Count(path, ".") == 1
+}
+
+// isDaemonSetStrategyBlock reports whether blockType is the strategy block of
+// a DaemonSet spec. The provider calls it strategy, but builds the DaemonSet's
+// updateStrategy from it.
+func isDaemonSetStrategyBlock(path, blockType string) bool {
+	if blockType != "strategy" || !strings.HasSuffix(path, ".spec") || strings.Count(path, ".") != 2 {
+		return false
+	}
+	return strings.HasPrefix(path, "kubernetes_daemonset.") || strings.HasPrefix(path, "kubernetes_daemon_set.") ||
+		strings.HasPrefix(path, "kubernetes_daemon_set_v1.")
+}
+
 func isServiceAccountSecretBlock(path, blockType string) bool {
 	if blockType != "secret" {
 		return false
@@ -453,12 +476,38 @@ func isSecurityContextIDField(path, name string) bool {
 	return false
 }
 
+// isJobTTLField reports whether name is a Job spec's ttl_seconds_after_finished,
+// in a Job or in a CronJob's job template. The provider declares it as a
+// string and parses it with strconv.Atoi.
+func isJobTTLField(path, name string) bool {
+	if name != "ttl_seconds_after_finished" || !strings.HasSuffix(path, ".spec") {
+		return false
+	}
+	return strings.HasPrefix(path, "kubernetes_job") || strings.HasPrefix(path, "kubernetes_cron_job")
+}
+
 // isStringTypedNumberField covers the provider's string-typed fields that hold
 // a number: int-or-string ports, where a value made of digits only is a port
 // number and anything else a port name, as intstr.Parse reads it, and the
 // security context IDs.
 func isStringTypedNumberField(path, name string) bool {
-	return isServiceTargetPortField(path, name) || isHandlerPortField(path, name) || isSecurityContextIDField(path, name)
+	return isServiceTargetPortField(path, name) || isHandlerPortField(path, name) || isSecurityContextIDField(path, name) ||
+		isJobTTLField(path, name)
+}
+
+// isVolumeFileModeField reports whether name is the default_mode of a secret,
+// config_map, downward_api or projected volume source, or the mode of one of
+// their items. The provider declares these as strings holding an octal number,
+// such as "0644", and parses them with strconv.ParseInt(v, 8, 32).
+func isVolumeFileModeField(path, name string) bool {
+	switch name {
+	case "default_mode":
+		return strings.HasSuffix(path, ".secret") || strings.HasSuffix(path, ".config_map") ||
+			strings.HasSuffix(path, ".downward_api") || strings.HasSuffix(path, ".projected")
+	case "mode":
+		return strings.HasSuffix(path, ".items")
+	}
+	return false
 }
 
 // isPDBIntOrStringField reports whether name is min_available or
@@ -481,6 +530,11 @@ func attributeValueFor(path, name string, val interface{}) interface{} {
 	// non-empty value.
 	if s, ok := val.(string); ok && s == "" && isSecurityContextIDField(path, name) {
 		return nil
+	}
+	if s, ok := val.(string); ok && isVolumeFileModeField(path, name) {
+		if mode, err := strconv.ParseInt(s, 8, 32); err == nil {
+			return json.Number(strconv.FormatInt(mode, 10))
+		}
 	}
 	if s, ok := val.(string); ok && (isConvertiblePortField(path, name) || isStringTypedNumberField(path, name) || isPDBIntOrStringField(path, name) || isEndpointSlicePortField(path, name)) && isDigitOnly(s) {
 		return json.Number(canonicalizeNumericString(s))
@@ -577,6 +631,9 @@ func (c *terraformBodyConverter) bodyToMap(body *hclsyntax.Body, evalCtx *hcl.Ev
 		if isServiceAccountSecretBlock(path, blockType) {
 			field = "secrets"
 			isRepeatable = true
+		}
+		if isDaemonSetStrategyBlock(path, blockType) {
+			field = "updateStrategy"
 		}
 		if isNestedHPAMetricBlock(path, blockType) {
 			field = "metric"
