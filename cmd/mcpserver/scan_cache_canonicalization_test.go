@@ -285,6 +285,17 @@ func assertScanReuse(
 	var res1, res2 *mcp.CallToolResult
 	var err1, err2 error
 
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() {
+			close(releaseScan)
+		})
+	}
+	t.Cleanup(func() {
+		release()
+		wg.Wait()
+	})
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -312,7 +323,7 @@ func assertScanReuse(
 	waitForScanCallers(t, ksServer, 1, 2)
 
 	// Release the in-flight scan so both callers complete
-	close(releaseScan)
+	release()
 	wg.Wait()
 
 	require.NoError(t, err1)
