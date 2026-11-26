@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 
@@ -8,7 +9,10 @@ import (
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 )
 
 // parseTypedHCL parses HCL source and returns the *hclsyntax.Body the typed
@@ -2248,4 +2252,148 @@ resource "` + tt.resource + `" "pv" {
 			assert.Equal(t, tt.namespace, claimRef["namespace"])
 		})
 	}
+}
+
+// Blocks that are lists in Kubernetes stay lists when they appear only once,
+// so the converted objects decode into the Kubernetes types.
+func TestExtractTypedResourcesSingleListBlocks(t *testing.T) {
+	src := `
+resource "kubernetes_pod_v1" "p" {
+  metadata {
+    name = "p"
+  }
+  spec {
+    readiness_gate {
+      condition_type = "ready"
+    }
+    topology_spread_constraint {
+      max_skew           = 1
+      topology_key       = "zone"
+      when_unsatisfiable = "DoNotSchedule"
+    }
+    affinity {
+      node_affinity {
+        required_during_scheduling_ignored_during_execution {
+          node_selector_term {
+            match_expressions {
+              key      = "k"
+              operator = "In"
+              values   = ["v"]
+            }
+          }
+        }
+        preferred_during_scheduling_ignored_during_execution {
+          weight = 1
+          preference {
+            match_expressions {
+              key      = "k"
+              operator = "In"
+              values   = ["v"]
+            }
+          }
+        }
+      }
+      pod_anti_affinity {
+        required_during_scheduling_ignored_during_execution {
+          topology_key = "kubernetes.io/hostname"
+        }
+      }
+    }
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+    volume {
+      name = "sec"
+      secret {
+        secret_name = "s"
+        items {
+          key  = "k"
+          path = "p"
+        }
+      }
+    }
+    volume {
+      name = "proj"
+      projected {
+        sources {
+          service_account_token {
+            path = "token"
+          }
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_cron_job_v1" "cj" {
+  metadata {
+    name = "cj"
+  }
+  spec {
+    schedule = "* * * * *"
+    timezone = "Etc/UTC"
+    job_template {
+      metadata {}
+      spec {
+        template {
+          metadata {}
+          spec {
+            container {
+              name  = "app"
+              image = "busybox"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_cluster_role_v1" "cr" {
+  metadata {
+    name = "cr"
+  }
+  aggregation_rule {
+    cluster_role_selectors {
+      match_labels = { "rbac.example.com/aggregate" = "true" }
+    }
+  }
+}
+`
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+	require.Empty(t, errs)
+	require.Len(t, manifests, 3)
+
+	targets := map[string]interface{}{
+		"Pod":         &corev1.Pod{},
+		"CronJob":     &batchv1.CronJob{},
+		"ClusterRole": &rbacv1.ClusterRole{},
+	}
+	for _, m := range manifests {
+		kind, _ := m["kind"].(string)
+		target, ok := targets[kind]
+		require.True(t, ok, "unexpected kind %q", kind)
+		data, err := json.Marshal(m)
+		require.NoError(t, err)
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		require.NoError(t, dec.Decode(target), "%s does not decode into the Kubernetes type", kind)
+	}
+
+	pod := targets["Pod"].(*corev1.Pod)
+	assert.Len(t, pod.Spec.ReadinessGates, 1)
+	assert.Len(t, pod.Spec.TopologySpreadConstraints, 1)
+	require.NotNil(t, pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
+	assert.Len(t, pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution, 1)
+	assert.Len(t, pod.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution, 1)
+	assert.Len(t, pod.Spec.Volumes[0].Secret.Items, 1)
+	assert.Len(t, pod.Spec.Volumes[1].Projected.Sources, 1)
+
+	cronJob := targets["CronJob"].(*batchv1.CronJob)
+	require.NotNil(t, cronJob.Spec.TimeZone)
+	assert.Equal(t, "Etc/UTC", *cronJob.Spec.TimeZone)
+
+	clusterRole := targets["ClusterRole"].(*rbacv1.ClusterRole)
+	assert.Len(t, clusterRole.AggregationRule.ClusterRoleSelectors, 1)
 }
