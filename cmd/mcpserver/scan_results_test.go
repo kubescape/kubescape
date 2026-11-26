@@ -168,6 +168,82 @@ func TestScanResultConcurrentClients(t *testing.T) {
 	wg.Wait()
 }
 
+func TestScanResultConcurrentClientLimits(t *testing.T) {
+	doc, _ := resultTestDocument(t)
+	doc.Resources = doc.Resources[:80]
+	doc.TotalFailed, doc.ReturnedFailed = 80, 80
+	data, err := json.Marshal(doc)
+	require.NoError(t, err)
+
+	for _, firstLimit := range []int{100, 50} {
+		t.Run(fmt.Sprintf("first-limit-%d", firstLimit), func(t *testing.T) {
+			ks := &KubescapeMcpserver{}
+			const key = "shared-client-limits"
+			started := make(chan struct{})
+			var scans atomic.Int32
+			run := func(context.Context) (interface{}, error) {
+				if scans.Add(1) == 1 {
+					close(started)
+				}
+				deadline := time.Now().Add(5 * time.Second)
+				for time.Now().Before(deadline) {
+					ks.scanCtxMu.Lock()
+					state := ks.scanCtxs[key]
+					joined := state != nil && state.count == 2
+					ks.scanCtxMu.Unlock()
+					if joined {
+						return data, nil
+					}
+					time.Sleep(time.Millisecond)
+				}
+				return nil, fmt.Errorf("both callers did not join the shared scan")
+			}
+
+			type scanReply struct {
+				value interface{}
+				err   error
+			}
+			first := make(chan scanReply, 1)
+			firstCtx := resultTestContext("first")
+			secondCtx := resultTestContext("second")
+			go func() {
+				value, err := ks.doResultScan(firstCtx, key, run, firstLimit)
+				first <- scanReply{value, err}
+			}()
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("first scan did not start")
+			}
+			secondValue, err := ks.doResultScan(secondCtx, key, run, 150-firstLimit)
+			require.NoError(t, err)
+			firstReply := <-first
+			require.NoError(t, firstReply.err)
+			require.EqualValues(t, 1, scans.Load())
+
+			full := decodeResultPage(t, firstReply.value.([]byte))
+			limited := decodeResultPage(t, secondValue.([]byte))
+			limitedCtx := secondCtx
+			if firstLimit == 50 {
+				full, limited = limited, full
+				limitedCtx = firstCtx
+			}
+			require.Equal(t, doc.Resources, full.Resources)
+			require.False(t, full.Truncated)
+			require.Empty(t, full.ScanID)
+			require.Equal(t, doc.Resources[:50], limited.Resources)
+			require.Equal(t, 80, limited.TotalFailed)
+			require.Equal(t, 50, limited.ReturnedFailed)
+			require.True(t, limited.Truncated)
+			require.NotNil(t, limited.NextOffset)
+			require.Equal(t, 50, *limited.NextOffset)
+			next, err := ks.scanResults.page(scanResultOwner(limitedCtx), limited.ScanID, 50, 100, time.Now())
+			require.NoError(t, err)
+			require.Equal(t, doc.Resources[50:], decodeResultPage(t, next).Resources)
+		})
+	}
+}
+
 func TestScanResultToolValidation(t *testing.T) {
 	ks := &KubescapeMcpserver{}
 	for _, args := range []map[string]any{

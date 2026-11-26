@@ -38,7 +38,6 @@ func TestSnapshotBudgetBeforeAfter(t *testing.T) {
 	ctx := resultTestContext("budget-proof")
 	value, err := ks.doResultScan(ctx, "budget-proof", func(scanCtx context.Context) (interface{}, error) {
 		prepared := scanCtx.Value(preparedScanResultsKey{}).(*preparedScanResults)
-		prepared.complete = true
 		err := prepared.buildSnapshot(response, total, func(i int) any {
 			encoded++
 			return resources[i]
@@ -56,13 +55,13 @@ func TestSnapshotBudgetBeforeAfter(t *testing.T) {
 			first.PaginationWarning = "retention limit exceeded"
 		}
 		return json.Marshal(first)
-	})
+	}, 50)
 	require.NoError(t, err)
 	require.Less(t, encoded, total, "encoding must stop before visiting the remaining findings")
 	page := decodeResultPage(t, value.([]byte))
-	require.Len(t, page.Resources, maxFailedResources)
+	require.Len(t, page.Resources, 50)
 	require.Equal(t, total, page.TotalFailed)
-	require.Equal(t, maxFailedResources, page.ReturnedFailed)
+	require.Equal(t, 50, page.ReturnedFailed)
 	require.True(t, page.Truncated)
 	require.NotEmpty(t, page.PaginationWarning)
 	require.Empty(t, page.ScanID)

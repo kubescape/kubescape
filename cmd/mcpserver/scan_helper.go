@@ -232,7 +232,10 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, req scanRequest)
 	}
 
 	limit := maxFailedResources
-	if req.limit > 0 {
+	prepared, _ := ctx.Value(preparedScanResultsKey{}).(*preparedScanResults)
+	// Shared execution must cover the largest supported page. Each caller
+	// applies its own limit after the shared result is available.
+	if prepared == nil && req.limit > 0 {
 		limit = req.limit
 	}
 	response, ordered := buildRankedScanResponse(summary, scanData.ResourcesResult, complianceScore, frameworkName, degraded, notEvaluated, totalControls, limit)
@@ -251,8 +254,7 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, req scanRequest)
 		helpers.Int("returned_resources", response.ReturnedFailed),
 	)
 
-	if prepared, ok := ctx.Value(preparedScanResultsKey{}).(*preparedScanResults); ok {
-		prepared.complete = true
+	if prepared != nil {
 		if response.Truncated {
 			if err := prepared.buildSnapshot(response, len(ordered), func(i int) any {
 				return scanData.ResourcesResult[ordered[i].key]
