@@ -48,6 +48,7 @@ func TestGetDiffCmd_FormatValidation(t *testing.T) {
 		{name: "sarif", format: "sarif", wantFormat: "sarif"},
 		{name: "junit", format: "junit", wantFormat: "junit"},
 		{name: "gitlab-sast", format: "gitlab-sast", wantFormat: "gitlab-sast"},
+		{name: "gitlab-codequality", format: "gitlab-codequality", wantFormat: "gitlab-codequality"},
 		{name: "markdown", format: "markdown", wantFormat: "markdown"},
 		{name: "github-actions", format: "github-actions", wantFormat: "github-actions"},
 		{name: "uppercase format is normalized", format: "JSON", wantFormat: "json"},
@@ -579,7 +580,7 @@ func TestGetDiffCmd_FlagCompletions(t *testing.T) {
 		{
 			name:     "format lists diff formats and excludes scan-only html",
 			args:     []string{"__complete", "diff", "--format", ""},
-			expected: []string{"pretty-printer", "summary-json", "summary-yaml", "summary-csv", "json", "yaml", "sarif", "junit", "gitlab-sast", "markdown", "github-actions"},
+			expected: []string{"pretty-printer", "summary-json", "summary-yaml", "summary-csv", "json", "yaml", "sarif", "junit", "gitlab-sast", "markdown", "github-actions", "gitlab-codequality"},
 			excluded: []string{"html", "pdf"},
 		},
 		{

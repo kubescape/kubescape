@@ -3,6 +3,8 @@ package diff
 import (
 	"errors"
 	"fmt"
+	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -42,6 +44,7 @@ type ControlChange struct {
 	Path               string `json:"path,omitempty"`
 	EvidenceResourceID string `json:"evidenceResourceID,omitempty"`
 	Reason             string `json:"reason,omitempty"`
+	SourcePath         string `json:"sourcePath,omitempty"`
 }
 
 // ChangeSet groups comparable regressions and explicitly separates results
@@ -226,6 +229,7 @@ func compareReports(base, head *scanReport, granularity Granularity) *ChangeSet 
 	if reasons := incompatibleScopeReasons(base, head); len(reasons) > 0 {
 		cs.Warnings = append(cs.Warnings, reasons...)
 		markAllFailuresIncomparable(cs, baseMap, headMap, baseSeverity, headSeverity, granularity, reasons[0])
+		populateSourcePaths(cs, base, head)
 		sortChangeSet(cs)
 		return cs
 	}
@@ -247,8 +251,77 @@ func compareReports(base, head *scanReport, granularity Granularity) *ChangeSet 
 		}
 	}
 
+	populateSourcePaths(cs, base, head)
 	sortChangeSet(cs)
 	return cs
+}
+
+func populateSourcePaths(cs *ChangeSet, base, head *scanReport) {
+	basePaths := buildSourcePathMap(base)
+	headPaths := buildSourcePathMap(head)
+	if len(basePaths) == 0 && len(headPaths) == 0 {
+		return
+	}
+	assign := func(changes []ControlChange, preferBase bool) {
+		for i := range changes {
+			id := changes[i].ResourceID
+			if preferBase {
+				if p, ok := basePaths[id]; ok {
+					changes[i].SourcePath = p
+					continue
+				}
+				if p, ok := headPaths[id]; ok {
+					changes[i].SourcePath = p
+				}
+			} else {
+				if p, ok := headPaths[id]; ok {
+					changes[i].SourcePath = p
+					continue
+				}
+				if p, ok := basePaths[id]; ok {
+					changes[i].SourcePath = p
+				}
+			}
+		}
+	}
+	assign(cs.New, false)
+	assign(cs.Unchanged, false)
+	assign(cs.Incomparable, false)
+	assign(cs.Resolved, true)
+}
+
+func buildSourcePathMap(r *scanReport) map[string]string {
+	if r == nil || len(r.Resources) == 0 {
+		return nil
+	}
+	paths := make(map[string]string, len(r.Resources))
+	for _, res := range r.Resources {
+		if res.ResourceID == "" || res.Source == nil {
+			continue
+		}
+		if rel, ok := normalizeRepoRelativePath(res.Source.RelativePath); ok {
+			paths[res.ResourceID] = rel
+		}
+	}
+	return paths
+}
+
+func normalizeRepoRelativePath(raw string) (string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || filepath.IsAbs(trimmed) || strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "\\") {
+		return "", false
+	}
+	if len(trimmed) >= 2 && trimmed[1] == ':' && ((trimmed[0] >= 'a' && trimmed[0] <= 'z') || (trimmed[0] >= 'A' && trimmed[0] <= 'Z')) {
+		return "", false
+	}
+	// Convert backslashes unconditionally so Windows-generated scan reports emit
+	// forward-slash repository paths on non-Windows diff runners as well.
+	slash := strings.ReplaceAll(filepath.ToSlash(trimmed), "\\", "/")
+	cleaned := path.Clean(slash)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", false
+	}
+	return cleaned, true
 }
 
 func compareFailedPair(cs *ChangeSet, base, head *scanReport, controlKey key, baseControl, headControl controlEntry, baseSeverity, headSeverity map[string]string, granularity Granularity) {

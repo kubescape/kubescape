@@ -90,6 +90,10 @@ func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (newFailures int, err error
 		if err := diff.PrintGitLabSAST(w, cs, diffInfo.SeverityThreshold); err != nil {
 			return 0, fmt.Errorf("writing GitLab SAST diff: %w", err)
 		}
+	case printer.GitLabCodeQualityFormat:
+		if err := diff.PrintGitLabCodeQuality(w, cs, diffInfo.SeverityThreshold); err != nil {
+			return 0, fmt.Errorf("writing GitLab Code Quality diff: %w", err)
+		}
 	case printer.MarkdownFormat:
 		if err := diff.PrintMarkdown(w, cs, diffInfo.SeverityThreshold); err != nil {
 			return 0, fmt.Errorf("writing Markdown diff: %w", err)

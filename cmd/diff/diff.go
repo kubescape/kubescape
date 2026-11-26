@@ -188,5 +188,6 @@ func diffFormats() []string {
 		printer.GitLabSASTFormat,
 		printer.MarkdownFormat,
 		printer.GitHubActionsFormat,
+		printer.GitLabCodeQualityFormat,
 	}
 }
