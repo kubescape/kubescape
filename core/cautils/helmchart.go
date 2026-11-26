@@ -1,13 +1,17 @@
 package cautils
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	posixpath "path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -640,6 +644,162 @@ func readHelmTemplateFile(path string) ([]byte, error) {
 	return data, nil
 }
 
+var helmDrivePathPattern = regexp.MustCompile(`^[a-zA-Z]:/`)
+
+func loadBoundedHelmArchiveFiles(in io.Reader, archiveName string, limit int64) ([]*helmloader.BufferedFile, error) {
+	unzipped, err := gzip.NewReader(in)
+	if err != nil {
+		return nil, err
+	}
+	defer unzipped.Close()
+
+	var files []*helmloader.BufferedFile
+	tr := tar.NewReader(unzipped)
+	var totalDecompressed int64
+	for {
+		hd, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if hd.FileInfo().IsDir() {
+			continue
+		}
+		switch hd.Typeflag {
+		case tar.TypeXGlobalHeader, tar.TypeXHeader:
+			continue
+		}
+
+		delimiter := "/"
+		if strings.ContainsRune(hd.Name, '\\') {
+			delimiter = "\\"
+		}
+		parts := strings.Split(hd.Name, delimiter)
+		n := strings.Join(parts[1:], delimiter)
+		n = strings.ReplaceAll(n, delimiter, "/")
+
+		if posixpath.IsAbs(n) {
+			return nil, errors.New("chart illegally contains absolute paths")
+		}
+		n = posixpath.Clean(n)
+		if n == "." {
+			return nil, fmt.Errorf("chart illegally contains content outside the base directory: %q", hd.Name)
+		}
+		if strings.HasPrefix(n, "..") {
+			return nil, errors.New("chart illegally references parent directory")
+		}
+		if helmDrivePathPattern.MatchString(n) {
+			return nil, errors.New("chart contains illegally named files")
+		}
+		if parts[0] == "Chart.yaml" {
+			return nil, errors.New("chart yaml not in base directory")
+		}
+
+		if hd.Size > limit {
+			return nil, fmt.Errorf("%w: archive entry %q in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, hd.Name, archiveName, limit)
+		}
+		totalDecompressed += hd.Size
+		if totalDecompressed > helmloader.MaxDecompressedChartSize {
+			return nil, fmt.Errorf("decompressed chart is larger than the maximum file size %d", helmloader.MaxDecompressedChartSize)
+		}
+
+		data, err := io.ReadAll(io.LimitReader(tr, limit+1))
+		if err != nil {
+			return nil, err
+		}
+		if int64(len(data)) > limit {
+			return nil, fmt.Errorf("%w: archive entry %q in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, hd.Name, archiveName, limit)
+		}
+		data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
+		files = append(files, &helmloader.BufferedFile{Name: n, Data: data})
+	}
+	if len(files) == 0 {
+		return nil, errors.New("no files in chart archive")
+	}
+	return files, nil
+}
+
+func validateBoundedHelmChartFiles(files []*helmloader.BufferedFile, archiveName string, limit int64) error {
+	subcharts := make(map[string][]*helmloader.BufferedFile)
+	for _, f := range files {
+		if int64(len(f.Data)) > limit {
+			return fmt.Errorf("%w: archive entry %q in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, f.Name, archiveName, limit)
+		}
+		if !strings.HasPrefix(f.Name, "charts/") {
+			continue
+		}
+		if posixpath.Ext(f.Name) == ".prov" {
+			continue
+		}
+		fname := strings.TrimPrefix(f.Name, "charts/")
+		cname := strings.SplitN(fname, "/", 2)[0]
+		if strings.IndexAny(cname, "_.") == 0 {
+			continue
+		}
+		subcharts[cname] = append(subcharts[cname], &helmloader.BufferedFile{Name: fname, Data: f.Data})
+	}
+
+	for cname, subFiles := range subcharts {
+		if posixpath.Ext(cname) == ".tgz" {
+			file := subFiles[0]
+			if file.Name != cname {
+				return fmt.Errorf("error unpacking subchart tar in %s: expected %s, got %s", archiveName, cname, file.Name)
+			}
+			nestedName := archiveName + ":" + file.Name
+			if int64(len(file.Data)) > limit {
+				return fmt.Errorf("%w: %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, nestedName, limit)
+			}
+			nestedFiles, err := loadBoundedHelmArchiveFiles(bytes.NewReader(file.Data), nestedName, limit)
+			if err != nil {
+				return err
+			}
+			if err := validateBoundedHelmChartFiles(nestedFiles, nestedName, limit); err != nil {
+				return err
+			}
+			continue
+		}
+		unpacked := make([]*helmloader.BufferedFile, 0, len(subFiles))
+		for _, sf := range subFiles {
+			parts := strings.SplitN(sf.Name, "/", 2)
+			if len(parts) < 2 {
+				continue
+			}
+			unpacked = append(unpacked, &helmloader.BufferedFile{Name: parts[1], Data: sf.Data})
+		}
+		if err := validateBoundedHelmChartFiles(unpacked, archiveName+":"+cname, limit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isPackagedHelmDependencyRel(relSlash string) bool {
+	parts := strings.Split(relSlash, "/")
+	if len(parts) < 2 || len(parts)%2 != 0 {
+		return false
+	}
+	for i := 0; i < len(parts); i += 2 {
+		if parts[i] != "charts" {
+			return false
+		}
+		name := parts[i+1]
+		if name == "" || strings.IndexAny(name, "_.") == 0 {
+			return false
+		}
+		isLast := i+2 == len(parts)
+		hasTgzExt := posixpath.Ext(name) == ".tgz"
+		if isLast {
+			return hasTgzExt
+		}
+		if hasTgzExt {
+			return false
+		}
+	}
+	return false
+}
+
 func loadBoundedHelmArchiveFile(path string) (*helmchart.Chart, error) {
 	file, limit, err := openBoundedHelmFile(path)
 	if err != nil {
@@ -664,17 +824,15 @@ func loadBoundedHelmArchiveFile(path string) (*helmchart.Chart, error) {
 	}
 
 	cr := &countingReader{r: io.LimitReader(file, limit+1)}
-	files, err := helmloader.LoadArchiveFiles(cr)
+	files, err := loadBoundedHelmArchiveFiles(cr, path, limit)
 	if cr.n > limit {
 		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, path, limit)
 	}
 	if err != nil {
 		return nil, err
 	}
-	for _, f := range files {
-		if int64(len(f.Data)) > limit {
-			return nil, fmt.Errorf("%w: archive entry %q in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, f.Name, path, limit)
-		}
+	if err := validateBoundedHelmChartFiles(files, path, limit); err != nil {
+		return nil, err
 	}
 	return helmloader.LoadFiles(files)
 }
@@ -702,17 +860,18 @@ func validateHelmChartDir(rootDir string) error {
 		return err
 	}
 
-	visitedDirs := make(map[string]bool)
+	activeAncestors := make(map[string]bool)
 	var walkDir func(currentDir string) error
 	walkDir = func(currentDir string) error {
 		resolvedDir, err := filepath.EvalSymlinks(currentDir)
 		if err != nil {
 			return err
 		}
-		if visitedDirs[resolvedDir] {
+		if activeAncestors[resolvedDir] {
 			return nil
 		}
-		visitedDirs[resolvedDir] = true
+		activeAncestors[resolvedDir] = true
+		defer delete(activeAncestors, resolvedDir)
 
 		entries, err := os.ReadDir(currentDir)
 		if err != nil {
@@ -772,7 +931,7 @@ func validateHelmChartDir(rootDir string) error {
 				}
 				return err
 			}
-			if strings.HasPrefix(relSlash, "charts/") && strings.HasSuffix(strings.ToLower(entry.Name()), ".tgz") {
+			if isPackagedHelmDependencyRel(relSlash) {
 				if _, err := loadBoundedHelmArchiveFile(entryPath); err != nil {
 					return err
 				}

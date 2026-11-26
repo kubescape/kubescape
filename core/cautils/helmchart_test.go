@@ -777,12 +777,10 @@ func TestProtectHelmPathSeparators(t *testing.T) {
 	}
 }
 
-func buildTestHelmArchive(t *testing.T, files map[string]string) string {
+func buildTestHelmArchiveBytes(t *testing.T, files map[string][]byte) []byte {
 	t.Helper()
-	archivePath := filepath.Join(t.TempDir(), "test-chart-0.1.0.tgz")
-	f, err := os.Create(archivePath)
-	require.NoError(t, err)
-	gw := gzip.NewWriter(f)
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gw)
 	for name, content := range files {
 		hdr := &tar.Header{
@@ -791,12 +789,22 @@ func buildTestHelmArchive(t *testing.T, files map[string]string) string {
 			Size: int64(len(content)),
 		}
 		require.NoError(t, tw.WriteHeader(hdr))
-		_, err := tw.Write([]byte(content))
+		_, err := tw.Write(content)
 		require.NoError(t, err)
 	}
 	require.NoError(t, tw.Close())
 	require.NoError(t, gw.Close())
-	require.NoError(t, f.Close())
+	return buf.Bytes()
+}
+
+func buildTestHelmArchive(t *testing.T, files map[string]string) string {
+	t.Helper()
+	raw := make(map[string][]byte, len(files))
+	for name, content := range files {
+		raw[name] = []byte(content)
+	}
+	archivePath := filepath.Join(t.TempDir(), "test-chart-0.1.0.tgz")
+	require.NoError(t, os.WriteFile(archivePath, buildTestHelmArchiveBytes(t, raw), 0o600))
 	return archivePath
 }
 
@@ -899,5 +907,59 @@ func TestNewHelmChart_BoundsAndIgnoreValidation(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("NewHelmChart hung on symlink cycle inside chart directory")
 		}
+	})
+
+	t.Run("nested packaged dependency with oversized decompressed entry rejected", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "4096")
+		childBytes := buildTestHelmArchiveBytes(t, map[string][]byte{
+			"child/Chart.yaml":           []byte("apiVersion: v2\nname: child\nversion: 0.1.0\n"),
+			"child/templates/large.yaml": []byte("# " + strings.Repeat("Z", 64<<10) + "\n"),
+		})
+		require.Less(t, len(childBytes), 4096, "compressed child package must be smaller than outer limit")
+
+		parentPath := filepath.Join(t.TempDir(), "parent-0.1.0.tgz")
+		parentBytes := buildTestHelmArchiveBytes(t, map[string][]byte{
+			"parent/Chart.yaml":       []byte("apiVersion: v2\nname: parent\nversion: 0.1.0\n"),
+			"parent/charts/child.tgz": childBytes,
+		})
+		require.Less(t, len(parentBytes), 4096)
+		require.NoError(t, os.WriteFile(parentPath, parentBytes, 0o600))
+
+		_, err := NewHelmChart(parentPath)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrHelmTemplateTooLarge)
+	})
+
+	t.Run("included symlink alias to ignored directory is still validated under its own path", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "256")
+		dir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "templates"), 0o750))
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "a"), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "Chart.yaml"), []byte("apiVersion: v2\nname: app\nversion: 0.1.0\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, ".helmignore"), []byte("a/large.yaml\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "templates", "cm.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: ok\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "a", "large.yaml"), bytes.Repeat([]byte("a"), 354), 0o600))
+		if err := os.Symlink(filepath.Join(dir, "a"), filepath.Join(dir, "b")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+
+		_, err := NewHelmChart(dir)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrHelmTemplateTooLarge)
+	})
+
+	t.Run("tgz asset inside unpacked dependency files directory is not parsed as subchart", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "4096")
+		dir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "templates"), 0o750))
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "charts", "child", "files"), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "Chart.yaml"), []byte("apiVersion: v2\nname: app\nversion: 0.1.0\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "templates", "cm.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: ok\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "charts", "child", "Chart.yaml"), []byte("apiVersion: v2\nname: child\nversion: 0.1.0\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "charts", "child", "files", "data.tgz"), []byte("not-a-chart-archive"), 0o600))
+
+		chart, err := NewHelmChart(dir)
+		require.NoError(t, err)
+		assert.Equal(t, "app", chart.GetName())
 	})
 }
