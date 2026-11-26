@@ -33,7 +33,6 @@ type preparedScanResults struct {
 	document  scanResultDocument
 	size      int
 	oversized bool
-	complete  bool
 }
 
 func (p *preparedScanResults) buildSnapshot(response scanResponse, count int, resourceAt func(int) any) error {
@@ -306,12 +305,6 @@ func decodeOversizedScanDocument(data []byte, limit int) (scanResultDocument, er
 	}, nil
 }
 
-type sharedScanPayload struct {
-	data []byte
-	doc  *scanResultDocument
-	size int
-}
-
 // doResultScan retains ownership only after shared execution has returned to
 // each caller. A shared scan must never inherit its first caller's session.
 func (ksServer *KubescapeMcpserver) doResultScan(ctx context.Context, key string, run func(context.Context) (interface{}, error), limitOpt ...int) (interface{}, error) {
@@ -326,7 +319,7 @@ func (ksServer *KubescapeMcpserver) doResultScan(ctx context.Context, key string
 			return nil, errors.New("unexpected scan result type")
 		}
 		result.firstPage = data
-		if result.document.Resources == nil && !result.oversized && !result.complete {
+		if result.document.Resources == nil {
 			var doc scanResultDocument
 			if len(data) > scanResultsMaxBytes {
 				decoded, err := decodeOversizedScanDocument(data, maxFailedResources)
@@ -350,6 +343,10 @@ func (ksServer *KubescapeMcpserver) doResultScan(ctx context.Context, key string
 	}
 	if result.document.Resources == nil {
 		return result.firstPage, nil
+	}
+	if result.oversized {
+		// The serialized first page may fit even when the full snapshot did not.
+		result.size = scanResultsMaxBytes + 1
 	}
 	return ksServer.scanResults.firstPage(scanResultOwner(ctx), result.document, result.size, time.Now(), limitOpt...)
 }
