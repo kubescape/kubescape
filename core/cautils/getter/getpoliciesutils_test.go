@@ -328,14 +328,10 @@ func TestSaveInFileConcurrentWritersAlwaysPublishCompleteJSON(t *testing.T) {
 	}()
 
 	for {
-		contents, err := os.ReadFile(target)
-		// Windows refuses to open the file for a moment while it is being replaced.
-		// That is not a partial read, so only a successful read is checked.
-		if err == nil || runtime.GOOS != "windows" {
-			require.NoError(t, err)
-			var published map[string]any
-			require.NoError(t, json.Unmarshal(contents, &published), "readers must never observe a partially written cache entry")
-		}
+		contents, err := readPolicyFile(target)
+		require.NoError(t, err)
+		var published map[string]any
+		require.NoError(t, json.Unmarshal(contents, &published), "readers must never observe a partially written cache entry")
 
 		select {
 		case <-readDone:
