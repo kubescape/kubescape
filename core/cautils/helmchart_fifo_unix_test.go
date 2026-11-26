@@ -66,3 +66,56 @@ func TestIsStaticTemplate_FIFOWithoutWriterDoesNotBlock(t *testing.T) {
 		t.Fatal("isStaticTemplate blocked on a FIFO with no writer")
 	}
 }
+
+func TestNewHelmChart_FIFOWithoutWriterIsRejectedPromptly(t *testing.T) {
+	t.Run("FIFO helmignore", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "templates"), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "Chart.yaml"), []byte("apiVersion: v2\nname: app\nversion: 0.1.0\n"), 0o600))
+		fifo := filepath.Join(dir, ".helmignore")
+		require.NoError(t, syscall.Mkfifo(fifo, 0o600))
+		t.Cleanup(func() {
+			if f, err := os.OpenFile(fifo, os.O_RDWR|syscall.O_NONBLOCK, 0); err == nil {
+				_ = f.Close()
+			}
+		})
+
+		done := make(chan error, 1)
+		go func() {
+			_, err := NewHelmChart(dir)
+			done <- err
+		}()
+
+		select {
+		case err := <-done:
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrHelmTemplateNotRegular)
+		case <-time.After(5 * time.Second):
+			t.Fatal("NewHelmChart blocked on a FIFO .helmignore with no writer")
+		}
+	})
+
+	t.Run("FIFO archive path", func(t *testing.T) {
+		fifo := filepath.Join(t.TempDir(), "chart.tgz")
+		require.NoError(t, syscall.Mkfifo(fifo, 0o600))
+		t.Cleanup(func() {
+			if f, err := os.OpenFile(fifo, os.O_RDWR|syscall.O_NONBLOCK, 0); err == nil {
+				_ = f.Close()
+			}
+		})
+
+		done := make(chan error, 1)
+		go func() {
+			_, err := NewHelmChart(fifo)
+			done <- err
+		}()
+
+		select {
+		case err := <-done:
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrHelmTemplateNotRegular)
+		case <-time.After(5 * time.Second):
+			t.Fatal("NewHelmChart blocked on a FIFO chart archive path")
+		}
+	})
+}

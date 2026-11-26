@@ -1,12 +1,17 @@
 package cautils
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	posixpath "path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,6 +27,7 @@ import (
 	helmloader "helm.sh/helm/v3/pkg/chart/loader"
 	helmchartutil "helm.sh/helm/v3/pkg/chartutil"
 	helmengine "helm.sh/helm/v3/pkg/engine"
+	helmignore "helm.sh/helm/v3/pkg/ignore"
 	k8sversion "k8s.io/apimachinery/pkg/util/version"
 	componentversion "k8s.io/component-base/version"
 )
@@ -39,7 +45,21 @@ func IsHelmDirectory(path string) (bool, error) {
 // Dependency resolution belongs to an explicit Helm operation, never a scan:
 // downloader.Manager.Build can fetch remote content and write into the chart.
 func NewHelmChart(path string) (*HelmChart, error) {
-	chart, err := helmloader.Load(path)
+	cleaned := filepath.Clean(path)
+	statInfo, err := os.Stat(cleaned)
+	if err != nil {
+		return nil, err
+	}
+
+	var chart *helmchart.Chart
+	if statInfo.IsDir() {
+		if err := validateHelmChartDir(cleaned); err != nil {
+			return nil, err
+		}
+		chart, err = helmloader.Load(cleaned)
+	} else {
+		chart, err = loadBoundedHelmArchiveFile(cleaned)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -566,22 +586,94 @@ func openHelmTemplateFile(path string) (*os.File, error) {
 	return file, nil
 }
 
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// boundedArchiveStreamReader bounds total decompressed bytes read from gzip into tar.Reader,
+// including PAX/GNU metadata records and padding, against a fixed stream budget
+// (helmloader.MaxDecompressedChartSize). On budget exhaustion it returns an error wrapping
+// ErrHelmTemplateTooLarge rather than io.EOF so tar.Reader cannot mistake truncation for end-of-archive.
+type boundedArchiveStreamReader struct {
+	r           io.Reader
+	archiveName string
+	read        int64
+	budget      int64
+}
+
+func (b *boundedArchiveStreamReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if b.budget < 0 {
+		return 0, fmt.Errorf("%w: decompressed archive stream in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, b.archiveName, b.budget)
+	}
+	remaining := b.budget - b.read
+	if remaining == 0 {
+		var probe [1]byte
+		n, err := b.r.Read(probe[:])
+		if n > 0 {
+			b.read++
+			return 0, fmt.Errorf("%w: decompressed archive stream in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, b.archiveName, b.budget)
+		}
+		return 0, err
+	}
+
+	readBuf := p
+	if int64(len(readBuf))-1 > remaining {
+		readBuf = readBuf[:int(remaining+1)]
+	}
+	n, err := b.r.Read(readBuf)
+	b.read += int64(n)
+	if int64(n) > remaining {
+		return 0, fmt.Errorf("%w: decompressed archive stream in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, b.archiveName, b.budget)
+	}
+	return n, err
+}
+
+func openBoundedHelmFile(path string) (*os.File, int64, error) {
+	file, err := openHelmTemplateFile(path)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	limit := getMaxFileSize()
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, 0, err
+	}
+	if info.Size() > limit {
+		file.Close()
+		return nil, 0, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, path, limit)
+	}
+	return file, limit, nil
+}
+
+func validateHelmRegularFile(path string) error {
+	file, _, err := openBoundedHelmFile(path)
+	if err != nil {
+		return err
+	}
+	return file.Close()
+}
+
 // readHelmTemplateFile returns the contents of the Helm template file at path, reading at most
 // getMaxFileSize() bytes (configurable via KUBESCAPE_MAX_FILE_SIZE, defaulting to
 // DefaultMaxFileSize) so that reading remains bounded.
 func readHelmTemplateFile(path string) ([]byte, error) {
-	file, err := openHelmTemplateFile(path)
+	file, limit, err := openBoundedHelmFile(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-
-	limit := getMaxFileSize()
-
-	info, err := file.Stat()
-	if err == nil && info.Size() > limit {
-		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, path, limit)
-	}
 
 	data, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
@@ -591,6 +683,312 @@ func readHelmTemplateFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, path, limit)
 	}
 	return data, nil
+}
+
+var helmDrivePathPattern = regexp.MustCompile(`^[a-zA-Z]:/`)
+
+func loadBoundedHelmArchiveFiles(in io.Reader, archiveName string, limit int64) ([]*helmloader.BufferedFile, error) {
+	unzipped, err := gzip.NewReader(in)
+	if err != nil {
+		return nil, err
+	}
+	defer unzipped.Close()
+
+	var files []*helmloader.BufferedFile
+	streamBudget := helmloader.MaxDecompressedChartSize
+	tr := tar.NewReader(&boundedArchiveStreamReader{
+		r:           unzipped,
+		archiveName: archiveName,
+		budget:      streamBudget,
+	})
+	var totalDecompressed int64
+	for {
+		hd, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if hd.Size < 0 {
+			return nil, fmt.Errorf("invalid negative tar entry size %d for %q in %q", hd.Size, hd.Name, archiveName)
+		}
+		if hd.Size > limit {
+			return nil, fmt.Errorf("%w: archive entry %q in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, hd.Name, archiveName, limit)
+		}
+		if helmloader.MaxDecompressedChartSize < 0 || hd.Size > helmloader.MaxDecompressedChartSize-totalDecompressed {
+			return nil, fmt.Errorf("decompressed chart is larger than the maximum file size %d", helmloader.MaxDecompressedChartSize)
+		}
+		totalDecompressed += hd.Size
+		if hd.FileInfo().IsDir() {
+			continue
+		}
+		switch hd.Typeflag {
+		case tar.TypeXGlobalHeader, tar.TypeXHeader:
+			continue
+		}
+
+		delimiter := "/"
+		if strings.ContainsRune(hd.Name, '\\') {
+			delimiter = "\\"
+		}
+		parts := strings.Split(hd.Name, delimiter)
+		n := strings.Join(parts[1:], delimiter)
+		n = strings.ReplaceAll(n, delimiter, "/")
+
+		if posixpath.IsAbs(n) {
+			return nil, errors.New("chart illegally contains absolute paths")
+		}
+		n = posixpath.Clean(n)
+		if n == "." {
+			return nil, fmt.Errorf("chart illegally contains content outside the base directory: %q", hd.Name)
+		}
+		if strings.HasPrefix(n, "..") {
+			return nil, errors.New("chart illegally references parent directory")
+		}
+		if helmDrivePathPattern.MatchString(n) {
+			return nil, errors.New("chart contains illegally named files")
+		}
+		if parts[0] == "Chart.yaml" {
+			return nil, errors.New("chart yaml not in base directory")
+		}
+
+		data, err := io.ReadAll(io.LimitReader(tr, limit+1))
+		if err != nil {
+			return nil, err
+		}
+		if int64(len(data)) > limit {
+			return nil, fmt.Errorf("%w: archive entry %q in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, hd.Name, archiveName, limit)
+		}
+		data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
+		files = append(files, &helmloader.BufferedFile{Name: n, Data: data})
+	}
+	if len(files) == 0 {
+		return nil, errors.New("no files in chart archive")
+	}
+	return files, nil
+}
+
+func validateBoundedHelmChartFiles(files []*helmloader.BufferedFile, archiveName string, limit int64) error {
+	subcharts := make(map[string][]*helmloader.BufferedFile)
+	for _, f := range files {
+		if int64(len(f.Data)) > limit {
+			return fmt.Errorf("%w: archive entry %q in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, f.Name, archiveName, limit)
+		}
+		if !strings.HasPrefix(f.Name, "charts/") {
+			continue
+		}
+		if posixpath.Ext(f.Name) == ".prov" {
+			continue
+		}
+		fname := strings.TrimPrefix(f.Name, "charts/")
+		cname := strings.SplitN(fname, "/", 2)[0]
+		if strings.IndexAny(cname, "_.") == 0 {
+			continue
+		}
+		subcharts[cname] = append(subcharts[cname], &helmloader.BufferedFile{Name: fname, Data: f.Data})
+	}
+
+	for cname, subFiles := range subcharts {
+		if posixpath.Ext(cname) == ".tgz" {
+			file := subFiles[0]
+			if file.Name != cname {
+				return fmt.Errorf("error unpacking subchart tar in %s: expected %s, got %s", archiveName, cname, file.Name)
+			}
+			nestedName := archiveName + ":" + file.Name
+			if int64(len(file.Data)) > limit {
+				return fmt.Errorf("%w: %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, nestedName, limit)
+			}
+			nestedFiles, err := loadBoundedHelmArchiveFiles(bytes.NewReader(file.Data), nestedName, limit)
+			if err != nil {
+				return err
+			}
+			if err := validateBoundedHelmChartFiles(nestedFiles, nestedName, limit); err != nil {
+				return err
+			}
+			continue
+		}
+		unpacked := make([]*helmloader.BufferedFile, 0, len(subFiles))
+		for _, sf := range subFiles {
+			parts := strings.SplitN(sf.Name, "/", 2)
+			if len(parts) < 2 {
+				continue
+			}
+			unpacked = append(unpacked, &helmloader.BufferedFile{Name: parts[1], Data: sf.Data})
+		}
+		if err := validateBoundedHelmChartFiles(unpacked, archiveName+":"+cname, limit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isPackagedHelmDependencyRel(relSlash string) bool {
+	parts := strings.Split(relSlash, "/")
+	if len(parts) < 2 || len(parts)%2 != 0 {
+		return false
+	}
+	for i := 0; i < len(parts); i += 2 {
+		if parts[i] != "charts" {
+			return false
+		}
+		name := parts[i+1]
+		if name == "" || strings.IndexAny(name, "_.") == 0 {
+			return false
+		}
+		isLast := i+2 == len(parts)
+		hasTgzExt := posixpath.Ext(name) == ".tgz"
+		if isLast {
+			return hasTgzExt
+		}
+		if hasTgzExt {
+			return false
+		}
+	}
+	return false
+}
+
+func loadBoundedHelmArchiveFile(path string) (*helmchart.Chart, error) {
+	file, limit, err := openBoundedHelmFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	head := make([]byte, 512)
+	n, readErr := file.Read(head)
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return nil, fmt.Errorf("file %q cannot be read: %w", path, readErr)
+	}
+	sample := head[:n]
+	if contentType := http.DetectContentType(sample); contentType != "application/x-gzip" && !bytes.HasPrefix(sample, []byte("\x1f\x8b\x08")) {
+		if strings.HasSuffix(path, ".yml") || strings.HasSuffix(path, ".yaml") {
+			return nil, fmt.Errorf("file %q seems to be a YAML file, but expected a gzipped archive", path)
+		}
+		return nil, fmt.Errorf("file %q does not appear to be a gzipped archive; got %q", path, contentType)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+
+	cr := &countingReader{r: io.LimitReader(file, limit+1)}
+	files, err := loadBoundedHelmArchiveFiles(cr, path, limit)
+	if cr.n > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, path, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := validateBoundedHelmChartFiles(files, path, limit); err != nil {
+		return nil, err
+	}
+	return helmloader.LoadFiles(files)
+}
+
+func loadHelmChartIgnoreRules(ignorePath string) (*helmignore.Rules, error) {
+	ignoreBytes, err := readHelmTemplateFile(ignorePath)
+	var rules *helmignore.Rules
+	if errors.Is(err, os.ErrNotExist) {
+		rules = helmignore.Empty()
+	} else if err != nil {
+		return nil, err
+	} else {
+		rules, err = helmignore.Parse(bytes.NewReader(ignoreBytes))
+		if err != nil {
+			return nil, err
+		}
+	}
+	rules.AddDefaults()
+	return rules, nil
+}
+
+func validateHelmChartDir(rootDir string) error {
+	rules, err := loadHelmChartIgnoreRules(filepath.Join(rootDir, helmignore.HelmIgnore))
+	if err != nil {
+		return err
+	}
+
+	activeAncestors := make(map[string]bool)
+	var walkDir func(currentDir string) error
+	walkDir = func(currentDir string) error {
+		resolvedDir, err := filepath.EvalSymlinks(currentDir)
+		if err != nil {
+			return err
+		}
+		if activeAncestors[resolvedDir] {
+			return fmt.Errorf("symlink cycle detected in Helm chart directory %q (resolves to %q)", currentDir, resolvedDir)
+		}
+		activeAncestors[resolvedDir] = true
+		defer delete(activeAncestors, resolvedDir)
+
+		entries, err := os.ReadDir(currentDir)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			entryPath := filepath.Join(currentDir, entry.Name())
+			rel, relErr := filepath.Rel(rootDir, entryPath)
+			if relErr != nil {
+				return relErr
+			}
+			relSlash := filepath.ToSlash(rel)
+
+			if entry.Type()&os.ModeSymlink != 0 {
+				lstatInfo, lerr := entry.Info()
+				if lerr == nil && rules.Ignore(relSlash, lstatInfo) {
+					continue
+				}
+				targetInfo, statErr := os.Stat(entryPath)
+				if errors.Is(statErr, os.ErrNotExist) {
+					continue
+				}
+				if statErr != nil {
+					return statErr
+				}
+				if rules.Ignore(relSlash, targetInfo) {
+					continue
+				}
+				if targetInfo.IsDir() {
+					if err := walkDir(entryPath); err != nil {
+						return err
+					}
+					continue
+				}
+			} else {
+				info, infoErr := entry.Info()
+				if errors.Is(infoErr, os.ErrNotExist) {
+					continue
+				}
+				if infoErr != nil {
+					return infoErr
+				}
+				if rules.Ignore(relSlash, info) {
+					continue
+				}
+				if info.IsDir() {
+					if err := walkDir(entryPath); err != nil {
+						return err
+					}
+					continue
+				}
+			}
+
+			if err := validateHelmRegularFile(entryPath); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					continue
+				}
+				return err
+			}
+			if isPackagedHelmDependencyRel(relSlash) {
+				if _, err := loadBoundedHelmArchiveFile(entryPath); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+
+	return walkDir(rootDir)
 }
 
 // isStaticTemplate reports whether the file at absPath contains no Go template
