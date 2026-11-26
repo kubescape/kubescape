@@ -597,6 +597,47 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// boundedArchiveStreamReader bounds total decompressed bytes read from gzip into tar.Reader,
+// including PAX/GNU metadata records and padding, against a fixed stream budget
+// (helmloader.MaxDecompressedChartSize). On budget exhaustion it returns an error wrapping
+// ErrHelmTemplateTooLarge rather than io.EOF so tar.Reader cannot mistake truncation for end-of-archive.
+type boundedArchiveStreamReader struct {
+	r           io.Reader
+	archiveName string
+	read        int64
+	budget      int64
+}
+
+func (b *boundedArchiveStreamReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if b.budget < 0 {
+		return 0, fmt.Errorf("%w: decompressed archive stream in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, b.archiveName, b.budget)
+	}
+	remaining := b.budget - b.read
+	if remaining == 0 {
+		var probe [1]byte
+		n, err := b.r.Read(probe[:])
+		if n > 0 {
+			b.read++
+			return 0, fmt.Errorf("%w: decompressed archive stream in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, b.archiveName, b.budget)
+		}
+		return 0, err
+	}
+
+	readBuf := p
+	if int64(len(readBuf))-1 > remaining {
+		readBuf = readBuf[:int(remaining+1)]
+	}
+	n, err := b.r.Read(readBuf)
+	b.read += int64(n)
+	if int64(n) > remaining {
+		return 0, fmt.Errorf("%w: decompressed archive stream in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, b.archiveName, b.budget)
+	}
+	return n, err
+}
+
 func openBoundedHelmFile(path string) (*os.File, int64, error) {
 	file, err := openHelmTemplateFile(path)
 	if err != nil {
@@ -654,7 +695,12 @@ func loadBoundedHelmArchiveFiles(in io.Reader, archiveName string, limit int64) 
 	defer unzipped.Close()
 
 	var files []*helmloader.BufferedFile
-	tr := tar.NewReader(unzipped)
+	streamBudget := helmloader.MaxDecompressedChartSize
+	tr := tar.NewReader(&boundedArchiveStreamReader{
+		r:           unzipped,
+		archiveName: archiveName,
+		budget:      streamBudget,
+	})
 	var totalDecompressed int64
 	for {
 		hd, err := tr.Next()
@@ -670,10 +716,10 @@ func loadBoundedHelmArchiveFiles(in io.Reader, archiveName string, limit int64) 
 		if hd.Size > limit {
 			return nil, fmt.Errorf("%w: archive entry %q in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, hd.Name, archiveName, limit)
 		}
-		totalDecompressed += hd.Size
-		if totalDecompressed > helmloader.MaxDecompressedChartSize {
+		if helmloader.MaxDecompressedChartSize < 0 || hd.Size > helmloader.MaxDecompressedChartSize-totalDecompressed {
 			return nil, fmt.Errorf("decompressed chart is larger than the maximum file size %d", helmloader.MaxDecompressedChartSize)
 		}
+		totalDecompressed += hd.Size
 		if hd.FileInfo().IsDir() {
 			continue
 		}

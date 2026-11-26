@@ -8,6 +8,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1015,5 +1016,78 @@ func TestNewHelmChart_BoundsAndIgnoreValidation(t *testing.T) {
 		chart, err := NewHelmChart(dir)
 		require.NoError(t, err)
 		assert.Equal(t, "app", chart.GetName())
+	})
+
+	t.Run("chained PAX metadata records exceeding stream budget rejected", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "1048576")
+
+		// Generate one valid TypeXHeader + payload block via tar.Writer, then strip
+		// the trailing dummy file header so we can repeat consecutive PAX records.
+		var templateBuf bytes.Buffer
+		ptw := tar.NewWriter(&templateBuf)
+		require.NoError(t, ptw.WriteHeader(&tar.Header{
+			Name:       "x",
+			Typeflag:   tar.TypeReg,
+			Mode:       0o600,
+			Size:       0,
+			Format:     tar.FormatPAX,
+			PAXRecords: map[string]string{"comment": strings.Repeat("A", 900000)},
+		}))
+		paxRecordBytes := templateBuf.Bytes()[:templateBuf.Len()-512]
+
+		var buf bytes.Buffer
+		gw, err := gzip.NewWriterLevel(&buf, gzip.BestSpeed)
+		require.NoError(t, err)
+		for i := 0; i < 120; i++ {
+			_, err = gw.Write(paxRecordBytes)
+			require.NoError(t, err)
+		}
+		tw := tar.NewWriter(gw)
+		chartYAML := []byte("apiVersion: v2\nname: app\nversion: 0.1.0\n")
+		require.NoError(t, tw.WriteHeader(&tar.Header{
+			Name:     "app/Chart.yaml",
+			Typeflag: tar.TypeReg,
+			Mode:     0o600,
+			Size:     int64(len(chartYAML)),
+		}))
+		_, err = tw.Write(chartYAML)
+		require.NoError(t, err)
+		require.NoError(t, tw.Close())
+		require.NoError(t, gw.Close())
+
+		archivePath := filepath.Join(t.TempDir(), "pax-bomb-0.1.0.tgz")
+		require.Less(t, buf.Len(), 1<<20, "compressed PAX chain must stay below compressed file limit")
+		require.NoError(t, os.WriteFile(archivePath, buf.Bytes(), 0o600))
+
+		_, err = NewHelmChart(archivePath)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrHelmTemplateTooLarge)
+	})
+
+	t.Run("near-MaxInt64 tar entry rejected before totalDecompressed overflow", func(t *testing.T) {
+		var buf bytes.Buffer
+		gw := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(gw)
+		chartYAML := []byte("apiVersion: v2\nname: app\nversion: 0.1.0\n")
+		require.NoError(t, tw.WriteHeader(&tar.Header{
+			Name:     "app/Chart.yaml",
+			Typeflag: tar.TypeReg,
+			Mode:     0o600,
+			Size:     int64(len(chartYAML)),
+		}))
+		_, err := tw.Write(chartYAML)
+		require.NoError(t, err)
+		require.NoError(t, tw.WriteHeader(&tar.Header{
+			Name:     "app/templates/huge.yaml",
+			Typeflag: tar.TypeReg,
+			Format:   tar.FormatPAX,
+			Mode:     0o600,
+			Size:     math.MaxInt64 - 1,
+		}))
+		require.NoError(t, gw.Close())
+
+		_, err = loadBoundedHelmArchiveFiles(bytes.NewReader(buf.Bytes()), "overflow.tgz", math.MaxInt64)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "decompressed chart is larger than the maximum file size")
 	})
 }
