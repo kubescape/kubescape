@@ -1,17 +1,27 @@
 package watch
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"helm.sh/helm/v3/pkg/ignore"
+)
+
+var (
+	errHelmIgnoreNotRegular = errors.New(".helmignore is not a regular file")
+	errHelmIgnoreTooLarge   = errors.New(".helmignore exceeds maximum size limit")
 )
 
 type dependencyDirectory struct {
@@ -274,13 +284,71 @@ func (d dependencyDirectories) addChart(ctx context.Context, chart string, visit
 	rules := ignore.Empty()
 	ignorePath := filepath.Join(root, ignore.HelmIgnore)
 	d.addPath(ignorePath) // Helm reads the rules before applying them to chart entries.
-	if info, err := os.Stat(ignorePath); err == nil && info.Mode().IsRegular() {
-		if parsed, err := ignore.ParseFile(ignorePath); err == nil {
-			rules = parsed
-		}
+	if parsed, err := loadHelmIgnoreRules(ignorePath); err == nil {
+		rules = parsed
 	}
 	rules.AddDefaults()
 	d.addChartDirectory(ctx, root, "", rules, make(map[string]struct{}))
+}
+
+// openRegularHelmIgnoreFile opens path with O_NONBLOCK and validates both
+// before opening and on the opened descriptor that it refers to a regular file.
+func openRegularHelmIgnoreFile(path string) (*os.File, fs.FileInfo, error) {
+	cleaned := filepath.Clean(path)
+	statInfo, err := os.Stat(cleaned)
+	if err != nil {
+		return nil, nil, err
+	}
+	if statInfo.IsDir() {
+		return nil, nil, fmt.Errorf("%q is a directory, not a file: %w", path, errHelmIgnoreNotRegular)
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("%w: %q", errHelmIgnoreNotRegular, path)
+	}
+
+	file, err := os.OpenFile(cleaned, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, err
+	}
+	if info.IsDir() {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("%q is a directory, not a file: %w", path, errHelmIgnoreNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("%w: %q", errHelmIgnoreNotRegular, path)
+	}
+	return file, info, nil
+}
+
+// loadHelmIgnoreRules reads and parses a .helmignore file without blocking on
+// non-regular files and bounds reads by filesizelimit.GetMaxFileSize().
+func loadHelmIgnoreRules(path string) (*ignore.Rules, error) {
+	file, info, err := openRegularHelmIgnoreFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	limit := filesizelimit.GetMaxFileSize()
+	if info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", errHelmIgnoreTooLarge, path, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", errHelmIgnoreTooLarge, path, limit)
+	}
+
+	return ignore.Parse(bytes.NewReader(data))
 }
 
 func (d dependencyDirectories) addChartDirectory(ctx context.Context, dir, relative string, rules *ignore.Rules, stack map[string]struct{}) {
