@@ -552,7 +552,7 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 
 	// Get repo root. A glob input is not a path on disk: anchor it at the
 	// directory file discovery walks, as the ignore file and --watch already do.
-	rootInput, _ := cautils.GlobInputRoot(path)
+	rootInput, isGlob := cautils.GlobInputRoot(path)
 	repoRoot, gitRepo := extractGitRepo(rootInput)
 
 	// when scanning a single file, we consider the repository root to be
@@ -593,27 +593,26 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 	// generic Helm renderer left them alone. CRDs are filtered separately according
 	// to includeCRDs, so an omitted CRD remains available to the raw-file pass.
 	coveredChartDirectories := append(append([]string{}, renderedCharts...), ownedHelmCharts...)
-	sourceToWorkloads, fileSkips, err := cautils.LoadResourcesFromFilesFiltered(ctx, path, repoRoot, coveredChartDirectories, pathFilter, workspaceDir)
+	sourceToWorkloads, fileSkips, filesErr := cautils.LoadResourcesFromFilesFiltered(ctx, path, repoRoot, coveredChartDirectories, pathFilter, workspaceDir)
 	allSkips = append(allSkips, fileSkips...)
-	filesErr := err
-	if err != nil && !errors.Is(err, cautils.ErrNoManifestFiles) {
-		return "", nil, nil, allSkips, err
+	if filesErr != nil && !errors.Is(filesErr, cautils.ErrNoManifestFiles) {
+		if !errors.Is(filesErr, cautils.ErrManifestsNotLoaded) {
+			return "", nil, nil, allSkips, filesErr
+		}
+		// A directory or glob can still have resources from the other loaders.
+		// A malformed file named as the input must still fail immediately.
+		if !isGlob {
+			info, statErr := os.Stat(path)
+			if statErr != nil || !info.IsDir() {
+				return "", nil, nil, allSkips, filesErr
+			}
+		}
 	}
 	terraformSourceToWorkloads, terraformSkips, err := cautils.LoadResourcesFromTerraformFilteredWithSkips(ctx, path, pathFilter, workspaceDir)
 	allSkips = append(allSkips, terraformSkips...)
 	if err != nil {
 		return "", nil, nil, allSkips, err
 	}
-	if filesErr != nil {
-		terraformWorkloads := 0
-		for _, ws := range terraformSourceToWorkloads {
-			terraformWorkloads += len(ws)
-		}
-		if terraformWorkloads == 0 {
-			return "", nil, nil, allSkips, filesErr
-		}
-	}
-
 	// merge Terraform-derived workloads, same pattern as the Kustomize block below
 	for source, ws := range terraformSourceToWorkloads {
 		workloads = append(workloads, ws...)
@@ -811,7 +810,13 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 	// Successful renderers already exclude their owned raw inputs. Preserve all
 	// remaining sources, even when their Kubernetes identities match.
 	if len(workloads) == 0 {
+		if filesErr != nil {
+			return "", nil, nil, allSkips, filesErr
+		}
 		return "", nil, nil, allSkips, fmt.Errorf("%w for input %q", ErrNoScannableResources, path)
+	}
+	if errors.Is(filesErr, cautils.ErrManifestsNotLoaded) {
+		logger.L().Ctx(ctx).Warning("Skipping invalid manifest files", helpers.Error(filesErr))
 	}
 
 	inputRoot := repoRoot

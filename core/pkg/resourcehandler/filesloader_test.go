@@ -977,6 +977,95 @@ func TestGetResourcesFromPathRejectsDirectoryWithoutKubernetesResources(t *testi
 	assert.Contains(t, err.Error(), "no scannable Kubernetes resources")
 }
 
+func TestGetResourcesFromPathWithInvalidManifest(t *testing.T) {
+	cases := []struct {
+		name     string
+		prepare  func(t *testing.T, dir string) string
+		manifest string
+		content  string
+		kind     string
+		source   string
+	}{
+		{
+			name: "Helm chart with invalid YAML helper",
+			prepare: func(t *testing.T, dir string) string {
+				return createTestHelmChartHelper(t, dir, "example")
+			},
+			manifest: "helper.yaml",
+			content:  "pattern: \"v?\\d+\"\n",
+			kind:     "Deployment",
+			source:   reporthandling.SourceTypeHelmChart,
+		},
+		{
+			name: "parent directory with Helm chart and invalid JSON helper",
+			prepare: func(t *testing.T, dir string) string {
+				createTestHelmChartHelper(t, dir, "example")
+				return dir
+			},
+			manifest: "helper.json",
+			content:  "{\"title\": \"{{ include \"example\" . }}\"}\n",
+			kind:     "Deployment",
+			source:   reporthandling.SourceTypeHelmChart,
+		},
+		{
+			name: "Terraform directory",
+			prepare: func(t *testing.T, dir string) string {
+				writeTerraformFixture(t, dir, terraformPodFixture)
+				return dir
+			},
+			kind:   "Pod",
+			source: "Terraform",
+		},
+		{
+			name: "directory with generated Kustomize resource",
+			prepare: func(t *testing.T, dir string) string {
+				app := filepath.Join(dir, "app")
+				require.NoError(t, os.Mkdir(app, 0o750))
+				require.NoError(t, os.WriteFile(filepath.Join(app, "kustomization.yaml"), []byte("configMapGenerator:\n  - name: generated\n    literals:\n      - key=value\n"), 0o600))
+				return dir
+			},
+			kind:   "ConfigMap",
+			source: reporthandling.SourceTypeKustomizeDirectory,
+		},
+		{
+			name: "empty Helm chart",
+			prepare: func(t *testing.T, dir string) string {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "Chart.yaml"), []byte("apiVersion: v2\nname: empty\nversion: 0.1.0\n"), 0o600))
+				return dir
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := tc.prepare(t, t.TempDir())
+			name, content := tc.manifest, tc.content
+			if name == "" {
+				name, content = "bad.yaml", "pattern: \"v?\\d+\"\n"
+			}
+			invalid := filepath.Join(dir, name)
+			require.NoError(t, os.WriteFile(invalid, []byte(content), 0o600))
+
+			sources, workloads, skips, err := getResourcesFromPath(context.Background(), dir, cautils.HelmValueOptions{}, nil)
+			if tc.kind == "" {
+				require.ErrorIs(t, err, cautils.ErrManifestsNotLoaded)
+				assert.Empty(t, workloads)
+			} else {
+				require.NoError(t, err)
+				require.Len(t, workloads, 1)
+				assert.Equal(t, tc.kind, workloads[0].GetKind())
+				assert.Equal(t, tc.source, sources[workloads[0].GetID()].FileType)
+			}
+			require.Len(t, skips, 1)
+			assert.Equal(t, invalid, skips[0].Path)
+			assert.Contains(t, skips[0].Reason, "parse error")
+
+			_, _, _, err = getResourcesFromPath(context.Background(), invalid, cautils.HelmValueOptions{}, nil)
+			require.ErrorIs(t, err, cautils.ErrManifestsNotLoaded)
+		})
+	}
+}
+
 const terraformPodFixture = `
 resource "kubernetes_pod_v1" "example" {
   metadata {
