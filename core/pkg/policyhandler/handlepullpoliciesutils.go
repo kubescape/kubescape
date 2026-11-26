@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -83,4 +84,20 @@ func policyIdentifierToSlice(rules []cautils.PolicyIdentifier) []string {
 		s = append(s, fmt.Sprintf("%s: %s", rules[i].Kind, rules[i].Identifier))
 	}
 	return s
+}
+
+// controlNameOnlyExceptions returns the names of exceptions that pick a
+// control only by controlName. controlName is no longer supported for
+// picking a control, so these exceptions don't do what they say.
+func controlNameOnlyExceptions(exceptions []armotypes.PostureExceptionPolicy) []string {
+	var names []string
+	for i := range exceptions {
+		for _, policy := range exceptions[i].PosturePolicies {
+			if policy.ControlName != "" && policy.ControlID == "" {
+				names = append(names, exceptions[i].GetName())
+				break
+			}
+		}
+	}
+	return names
 }

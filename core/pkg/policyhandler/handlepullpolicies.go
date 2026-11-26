@@ -170,6 +170,10 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 		exceptions = []armotypes.PostureExceptionPolicy{}
 	} else {
 		logger.L().StopSuccess("Loaded exceptions")
+		if names := controlNameOnlyExceptions(exceptions); len(names) > 0 {
+			logger.L().Ctx(ctx).Warning("exceptions select a control by controlName, which is not supported; use controlID instead",
+				helpers.String("exceptions", quoteIdentifiers(names)))
+		}
 	}
 
 	logger.L().Start("Loading account configurations...")
