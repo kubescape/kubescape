@@ -756,7 +756,7 @@ func validateKustomizeHelmChartInputs(root string, globals *types.HelmGlobals, c
 			return nil
 		}
 		if entryInfo.IsDir() {
-			return nil
+			return fmt.Errorf("%w: symlinked directory %q in Helm chart %q is not allowed", ErrKustomizationFileNotRegular, rel, chart.Name)
 		}
 		err := validateKustomizationFile(entryPath)
 		if errors.Is(err, os.ErrNotExist) {

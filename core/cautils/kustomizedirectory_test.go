@@ -879,4 +879,92 @@ spec:
 		require.NotEmpty(t, errs)
 		assert.Contains(t, errs[0].Error(), "**")
 	})
+
+	t.Run("symlinked directory in helm chart is rejected before invoking helm", func(t *testing.T) {
+		installFakeHelmBinary(t)
+		marker := filepath.Join(t.TempDir(), "helm-invoked")
+		t.Setenv("KUBESCAPE_TEST_HELM_MARKER", marker)
+
+		dir := resolvedTempDir(t)
+		targetDir := t.TempDir()
+		writeManifestFixture(t, targetDir, "payload.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: target-payload\n")
+
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "charts", "app", "templates"), 0o750))
+		symlinkErr := os.Symlink(targetDir, filepath.Join(dir, "charts", "app", "templates", "linked_dir"))
+		if symlinkErr != nil {
+			if runtime.GOOS == "windows" {
+				t.Skip("skipping symlink test on Windows due to privileges")
+			}
+			require.NoError(t, symlinkErr)
+		}
+
+		writeManifestFixture(t, dir, "kustomization.yaml", "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nhelmCharts:\n- name: app\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "Chart.yaml"), "apiVersion: v2\nname: app\nversion: 0.1.0\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "values.yaml"), "{}\n")
+
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		assert.Nil(t, workloads)
+		require.NotEmpty(t, errs)
+		assert.ErrorIs(t, errs[0], ErrKustomizationFileNotRegular)
+		assert.Contains(t, errs[0].Error(), "symlinked directory")
+
+		_, statErr := os.Stat(marker)
+		assert.True(t, os.IsNotExist(statErr), "helm must not be invoked when chart contains a symlinked directory; statErr=%v", statErr)
+	})
+
+	t.Run("symlinked directory excluded by helmignore is allowed", func(t *testing.T) {
+		installFakeHelmBinary(t)
+
+		dir := resolvedTempDir(t)
+		targetDir := t.TempDir()
+		writeManifestFixture(t, targetDir, "payload.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: target-payload\n")
+
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "charts", "app", "templates"), 0o750))
+		symlinkErr := os.Symlink(targetDir, filepath.Join(dir, "charts", "app", "ignored_symdir"))
+		if symlinkErr != nil {
+			if runtime.GOOS == "windows" {
+				t.Skip("skipping symlink test on Windows due to privileges")
+			}
+			require.NoError(t, symlinkErr)
+		}
+
+		writeManifestFixture(t, dir, "kustomization.yaml", "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nhelmCharts:\n- name: app\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", ".helmignore"), "ignored_symdir/\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "Chart.yaml"), "apiVersion: v2\nname: app\nversion: 0.1.0\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "values.yaml"), "{}\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "templates", "cm.yaml"), "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test-config\n")
+
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		require.Empty(t, errs)
+		require.Len(t, workloads[dir], 1)
+	})
+
+	t.Run("symlink to regular file within size limit in helm chart is accepted", func(t *testing.T) {
+		installFakeHelmBinary(t)
+
+		dir := resolvedTempDir(t)
+		targetDir := t.TempDir()
+		targetFile := filepath.Join(targetDir, "cm.yaml")
+		require.NoError(t, os.WriteFile(targetFile, []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test-config\n"), 0o600))
+
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "charts", "app", "templates"), 0o750))
+		symlinkErr := os.Symlink(targetFile, filepath.Join(dir, "charts", "app", "templates", "cm.yaml"))
+		if symlinkErr != nil {
+			if runtime.GOOS == "windows" {
+				t.Skip("skipping symlink test on Windows due to privileges")
+			}
+			require.NoError(t, symlinkErr)
+		}
+
+		writeManifestFixture(t, dir, "kustomization.yaml", "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nhelmCharts:\n- name: app\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "Chart.yaml"), "apiVersion: v2\nname: app\nversion: 0.1.0\n")
+		writeManifestFixture(t, dir, filepath.Join("charts", "app", "values.yaml"), "{}\n")
+
+		kd := NewKustomizeDirectory(dir)
+		workloads, errs := kd.GetWorkloads(dir)
+		require.Empty(t, errs)
+		require.Len(t, workloads[dir], 1)
+	})
 }
