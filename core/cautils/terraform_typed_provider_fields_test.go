@@ -190,3 +190,123 @@ func TestAttributeKeyForSecretData(t *testing.T) {
 	assert.Equal(t, "data", attributeKeyFor("kubernetes_config_map_v1.cm", "data"))
 	assert.Equal(t, "data", attributeKeyFor("kubernetes_secret_v1.s.metadata", "data"))
 }
+
+// The provider's control attributes and timeouts blocks tell the provider how
+// to apply an object. They are not part of the Kubernetes object, so they are
+// left out of the converted manifests.
+func TestExtractTypedResourcesStripsProviderControlArguments(t *testing.T) {
+	src := `
+resource "kubernetes_deployment_v1" "d" {
+  wait_for_rollout = true
+  timeouts {
+    create = "3m"
+  }
+  metadata {
+    name = "d"
+  }
+  spec {
+    selector {
+      match_labels = { app = "a" }
+    }
+    template {
+      metadata {
+        labels = { app = "a" }
+      }
+      spec {
+        container {
+          name  = "app"
+          image = "nginx"
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_service_v1" "s" {
+  wait_for_load_balancer = false
+  metadata {
+    name = "s"
+  }
+  spec {
+    type = "LoadBalancer"
+    port {
+      port = 80
+    }
+  }
+}
+
+resource "kubernetes_job_v1" "j" {
+  wait_for_completion = true
+  metadata {
+    name = "j"
+  }
+  spec {
+    template {
+      metadata {}
+      spec {
+        restart_policy = "Never"
+        container {
+          name  = "app"
+          image = "busybox"
+        }
+      }
+    }
+  }
+}
+
+resource "kubernetes_namespace_v1" "ns" {
+  wait_for_default_service_account = true
+  metadata {
+    name = "ns"
+  }
+}
+
+resource "kubernetes_secret_v1" "tok" {
+  wait_for_service_account_token = true
+  metadata {
+    name        = "tok"
+    annotations = { "kubernetes.io/service-account.name" = "sa" }
+  }
+  type = "kubernetes.io/service-account-token"
+}
+
+resource "kubernetes_persistent_volume_claim_v1" "pvc" {
+  wait_until_bound = false
+  metadata {
+    name = "pvc"
+  }
+  spec {
+    access_modes = ["ReadWriteOnce"]
+    resources {
+      requests = { storage = "1Gi" }
+    }
+  }
+}
+`
+	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+	require.Empty(t, errs)
+	require.Len(t, manifests, 6)
+
+	targets := map[string]interface{}{
+		"Deployment":            &appsv1.Deployment{},
+		"Service":               &corev1.Service{},
+		"Job":                   &batchv1.Job{},
+		"Namespace":             &corev1.Namespace{},
+		"Secret":                &corev1.Secret{},
+		"PersistentVolumeClaim": &corev1.PersistentVolumeClaim{},
+	}
+	for _, m := range manifests {
+		kind, _ := m["kind"].(string)
+		for _, key := range []string{"timeouts", "waitForRollout", "waitForLoadBalancer", "waitForCompletion",
+			"waitForDefaultServiceAccount", "waitForServiceAccountToken", "waitUntilBound"} {
+			assert.NotContains(t, m, key, "%s keeps the provider control argument %s", kind, key)
+		}
+		target, ok := targets[kind]
+		require.True(t, ok, "unexpected kind %q", kind)
+		data, err := json.Marshal(m)
+		require.NoError(t, err)
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		require.NoError(t, dec.Decode(target), "%s does not decode into the Kubernetes type", kind)
+	}
+}
