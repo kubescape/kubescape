@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -146,8 +145,7 @@ func readBoundedTLSFile(kind, path string, limit int64) ([]byte, os.FileInfo, er
 	if strings.TrimSpace(path) == "" {
 		return nil, nil, fmt.Errorf("failed to stat %s file %q: %w", kind, path, os.ErrNotExist)
 	}
-	cleaned := filepath.Clean(path)
-	statInfo, err := os.Stat(cleaned)
+	statInfo, err := os.Stat(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to stat %s file %q: %w", kind, path, err)
 	}
@@ -158,7 +156,7 @@ func readBoundedTLSFile(kind, path string, limit int64) ([]byte, os.FileInfo, er
 		return nil, nil, fmt.Errorf("%w: %q", errTLSFileNotRegular, path)
 	}
 
-	file, err := os.OpenFile(cleaned, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -180,9 +178,11 @@ func readBoundedTLSFile(kind, path string, limit int64) ([]byte, os.FileInfo, er
 
 	data, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
+		clear(data)
 		return nil, nil, err
 	}
 	if int64(len(data)) > limit {
+		clear(data)
 		return nil, nil, fmt.Errorf("%w: %q exceeds the %d byte limit", errTLSFileTooLarge, path, limit)
 	}
 	return data, info, nil
