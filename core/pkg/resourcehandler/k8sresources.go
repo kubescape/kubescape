@@ -1322,18 +1322,40 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 // Every GVR keeps pointing at the surviving object, so a rule declaring either
 // version still matches it.
 func dedupeServedVersionAliases(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata) {
+	if len(allResources) < 2 {
+		return
+	}
+
+	// Quick check if any UID collision exists before doing full group-by and sorting.
+	seenUIDs := make(map[string]struct{}, len(allResources))
+	hasCollision := false
+	for _, res := range allResources {
+		if uid := resourceUID(res); uid != "" {
+			if _, exists := seenUIDs[uid]; exists {
+				hasCollision = true
+				break
+			}
+			seenUIDs[uid] = struct{}{}
+		}
+	}
+	if !hasCollision {
+		return
+	}
+
 	byUID := make(map[string][]string, len(allResources))
-	for _, id := range slices.Sorted(maps.Keys(allResources)) {
-		if uid := resourceUID(allResources[id]); uid != "" {
+	for id, res := range allResources {
+		if uid := resourceUID(res); uid != "" {
 			byUID[uid] = append(byUID[uid], id)
 		}
 	}
 
+	// For determinism when selecting survivor among equal-ranked versions, sort the IDs per colliding UID.
 	alias := map[string]string{} // dropped resource ID -> surviving one
 	for _, ids := range byUID {
 		if len(ids) < 2 {
 			continue
 		}
+		slices.Sort(ids)
 		survivor := ids[0]
 		for _, id := range ids[1:] {
 			if preferServedVersion(allResources[id], allResources[survivor]) {

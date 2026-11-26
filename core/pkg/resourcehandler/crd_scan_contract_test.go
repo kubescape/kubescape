@@ -613,6 +613,113 @@ func TestDedupeServedVersionAliases(t *testing.T) {
 
 		assert.Equal(t, []string{beta.GetID()}, k8sResources["ate.dev/v1beta1/workerpools"])
 	})
+
+	t.Run("returns early on empty or single-resource map", func(t *testing.T) {
+		allResources := map[string]workloadinterface.IMetadata{}
+		dedupeServedVersionAliases(cautils.K8SResources{}, allResources)
+		assert.Empty(t, allResources)
+
+		single := servedWorkload("apps/v1", "Deployment", "default", "web", "single-uid")
+		allResources[single.GetID()] = single
+		k8sResources := cautils.K8SResources{"apps/v1/deployments": {single.GetID()}}
+		dedupeServedVersionAliases(k8sResources, allResources)
+		assert.Len(t, allResources, 1)
+		assert.Equal(t, []string{single.GetID()}, k8sResources["apps/v1/deployments"])
+	})
+
+	t.Run("no-collision fast path preserves all resources and mappings without modification", func(t *testing.T) {
+		allResources := make(map[string]workloadinterface.IMetadata)
+		k8sResources := make(cautils.K8SResources)
+		for i := 0; i < 50; i++ {
+			w := servedWorkload("apps/v1", "Deployment", "default", fmt.Sprintf("deploy-%d", i), fmt.Sprintf("uid-%d", i))
+			allResources[w.GetID()] = w
+			k8sResources["apps/v1/deployments"] = append(k8sResources["apps/v1/deployments"], w.GetID())
+		}
+		require.Len(t, allResources, 50)
+		require.Len(t, k8sResources["apps/v1/deployments"], 50)
+
+		dedupeServedVersionAliases(k8sResources, allResources)
+
+		assert.Len(t, allResources, 50)
+		assert.Len(t, k8sResources["apps/v1/deployments"], 50)
+		for i := 0; i < 50; i++ {
+			expectedID := fmt.Sprintf("apps/v1/default/Deployment/deploy-%d", i)
+			assert.Contains(t, allResources, expectedID)
+		}
+	})
+
+	t.Run("deterministic survivor selection among colliding UIDs across arbitrary map iterations", func(t *testing.T) {
+		// When multiple versions share identical version rank, the survivor must be deterministically
+		// chosen by lexicographical order of IDs regardless of Go map iteration order.
+		const sharedUID = "colliding-uid-deterministic-test"
+		idA := "ate.dev/v1alpha1/agents/WorkerPool/aaa"
+		idB := "ate.dev/v1alpha1/agents/WorkerPool/bbb"
+		idC := "ate.dev/v1alpha1/agents/WorkerPool/ccc"
+
+		for trial := 0; trial < 25; trial++ {
+			wA := servedWorkload("ate.dev/v1alpha1", "WorkerPool", "agents", "aaa", sharedUID)
+			wB := servedWorkload("ate.dev/v1alpha1", "WorkerPool", "agents", "bbb", sharedUID)
+			wC := servedWorkload("ate.dev/v1alpha1", "WorkerPool", "agents", "ccc", sharedUID)
+
+			allResources := map[string]workloadinterface.IMetadata{
+				wA.GetID(): wA,
+				wB.GetID(): wB,
+				wC.GetID(): wC,
+			}
+			k8sResources := cautils.K8SResources{
+				"ate.dev/v1alpha1/workerpools": {idA, idB, idC},
+			}
+
+			dedupeServedVersionAliases(k8sResources, allResources)
+
+			// In preferServedVersion, when ranking is equal, candidate.GetID() < current.GetID()
+			// with sorted IDs ensures the lexicographically lowest ID (aaa) survives deterministically.
+			require.Len(t, allResources, 1, "trial %d", trial)
+			survivingID := slices.Collect(maps.Keys(allResources))[0]
+			assert.Equal(t, idA, survivingID, "trial %d: survivor must be deterministically idA", trial)
+			assert.Equal(t, []string{idA}, k8sResources["ate.dev/v1alpha1/workerpools"])
+		}
+	})
+}
+
+func BenchmarkDedupeServedVersionAliases_NoCollisions(b *testing.B) {
+	for _, count := range []int{10, 100, 500} {
+		b.Run(fmt.Sprintf("items_%d", count), func(b *testing.B) {
+			resources := make(map[string]workloadinterface.IMetadata, count)
+			for i := 0; i < count; i++ {
+				w := servedWorkload("apps/v1", "Deployment", "default", fmt.Sprintf("deploy-%d", i), fmt.Sprintf("uid-%d", i))
+				resources[w.GetID()] = w
+			}
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				dedupeServedVersionAliases(cautils.K8SResources{}, resources)
+			}
+		})
+	}
+}
+
+func BenchmarkDedupeServedVersionAliases_WithCollisions(b *testing.B) {
+	for _, count := range []int{10, 100, 500} {
+		b.Run(fmt.Sprintf("items_%d", count), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				b.StopTimer()
+				resources := make(map[string]workloadinterface.IMetadata, count)
+				for j := 0; j < count-2; j++ {
+					w := servedWorkload("apps/v1", "Deployment", "default", fmt.Sprintf("deploy-%d", j), fmt.Sprintf("uid-%d", j))
+					resources[w.GetID()] = w
+				}
+				wAlpha := servedWorkload("ate.dev/v1alpha1", "WorkerPool", "agents", "shared", "shared-uid")
+				wBeta := servedWorkload("ate.dev/v1beta1", "WorkerPool", "agents", "shared", "shared-uid")
+				resources[wAlpha.GetID()] = wAlpha
+				resources[wBeta.GetID()] = wBeta
+				b.StartTimer()
+
+				dedupeServedVersionAliases(cautils.K8SResources{}, resources)
+			}
+		})
+	}
 }
 
 func TestFileResourceHandlerUsesManifestAPIVersionsForBuiltIns(t *testing.T) {
