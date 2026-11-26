@@ -21,10 +21,7 @@ import (
 	helmchart "helm.sh/helm/v3/pkg/chart"
 	helmloader "helm.sh/helm/v3/pkg/chart/loader"
 	helmchartutil "helm.sh/helm/v3/pkg/chartutil"
-	"helm.sh/helm/v3/pkg/cli"
-	helmvalues "helm.sh/helm/v3/pkg/cli/values"
 	helmengine "helm.sh/helm/v3/pkg/engine"
-	helmgetter "helm.sh/helm/v3/pkg/getter"
 	k8sversion "k8s.io/apimachinery/pkg/util/version"
 	componentversion "k8s.io/component-base/version"
 )
@@ -776,13 +773,7 @@ func protectHelmFileValues(values []string) []string {
 // merger (the same code path used by `helm install -f ... --set ...`). The resulting
 // map is the final user-supplied values that should be merged over the chart defaults.
 func (o HelmValueOptions) MergeValues() (map[string]any, error) {
-	opts := helmvalues.Options{
-		ValueFiles:   o.ValueFiles,
-		Values:       o.Values,
-		StringValues: o.StringValues,
-		FileValues:   protectHelmFileValues(o.FileValues),
-	}
-	return opts.MergeValues(helmgetter.All(cli.New()))
+	return mergeBoundedHelmValues(o, os.Stdin)
 }
 
 // ReleaseOptions returns the Helm ReleaseOptions for use with chartutil.ToRenderValues.
