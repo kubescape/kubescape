@@ -19,6 +19,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/convert"
 )
 
 const (
@@ -146,9 +147,11 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 
 	parser := hclparse.NewParser()
 	var errs []error
-	varDefaults := map[string]cty.Value{}
-	declared := map[string]terraformVariable{}
-	var files []*hcl.File
+	// Override files (override.tf, *_override.tf) are merged into the primary
+	// files rather than read as configuration of their own, as in Terraform.
+	// os.ReadDir lists entries sorted by name, the order Terraform applies
+	// override files in.
+	var files, overrideFiles []*hcl.File
 	var parsedPaths []string
 	for _, entry := range entries {
 		if !IsTerraformFile(entry.Name()) {
@@ -170,17 +173,30 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 			errs = append(errs, fmt.Errorf("parsing %s: %w", f, diags))
 			continue
 		}
+		if isTerraformOverrideFile(f) {
+			overrideFiles = append(overrideFiles, file)
+			continue
+		}
 		files = append(files, file)
 		parsedPaths = append(parsedPaths, f)
-		collectVariableDefaults(file.Body, varDefaults, declared)
 	}
 
+	merged, overrideErrs := applyTerraformOverrides(files, overrideFiles)
+	errs = append(errs, overrideErrs...)
+	files = merged.files
+
+	varDefaults := map[string]cty.Value{}
+	declared := map[string]terraformVariable{}
+	for _, file := range files {
+		collectVariableDefaults(file.Body, varDefaults, declared)
+	}
+	applyTerraformVariableOverrides(merged.variables, varDefaults, declared)
 	if len(files) > 0 {
 		errs = append(errs, applyTerraformVarFiles(parser, path, td.workspaceDir, declared, varDefaults)...)
 	}
 	locals, localExpressions := resolveLocals(files, varDefaults)
 	evalCtx := newTerraformEvalContext(varDefaults, locals)
-	references := terraformReferenceChecker{localExpressions: localExpressions, moduleCtx: evalCtx, declaredVariables: declared}
+	references := terraformReferenceChecker{localExpressions: localExpressions, moduleCtx: evalCtx, declaredVariables: declared, sourceSizes: merged.sourceSizes}
 
 	workloads := map[string][]workloadinterface.IMetadata{}
 	for i, file := range files {
@@ -240,8 +256,8 @@ func collectVariableDefaults(body hcl.Body, defaults map[string]cty.Value, decla
 		attrContent, _, _ := block.Body.PartialContent(attrSchema)
 		variable := newTerraformVariable(attrContent.Attributes["type"])
 		if attr, ok := attrContent.Attributes["nullable"]; ok {
-			if val, diags := attr.Expr.Value(nil); !diags.HasErrors() && val.Type() == cty.Bool && val.IsKnown() && !val.IsNull() {
-				variable.nonNullable = val.False()
+			if nonNullable, ok := terraformVariableNonNullable(attr); ok {
+				variable.nonNullable = nonNullable
 			}
 		}
 		if attr, ok := attrContent.Attributes["default"]; ok {
@@ -254,6 +270,22 @@ func collectVariableDefaults(body hcl.Body, defaults map[string]cty.Value, decla
 		}
 		declared[name] = variable
 	}
+}
+
+// terraformVariableNonNullable reads a variable's nullable argument, reporting
+// whether it is set to false. As in Terraform, a value that converts to bool,
+// such as "false", is accepted; ok is false when the value isn't a known bool
+// after conversion.
+func terraformVariableNonNullable(attr *hcl.Attribute) (nonNullable, ok bool) {
+	val, diags := attr.Expr.Value(nil)
+	if diags.HasErrors() || !val.IsWhollyKnown() || val.IsNull() {
+		return false, false
+	}
+	val, err := convert.Convert(val, cty.Bool)
+	if err != nil || !val.IsKnown() || val.IsNull() {
+		return false, false
+	}
+	return val.False(), true
 }
 
 // extractKubernetesManifests finds resource "kubernetes_manifest" "x" { manifest = {...} }
@@ -297,7 +329,7 @@ func extractKubernetesManifestResources(body hcl.Body, evalCtx *hcl.EvalContext,
 		}
 		var sourceSize int
 		if synBody, ok := block.Body.(*hclsyntax.Body); ok {
-			sourceSize = synBody.SrcRange.End.Byte - synBody.SrcRange.Start.Byte
+			sourceSize = reference.sourceSize(synBody, synBody.SrcRange.End.Byte-synBody.SrcRange.Start.Byte)
 		}
 		instances, err := terraformResourceInstances(attrContent.Attributes["count"], attrContent.Attributes["for_each"],
 			evalCtx, reference, "kubernetes_manifest."+block.Labels[1], sourceSize)

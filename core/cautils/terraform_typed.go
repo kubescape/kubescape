@@ -715,7 +715,7 @@ func extractTypedResourceManifests(body hcl.Body, evalCtx *hcl.EvalContext, refe
 		path := block.Labels[0] + "." + block.Labels[1]
 		instances, err := terraformResourceInstances(
 			syntaxAttribute(block.Body, "count"), syntaxAttribute(block.Body, "for_each"),
-			evalCtx, reference, path, block.Range().End.Byte-block.Range().Start.Byte)
+			evalCtx, reference, path, reference.sourceSize(block.Body, block.Range().End.Byte-block.Range().Start.Byte))
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -916,6 +916,19 @@ type terraformReferenceChecker struct {
 	proofVariables      map[hcl.Expression][]hcl.Traversal
 	referenceResults    map[terraformReferenceContext]terraformReferenceResult
 	forItems            map[terraformReferenceContext]terraformForItems
+	// sourceSizes holds the source size of resource bodies merged from
+	// override files, whose own source ranges cover only the base block.
+	sourceSizes map[*hclsyntax.Body]int
+}
+
+// sourceSize is the source size in bytes of a resource block with the given
+// body: span, the size of its source range, unless the body was merged from
+// override files.
+func (c *terraformReferenceChecker) sourceSize(body *hclsyntax.Body, span int) int {
+	if size, ok := c.sourceSizes[body]; ok {
+		return size
+	}
+	return span
 }
 
 type terraformReferenceResult struct {

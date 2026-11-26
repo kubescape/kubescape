@@ -1205,8 +1205,22 @@ func LoadResourcesFromTerraformFilteredWithSkips(ctx context.Context, basePath s
 		td := NewTerraformDirectory(dir, workspaceDir)
 		wls, dirErrs := td.GetWorkloads(dir)
 		if len(dirErrs) > 0 {
+			// Override blocks with no primary definition are skipped without
+			// affecting the rest of the configuration, so the workloads it
+			// defines are kept. The configuration error is still reported.
+			overridesOnly := onlyTerraformMissingOverrideTargets(dirErrs)
 			if explicitTerraformDir && dir == basePath {
+				if overridesOnly {
+					maps.Copy(sourceToWorkloads, wls)
+				}
 				return sourceToWorkloads, skips, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(dirErrs...))
+			}
+			if overridesOnly {
+				logger.L().Ctx(ctx).Warning("Nested Terraform configuration has override blocks that could not be applied; scanning the resources it defines without them",
+					helpers.String("path", dir), helpers.Error(errors.Join(dirErrs...)))
+				skips = append(skips, SkippedManifest{Path: dir, Reason: "some Terraform override blocks could not be applied; see scan logs for details"})
+				maps.Copy(sourceToWorkloads, wls)
+				continue
 			}
 			logger.L().Ctx(ctx).Warning("Skipping nested Terraform configuration that failed to render", helpers.String("path", dir), helpers.Error(errors.Join(dirErrs...)))
 			// HCL diagnostics contain source filenames and resource labels that
