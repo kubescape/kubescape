@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	giturl "github.com/kubescape/go-git-url"
 	"github.com/kubescape/go-logger"
@@ -434,6 +435,17 @@ func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath 
 	}
 
 	wlSource, ok := helmSourceToWorkloads[templatePath]
+	if ok && clonedRepo == "" {
+		// filepath.Abs can collapse "link/.." before the filesystem resolves the symlink.
+		requested, statErr := os.Stat(workloadPath)
+		if statErr == nil {
+			template, templateErr := os.Stat(templatePath)
+			ok = templateErr == nil && os.SameFile(requested, template)
+		} else {
+			// A packaged template's path can be missing or have a non-directory component.
+			ok = errors.Is(statErr, os.ErrNotExist) || errors.Is(statErr, syscall.ENOTDIR)
+		}
+	}
 	if !ok && clonedRepo == "" {
 		var ambiguous bool
 		templatePath, ambiguous = findLocalHelmTemplateAlias(workloadPath, helmSourceToWorkloads, workspaceOpt...)
@@ -472,7 +484,6 @@ func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath 
 
 }
 
-// Keep exact lookups first because rendered templates in packaged dependencies may not exist on disk.
 func findLocalHelmTemplateAlias(workloadPath string, templates map[string][]workloadinterface.IMetadata, workspaceOpt ...string) (match string, ambiguous bool) {
 	if len(workspaceOpt) > 0 && workspaceOpt[0] != "" && !pathcontainment.IsPathContained(workspaceOpt[0], workloadPath) {
 		return "", false
