@@ -71,6 +71,7 @@ func createDiffReportsTools(ksServer *KubescapeMcpserver) {
 		mcp.WithString("base_report", mcp.Required(), mcp.Description("Path to the baseline/base Kubescape scan report JSON file")),
 		mcp.WithString("head_report", mcp.Required(), mcp.Description("Path to the current/head Kubescape scan report JSON file")),
 		mcp.WithBoolean("include_unchanged", mcp.Description("Also list the findings that are the same in both reports (default false; counts.unchanged always gives their number)")),
+		mcp.WithString("min_severity", mcp.Description("Minimum finding severity to include: Critical, High, Medium, Low (optional)")),
 	)
 
 	ksServer.s.AddTool(tool, func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -89,6 +90,10 @@ func createDiffReportsTools(ksServer *KubescapeMcpserver) {
 		}
 
 		includeUnchanged, toolErr := mcpBoolArg(args, "include_unchanged")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		minSeverity, toolErr := parseSeverityValue(args, "min_severity")
 		if toolErr != nil {
 			return toolErr, nil
 		}
@@ -144,6 +149,12 @@ func createDiffReportsTools(ksServer *KubescapeMcpserver) {
 			HeadReport: headReport,
 		}
 		if postureChangeSet != nil {
+			if minSeverity != "" {
+				postureChangeSet.New = diff.FilterBySeverity(postureChangeSet.New, minSeverity)
+				postureChangeSet.Resolved = diff.FilterBySeverity(postureChangeSet.Resolved, minSeverity)
+				postureChangeSet.Unchanged = diff.FilterBySeverity(postureChangeSet.Unchanged, minSeverity)
+				postureChangeSet.Incomparable = diff.FilterBySeverity(postureChangeSet.Incomparable, minSeverity)
+			}
 			result.Counts = diffReportsCounts{
 				New:          len(postureChangeSet.New),
 				Resolved:     len(postureChangeSet.Resolved),
@@ -157,6 +168,11 @@ func createDiffReportsTools(ksServer *KubescapeMcpserver) {
 			}
 		}
 		if vulnerabilityChangeSet != nil {
+			if minSeverity != "" {
+				vulnerabilityChangeSet.New = diff.FilterVulnerabilitiesBySeverity(vulnerabilityChangeSet.New, minSeverity)
+				vulnerabilityChangeSet.Resolved = diff.FilterVulnerabilitiesBySeverity(vulnerabilityChangeSet.Resolved, minSeverity)
+				vulnerabilityChangeSet.Unchanged = diff.FilterVulnerabilitiesBySeverity(vulnerabilityChangeSet.Unchanged, minSeverity)
+			}
 			result.Counts = diffReportsCounts{
 				New:       len(vulnerabilityChangeSet.New),
 				Resolved:  len(vulnerabilityChangeSet.Resolved),

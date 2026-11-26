@@ -296,3 +296,113 @@ func TestDiffReports_IncludeUnchangedMustBeBoolean(t *testing.T) {
 	assert.Equal(t, ErrCodeInvalidArgument, te.Code)
 	assert.Equal(t, "include_unchanged", te.Details["argument"])
 }
+
+func TestDiffReports_MinSeverity(t *testing.T) {
+	t.Run("posture filters new, resolved, unchanged, and incomparable findings", func(t *testing.T) {
+		base := writeDiffReportFixture(t, `{
+			"results":[{"resourceID":"res1","controls":[
+				{"controlID":"C-RESOLVED-LOW","name":"ResolvedLow","status":{"status":"failed"}},
+				{"controlID":"C-STILL-LOW","name":"StillLow","status":{"status":"failed"}},
+				{"controlID":"C-STILL-HIGH","name":"StillHigh","status":{"status":"failed"}},
+				{"controlID":"C-NEW-LOW","name":"NewLow","status":{"status":"passed"}},
+				{"controlID":"C-NEW-HIGH","name":"NewHigh","status":{"status":"passed"}}
+			]}],
+			"summaryDetails":{"controls":{
+				"C-RESOLVED-LOW":{"scoreFactor":2.0},
+				"C-STILL-LOW":{"scoreFactor":2.0},
+				"C-STILL-HIGH":{"scoreFactor":7.0},
+				"C-NEW-LOW":{"scoreFactor":2.0},
+				"C-NEW-HIGH":{"scoreFactor":7.0}
+			}}
+		}`)
+		head := writeDiffReportFixture(t, `{
+			"results":[{"resourceID":"res1","controls":[
+				{"controlID":"C-NEW-LOW","name":"NewLow","status":{"status":"failed"}},
+				{"controlID":"C-NEW-HIGH","name":"NewHigh","status":{"status":"failed"}},
+				{"controlID":"C-INCOMP-HIGH","name":"IncompHigh","status":{"status":"failed"}},
+				{"controlID":"C-STILL-LOW","name":"StillLow","status":{"status":"failed"}},
+				{"controlID":"C-STILL-HIGH","name":"StillHigh","status":{"status":"failed"}}
+			]}],
+			"summaryDetails":{"controls":{
+				"C-NEW-LOW":{"scoreFactor":2.0},
+				"C-NEW-HIGH":{"scoreFactor":7.0},
+				"C-INCOMP-HIGH":{"scoreFactor":7.0},
+				"C-STILL-LOW":{"scoreFactor":2.0},
+				"C-STILL-HIGH":{"scoreFactor":7.0}
+			}}
+		}`)
+
+		ksServer := newDiffReportsTestServer(t)
+		result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "diff_reports", map[string]any{
+			"base_report":       base,
+			"head_report":       head,
+			"include_unchanged": true,
+			"min_severity":      "high",
+		}))
+		require.False(t, result.IsError, "unexpected tool error: %s", toolResultText(t, result))
+
+		var parsed diffReportsResult
+		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+		assert.Equal(t, diffReportsCounts{New: 1, Resolved: 0, Unchanged: 1, Incomparable: 1}, parsed.Counts)
+		require.NotNil(t, parsed.Posture)
+		require.Len(t, parsed.Posture.New, 1)
+		assert.Equal(t, "C-NEW-HIGH", parsed.Posture.New[0].ControlID)
+		assert.Empty(t, parsed.Posture.Resolved)
+		require.Len(t, parsed.Posture.Incomparable, 1)
+		assert.Equal(t, "C-INCOMP-HIGH", parsed.Posture.Incomparable[0].ControlID)
+		require.NotNil(t, parsed.Posture.Unchanged)
+		require.Len(t, *parsed.Posture.Unchanged, 1)
+		assert.Equal(t, "C-STILL-HIGH", (*parsed.Posture.Unchanged)[0].ControlID)
+	})
+
+	t.Run("vulnerability filters new, resolved, and unchanged findings", func(t *testing.T) {
+		base := writeDiffReportFixture(t, `{"matches":[
+			{"vulnerability":{"id":"CVE-RES-LOW","severity":"Low","fix":{"versions":[]}},"artifact":{"name":"a","version":"1","type":"apk"}},
+			{"vulnerability":{"id":"CVE-STILL-NEG","severity":"Negligible","fix":{"versions":[]}},"artifact":{"name":"b","version":"1","type":"apk"}},
+			{"vulnerability":{"id":"CVE-STILL-CRIT","severity":"Critical","fix":{"versions":[]}},"artifact":{"name":"c","version":"1","type":"apk"}}
+		],"source":{"target":{"userInput":"app:1.0"}}}`)
+		head := writeDiffReportFixture(t, `{"matches":[
+			{"vulnerability":{"id":"CVE-NEW-MED","severity":"Medium","fix":{"versions":[]}},"artifact":{"name":"d","version":"1","type":"apk"}},
+			{"vulnerability":{"id":"CVE-NEW-HIGH","severity":"High","fix":{"versions":[]}},"artifact":{"name":"e","version":"1","type":"apk"}},
+			{"vulnerability":{"id":"CVE-STILL-NEG","severity":"Negligible","fix":{"versions":[]}},"artifact":{"name":"b","version":"1","type":"apk"}},
+			{"vulnerability":{"id":"CVE-STILL-CRIT","severity":"Critical","fix":{"versions":[]}},"artifact":{"name":"c","version":"1","type":"apk"}}
+		],"source":{"target":{"userInput":"app:1.1"}}}`)
+
+		ksServer := newDiffReportsTestServer(t)
+		result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "diff_reports", map[string]any{
+			"base_report":       base,
+			"head_report":       head,
+			"include_unchanged": true,
+			"min_severity":      "High",
+		}))
+		require.False(t, result.IsError, "unexpected tool error: %s", toolResultText(t, result))
+
+		var parsed diffReportsResult
+		require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+		assert.Equal(t, diffReportsCounts{New: 1, Resolved: 0, Unchanged: 1}, parsed.Counts)
+		require.NotNil(t, parsed.Vulnerability)
+		require.Len(t, parsed.Vulnerability.New, 1)
+		assert.Equal(t, "CVE-NEW-HIGH", parsed.Vulnerability.New[0].ID)
+		assert.Empty(t, parsed.Vulnerability.Resolved)
+		require.NotNil(t, parsed.Vulnerability.Unchanged)
+		require.Len(t, *parsed.Vulnerability.Unchanged, 1)
+		assert.Equal(t, "CVE-STILL-CRIT", (*parsed.Vulnerability.Unchanged)[0].ID)
+	})
+
+	t.Run("invalid min_severity returns INVALID_ARGUMENT", func(t *testing.T) {
+		ksServer := newDiffReportsTestServer(t)
+		base := writeDiffReportFixture(t, diffReportsPostureBase)
+		head := writeDiffReportFixture(t, diffReportsPostureHead)
+
+		for _, bad := range []any{"Extreme", "Negligible", 123} {
+			result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "diff_reports", map[string]any{
+				"base_report":  base,
+				"head_report":  head,
+				"min_severity": bad,
+			}))
+			te := parsePSSToolError(t, result)
+			assert.Equal(t, ErrCodeInvalidArgument, te.Code)
+			assert.Equal(t, "min_severity", te.Details["argument"])
+		}
+	})
+}

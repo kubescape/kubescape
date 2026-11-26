@@ -849,6 +849,7 @@ Compare two already-produced Kubescape scan report files (JSON) and return what 
 | `base_report` | string | Yes | Path to the baseline/base Kubescape scan report JSON file |
 | `head_report` | string | Yes | Path to the current/head Kubescape scan report JSON file |
 | `include_unchanged` | boolean | No | Also list the findings that are the same in both reports (default false). `counts` always gives the number of new, resolved, unchanged and incomparable findings |
+| `min_severity` | string | No | Minimum finding severity to include: `Critical`, `High`, `Medium`, `Low` |
 
 **Example use case:** "What changed between these two Kubescape reports?"
 
