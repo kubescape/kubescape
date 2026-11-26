@@ -123,7 +123,7 @@ func (cp *GitLabCodeQualityPrinter) collectIssues(ctx context.Context, opaSessio
 			continue
 		}
 
-		resourceSource := opaSessionObj.ResourceSource[resourceID]
+		resourceSource := reportedSource(opaSessionObj, resourceID)
 		relPath := resourceSource.RelativePath
 		if relPath == "" {
 			withoutFilePath++
@@ -216,6 +216,10 @@ func codeQualityFingerprint(controlID string, resource workloadinterface.IMetada
 	identity := resourceID
 	if resource != nil {
 		identity = apiGroup(resource.GetApiVersion()) + "/" + resource.GetKind() + "/" + resource.GetNamespace() + "/" + resource.GetName()
+		// an RBAC subject can be bound more than once in the same file
+		if binding, _, ok := rbacSubjectBinding(resource); ok {
+			identity += "/" + binding.GetKind() + "/" + binding.GetNamespace() + "/" + binding.GetName()
+		}
 	}
 	return gitLabVulnerabilityID(controlID, identity, filePath)
 }

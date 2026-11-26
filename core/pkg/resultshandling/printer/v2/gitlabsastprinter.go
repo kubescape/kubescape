@@ -381,7 +381,7 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 			continue
 		}
 
-		resourceSource := opaSessionObj.ResourceSource[resourceID]
+		resourceSource := reportedSource(opaSessionObj, resourceID)
 		relPath := resourceSource.RelativePath
 
 		// location.file is built from the relative path alone, and GitLab can only anchor a finding to a file inside the repository
