@@ -6,7 +6,11 @@ package fixhandler
 // the same file read through another root is another resource. A scan inside a
 // git repository has one, the repository root, however many inputs it had. It
 // covers every manifest the scan read, not only the ones that were fixed.
+// It returns nil when the handler has no report.
 func (h *FixHandler) ScanRoots() []string {
+	if h.reportObj == nil {
+		return nil
+	}
 	return h.scanRoots()
 }
 

@@ -61,6 +61,11 @@ func TestFixHandler_RecordedKubescapeVersion(t *testing.T) {
 }
 
 func TestFixHandler_ScanRoots(t *testing.T) {
+	t.Run("nil report returns no scan roots", func(t *testing.T) {
+		h := &FixHandler{}
+		assert.Empty(t, h.ScanRoots())
+	})
+
 	t.Run("empty report returns no scan roots", func(t *testing.T) {
 		h := &FixHandler{reportObj: &reporthandlingv2.PostureReport{}}
 		assert.Empty(t, h.ScanRoots())
