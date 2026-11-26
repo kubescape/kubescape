@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -131,11 +132,18 @@ func TestFileWatcherFollowsAncestorOfRenderDependency(t *testing.T) {
 	require.NoError(t, os.Rename(shared, filepath.Join(dir, "replaced")))
 	signals.waitFor(t, "the moved ancestor", is(shared))
 	write(t, dependency, "replacement")
-	_, err = ReplaceRenderDependencies(t.Context(), watchers, files, nil)
-	require.NoError(t, err)
-	mark := signals.mark()
-	write(t, dependency, "edited")
-	signals.waitForAfter(t, mark, "the replacement dependency", is(dependency))
+	// A second rename event for the moved ancestor can still be queued and, once
+	// handled, drops the watches just replanned. Replan until the watch holds.
+	edits := 0
+	require.Eventually(t, func() bool {
+		_, err := ReplaceRenderDependencies(t.Context(), watchers, files, nil)
+		require.NoError(t, err)
+		mark := signals.mark()
+		edits++
+		write(t, dependency, fmt.Sprintf("edited %d", edits))
+		time.Sleep(200 * time.Millisecond)
+		return signals.hasAfter(mark, is(dependency))
+	}, waitTimeout, 50*time.Millisecond)
 }
 
 func TestFileWatcherChartSelectionSkipsIgnoredLink(t *testing.T) {
