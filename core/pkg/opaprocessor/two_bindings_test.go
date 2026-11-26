@@ -110,3 +110,38 @@ func TestTwoBindingsWithParamRefsAreStillRefused(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "is matched by 2 live bindings")
 }
+
+// Two bindings that pick their params with a selector are refused too, even
+// though neither names a single params object.
+func TestTwoBindingsWithParamSelectorsAreStillRefused(t *testing.T) {
+	rule := reporthandling.PolicyRule{
+		PortalBase:   armotypes.PortalBase{Name: "rule-resources-limits"},
+		RuleLanguage: reporthandling.CELLanguage,
+		Match:        podMatch,
+	}
+	control := reporthandling.Control{ControlID: "C-0004", Rules: []reporthandling.PolicyRule{rule}}
+	selectorBinding := func(name string) metav1unstructured.Unstructured {
+		binding := liveBinding(t, "C-0004", name)
+		require.NoError(t, metav1unstructured.SetNestedField(binding.Object,
+			map[string]any{"matchLabels": map[string]any{"team": name}}, "spec", "paramRef", "selector"))
+		return binding
+	}
+	scanner := newParityScanner(t, twoBindingsTestPods(), nil)
+	scanner.VAPBindings = []metav1unstructured.Unstructured{selectorBinding("binding-a"), selectorBinding("binding-b")}
+
+	_, err := scanner.processRule(context.Background(), &rule, nil, evaluationScope{}, &control)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is matched by 2 live bindings")
+}
+
+// A policy that takes no params ignores a binding's paramRef, so two bindings
+// that each carry one still scan like a single binding.
+func TestTwoBindingsWithParamRefsOnAPolicyWithoutParamsStillScan(t *testing.T) {
+	statuses, err := scanC0057WithBindings(t, []metav1unstructured.Unstructured{
+		liveBindingWithParamRef(t, "C-0057", "binding-a", "params-a"),
+		liveBindingWithParamRef(t, "C-0057", "binding-b", "params-b"),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, apis.StatusFailed, statuses["/v1/default/Pod/leaky"])
+	assert.Equal(t, apis.StatusPassed, statuses["/v1/default/Pod/clean"])
+}
