@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -48,6 +49,14 @@ func EvaluateCase(ctx context.Context, rule RuleUnderTest, c Case) ([]reporthand
 	sessionObj := cautils.NewOPASessionObjMock()
 	sessionObj.RegoInputData = data
 	sessionObj.Report.ClusterCloudProvider = data.DataControlInputs["cloudProvider"]
+	if rule.Rule.RuleLanguage == reporthandling.CELLanguage {
+		sessionObj.CELNamespaceContext = make(map[string]workloadinterface.IMetadata)
+		for _, resource := range resourcesToScan {
+			if resource.GetKind() == "Namespace" && resource.GetApiVersion() == "v1" && resource.GetName() != "" {
+				sessionObj.CELNamespaceContext[resource.GetName()] = resource
+			}
+		}
+	}
 	proc := opaprocessor.NewOPAProcessor(sessionObj, &resources.RegoDependenciesData{}, "", "", "", false, nil)
 
 	got, err := proc.EvaluateRule(ctx, &rule.Rule, resourcesToScan, rule.Name)

@@ -20,9 +20,16 @@ func getPolicyTestCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "test <path>",
-		Short: "Run a Rego control's test fixtures and report pass/fail",
-		Long:  `Discovers rule directories (raw.rego + rule.metadata.json, with test cases under test/<case>/{input,expected.json} and an optional data.json of control inputs) under <path>, evaluates every case, and reports which ones match their expected.json.`,
-		Args:  cobra.ExactArgs(1),
+		Short: "Run Rego or CEL policy fixtures and report pass/fail",
+		Long: `Discovers rule directories under <path>, evaluates their cases under
+test/<case>/input, and compares findings with test/<case>/expected.json.
+
+A rule directory contains raw.rego with rule.metadata.json, or policy.yaml
+with one standalone ValidatingAdmissionPolicy without spec.paramKind.
+Rego cases can supply control inputs in an optional data.json.
+
+Example: kubescape policy test ./my-rules/require-team-label`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var pattern *regexp.Regexp
 			if run != "" {
@@ -148,7 +155,7 @@ func discoverRules(path string, pattern *regexp.Regexp) ([]policytest.RuleUnderT
 		return nil, fmt.Errorf("discover rules: %w", err)
 	}
 	if len(rules) == 0 {
-		return nil, fmt.Errorf("no rule directories (raw.rego + rule.metadata.json) found under %q", path)
+		return nil, fmt.Errorf("no rule directories (raw.rego + rule.metadata.json, or policy.yaml) found under %q", path)
 	}
 	if pattern != nil {
 		rules = policytest.FilterCases(rules, pattern)

@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"sort"
 
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 	"github.com/kubescape/kubescape/v4/core/pkg/ruledir"
 	"github.com/kubescape/opa-utils/reporthandling"
 )
@@ -19,8 +21,9 @@ type Case struct {
 	Dir  string
 }
 
-// RuleUnderTest is a rule directory (raw.rego + rule.metadata.json) together
-// with the test cases discovered under its test/ subdirectory.
+const celPolicyFile = "policy.yaml"
+
+// RuleUnderTest is a Rego or CEL rule with the cases under its test/ directory.
 type RuleUnderTest struct {
 	Name  string
 	Dir   string
@@ -32,40 +35,88 @@ type RuleUnderTest struct {
 // rule directory, it is returned as the sole result. Otherwise Discover is
 // used to find rule directories among path's immediate children.
 func DiscoverPath(path string) ([]RuleUnderTest, error) {
-	dirs, err := ruledir.DiscoverPath(path)
+	rule, ok, err := loadRule(path)
 	if err != nil {
 		return nil, err
 	}
-	return withCases(dirs)
+	if ok {
+		return []RuleUnderTest{rule}, nil
+	}
+	return Discover(path)
 }
 
 // Discover walks root looking for rule directories among its immediate
 // children. It does not require a test/ subdirectory to exist, but a rule with
 // no cases produces no CaseResults when run.
 func Discover(root string) ([]RuleUnderTest, error) {
-	dirs, err := ruledir.Discover(root)
+	entries, err := os.ReadDir(root)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read %q: %w", root, err)
 	}
-	return withCases(dirs)
-}
-
-// withCases attaches the fixtures under each rule's test/ subdirectory.
-func withCases(dirs []ruledir.Rule) ([]RuleUnderTest, error) {
-	rules := make([]RuleUnderTest, 0, len(dirs))
-	for _, dir := range dirs {
-		cases, err := discoverCases(filepath.Join(dir.Dir, "test"))
-		if err != nil {
-			return nil, fmt.Errorf("rule %q: %w", dir.Name, err)
+	var rules []RuleUnderTest
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
 		}
-		rules = append(rules, RuleUnderTest{
-			Name:  dir.Name,
-			Dir:   dir.Dir,
-			Rule:  dir.Rule,
-			Cases: cases,
-		})
+		rule, ok, err := loadRule(filepath.Join(root, entry.Name()))
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			rules = append(rules, rule)
+		}
 	}
 	return rules, nil
+}
+
+func loadRule(dir string) (RuleUnderTest, bool, error) {
+	regoRule, ok, err := ruledir.Load(dir)
+	if err != nil {
+		return RuleUnderTest{}, false, fmt.Errorf("rule %q: %w", dir, err)
+	}
+	rule := regoRule.Rule
+	if !ok {
+		policyPath := filepath.Join(dir, celPolicyFile)
+		info, err := os.Stat(policyPath)
+		if os.IsNotExist(err) {
+			return RuleUnderTest{}, false, nil
+		}
+		if err != nil {
+			return RuleUnderTest{}, false, fmt.Errorf("inspect policy %q: %w", policyPath, err)
+		}
+		if !info.Mode().IsRegular() {
+			return RuleUnderTest{}, false, fmt.Errorf("policy %q: %w", policyPath, ruledir.ErrNotRegularFile)
+		}
+		rule, err = loadCELRule(policyPath)
+		if err != nil {
+			return RuleUnderTest{}, false, fmt.Errorf("policy %q: %w", policyPath, err)
+		}
+	}
+
+	cases, err := discoverCases(filepath.Join(dir, "test"))
+	if err != nil {
+		return RuleUnderTest{}, false, fmt.Errorf("rule %q: %w", dir, err)
+	}
+	return RuleUnderTest{Name: filepath.Base(dir), Dir: dir, Rule: rule, Cases: cases}, true, nil
+}
+
+func loadCELRule(path string) (reporthandling.PolicyRule, error) {
+	framework, err := getter.LoadCustomRules(path)
+	if err != nil {
+		return reporthandling.PolicyRule{}, err
+	}
+	if len(framework.Controls) != 1 {
+		return reporthandling.PolicyRule{}, fmt.Errorf("expected one ValidatingAdmissionPolicy, found %d", len(framework.Controls))
+	}
+	rule := framework.Controls[0].Rules[0]
+	policy, err := cel.ParseVAP([]byte(rule.Rule))
+	if err != nil {
+		return reporthandling.PolicyRule{}, err
+	}
+	if policy.TakesParams() {
+		return reporthandling.PolicyRule{}, fmt.Errorf("policy test requires a ValidatingAdmissionPolicy without spec.paramKind")
+	}
+	return rule, nil
 }
 
 // FilterCases keeps only the cases whose "<rule>/<case>" name, the name policy
