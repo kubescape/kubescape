@@ -904,9 +904,63 @@ func TestNewHelmChart_BoundsAndIgnoreValidation(t *testing.T) {
 		select {
 		case loadErr := <-done:
 			require.Error(t, loadErr)
+			assert.Contains(t, loadErr.Error(), "symlink cycle")
 		case <-time.After(5 * time.Second):
 			t.Fatal("NewHelmChart hung on symlink cycle inside chart directory")
 		}
+	})
+
+	t.Run("directory-mode TypeReg tar entry exceeding limit rejected", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "512")
+
+		var buf bytes.Buffer
+		gw := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(gw)
+		for _, item := range []struct {
+			name     string
+			typeflag byte
+			mode     int64
+			body     []byte
+		}{
+			{
+				name:     "app/templates/",
+				typeflag: tar.TypeDir,
+				mode:     0o040755,
+			},
+			{
+				name:     "app/Chart.yaml",
+				typeflag: tar.TypeReg,
+				mode:     0o600,
+				body:     []byte("apiVersion: v2\nname: app\nversion: 0.1.0\n"),
+			},
+			{
+				name:     "app/templates/disguised.yaml",
+				typeflag: tar.TypeReg,
+				mode:     0o040755,
+				body:     bytes.Repeat([]byte("D"), 4096),
+			},
+		} {
+			require.NoError(t, tw.WriteHeader(&tar.Header{
+				Name:     item.name,
+				Typeflag: item.typeflag,
+				Mode:     item.mode,
+				Size:     int64(len(item.body)),
+			}))
+			if len(item.body) > 0 {
+				_, err := tw.Write(item.body)
+				require.NoError(t, err)
+			}
+		}
+		require.NoError(t, tw.Close())
+		require.NoError(t, gw.Close())
+
+		archivePath := filepath.Join(t.TempDir(), "disguised-0.1.0.tgz")
+		require.LessOrEqual(t, buf.Len(), 512)
+		require.NoError(t, os.WriteFile(archivePath, buf.Bytes(), 0o600))
+
+		_, err := NewHelmChart(archivePath)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrHelmTemplateTooLarge)
 	})
 
 	t.Run("nested packaged dependency with oversized decompressed entry rejected", func(t *testing.T) {

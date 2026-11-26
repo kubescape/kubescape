@@ -664,6 +664,16 @@ func loadBoundedHelmArchiveFiles(in io.Reader, archiveName string, limit int64) 
 		if err != nil {
 			return nil, err
 		}
+		if hd.Size < 0 {
+			return nil, fmt.Errorf("invalid negative tar entry size %d for %q in %q", hd.Size, hd.Name, archiveName)
+		}
+		if hd.Size > limit {
+			return nil, fmt.Errorf("%w: archive entry %q in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, hd.Name, archiveName, limit)
+		}
+		totalDecompressed += hd.Size
+		if totalDecompressed > helmloader.MaxDecompressedChartSize {
+			return nil, fmt.Errorf("decompressed chart is larger than the maximum file size %d", helmloader.MaxDecompressedChartSize)
+		}
 		if hd.FileInfo().IsDir() {
 			continue
 		}
@@ -695,14 +705,6 @@ func loadBoundedHelmArchiveFiles(in io.Reader, archiveName string, limit int64) 
 		}
 		if parts[0] == "Chart.yaml" {
 			return nil, errors.New("chart yaml not in base directory")
-		}
-
-		if hd.Size > limit {
-			return nil, fmt.Errorf("%w: archive entry %q in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, hd.Name, archiveName, limit)
-		}
-		totalDecompressed += hd.Size
-		if totalDecompressed > helmloader.MaxDecompressedChartSize {
-			return nil, fmt.Errorf("decompressed chart is larger than the maximum file size %d", helmloader.MaxDecompressedChartSize)
 		}
 
 		data, err := io.ReadAll(io.LimitReader(tr, limit+1))
@@ -868,7 +870,7 @@ func validateHelmChartDir(rootDir string) error {
 			return err
 		}
 		if activeAncestors[resolvedDir] {
-			return nil
+			return fmt.Errorf("symlink cycle detected in Helm chart directory %q (resolves to %q)", currentDir, resolvedDir)
 		}
 		activeAncestors[resolvedDir] = true
 		defer delete(activeAncestors, resolvedDir)
