@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -120,4 +121,61 @@ func TestPrintVulnerabilityGitHubActions(t *testing.T) {
 	assert.Contains(t, string(summaryBytes), "CVE-CRIT")
 	assert.Contains(t, string(summaryBytes), "CVE-HIGH")
 	assert.NotContains(t, string(summaryBytes), "CVE-LOW")
+}
+
+func TestAppendStepSummary_ExistingFileSizeBudget(t *testing.T) {
+	t.Run("truncates append to remaining capacity", func(t *testing.T) {
+		summaryFile := filepath.Join(t.TempDir(), "step-summary.md")
+		existing := strings.Repeat("a", 600*1024)
+		require.NoError(t, os.WriteFile(summaryFile, []byte(existing), 0o600))
+		t.Setenv(githubActionsStepSummaryEnvVar, summaryFile)
+
+		payload := strings.Repeat("b", 600*1024)
+		require.NoError(t, appendStepSummary(func() (string, error) {
+			return payload, nil
+		}))
+
+		got, err := os.ReadFile(summaryFile)
+		require.NoError(t, err)
+		assert.LessOrEqual(t, len(got), githubActionsMaxStepSummaryBytes)
+		assert.True(t, strings.HasPrefix(string(got), existing))
+		assert.True(t, strings.HasSuffix(string(got), githubActionsSummaryTruncatedNote))
+	})
+
+	t.Run("preserves existing content when no capacity remains", func(t *testing.T) {
+		summaryFile := filepath.Join(t.TempDir(), "step-summary.md")
+		existing := strings.Repeat("x", githubActionsMaxStepSummaryBytes)
+		require.NoError(t, os.WriteFile(summaryFile, []byte(existing), 0o600))
+		t.Setenv(githubActionsStepSummaryEnvVar, summaryFile)
+
+		require.NoError(t, appendStepSummary(func() (string, error) {
+			return "extra summary", nil
+		}))
+
+		got, err := os.ReadFile(summaryFile)
+		require.NoError(t, err)
+		assert.Equal(t, existing, string(got))
+	})
+}
+
+func TestAppendStepSummary_TruncatesAtUTF8RuneBoundary(t *testing.T) {
+	summaryFile := filepath.Join(t.TempDir(), "step-summary.md")
+	// Leave room for 4 bytes of content plus the truncation note, then supply
+	// a payload larger than remaining starting with two 3-byte UTF-8 runes ("€€", 6 bytes)
+	// so byte offset 4 splits the second rune.
+	existingLen := githubActionsMaxStepSummaryBytes - len(githubActionsSummaryTruncatedNote) - 4
+	existing := strings.Repeat("a", existingLen)
+	require.NoError(t, os.WriteFile(summaryFile, []byte(existing), 0o600))
+	t.Setenv(githubActionsStepSummaryEnvVar, summaryFile)
+
+	payload := "€€" + strings.Repeat("z", len(githubActionsSummaryTruncatedNote)+10)
+	require.NoError(t, appendStepSummary(func() (string, error) {
+		return payload, nil
+	}))
+
+	got, err := os.ReadFile(summaryFile)
+	require.NoError(t, err)
+	assert.True(t, utf8.Valid(got), "truncated summary must remain valid UTF-8")
+	assert.LessOrEqual(t, len(got), githubActionsMaxStepSummaryBytes)
+	assert.Equal(t, existing+"€"+githubActionsSummaryTruncatedNote, string(got))
 }

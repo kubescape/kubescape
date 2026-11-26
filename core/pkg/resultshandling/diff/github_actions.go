@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -153,6 +154,17 @@ func appendStepSummary(render func() (string, error)) error {
 	if summaryPath == "" {
 		return nil
 	}
+	var existingSize int64
+	if info, err := os.Stat(summaryPath); err == nil { // #nosec G304,G703 -- GITHUB_STEP_SUMMARY is runner-provided
+		existingSize = info.Size()
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stating %s: %w", githubActionsStepSummaryEnvVar, err)
+	}
+	remaining := int64(githubActionsMaxStepSummaryBytes) - existingSize
+	if remaining <= 0 {
+		return nil
+	}
+
 	content, err := render()
 	if err != nil {
 		return err
@@ -160,10 +172,14 @@ func appendStepSummary(render func() (string, error)) error {
 	if content == "" {
 		return nil
 	}
-	if len(content) > githubActionsMaxStepSummaryBytes {
-		maxLen := githubActionsMaxStepSummaryBytes - len(githubActionsSummaryTruncatedNote)
-		if maxLen < 0 {
-			maxLen = 0
+	if int64(len(content)) > remaining {
+		noteLen := len(githubActionsSummaryTruncatedNote)
+		if remaining <= int64(noteLen) {
+			return nil
+		}
+		maxLen := int(remaining) - noteLen
+		for maxLen > 0 && !utf8.RuneStart(content[maxLen]) {
+			maxLen--
 		}
 		content = content[:maxLen] + githubActionsSummaryTruncatedNote
 	}
