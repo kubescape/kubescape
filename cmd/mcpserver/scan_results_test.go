@@ -169,19 +169,22 @@ func TestScanResultConcurrentClients(t *testing.T) {
 }
 
 func TestScanResultConcurrentClientLimits(t *testing.T) {
-	doc, _ := resultTestDocument(t)
-	doc.Resources = doc.Resources[:80]
-	doc.TotalFailed, doc.ReturnedFailed = 80, 80
-	data, err := json.Marshal(doc)
-	require.NoError(t, err)
+	const totalFailed = 80
+	manifests := make([]string, totalFailed)
+	for i := range manifests {
+		name := fmt.Sprintf("privileged-pod-%03d", i)
+		manifests[i] = strings.Replace(samplePrivilegedPodManifest, "name: privileged-pod", "name: "+name, 1)
+	}
+	manifest := strings.Join(manifests, "---\n")
+	policyGetter := getSharedLiveClusterPolicyGetter(t)
 
 	for _, firstLimit := range []int{100, 50} {
 		t.Run(fmt.Sprintf("first-limit-%d", firstLimit), func(t *testing.T) {
-			ks := &KubescapeMcpserver{}
+			ks := &KubescapeMcpserver{policyGetter: policyGetter}
 			const key = "shared-client-limits"
 			started := make(chan struct{})
 			var scans atomic.Int32
-			run := func(context.Context) (interface{}, error) {
+			run := func(ctx context.Context, limit int) (interface{}, error) {
 				if scans.Add(1) == 1 {
 					close(started)
 				}
@@ -192,7 +195,7 @@ func TestScanResultConcurrentClientLimits(t *testing.T) {
 					joined := state != nil && state.count == 2
 					ks.scanCtxMu.Unlock()
 					if joined {
-						return data, nil
+						return ks.runManifestScan(ctx, manifest, "", []string{"C-0017"}, scanFilterArgs{limit: limit})
 					}
 					time.Sleep(time.Millisecond)
 				}
@@ -207,7 +210,9 @@ func TestScanResultConcurrentClientLimits(t *testing.T) {
 			firstCtx := resultTestContext("first")
 			secondCtx := resultTestContext("second")
 			go func() {
-				value, err := ks.doResultScan(firstCtx, key, run, firstLimit)
+				value, err := ks.doResultScan(firstCtx, key, func(ctx context.Context) (interface{}, error) {
+					return run(ctx, firstLimit)
+				}, firstLimit)
 				first <- scanReply{value, err}
 			}()
 			select {
@@ -215,7 +220,10 @@ func TestScanResultConcurrentClientLimits(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("first scan did not start")
 			}
-			secondValue, err := ks.doResultScan(secondCtx, key, run, 150-firstLimit)
+			secondLimit := 150 - firstLimit
+			secondValue, err := ks.doResultScan(secondCtx, key, func(ctx context.Context) (interface{}, error) {
+				return run(ctx, secondLimit)
+			}, secondLimit)
 			require.NoError(t, err)
 			firstReply := <-first
 			require.NoError(t, firstReply.err)
@@ -228,18 +236,20 @@ func TestScanResultConcurrentClientLimits(t *testing.T) {
 				full, limited = limited, full
 				limitedCtx = firstCtx
 			}
-			require.Equal(t, doc.Resources, full.Resources)
+			require.Len(t, full.Resources, totalFailed)
+			require.Equal(t, totalFailed, full.TotalFailed)
+			require.Equal(t, totalFailed, full.ReturnedFailed)
 			require.False(t, full.Truncated)
 			require.Empty(t, full.ScanID)
-			require.Equal(t, doc.Resources[:50], limited.Resources)
-			require.Equal(t, 80, limited.TotalFailed)
+			require.Equal(t, full.Resources[:50], limited.Resources)
+			require.Equal(t, totalFailed, limited.TotalFailed)
 			require.Equal(t, 50, limited.ReturnedFailed)
 			require.True(t, limited.Truncated)
 			require.NotNil(t, limited.NextOffset)
 			require.Equal(t, 50, *limited.NextOffset)
 			next, err := ks.scanResults.page(scanResultOwner(limitedCtx), limited.ScanID, 50, 100, time.Now())
 			require.NoError(t, err)
-			require.Equal(t, doc.Resources[50:], decodeResultPage(t, next).Resources)
+			require.Equal(t, full.Resources[50:], decodeResultPage(t, next).Resources)
 		})
 	}
 }
