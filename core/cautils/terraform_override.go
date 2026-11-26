@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -8,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/hashicorp/hcl/v2"
-	"github.com/hashicorp/hcl/v2/ext/typeexpr"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -18,15 +18,46 @@ import (
 
 // isTerraformOverrideFile reports whether path names a Terraform override
 // file: override.tf or *_override.tf, matched as Terraform does on the file
-// name without its extension. Terraform also accepts .tf.json override files,
-// which, like other .tf.json files, are not read here.
+// name without its extension. Terraform ignores hidden files before it looks
+// for override files, so a name starting with a dot is never one. Terraform
+// also accepts .tf.json override files, which, like other .tf.json files, are
+// not read here.
 func isTerraformOverrideFile(path string) bool {
 	name := filepath.Base(path)
-	if filepath.Ext(name) != ".tf" {
+	if strings.HasPrefix(name, ".") || filepath.Ext(name) != ".tf" {
 		return false
 	}
 	base := strings.TrimSuffix(name, ".tf")
 	return base == "override" || strings.HasSuffix(base, "_override")
+}
+
+// terraformMissingOverrideTargetError reports an override block with no
+// primary definition to merge into. Terraform rejects the configuration, but
+// the block is only skipped: the rest of the module is still read, so the
+// workloads it defines remain valid.
+type terraformMissingOverrideTargetError struct {
+	msg string
+}
+
+func (e *terraformMissingOverrideTargetError) Error() string {
+	return e.msg
+}
+
+func missingTerraformOverrideTarget(format string, args ...any) error {
+	return &terraformMissingOverrideTargetError{msg: fmt.Sprintf(format, args...)}
+}
+
+// onlyTerraformMissingOverrideTargets reports whether errs is non-empty and
+// holds nothing but override blocks with no primary definition, so the
+// workloads extracted alongside them are complete apart from those blocks.
+func onlyTerraformMissingOverrideTargets(errs []error) bool {
+	for _, err := range errs {
+		var target *terraformMissingOverrideTargetError
+		if !errors.As(err, &target) {
+			return false
+		}
+	}
+	return len(errs) > 0
 }
 
 // terraformOverrideResult is the module configuration after override files
@@ -59,6 +90,9 @@ type terraformOverrideMerger struct {
 	variables   map[string][]terraformBlockPosition
 	locals      map[string][]terraformBlockPosition
 	sourceSizes map[*hclsyntax.Body]int
+	// writableLocals are the locals blocks already replaced by a copy the
+	// merger owns, which later local value overrides update in place.
+	writableLocals map[terraformBlockPosition]bool
 
 	variableOverrides []*hclsyntax.Block
 }
@@ -92,6 +126,8 @@ func applyTerraformOverrides(primary, overrides []*hcl.File) (terraformOverrideR
 		variables:   map[string][]terraformBlockPosition{},
 		locals:      map[string][]terraformBlockPosition{},
 		sourceSizes: map[*hclsyntax.Body]int{},
+
+		writableLocals: map[terraformBlockPosition]bool{},
 	}
 	for i, file := range primary {
 		body, ok := file.Body.(*hclsyntax.Body)
@@ -143,28 +179,30 @@ func applyTerraformOverrides(primary, overrides []*hcl.File) (terraformOverrideR
 // variable without a default, as an invalid default in a primary file does.
 // An invalid type constraint leaves the variable unset altogether, so that
 // neither its default nor a variable file value is converted the wrong way.
+//
+// The merged default is kept as Terraform keeps it in the configuration:
+// converted to the type constraint, without the optional attribute defaults
+// applied again. That is what Terraform substitutes for a null variable file
+// value when nullable is false. The value in effect when the variable is not
+// set at all has the optional attribute defaults applied, and goes in
+// defaults.
 func applyTerraformVariableOverrides(overrides []*hclsyntax.Block, defaults map[string]cty.Value, declared map[string]terraformVariable) {
-	// stored is each overridden variable's default as Terraform keeps it in
-	// the configuration, before the type's optional attribute defaults are
-	// applied to it again when the value is used. For a primary declaration
-	// this is the default collectVariableDefaults converted.
-	stored := map[string]cty.Value{}
 	for _, block := range overrides {
 		name := block.Labels[0]
 		variable, ok := declared[name]
 		if !ok {
 			continue
 		}
-		val, ok := stored[name]
-		if !ok {
-			val = variable.defaultVal
-		}
+		// For a primary declaration this is the default collectVariableDefaults
+		// converted, which Terraform applied the optional attribute defaults to
+		// when decoding it; for an overridden one, the default merged so far.
+		val := variable.defaultVal
 
 		attrs := block.Body.Attributes
 		typeAttr, typeSet := attrs["type"]
 		var overrideType terraformVariable
 		if typeSet {
-			ty, tyDefaults, diags := typeexpr.TypeConstraintWithDefaults(typeAttr.Expr)
+			ty, tyDefaults, diags := terraformTypeConstraint(typeAttr.Expr)
 			if diags.HasErrors() {
 				// Terraform rejects the configuration. Neither the default nor
 				// a variable file value can be converted the way Terraform
@@ -206,14 +244,12 @@ func applyTerraformVariableOverrides(overrides []*hclsyntax.Block, defaults map[
 		if val != cty.NilVal && val.IsNull() && variable.nonNullable {
 			val = cty.NilVal
 		}
-		stored[name] = val
 
 		delete(defaults, name)
-		variable.defaultVal = cty.NilVal
+		variable.defaultVal = val
 		if val != cty.NilVal {
 			if final, err := variable.convert(val); err == nil {
 				defaults[name] = final
-				variable.defaultVal = final
 			}
 		}
 		declared[name] = variable
@@ -245,19 +281,22 @@ func (m *terraformOverrideMerger) apply(override *hclsyntax.Block) []error {
 	case override.Type == "resource" && len(override.Labels) == 2:
 		positions := m.resources[terraformResourceKey(override.Labels[0], override.Labels[1])]
 		if len(positions) == 0 {
-			return []error{fmt.Errorf("%s: missing resource to override: there is no %s resource named %q; an override file can only override a resource block defined in a primary configuration file",
+			return []error{missingTerraformOverrideTarget("%s: missing resource to override: there is no %s resource named %q; an override file can only override a resource block defined in a primary configuration file",
 				override.DefRange(), override.Labels[0], override.Labels[1])}
 		}
 		for _, p := range positions {
 			base := m.bodies[p.file].Blocks[p.block]
 			merged := mergeTerraformBlock(base, override)
 			m.sourceSizes[merged.Body] = m.blockSourceSize(base) + terraformBlockSpan(override)
+			// A body merged by an earlier override file is replaced, its size
+			// carried into the new one.
+			delete(m.sourceSizes, base.Body)
 			m.bodies[p.file].Blocks[p.block] = merged
 		}
 	case override.Type == "variable" && len(override.Labels) == 1:
 		positions := m.variables[override.Labels[0]]
 		if len(positions) == 0 {
-			return []error{fmt.Errorf("%s: missing base variable declaration to override: there is no variable named %q; an override file can only override a variable that was already declared in a primary configuration file",
+			return []error{missingTerraformOverrideTarget("%s: missing base variable declaration to override: there is no variable named %q; an override file can only override a variable that was already declared in a primary configuration file",
 				override.DefRange(), override.Labels[0])}
 		}
 		m.variableOverrides = append(m.variableOverrides, override)
@@ -268,12 +307,12 @@ func (m *terraformOverrideMerger) apply(override *hclsyntax.Block) []error {
 			attr := override.Body.Attributes[name]
 			positions := m.locals[name]
 			if len(positions) == 0 {
-				errs = append(errs, fmt.Errorf("%s: missing base local value definition to override: there is no local value named %q; an override file can only override a local value that was already defined in a primary configuration file",
+				errs = append(errs, missingTerraformOverrideTarget("%s: missing base local value definition to override: there is no local value named %q; an override file can only override a local value that was already defined in a primary configuration file",
 					attr.SrcRange, name))
 				continue
 			}
 			for _, p := range positions {
-				m.bodies[p.file].Blocks[p.block] = withTerraformAttribute(m.bodies[p.file].Blocks[p.block], attr)
+				m.writableLocalsBlock(p).Body.Attributes[name] = attr
 			}
 		}
 		return errs
@@ -342,13 +381,20 @@ func terraformMergeBlockType(block *hclsyntax.Block) string {
 	return block.Type
 }
 
-// withTerraformAttribute returns a copy of block with attr replacing the
-// attribute of the same name.
-func withTerraformAttribute(block *hclsyntax.Block, attr *hclsyntax.Attribute) *hclsyntax.Block {
+// writableLocalsBlock returns the locals block at p, first replacing it with
+// a copy the merger owns, so that its attributes can be overridden without
+// changing the parsed file. Each block is copied once, however many local
+// values override it.
+func (m *terraformOverrideMerger) writableLocalsBlock(p terraformBlockPosition) *hclsyntax.Block {
+	block := m.bodies[p.file].Blocks[p.block]
+	if m.writableLocals[p] {
+		return block
+	}
 	body := *block.Body
 	body.Attributes = maps.Clone(block.Body.Attributes)
-	body.Attributes[attr.Name] = attr
 	updated := *block
 	updated.Body = &body
+	m.bodies[p.file].Blocks[p.block] = &updated
+	m.writableLocals[p] = true
 	return &updated
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zclconf/go-cty/cty"
 )
 
 // writeTerraformOverrideFiles writes each named file into dir.
@@ -69,6 +72,12 @@ func TestIsTerraformOverrideFile(t *testing.T) {
 		"web_override.tf":                 true,
 		"_override.tf":                    true,
 		"/a/b/dev_override.tf":            true,
+		"draft_override.tf":               true,
+		"api_override.tf":                 true,
+		".override.tf":                    false, // hidden files are ignored
+		".draft_override.tf":              false,
+		"/a/b/.dev_override.tf":           false,
+		".draft_override.tf.json":         false,
 		"main.tf":                         false,
 		"overrides.tf":                    false,
 		"override_main.tf":                false,
@@ -372,6 +381,26 @@ variable "sc" {
 `,
 			},
 			expected: false,
+		},
+		{
+			// The reverse direction: Terraform decodes the primary default with
+			// the primary type's optional defaults, and a type-only override
+			// does not decode it again with its own.
+			name: "primary optional default is kept when the override's is false",
+			files: map[string]string{
+				"main.tf": `
+variable "sc" {
+  type    = object({ privileged = optional(bool, true) })
+  default = {}
+}
+` + manifest,
+				"override.tf": `
+variable "sc" {
+  type = object({ privileged = optional(bool, false) })
+}
+`,
+			},
+			expected: true,
 		},
 		{
 			name: "overriding type's optional default is not applied to the primary default",
@@ -694,6 +723,7 @@ resource "kubernetes_manifest" "web2" {
 
 	workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
 	require.Len(t, errs, 4)
+	assert.True(t, onlyTerraformMissingOverrideTargets(errs), "unmatched overrides are told apart from other errors")
 	var messages []string
 	for _, err := range errs {
 		messages = append(messages, err.Error())
@@ -714,25 +744,110 @@ resource "kubernetes_manifest" "web2" {
 	assert.Equal(t, false, podSpec(t, all[0])["hostNetwork"], "matched overrides still apply")
 }
 
-// Unmatched overrides follow the existing error policy: a directly scanned
-// directory reports the error, a nested one is skipped with a warning.
+// workloadNames returns the names of all workloads, whichever file they are
+// keyed by.
+func workloadNames(workloads map[string][]workloadinterface.IMetadata) []string {
+	var names []string
+	for _, wls := range workloads {
+		for _, w := range wls {
+			names = append(names, w.GetName())
+		}
+	}
+	return names
+}
+
+// Unmatched overrides are still reported: a directly scanned directory
+// returns the error, a nested one is logged and recorded as a skip. The
+// unmatched block is all that is skipped, so the workloads the directory
+// defines are kept in both cases.
 func TestLoadResourcesFromTerraform_UnmatchedOverride(t *testing.T) {
+	tests := []struct {
+		name     string
+		override string
+		message  string
+	}{
+		{
+			name:     "resource",
+			override: `resource "kubernetes_manifest" "missing" {}`,
+			message:  `there is no kubernetes_manifest resource named "missing"`,
+		},
+		{
+			// The base declaration is in a .tf.json file, which is not read,
+			// so the override matches nothing; the independent Pod in
+			// main.tf must still be scanned.
+			name:     "variable declared in a .tf.json file",
+			override: "variable \"replicas\" {\n  default = 3\n}\n",
+			message:  `there is no variable named "replicas"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := resolvedTempDir(t)
+			nested := filepath.Join(root, "modules", "app")
+			require.NoError(t, os.MkdirAll(nested, 0o700))
+			writeTerraformOverrideFiles(t, nested, map[string]string{
+				"main.tf":           overrideBaseManifestPod,
+				"variables.tf.json": `{"variable": {"replicas": {"type": "number"}}}`,
+				"override.tf":       tt.override,
+			})
+
+			// Nested directory.
+			workloads, skips, err := LoadResourcesFromTerraformFilteredWithSkips(context.Background(), root, nil, root)
+			require.NoError(t, err)
+			assert.Equal(t, []string{"web"}, workloadNames(workloads))
+			require.Len(t, skips, 1)
+			assert.Equal(t, nested, skips[0].Path)
+			assert.Contains(t, skips[0].Reason, "override blocks could not be applied")
+
+			// Explicitly scanned directory.
+			workloads, _, err = LoadResourcesFromTerraformFilteredWithSkips(context.Background(), nested, nil, root)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.message)
+			assert.Equal(t, []string{"web"}, workloadNames(workloads))
+
+			// Explicitly scanned file.
+			workloads, _, err = LoadResourcesFromTerraformFilteredWithSkips(context.Background(), filepath.Join(nested, "main.tf"), nil, root)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.message)
+			assert.Equal(t, []string{"web"}, workloadNames(workloads))
+		})
+	}
+}
+
+// A directory with any other error alongside an unmatched override keeps the
+// existing policy: a nested one is skipped as a whole, a directly scanned one
+// fails without its workloads.
+func TestLoadResourcesFromTerraform_UnmatchedOverrideWithOtherErrors(t *testing.T) {
 	root := resolvedTempDir(t)
 	nested := filepath.Join(root, "modules", "app")
 	require.NoError(t, os.MkdirAll(nested, 0o700))
 	writeTerraformOverrideFiles(t, nested, map[string]string{
 		"main.tf":     overrideBaseManifestPod,
+		"broken.tf":   "this is not valid HCL",
 		"override.tf": `resource "kubernetes_manifest" "missing" {}`,
 	})
 
-	_, skips, err := LoadResourcesFromTerraformFilteredWithSkips(context.Background(), root, nil, root)
+	workloads, skips, err := LoadResourcesFromTerraformFilteredWithSkips(context.Background(), root, nil, root)
 	require.NoError(t, err)
+	assert.Empty(t, workloadNames(workloads))
 	require.Len(t, skips, 1)
 	assert.Equal(t, nested, skips[0].Path)
+	assert.Equal(t, "failed to render Terraform configuration; see scan logs for details", skips[0].Reason)
 
-	_, _, err = LoadResourcesFromTerraformFilteredWithSkips(context.Background(), nested, nil, root)
+	workloads, _, err = LoadResourcesFromTerraformFilteredWithSkips(context.Background(), nested, nil, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `there is no kubernetes_manifest resource named "missing"`)
+	assert.Contains(t, err.Error(), "broken.tf")
+	assert.Empty(t, workloadNames(workloads))
+}
+
+func TestOnlyTerraformMissingOverrideTargets(t *testing.T) {
+	missing := missingTerraformOverrideTarget("missing %s", "x")
+	assert.Equal(t, "missing x", missing.Error())
+	assert.False(t, onlyTerraformMissingOverrideTargets(nil))
+	assert.True(t, onlyTerraformMissingOverrideTargets([]error{missing}))
+	assert.True(t, onlyTerraformMissingOverrideTargets([]error{fmt.Errorf("wrapped: %w", missing)}))
+	assert.False(t, onlyTerraformMissingOverrideTargets([]error{missing, errors.New("parse error")}))
 }
 
 // Several override files of one resource apply in file name order, whatever
@@ -955,4 +1070,371 @@ dynamic "volume" {
 	// block. The block type that is not overridden is kept, first.
 	assert.Equal(t, []string{"dynamic mount", "port", "env", "dynamic volume"}, got)
 	assert.Same(t, override.Blocks[0], merged.Blocks[1])
+}
+
+// The default Terraform substitutes for a null variable file value is the
+// declaration default converted to the type, while a variable that is not set
+// at all also gets the optional attribute defaults (PrepareFinalInputVariableValue).
+func TestTerraformDirectory_GetWorkloads_OverrideVariableNullInput(t *testing.T) {
+	const manifest = `
+resource "kubernetes_manifest" "pod" {
+  manifest = {
+    apiVersion = "v1"
+    kind       = "Pod"
+    metadata   = { name = "pod", namespace = "default" }
+    spec       = { securityContext = var.sc }
+  }
+}
+`
+	const primary = `
+variable "sc" {
+  type     = object({ privileged = optional(bool, false) })
+  nullable = false
+}
+` + manifest
+	tests := []struct {
+		name     string
+		files    map[string]string
+		expected interface{}
+	}{
+		{
+			name: "omitted input gets the optional attribute defaults",
+			files: map[string]string{
+				"main.tf":     primary,
+				"override.tf": "variable \"sc\" {\n  default = {}\n}\n",
+			},
+			expected: false,
+		},
+		{
+			name: "explicit null input gets the overridden default as converted",
+			files: map[string]string{
+				"main.tf":          primary,
+				"override.tf":      "variable \"sc\" {\n  default = {}\n}\n",
+				"terraform.tfvars": `sc = null`,
+			},
+			expected: nil,
+		},
+		{
+			// An override that sets the type as well decodes its default with
+			// that type's optional attribute defaults.
+			name: "explicit null input gets an override default decoded with its own type",
+			files: map[string]string{
+				"main.tf":          primary,
+				"override.tf":      "variable \"sc\" {\n  type    = object({ privileged = optional(bool, true) })\n  default = {}\n}\n",
+				"terraform.tfvars": `sc = null`,
+			},
+			expected: true,
+		},
+		{
+			// A type-only override keeps the primary default as decoded, with
+			// the primary type's optional attribute defaults.
+			name: "explicit null input gets the primary default after a type-only override",
+			files: map[string]string{
+				"main.tf": `
+variable "sc" {
+  type     = object({ privileged = optional(bool, false) })
+  default  = {}
+  nullable = false
+}
+` + manifest,
+				"override.tf":      "variable \"sc\" {\n  type = object({ privileged = optional(bool, true) })\n}\n",
+				"terraform.tfvars": `sc = null`,
+			},
+			expected: false,
+		},
+		{
+			// Terraform applies the optional attribute defaults when decoding
+			// a primary default, so it already holds them.
+			name: "explicit null input gets the primary default as decoded",
+			files: map[string]string{
+				"main.tf": `
+variable "sc" {
+  type     = object({ privileged = optional(bool, false) })
+  default  = {}
+  nullable = false
+}
+` + manifest,
+				"terraform.tfvars": `sc = null`,
+			},
+			expected: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeTerraformOverrideFiles(t, dir, tt.files)
+			workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
+			require.Empty(t, errs)
+			all := terraformOverrideWorkloads(t, workloads)
+			require.Len(t, all, 1)
+			securityContext, ok := podSpec(t, all[0])["securityContext"].(map[string]interface{})
+			require.True(t, ok, "securityContext must be an object")
+			require.Contains(t, securityContext, "privileged")
+			assert.Equal(t, tt.expected, securityContext["privileged"])
+		})
+	}
+
+	t.Run("ordinary default replaces an explicit null input", func(t *testing.T) {
+		dir := t.TempDir()
+		writeTerraformOverrideFiles(t, dir, map[string]string{
+			"main.tf":          overrideBaseManifestPod,
+			"override.tf":      "variable \"host_network\" {\n  default  = false\n  nullable = false\n}\n",
+			"terraform.tfvars": `host_network = null`,
+		})
+		workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
+		require.Empty(t, errs)
+		all := terraformOverrideWorkloads(t, workloads)
+		require.Len(t, all, 1)
+		assert.Equal(t, false, podSpec(t, all[0])["hostNetwork"])
+	})
+}
+
+func TestTerraformTypeConstraint(t *testing.T) {
+	tests := []struct {
+		expr    string
+		want    cty.Type
+		invalid bool
+	}{
+		{expr: "list", want: cty.List(cty.DynamicPseudoType)},
+		{expr: "map", want: cty.Map(cty.DynamicPseudoType)},
+		{expr: "list(string)", want: cty.List(cty.String)},
+		{expr: "map(number)", want: cty.Map(cty.Number)},
+		{expr: "string", want: cty.String},
+		{expr: "any", want: cty.DynamicPseudoType},
+		{expr: "object({ a = list(bool) })", want: cty.Object(map[string]cty.Type{"a": cty.List(cty.Bool)})},
+		// The shorthands are only accepted as the whole type constraint.
+		{expr: "list(list)", invalid: true},
+		{expr: "map(map)", invalid: true},
+		{expr: "object({ a = list })", invalid: true},
+		{expr: "boool", invalid: true},
+		{expr: "list(boool)", invalid: true},
+		{expr: `"list"`, invalid: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.expr, func(t *testing.T) {
+			expr, diags := hclsyntax.ParseExpression([]byte(tt.expr), "test.tf", hcl.InitialPos)
+			require.False(t, diags.HasErrors(), diags.Error())
+			ty, _, diags := terraformTypeConstraint(expr)
+			if tt.invalid {
+				assert.True(t, diags.HasErrors())
+				return
+			}
+			require.False(t, diags.HasErrors(), diags.Error())
+			assert.True(t, tt.want.Equals(ty), "got %s", ty.FriendlyName())
+		})
+	}
+}
+
+// The list and map shorthands are valid type constraints in a primary file and
+// in an override file alike.
+func TestTerraformDirectory_GetWorkloads_VariableTypeShorthand(t *testing.T) {
+	const manifest = `
+resource "kubernetes_manifest" "pod" {
+  manifest = {
+    apiVersion = "v1"
+    kind       = "Pod"
+    metadata   = { name = "pod", namespace = "default", labels = var.labels }
+    spec       = { containers = [{ name = "app", image = "nginx:1.25", args = var.args }] }
+  }
+}
+`
+	tests := []struct {
+		name  string
+		files map[string]string
+	}{
+		{
+			name: "override file",
+			files: map[string]string{
+				"main.tf": "variable \"args\" {\n  default = [\"x\"]\n}\nvariable \"labels\" {\n  default = {}\n}\n" + manifest,
+				"override.tf": `
+variable "args" {
+  type    = list
+  default = ["a", "b"]
+}
+variable "labels" {
+  type    = map
+  default = { team = "web" }
+}
+`,
+			},
+		},
+		{
+			name: "primary file",
+			files: map[string]string{
+				"main.tf": `
+variable "args" {
+  type    = list
+  default = ["a", "b"]
+}
+variable "labels" {
+  type    = map
+  default = { team = "web" }
+}
+` + manifest,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeTerraformOverrideFiles(t, dir, tt.files)
+			workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
+			require.Empty(t, errs)
+			all := terraformOverrideWorkloads(t, workloads)
+			require.Len(t, all, 1)
+			metadata := all[0].GetObject()["metadata"].(map[string]interface{})
+			assert.Equal(t, map[string]interface{}{"team": "web"}, metadata["labels"])
+			containers := podSpec(t, all[0])["containers"].([]interface{})
+			require.Len(t, containers, 1)
+			assert.Equal(t, []interface{}{"a", "b"}, containers[0].(map[string]interface{})["args"])
+		})
+	}
+
+	t.Run("shorthand type still rejects a default of another kind", func(t *testing.T) {
+		variable := newTerraformVariable(parseTerraformAttribute(t, `type = list`))
+		_, err := variable.convert(cty.StringVal("x"))
+		assert.Error(t, err)
+	})
+}
+
+// parseTerraformAttribute parses one attribute, such as `nullable = false`.
+func parseTerraformAttribute(t *testing.T, src string) *hcl.Attribute {
+	t.Helper()
+	body := parseTerraformOverrideTest(t, "test.tf", src).Body.(*hclsyntax.Body)
+	require.Len(t, body.Attributes, 1)
+	for _, attr := range body.Attributes {
+		return attr.AsHCLAttribute()
+	}
+	return nil
+}
+
+func TestTerraformVariableNonNullable(t *testing.T) {
+	tests := []struct {
+		src             string
+		wantNonNullable bool
+		wantOK          bool
+	}{
+		{src: `nullable = false`, wantNonNullable: true, wantOK: true},
+		{src: `nullable = true`, wantNonNullable: false, wantOK: true},
+		{src: `nullable = "false"`, wantNonNullable: true, wantOK: true},
+		{src: `nullable = "true"`, wantNonNullable: false, wantOK: true},
+		{src: `nullable = "maybe"`},
+		{src: `nullable = 0`},
+		{src: `nullable = [false]`},
+		{src: `nullable = null`},
+		{src: `nullable = var.unknown`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.src, func(t *testing.T) {
+			nonNullable, ok := terraformVariableNonNullable(parseTerraformAttribute(t, tt.src))
+			assert.Equal(t, tt.wantOK, ok)
+			assert.Equal(t, tt.wantNonNullable, nonNullable)
+		})
+	}
+
+	t.Run("string nullable applies to a null variable file value", func(t *testing.T) {
+		for _, files := range []map[string]string{
+			{
+				"main.tf":          "variable \"host_network\" {\n  type     = bool\n  default  = false\n  nullable = \"false\"\n}\n" + overrideBaseManifestPod[strings.Index(overrideBaseManifestPod, "resource"):],
+				"terraform.tfvars": `host_network = null`,
+			},
+			{
+				"main.tf":          overrideBaseManifestPod,
+				"override.tf":      "variable \"host_network\" {\n  default  = false\n  nullable = \"false\"\n}\n",
+				"terraform.tfvars": `host_network = null`,
+			},
+		} {
+			dir := t.TempDir()
+			writeTerraformOverrideFiles(t, dir, files)
+			workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
+			require.Empty(t, errs)
+			all := terraformOverrideWorkloads(t, workloads)
+			require.Len(t, all, 1)
+			assert.Equal(t, false, podSpec(t, all[0])["hostNetwork"])
+		}
+	})
+}
+
+// Local values from several override blocks and files are applied in order
+// to one copy of each primary locals block, a later override winning.
+func TestApplyTerraformOverrides_MultipleLocalsOverrides(t *testing.T) {
+	main := parseTerraformOverrideTest(t, "main.tf", `
+locals {
+  a = 1
+  b = 1
+  c = 1
+  d = 1
+}
+locals {
+  e = 1
+}
+`)
+	first := parseTerraformOverrideTest(t, "a_override.tf", `
+locals {
+  a = 2
+  b = 2
+}
+locals {
+  e = 2
+}
+`)
+	second := parseTerraformOverrideTest(t, "b_override.tf", `
+locals {
+  b = 3
+  c = 3
+}
+`)
+	body := main.Body.(*hclsyntax.Body)
+	original := []hclsyntax.Attributes{maps.Clone(body.Blocks[0].Body.Attributes), maps.Clone(body.Blocks[1].Body.Attributes)}
+
+	result, errs := applyTerraformOverrides([]*hcl.File{main}, []*hcl.File{first, second})
+	require.Empty(t, errs)
+
+	firstBody := first.Body.(*hclsyntax.Body)
+	secondBody := second.Body.(*hclsyntax.Body)
+	merged := result.files[0].Body.(*hclsyntax.Body)
+	require.Len(t, merged.Blocks, 2)
+	attrs := merged.Blocks[0].Body.Attributes
+	assert.Same(t, firstBody.Blocks[0].Body.Attributes["a"], attrs["a"])
+	assert.Same(t, secondBody.Blocks[0].Body.Attributes["b"], attrs["b"], "the later override file wins")
+	assert.Same(t, secondBody.Blocks[0].Body.Attributes["c"], attrs["c"])
+	assert.Same(t, original[0]["d"], attrs["d"])
+	assert.Same(t, firstBody.Blocks[1].Body.Attributes["e"], merged.Blocks[1].Body.Attributes["e"])
+
+	// The parsed primary file is unchanged.
+	assert.Equal(t, original[0], body.Blocks[0].Body.Attributes)
+	assert.Equal(t, original[1], body.Blocks[1].Body.Attributes)
+	assert.NotSame(t, body.Blocks[0], merged.Blocks[0])
+
+	// Evaluated, the later override wins.
+	locals, _ := resolveLocals(result.files, nil)
+	for name, want := range map[string]int64{"a": 2, "b": 3, "c": 3, "d": 1, "e": 2} {
+		got, _ := locals[name].AsBigFloat().Int64()
+		assert.Equal(t, want, got, name)
+	}
+}
+
+// A resource merged by several override files keeps one source size entry,
+// for its final body, holding the size of every block it was built from.
+func TestApplyTerraformOverrides_SourceSizesOfRepeatedOverrides(t *testing.T) {
+	const resource = `
+resource "kubernetes_manifest" "web" {
+  manifest = {}
+}
+`
+	main := parseTerraformOverrideTest(t, "main.tf", resource)
+	first := parseTerraformOverrideTest(t, "a_override.tf", resource)
+	second := parseTerraformOverrideTest(t, "b_override.tf", `
+resource "kubernetes_manifest" "web" {
+  manifest = { apiVersion = "v1" }
+}
+`)
+	result, errs := applyTerraformOverrides([]*hcl.File{main}, []*hcl.File{first, second})
+	require.Empty(t, errs)
+
+	merged := result.files[0].Body.(*hclsyntax.Body).Blocks[0]
+	block := func(f *hcl.File) *hclsyntax.Block { return f.Body.(*hclsyntax.Body).Blocks[0] }
+	assert.Equal(t, map[*hclsyntax.Body]int{
+		merged.Body: terraformBlockSpan(block(main)) + terraformBlockSpan(block(first)) + terraformBlockSpan(block(second)),
+	}, result.sourceSizes)
 }

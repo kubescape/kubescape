@@ -300,11 +300,25 @@ func newTerraformVariable(typeAttr *hcl.Attribute) terraformVariable {
 	if typeAttr == nil {
 		return terraformVariable{ty: cty.DynamicPseudoType}
 	}
-	ty, defaults, diags := typeexpr.TypeConstraintWithDefaults(typeAttr.Expr)
+	ty, defaults, diags := terraformTypeConstraint(typeAttr.Expr)
 	if diags.HasErrors() {
 		return terraformVariable{ty: cty.DynamicPseudoType}
 	}
 	return terraformVariable{ty: ty, defaults: defaults}
+}
+
+// terraformTypeConstraint decodes a variable's type constraint as Terraform
+// does, accepting the legacy shorthands list and map, written as a bare
+// keyword, for list(any) and map(any). Only the whole expression is checked
+// for them: Terraform rejects the shorthands inside another type constraint.
+func terraformTypeConstraint(expr hcl.Expression) (cty.Type, *typeexpr.Defaults, hcl.Diagnostics) {
+	switch hcl.ExprAsKeyword(expr) {
+	case "list":
+		return cty.List(cty.DynamicPseudoType), nil, nil
+	case "map":
+		return cty.Map(cty.DynamicPseudoType), nil, nil
+	}
+	return typeexpr.TypeConstraintWithDefaults(expr)
 }
 
 func (v terraformVariable) convert(val cty.Value) (cty.Value, error) {

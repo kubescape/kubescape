@@ -19,6 +19,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/convert"
 )
 
 const (
@@ -272,10 +273,16 @@ func collectVariableDefaults(body hcl.Body, defaults map[string]cty.Value, decla
 }
 
 // terraformVariableNonNullable reads a variable's nullable argument, reporting
-// whether it is set to false; ok is false when it isn't a known bool.
+// whether it is set to false. As in Terraform, a value that converts to bool,
+// such as "false", is accepted; ok is false when the value isn't a known bool
+// after conversion.
 func terraformVariableNonNullable(attr *hcl.Attribute) (nonNullable, ok bool) {
 	val, diags := attr.Expr.Value(nil)
-	if diags.HasErrors() || val.Type() != cty.Bool || !val.IsKnown() || val.IsNull() {
+	if diags.HasErrors() || !val.IsWhollyKnown() || val.IsNull() {
+		return false, false
+	}
+	val, err := convert.Convert(val, cty.Bool)
+	if err != nil || !val.IsKnown() || val.IsNull() {
 		return false, false
 	}
 	return val.False(), true
