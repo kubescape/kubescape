@@ -416,24 +416,32 @@ func pathFilterFromScanInfo(ctx context.Context, input string, scanInfo *cautils
 
 func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath string, helmValueOpts cautils.HelmValueOptions, cloneDepth int, workspaceOpt ...string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
 	clonedRepo := cautils.GetClonedPath(path, cloneDepth)
-
 	if clonedRepo != "" {
-		// if the repo was cloned, add the workload path to the cloned repo
 		workloadPath = filepath.Join(clonedRepo, workloadPath)
-	} else {
-		// if the repo was not cloned
-		clonedRepo = path
 	}
-
-	// Get repo root
-	repoRoot, gitRepo := extractGitRepo(clonedRepo)
 
 	helmSourceToWorkloads, helmSourceToChart, _, err := cautils.LoadResourcesFromHelmChartsFiltered(ctx, helmPath, helmValueOpts, nil, nil, workspaceOpt...)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	wlSource, ok := helmSourceToWorkloads[workloadPath]
+	templatePath := workloadPath
+	if clonedRepo == "" {
+		templatePath, err = filepath.Abs(workloadPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("resolve Helm workload path %q: %w", workloadPath, err)
+		}
+	}
+
+	wlSource, ok := helmSourceToWorkloads[templatePath]
+	if !ok && clonedRepo == "" {
+		var ambiguous bool
+		templatePath, ambiguous = findLocalHelmTemplateAlias(workloadPath, helmSourceToWorkloads, workspaceOpt...)
+		if ambiguous {
+			return nil, nil, fmt.Errorf("workload %s matches multiple templates in chart %s", workloadPath, helmPath)
+		}
+		wlSource, ok = helmSourceToWorkloads[templatePath]
+	}
 	if !ok {
 		return nil, nil, fmt.Errorf("workload %s not found in chart %s", workloadPath, helmPath)
 	}
@@ -442,12 +450,17 @@ func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath 
 		return nil, nil, fmt.Errorf("workload %s found multiple times in chart %s", workloadPath, helmPath)
 	}
 
-	helmChart, ok := helmSourceToChart[workloadPath]
+	helmChart, ok := helmSourceToChart[templatePath]
 	if !ok {
 		return nil, nil, fmt.Errorf("helmChart not found for workload %s", workloadPath)
 	}
 
-	workloadSource := getWorkloadSourceHelmChart(repoRoot, helmPath, gitRepo, helmChart)
+	repoPath := filepath.Dir(templatePath)
+	if clonedRepo != "" {
+		repoPath = clonedRepo
+	}
+	repoRoot, gitRepo := extractGitRepo(repoPath)
+	workloadSource := getWorkloadSourceHelmChart(repoRoot, templatePath, gitRepo, helmChart)
 
 	workloadIDToSource := make(map[string]reporthandling.Source, 1)
 	workloadIDToSource[wlSource[0].GetID()] = workloadSource
@@ -457,6 +470,28 @@ func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath 
 
 	return workloadIDToSource, workloads, nil
 
+}
+
+// Keep exact lookups first because rendered templates in packaged dependencies may not exist on disk.
+func findLocalHelmTemplateAlias(workloadPath string, templates map[string][]workloadinterface.IMetadata, workspaceOpt ...string) (match string, ambiguous bool) {
+	if len(workspaceOpt) > 0 && workspaceOpt[0] != "" && !pathcontainment.IsPathContained(workspaceOpt[0], workloadPath) {
+		return "", false
+	}
+	requested, err := os.Stat(workloadPath)
+	if err != nil || !requested.Mode().IsRegular() {
+		return "", false
+	}
+	for templatePath := range templates {
+		template, err := os.Stat(templatePath)
+		if err != nil || !os.SameFile(requested, template) {
+			continue
+		}
+		if match != "" {
+			return "", true
+		}
+		match = templatePath
+	}
+	return match, false
 }
 
 func getWorkloadSourceHelmChart(repoRoot string, source string, gitRepo *cautils.LocalGitRepository, helmChart cautils.Chart) reporthandling.Source {
