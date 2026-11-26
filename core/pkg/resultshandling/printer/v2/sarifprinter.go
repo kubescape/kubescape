@@ -1336,8 +1336,8 @@ func reportedSource(opaSessionObj *cautils.OPASessionObj, resourceID string) rep
 // rbacSubjectPaths returns the binding's document and the subject's paths inside
 // it. A subject's paths are written as relatedObjects[i].<path>, and only the
 // binding's can be resolved in the binding's document. The subject's own entry
-// comes first whatever order the rule reports, and a rule with no binding path
-// falls back to the binding's kind line.
+// comes first whatever order the rule reports, followed by roleRef.name and then
+// any other binding paths; a rule with no binding path falls back to kind.
 func rbacSubjectPaths(opaSessionObj *cautils.OPASessionObj, resourceID string, paths []string) (int, []string, bool) {
 	resource, _ := opaSessionObj.GetResource(resourceID)
 	binding, index, ok := rbacSubjectBinding(resource)
@@ -1349,18 +1349,20 @@ func rbacSubjectPaths(opaSessionObj *cautils.OPASessionObj, resourceID string, p
 		return 0, nil, false
 	}
 	prefix := fmt.Sprintf("relatedObjects[%d].", index)
-	var subjectPaths, otherPaths []string
+	var subjectPaths, roleRefPaths, otherPaths []string
 	for _, path := range paths {
 		rest, found := strings.CutPrefix(path, prefix)
 		switch {
 		case !found:
 		case strings.HasPrefix(rest, "subjects["):
 			subjectPaths = append(subjectPaths, rest)
+		case rest == "roleRef.name":
+			roleRefPaths = append(roleRefPaths, rest)
 		default:
 			otherPaths = append(otherPaths, rest)
 		}
 	}
-	bindingPaths := append(subjectPaths, otherPaths...)
+	bindingPaths := append(append(subjectPaths, roleRefPaths...), otherPaths...)
 	if len(bindingPaths) == 0 {
 		bindingPaths = []string{"kind"}
 	}

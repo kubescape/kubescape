@@ -216,3 +216,50 @@ roleRef: {kind: Role, name: wild, apiGroup: rbac.authorization.k8s.io}
 	require.ElementsMatch(t, []int{rbacSubjectLine, 20}, []int{issues[0].Location.Lines.Begin, issues[1].Location.Lines.Begin})
 	require.NotEqual(t, issues[0].Fingerprint, issues[1].Fingerprint)
 }
+
+// When no subject path is reported, SARIF must prefer roleRef.name over other
+// binding paths regardless of report order, and fall back to kind when absent.
+func TestSARIFPrinter_RBACSubjectPrefersRoleRefOverOtherBindingPaths(t *testing.T) {
+	session := singleRBACSubjectSession(t)
+	for id, res := range session.ResourcesResult {
+		res.AssociatedControls[0].ResourceAssociatedRules[0].Paths = []armotypes.PosturePaths{
+			{ReviewPath: "relatedObjects[0].metadata.name"},
+			{ReviewPath: "relatedObjects[0].roleRef.name"},
+		}
+		session.ResourcesResult[id] = res
+	}
+
+	results := parseSARIFResults(t, renderSARIF(t, NewSARIFPrinter(false), session))
+
+	require.Len(t, results, 1)
+	require.Equal(t, 14, *results[0].Locations[0].PhysicalLocation.Region.StartLine)
+}
+
+func TestRBACSubjectPaths_PriorityOrder(t *testing.T) {
+	session := singleRBACSubjectSession(t)
+	var subjectID string
+	for id := range session.ResourcesResult {
+		subjectID = id
+	}
+
+	_, paths, ok := rbacSubjectPaths(session, subjectID, []string{
+		"relatedObjects[0].metadata.name",
+		"relatedObjects[0].roleRef.name",
+		"relatedObjects[0].subjects[0]",
+	})
+	require.True(t, ok)
+	require.Equal(t, []string{"subjects[0]", "roleRef.name", "metadata.name"}, paths)
+
+	_, paths, ok = rbacSubjectPaths(session, subjectID, []string{
+		"relatedObjects[0].metadata.name",
+		"relatedObjects[0].roleRef.name",
+	})
+	require.True(t, ok)
+	require.Equal(t, []string{"roleRef.name", "metadata.name"}, paths)
+
+	_, paths, ok = rbacSubjectPaths(session, subjectID, []string{
+		"relatedObjects[1].rules[0].verbs[0]",
+	})
+	require.True(t, ok)
+	require.Equal(t, []string{"kind"}, paths)
+}
