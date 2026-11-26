@@ -1639,6 +1639,74 @@ func TestGetWorkloadFromHelmChart_WorkspaceContainment(t *testing.T) {
 	})
 }
 
+func TestGetResources_ChartAndFileRoute_RelativePaths(t *testing.T) {
+	ctx := context.Background()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	chart := createTestHelmChartHelper(t, dir, "chart")
+	templateDir := filepath.Join(chart, "templates")
+	t.Chdir(dir)
+
+	assertScan := func(t *testing.T, filePath, workspaceDir, wantRoot, wantRelativePath string) {
+		t.Helper()
+		filePath = filepath.FromSlash(filePath)
+		scanInfo := &cautils.ScanInfo{
+			InputPatterns: []string{filePath},
+			ChartPath:     filepath.FromSlash("./chart"),
+			FilePath:      filePath,
+			WorkspaceDir:  workspaceDir,
+			ScanObject:    scanObject("apps/v1", "Deployment", "", "demo-deploy"),
+		}
+		session := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo, nil)
+
+		_, workloads, _, _, err := NewFileResourceHandler().GetResources(ctx, session, scanInfo)
+		require.NoError(t, err)
+		require.Len(t, workloads, 1)
+		require.NotNil(t, session.SingleResourceScan)
+		assert.Equal(t, "demo-deploy", session.SingleResourceScan.GetName())
+		for id := range workloads {
+			source, ok := session.ResourceSource[id]
+			require.True(t, ok, "missing source for %s", id)
+			assert.Equal(t, wantRoot, source.Path)
+			assert.Equal(t, wantRelativePath, source.RelativePath)
+			assert.Equal(t, chart, source.HelmPath)
+		}
+	}
+
+	t.Run("direct template path", func(t *testing.T) {
+		assertScan(t, "./chart/templates/deployment.yaml", "", templateDir, "deployment.yaml")
+	})
+	t.Run("template reached through symlink", func(t *testing.T) {
+		if err := os.Symlink(chart, filepath.Join(dir, "alias")); err != nil {
+			t.Skipf("symlinks are unavailable: %v", err)
+		}
+		assertScan(t, "./alias/templates/deployment.yaml", dir, templateDir, "deployment.yaml")
+	})
+	t.Run("template in Git repository", func(t *testing.T) {
+		_, err := gitv5.PlainInit(dir, false)
+		require.NoError(t, err)
+		assertScan(t, "./chart/templates/deployment.yaml", "", dir, filepath.FromSlash("chart/templates/deployment.yaml"))
+	})
+}
+
+func TestGetWorkloadFromHelmChart_AmbiguousTemplateAlias(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	chart := createTestHelmChartHelper(t, dir, "chart")
+	templatePath := filepath.Join(chart, "templates", "deployment.yaml")
+	aliasPath := filepath.Join(dir, "alias.yaml")
+	if err := os.Symlink(templatePath, aliasPath); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	require.NoError(t, os.Symlink(templatePath, filepath.Join(chart, "templates", "second.yaml")))
+
+	_, _, err := getWorkloadFromHelmChart(ctx, aliasPath, chart, aliasPath, cautils.HelmValueOptions{}, 0)
+	require.ErrorContains(t, err, "matches multiple templates")
+	_, workloads, err := getWorkloadFromHelmChart(ctx, templatePath, chart, templatePath, cautils.HelmValueOptions{}, 0)
+	require.NoError(t, err)
+	require.Len(t, workloads, 1)
+}
+
 func TestGetResources_ChartAndFileRoute_EnforcesWorkspaceContainment(t *testing.T) {
 	wsDir := t.TempDir()
 	outsideDir := t.TempDir()
