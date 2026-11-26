@@ -2283,6 +2283,12 @@ func glob(root, pattern string, kind globPathKind, filter *PathFilter) ([]string
 			return next
 		}
 		matched, err := match(pattern, name)
+		if err != nil && matchRelativePath {
+			// Legacy globs (such as an unclosed '{') can fail doublestar parsing even though filepath.Match accepts them as literals.
+			if fallbackMatched, fallbackErr := filepath.Match(pattern, name); fallbackErr == nil {
+				matched, err = fallbackMatched, nil
+			}
+		}
 		if err != nil {
 			return err
 		}

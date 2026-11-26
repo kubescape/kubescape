@@ -1552,6 +1552,28 @@ func TestGetOutputPrinters_GlobDiscoveryCollision(t *testing.T) {
 		_ = closePrinters(printers...)
 	})
 
+	t.Run("nested glob with literal unclosed brace allows unrelated existing report destination", func(t *testing.T) {
+		baseDir := t.TempDir()
+		manifestsDir := filepath.Join(baseDir, "manifests")
+		subDir := filepath.Join(manifestsDir, "sub")
+		require.NoError(t, os.MkdirAll(subDir, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(subDir, "{draft.tf"), []byte("locals { example = true }\n"), 0o600))
+		out := filepath.Join(baseDir, "out.json")
+		require.NoError(t, os.WriteFile(out, []byte("{}"), 0o600))
+
+		scanInfo := &cautils.ScanInfo{
+			ScanType:      cautils.ScanTypeControl,
+			Format:        printer.JsonFormat,
+			Output:        out,
+			InputPatterns: []string{filepath.Join(manifestsDir, "*", "{draft.tf")},
+		}
+
+		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+		require.NoError(t, err)
+		require.NotEmpty(t, printers)
+		_ = closePrinters(printers...)
+	})
+
 	t.Run("globstar allows an output under an ordinary matched directory", func(t *testing.T) {
 		baseDir := t.TempDir()
 		subDir := filepath.Join(baseDir, "group", "app")

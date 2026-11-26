@@ -36,7 +36,7 @@ func TestListFiles(t *testing.T) {
 
 func TestListFilesNestedGlob(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "manifests[old]")
-	for _, name := range []string{"deploy.yaml", "app/deploy.yaml", "app/deep/deploy.yaml", "app/service.json", "app/main.tf", "app/{literal}.tf", "app/upper.TF", "other/notes.txt"} {
+	for _, name := range []string{"deploy.yaml", "app/deploy.yaml", "app/deep/deploy.yaml", "app/service.json", "app/main.tf", "app/{literal}.tf", "app/{draft.tf", "app/upper.TF", "other/notes.txt"} {
 		path := filepath.Join(root, filepath.FromSlash(name))
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750))
 		require.NoError(t, os.WriteFile(path, nil, 0o600))
@@ -80,13 +80,14 @@ func TestListFilesNestedGlob(t *testing.T) {
 
 	files, errs = ScanGlobCollisionPaths(terraformGlob, nil)
 	require.Empty(t, errs)
-	assert.ElementsMatch(t, []string{filepath.Join(root, "app", "main.tf"), filepath.Join(root, "app", "{literal}.tf")}, files)
+	assert.ElementsMatch(t, []string{filepath.Join(root, "app", "main.tf"), filepath.Join(root, "app", "{literal}.tf"), filepath.Join(root, "app", "{draft.tf")}, files)
 
 	for _, tc := range []struct {
 		pattern string
 		file    string
 	}{
 		{"*/{literal}.tf", "app/{literal}.tf"},
+		{"*/{draft.tf", "app/{draft.tf"},
 		{"[!a]pp/main.tf", "app/main.tf"},
 		{"*/upper.TF", "app/upper.TF"},
 	} {
