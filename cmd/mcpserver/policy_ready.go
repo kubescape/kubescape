@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/opa-utils/reporthandling"
 )
 
 // defaultPolicyReadyWait is how long a tool call that needs policies waits for
@@ -44,9 +45,40 @@ func loadPolicyGetter(drp policyStoreLoader) getter.IPolicyGetter {
 		for _, fw := range getter.NativeFrameworks {
 			paths = append(paths, getter.GetDefaultPath(fw+".json"))
 		}
-		pg = getter.NewLoadPolicy(paths)
+		pg = cachedPolicy{getter.NewLoadPolicy(paths)}
 	}
 	return pg
+}
+
+// cachedPolicy is the policy cache the server falls back to when the release
+// cannot be fetched. Like the CLI fallback it serves the NativeFrameworks
+// files, which are also all list_frameworks reports. The getter is shared by
+// every tool, so it cannot know the requested frameworks up front: a framework
+// that is not native is read by name from its own cache file
+// (getter.PolicyCachePath), so workloadscan, clusterscan or any framework
+// cached before can still be scanned.
+type cachedPolicy struct {
+	*getter.LoadPolicy
+}
+
+// runScan reads exceptions, control inputs and attack tracks off the policy
+// getter by type assertion, so losing one would silently degrade scans.
+var (
+	_ getter.IExceptionsGetter     = cachedPolicy{}
+	_ getter.IControlsInputsGetter = cachedPolicy{}
+	_ getter.IAttackTracksGetter   = cachedPolicy{}
+)
+
+func (c cachedPolicy) GetFramework(name string) (*reporthandling.Framework, error) {
+	framework, err := c.LoadPolicy.GetFramework(name)
+	if !errors.Is(err, getter.ErrFrameworkNotMatching) {
+		return framework, err
+	}
+	path, pathErr := getter.PolicyCachePath(name)
+	if pathErr != nil {
+		return nil, err
+	}
+	return getter.NewLoadPolicy([]string{path}).GetFramework(name)
 }
 
 // startPolicyLoad runs load in the background and publishes its result as the
