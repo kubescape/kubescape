@@ -17,7 +17,7 @@ const (
 )
 
 var (
-	renameSavedFile             = os.Rename
+	renameSavedFile             = replaceFile
 	ErrHTTPResponseBodyTooLarge = errors.New("HTTP response body exceeds maximum allowed size")
 )
 
