@@ -140,16 +140,21 @@ type LocalConfig struct {
 	configObj *ConfigObj
 }
 
-func NewLocalConfig(accountID, accessKey, clusterName, customClusterName string) *LocalConfig {
+// NewLocalConfigFromCache loads only the saved local configuration.
+func NewLocalConfigFromCache() *LocalConfig {
 	lc := &LocalConfig{
 		configObj: &ConfigObj{},
 	}
-	// get from configMap
-	if existsConfigFile() { // get from file
+	if existsConfigFile() {
 		if err := loadConfigFromFile(lc.configObj); err != nil {
 			logger.L().Debug("failed to load cached config file", helpers.Error(err))
 		}
 	}
+	return lc
+}
+
+func NewLocalConfig(accountID, accessKey, clusterName, customClusterName string) *LocalConfig {
+	lc := NewLocalConfigFromCache()
 
 	if err := loadUrlsFromFile(lc.configObj); err != nil {
 		logger.L().Debug("failed to load urls from config file", helpers.Error(err))

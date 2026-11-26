@@ -226,6 +226,46 @@ func TestSetCachedConfig_ClusterName(t *testing.T) {
 	assert.Equal(t, "production-cluster\n", buf.String())
 }
 
+func TestSetCachedConfig_ClusterNamePreservesSavedReportURL(t *testing.T) {
+	isolateCachedConfigTest(t)
+	ks := NewKubescape(context.Background())
+	const originalReportURL = "https://original-report.example.test"
+	require.NoError(t, ks.SetCachedConfig(&metav1.SetConfig{
+		ClusterName:    "original-cluster",
+		CloudReportURL: originalReportURL,
+	}))
+	require.Equal(t, originalReportURL, readPersistedConfig(t).CloudReportURL)
+
+	t.Setenv("KS_CLOUD_REPORT_URL", "https://temporary-report.example.test")
+	require.NoError(t, ks.SetCachedConfig(&metav1.SetConfig{ClusterName: "updated-cluster"}))
+
+	persisted := readPersistedConfig(t)
+	assert.Equal(t, "updated-cluster", persisted.ClusterName)
+	assert.Equal(t, originalReportURL, persisted.CloudReportURL)
+}
+
+func TestSetCachedConfig_ExplicitReportURLWithEnvOverride(t *testing.T) {
+	isolateCachedConfigTest(t)
+	ks := NewKubescape(context.Background())
+	require.NoError(t, ks.SetCachedConfig(&metav1.SetConfig{
+		ClusterName:    "original-cluster",
+		CloudReportURL: "https://original-report.example.test",
+	}))
+
+	const temporaryReportURL = "https://temporary-report.example.test"
+	const updatedReportURL = "https://updated-report.example.test"
+	t.Setenv("KS_CLOUD_REPORT_URL", temporaryReportURL)
+	require.NoError(t, ks.SetCachedConfig(&metav1.SetConfig{CloudReportURL: updatedReportURL}))
+
+	persisted := readPersistedConfig(t)
+	assert.Equal(t, "original-cluster", persisted.ClusterName)
+	assert.Equal(t, updatedReportURL, persisted.CloudReportURL)
+	assert.Equal(t, temporaryReportURL, cautils.NewLocalConfig("", "", "", "").GetCloudReportURL())
+
+	t.Setenv("KS_CLOUD_REPORT_URL", "")
+	assert.Equal(t, updatedReportURL, cautils.NewLocalConfig("", "", "", "").GetCloudReportURL())
+}
+
 func TestViewCachedConfig_FullJSON(t *testing.T) {
 	isolateCachedConfigTest(t)
 
@@ -284,6 +324,26 @@ func TestDeleteCachedConfig_MissingFileIsNonFatal(t *testing.T) {
 
 	ks := NewKubescape(context.Background())
 	require.NoError(t, ks.DeleteCachedConfig(&metav1.DeleteConfig{}))
+}
+
+func TestDeleteCachedConfig_ClusterNamePreservesSavedReportURL(t *testing.T) {
+	isolateCachedConfigTest(t)
+	ks := NewKubescape(context.Background())
+	const originalReportURL = "https://original-report.example.test"
+	require.NoError(t, ks.SetCachedConfig(&metav1.SetConfig{
+		ClusterName:    "original-cluster",
+		CloudReportURL: originalReportURL,
+	}))
+	before := readPersistedConfig(t)
+	require.Equal(t, "original-cluster", before.ClusterName)
+	require.Equal(t, originalReportURL, before.CloudReportURL)
+
+	t.Setenv("KS_CLOUD_REPORT_URL", "https://temporary-report.example.test")
+	require.NoError(t, ks.DeleteCachedConfig(&metav1.DeleteConfig{Keys: []string{"clusterName"}}))
+
+	persisted := readPersistedConfig(t)
+	assert.Empty(t, persisted.ClusterName)
+	assert.Equal(t, originalReportURL, persisted.CloudReportURL)
 }
 
 func TestGetNormalizedKey(t *testing.T) {

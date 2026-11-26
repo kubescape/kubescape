@@ -15,7 +15,7 @@ func (ks *Kubescape) SetCachedConfig(setConfig *metav1.SetConfig) error {
 	if setConfig == nil {
 		return errors.New("uninitialized set parameters")
 	}
-	tenant := cautils.GetTenantConfig(ks.Context(), "", "", "", "", nil)
+	tenant := cautils.NewLocalConfigFromCache()
 
 	if setConfig.Account != "" {
 		tenant.GetConfigObj().AccountID = setConfig.Account
@@ -137,12 +137,12 @@ func (ks *Kubescape) ValidateCachedConfig(validateConfig *metav1.ValidateConfig)
 }
 
 func (ks *Kubescape) DeleteCachedConfig(deleteConfig *metav1.DeleteConfig) error {
-	tenant := cautils.GetTenantConfig(ks.Context(), "", "", "", "", nil) // change k8sinterface
-
 	if deleteConfig == nil || len(deleteConfig.Keys) == 0 {
+		tenant := cautils.GetTenantConfig(ks.Context(), "", "", "", "", nil)
 		return tenant.DeleteCachedConfig(ks.Context())
 	}
 
+	tenant := cautils.NewLocalConfigFromCache()
 	configObj := tenant.GetConfigObj()
 	for _, key := range deleteConfig.Keys {
 		normalizedKey := getNormalizedKey(key)
