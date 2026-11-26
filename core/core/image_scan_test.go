@@ -14,6 +14,9 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/anchore/grype/grype/match"
+	"github.com/anchore/grype/grype/pkg"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
@@ -799,6 +802,57 @@ func TestGetVulnerabilitiesAndSeverities(t *testing.T) {
 			expectedSeverities:      []string{},
 		},
 		{
+			// An all-uppercase GHSA ID must also produce the canonical
+			// mixed-case form (uppercase prefix, lowercase suffix), which
+			// neither ToUpper nor ToLower yields (issue #5796).
+			policies: []VulnerabilitiesIgnorePolicy{
+				{
+					Metadata: Metadata{
+						Name: "ghsa-uppercase-only",
+					},
+					Kind: "VulnerabilitiesIgnorePolicy",
+					Targets: []Target{
+						{
+							DesignatorType: "Attributes",
+							Attributes: Attributes{
+								Registry: "quay.io",
+							},
+						},
+					},
+					Vulnerabilities: []string{"GHSA-JC7W-C686-C4V9"},
+					Severities:      []string{},
+				},
+			},
+			image:                   "quay.io/kubescape/kubescape-cli:v3.0.0",
+			expectedVulnerabilities: []string{"GHSA-JC7W-C686-C4V9", "GHSA-jc7w-c686-c4v9", "ghsa-jc7w-c686-c4v9"},
+			expectedSeverities:      []string{},
+		},
+		{
+			// An all-lowercase GHSA ID must also produce the canonical
+			// mixed-case form (issue #5796).
+			policies: []VulnerabilitiesIgnorePolicy{
+				{
+					Metadata: Metadata{
+						Name: "ghsa-lowercase-whole-id",
+					},
+					Kind: "VulnerabilitiesIgnorePolicy",
+					Targets: []Target{
+						{
+							DesignatorType: "Attributes",
+							Attributes: Attributes{
+								Registry: "quay.io",
+							},
+						},
+					},
+					Vulnerabilities: []string{"ghsa-jc7w-c686-c4v9"},
+					Severities:      []string{},
+				},
+			},
+			image:                   "quay.io/kubescape/kubescape-cli:v3.0.0",
+			expectedVulnerabilities: []string{"GHSA-JC7W-C686-C4V9", "GHSA-jc7w-c686-c4v9", "ghsa-jc7w-c686-c4v9"},
+			expectedSeverities:      []string{},
+		},
+		{
 			// Empty or whitespace-only entries are skipped so they cannot
 			// produce an empty IgnoreRule that grype would treat as a
 			// match-everything wildcard, and surrounding whitespace from a
@@ -861,6 +915,50 @@ func TestGetVulnerabilitiesAndSeverities(t *testing.T) {
 			sort.Strings(vulnerabilities)
 			assert.Equal(t, tt.expectedVulnerabilities, vulnerabilities)
 			assert.Equal(t, tt.expectedSeverities, severities)
+		})
+	}
+}
+
+// TestGHSAExceptionCasingWaivedByGrype feeds the IDs emitted for a GHSA
+// exception into grype's own case-sensitive IgnoreRule matching, proving the
+// canonical advisory ID is waived whichever single casing the user wrote
+// (kubescape issue #5796), while an unrelated finding is left alone.
+func TestGHSAExceptionCasingWaivedByGrype(t *testing.T) {
+	const canonical = "GHSA-jc7w-c686-c4v9"
+	for _, input := range []string{"GHSA-JC7W-C686-C4V9", "ghsa-jc7w-c686-c4v9", canonical} {
+		t.Run(input, func(t *testing.T) {
+			policies := []VulnerabilitiesIgnorePolicy{{
+				Kind:            "VulnerabilitiesIgnorePolicy",
+				Targets:         []Target{{DesignatorType: "Attributes", Attributes: Attributes{Registry: "quay.io"}}},
+				Vulnerabilities: []string{input},
+			}}
+			ids, _, err := getUniqueVulnerabilitiesAndSeverities(policies, "quay.io/kubescape/kubescape-cli:v3.0.0", true)
+			require.NoError(t, err)
+
+			rules := make([]match.IgnoreRule, 0, len(ids))
+			for _, id := range ids {
+				rules = append(rules, match.IgnoreRule{Vulnerability: id})
+			}
+
+			matches := match.NewMatches(
+				match.Match{
+					Vulnerability: vulnerability.Vulnerability{Reference: vulnerability.Reference{ID: canonical}},
+					Package:       pkg.Package{ID: pkg.ID("advised"), Name: "advised"},
+				},
+				match.Match{
+					Vulnerability: vulnerability.Vulnerability{Reference: vulnerability.Reference{ID: "CVE-2023-42365"}},
+					Package:       pkg.Package{ID: pkg.ID("other"), Name: "other"},
+				},
+			)
+
+			remaining, ignored := match.ApplyIgnoreRules(matches, rules)
+			require.Len(t, ignored, 1)
+			assert.Equal(t, canonical, ignored[0].Vulnerability.ID)
+			remainingIDs := make([]string, 0, remaining.Count())
+			for _, m := range remaining.Sorted() {
+				remainingIDs = append(remainingIDs, m.Vulnerability.ID)
+			}
+			assert.Equal(t, []string{"CVE-2023-42365"}, remainingIDs)
 		})
 	}
 }

@@ -1015,9 +1015,9 @@ func matchPolicies(policies []VulnerabilitiesIgnorePolicy, attrs Attributes) ([]
 				// sources do not share a single casing convention: CVE IDs
 				// are uppercase, while GHSA IDs keep a lowercase suffix
 				// (e.g. "GHSA-jc7w-c686-c4v9"). Emit the trimmed original
-				// casing plus the uppercased and lowercased forms so users
-				// can list the ID in any casing without the filter silently
-				// missing the match (kubescape issue #1870).
+				// casing, uppercase and lowercase variants, and the canonical
+				// GHSA form so users can list IDs in any casing without the
+				// filter silently missing a match (kubescape issues #1870, #5796).
 				vulnerability = strings.TrimSpace(vulnerability)
 				if vulnerability == "" {
 					continue
@@ -1030,6 +1030,12 @@ func matchPolicies(policies []VulnerabilitiesIgnorePolicy, attrs Attributes) ([]
 				vulnerabilityLowercase := strings.ToLower(vulnerability)
 				if vulnerabilityLowercase != vulnerability && vulnerabilityLowercase != vulnerabilityUppercase {
 					uniqueVulns[vulnerabilityLowercase] = append(uniqueVulns[vulnerabilityLowercase], vulnerability)
+				}
+				// Neither all-upper nor all-lower casing yields the canonical
+				// mixed-case GHSA form, so an ID written entirely in one case
+				// would otherwise never match (kubescape issue #5796).
+				if canonical, ok := canonicalGHSAID(vulnerability); ok && canonical != vulnerability {
+					uniqueVulns[canonical] = append(uniqueVulns[canonical], vulnerability)
 				}
 			}
 			for _, severity := range policy.Severities {
@@ -1047,6 +1053,18 @@ func matchPolicies(policies []VulnerabilitiesIgnorePolicy, attrs Attributes) ([]
 		uniqueSeversList = append(uniqueSeversList, sever)
 	}
 	return uniqueVulnsList, uniqueSeversList
+}
+
+// canonicalGHSAID returns the canonical GitHub Security Advisory form of id
+// (uppercase "GHSA-" prefix, lowercase suffix, e.g. "GHSA-jc7w-c686-c4v9")
+// when id carries a GHSA prefix in any casing. It reports false for every
+// other identifier so non-GHSA IDs are left untouched.
+func canonicalGHSAID(id string) (string, bool) {
+	const prefix = "GHSA-"
+	if len(id) <= len(prefix) || !strings.EqualFold(id[:len(prefix)], prefix) {
+		return "", false
+	}
+	return prefix + strings.ToLower(id[len(prefix):]), true
 }
 
 func isNonRegistryForExceptions(img string, stat func(string) bool) bool {
