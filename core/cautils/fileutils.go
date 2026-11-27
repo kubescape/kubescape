@@ -1652,7 +1652,12 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err 
 	// The documents are split by looking for "---" lines in the raw bytes, which
 	// UTF-16 text doesn't contain: without decoding it first, everything after
 	// the first document would be dropped with no error.
-	docs, splitErr := splitYAMLDocuments(textencoding.DecodeUTF16(yamlFile))
+	yamlFile, err = textencoding.DecodeUTF16(yamlFile)
+	if err != nil {
+		return yamlObjs, err
+	}
+
+	docs, splitErr := splitYAMLDocuments(yamlFile)
 
 	var parseErrs []error
 	if splitErr != nil {
@@ -1844,7 +1849,10 @@ func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err
 	}()
 
 	// fastjson reads UTF-8 only.
-	jsonFile = textencoding.DecodeUTF16(jsonFile)
+	jsonFile, err = textencoding.DecodeUTF16(jsonFile)
+	if err != nil {
+		return workloads, err
+	}
 
 	// A UTF-8 byte order mark is not part of the JSON text. Windows editors and
 	// PowerShell's Out-File -Encoding utf8 write one, the YAML reader skips it,

@@ -122,7 +122,11 @@ func readPolicyFile(path string) ([]byte, error) {
 // the decoder would reject the whole file at the first byte. Only the decoded
 // text is changed; digests of the file still cover its exact bytes.
 func unmarshalPolicy(buf []byte, v any) error {
-	return json.Unmarshal(bytes.TrimPrefix(textencoding.DecodeUTF16(buf), []byte("\xef\xbb\xbf")), v)
+	text, err := textencoding.DecodeUTF16(buf)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(bytes.TrimPrefix(text, []byte("\xef\xbb\xbf")), v)
 }
 
 // ReadPolicyFile returns the contents of the policy file at path, reading at most
