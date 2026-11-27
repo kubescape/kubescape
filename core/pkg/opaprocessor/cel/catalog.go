@@ -1,11 +1,17 @@
 package cel
 
 import (
+	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 )
+
+// ErrNoCELEquivalent indicates that a requested control or policy does not have
+// an equivalent ValidatingAdmissionPolicy in the embedded CEL library.
+var ErrNoCELEquivalent = errors.New("no CEL equivalent yet")
 
 // This file exposes bundle metadata to callers outside the engine, so the
 // embedded VAP YAML is the single source of truth for facts like "which policy
@@ -28,6 +34,44 @@ func PolicyNameForControl(controlID string) (string, error) {
 		return "", err
 	}
 	return vap.PolicyName, nil
+}
+
+// PolicyManifestForControl returns the ValidatingAdmissionPolicy manifest YAML
+// implementing a control (e.g. C-0016).
+// If the control has no policy in the embedded bundle, it returns an error wrapping ErrNoCELEquivalent.
+func PolicyManifestForControl(controlID string) (manifest string, policyName string, takesParams bool, err error) {
+	controlID = strings.ToUpper(strings.TrimSpace(controlID))
+	catalog, err := getVAPCatalog()
+	if err != nil {
+		return "", "", false, err
+	}
+	if _, dup := catalog.dupControls[controlID]; dup {
+		return "", "", false, fmt.Errorf("control %q is defined by more than one policy in the VAP bundle; refusing it rather than pick one", controlID)
+	}
+	vap, ok := catalog.byControl[controlID]
+	if !ok {
+		return "", "", false, fmt.Errorf("%w: control %q", ErrNoCELEquivalent, controlID)
+	}
+	return vap.Manifest(), vap.PolicyName, vap.TakesParams(), nil
+}
+
+// PolicyManifestForPolicy returns the ValidatingAdmissionPolicy manifest YAML
+// by policy name.
+// If the policy name is absent from the embedded bundle, it returns an error wrapping ErrNoCELEquivalent.
+func PolicyManifestForPolicy(policyName string) (manifest string, controlID string, takesParams bool, err error) {
+	policyName = strings.TrimSpace(policyName)
+	catalog, err := getVAPCatalog()
+	if err != nil {
+		return "", "", false, err
+	}
+	if _, dup := catalog.dupNames[policyName]; dup {
+		return "", "", false, fmt.Errorf("policy %q is defined more than once in the VAP bundle; refusing it rather than pick one", policyName)
+	}
+	vap, ok := catalog.byName[policyName]
+	if !ok {
+		return "", "", false, fmt.Errorf("%w: policy %q", ErrNoCELEquivalent, policyName)
+	}
+	return vap.Manifest(), vap.ControlID, vap.TakesParams(), nil
 }
 
 // ParamKindForControl returns the spec.paramKind of the control's policy, nil

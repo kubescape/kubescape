@@ -21,6 +21,33 @@ func TestPolicyNameForControl(t *testing.T) {
 	require.Error(t, err, "a control absent from the bundle must fail loudly")
 }
 
+func TestPolicyManifestForControl(t *testing.T) {
+	manifest, policyName, takesParams, err := PolicyManifestForControl("C-0016")
+	require.NoError(t, err)
+	assert.Equal(t, "kubescape-c-0016-allow-privilege-escalation", policyName)
+	assert.False(t, takesParams)
+	assert.Contains(t, manifest, "kind: ValidatingAdmissionPolicy")
+	assert.Contains(t, manifest, "name: kubescape-c-0016-allow-privilege-escalation")
+
+	// Control absent from bundle fails with ErrNoCELEquivalent
+	_, _, _, err = PolicyManifestForControl("C-9999")
+	require.ErrorIs(t, err, ErrNoCELEquivalent)
+	assert.Contains(t, err.Error(), "no CEL equivalent yet")
+}
+
+func TestPolicyManifestForPolicy(t *testing.T) {
+	manifest, controlID, takesParams, err := PolicyManifestForPolicy("kubescape-c-0016-allow-privilege-escalation")
+	require.NoError(t, err)
+	assert.Equal(t, "C-0016", controlID)
+	assert.False(t, takesParams)
+	assert.Contains(t, manifest, "kind: ValidatingAdmissionPolicy")
+
+	// Unknown policy name fails with ErrNoCELEquivalent
+	_, _, _, err = PolicyManifestForPolicy("unknown-policy-name")
+	require.ErrorIs(t, err, ErrNoCELEquivalent)
+	assert.Contains(t, err.Error(), "no CEL equivalent yet")
+}
+
 // TestParamKindForControl checks paramKind is read off the embedded policy.
 // C-0009 is the regression case: the retired hand-typed params map did not list
 // it, even though its policy declares a paramKind — the exact drift deriving

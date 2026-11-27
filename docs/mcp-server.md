@@ -1141,11 +1141,42 @@ A missing resource, a missing control or the absence of a finding is never treat
 
 ### Admission Policy Tools
 
-Both tools read only the CEL admission policy library embedded in the Kubescape binary. They make no cluster, file or network access, and neither applies anything to a cluster. Kubescape's ValidatingAdmissionPolicy support is experimental.
+These tools read only the CEL admission policy library embedded in the Kubescape binary. They make no cluster, file or network access, and none applies anything to a cluster. Kubescape's ValidatingAdmissionPolicy support is experimental.
 
 #### `list_admission_policies`
 
 List the ValidatingAdmissionPolicies in the embedded library, with the Kubescape control each one implements (`controlID`), whether it reads parameters (`takesParams`), its `failurePolicy` and the `resources` it matches. It takes no arguments. The output is the same as `kubescape vap list-policies --format json`.
+
+#### `generate_vap`
+
+Generate a `ValidatingAdmissionPolicy` manifest for a control or policy in the embedded library. The tool runs the same validation as `kubescape vap generate-policy` and returns the YAML for you to review; it does **not** apply it to a cluster.
+
+Only controls that already have a CEL/VAP implementation in the embedded library are supported. Requesting a control or policy without a CEL implementation returns an error stating no CEL equivalent exists yet.
+
+**Arguments:**
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `control_id` | string | Kubescape control ID whose policy to generate, in any casing (e.g. `C-0016`). Exactly one of `control_id` or `policy_name` is required |
+| `policy_name` | string | Name of the ValidatingAdmissionPolicy to generate (see `list_admission_policies`). Exactly one of `control_id` or `policy_name` is required |
+
+**Response:**
+
+```json
+{
+  "policy_name": "kubescape-c-0016-allow-privilege-escalation",
+  "control_id": "C-0016",
+  "manifest": "apiVersion: admissionregistration.k8s.io/v1\nkind: ValidatingAdmissionPolicy\n...",
+  "takes_params": false
+}
+```
+
+- `policy_name` is the resolved ValidatingAdmissionPolicy name.
+- `control_id` is the associated Kubescape control ID (if applicable).
+- `manifest` is the generated ValidatingAdmissionPolicy YAML.
+- `takes_params` indicates whether the policy declares a `spec.paramKind`.
+
+**Errors:** `INVALID_ARGUMENT` if neither or both arguments are specified, or if the requested control/policy has no CEL equivalent yet.
 
 #### `create_admission_policy_binding`
 

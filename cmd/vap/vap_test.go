@@ -2406,3 +2406,74 @@ func TestCreatePolicyBindingCmd_OutputFlagValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "is a directory, not a file")
 	})
 }
+
+func TestGeneratePolicyCmd(t *testing.T) {
+	t.Run("generate by control ID writes ValidatingAdmissionPolicy", func(t *testing.T) {
+		cmd := getGeneratePolicyCmd()
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		cmd.SetArgs([]string{"--control", "C-0016"})
+		require.NoError(t, cmd.Execute())
+		assert.Contains(t, buf.String(), "kind: ValidatingAdmissionPolicy")
+		assert.Contains(t, buf.String(), "name: kubescape-c-0016-allow-privilege-escalation")
+	})
+
+	t.Run("generate by policy name writes ValidatingAdmissionPolicy", func(t *testing.T) {
+		cmd := getGeneratePolicyCmd()
+		var buf bytes.Buffer
+		cmd.SetOut(&buf)
+		cmd.SetArgs([]string{"--policy", "kubescape-c-0016-allow-privilege-escalation"})
+		require.NoError(t, cmd.Execute())
+		assert.Contains(t, buf.String(), "kind: ValidatingAdmissionPolicy")
+	})
+
+	t.Run("absent control returns clear no CEL equivalent error", func(t *testing.T) {
+		cmd := getGeneratePolicyCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--control", "C-9999"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `control "C-9999" has no CEL equivalent yet`)
+	})
+
+	t.Run("absent policy returns clear no CEL equivalent error", func(t *testing.T) {
+		cmd := getGeneratePolicyCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--policy", "nonexistent-policy"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `policy "nonexistent-policy" has no CEL equivalent yet`)
+	})
+
+	t.Run("missing both flags fails", func(t *testing.T) {
+		cmd := getGeneratePolicyCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "either --policy or --control must be specified")
+	})
+
+	t.Run("both flags specified fails", func(t *testing.T) {
+		cmd := getGeneratePolicyCmd()
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
+		cmd.SetArgs([]string{"--control", "C-0016", "--policy", "kubescape-c-0016-allow-privilege-escalation"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "only one of --policy or --control can be specified")
+	})
+
+	t.Run("output to file writes manifest", func(t *testing.T) {
+		outFile := filepath.Join(t.TempDir(), "policy.yaml")
+		cmd := getGeneratePolicyCmd()
+		cmd.SetArgs([]string{"--control", "C-0016", "--output", outFile})
+		require.NoError(t, cmd.Execute())
+		content, err := os.ReadFile(outFile)
+		require.NoError(t, err)
+		assert.Contains(t, string(content), "kind: ValidatingAdmissionPolicy")
+	})
+}
