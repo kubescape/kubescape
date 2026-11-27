@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -416,18 +417,25 @@ func TestDownload_BareJSONOutputPathIsRespected(t *testing.T) {
 	assert.FileExists(t, "nsa.json")
 }
 
+const downloadLoggerChildTest = "KUBESCAPE_DOWNLOAD_LOGGER_TEST"
+
+func downloadTestCommand(t *testing.T, name string) *exec.Cmd {
+	// Go matches slash-separated name components independently.
+	pattern := "^" + strings.ReplaceAll(regexp.QuoteMeta(name), "/", "$/^") + "$"
+	return exec.CommandContext(t.Context(), os.Args[0], "-test.run="+pattern, "-test.v") //nolint:gosec // G204: re-executes the running test binary with a literal test selector.
+}
+
 // Run logger-sensitive download tests in a child process because initializing a
 // logger replaces the global backend and the logger API cannot restore it.
 func runInDownloadLoggerProcess(t *testing.T) bool {
 	t.Helper()
-	const childTest = "KUBESCAPE_DOWNLOAD_LOGGER_TEST"
-	if os.Getenv(childTest) == t.Name() {
+	if os.Getenv(downloadLoggerChildTest) == t.Name() {
 		logger.InitLogger("pretty")
 		logger.DisableColor(true)
 		return true
 	}
-	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+t.Name()+"$", "-test.v") //nolint:gosec // G204: re-executes the running Go test binary with fixed flags and a source-defined test name.
-	cmd.Env = append(os.Environ(), childTest+"="+t.Name())
+	cmd := downloadTestCommand(t, t.Name())
+	cmd.Env = append(os.Environ(), downloadLoggerChildTest+"="+t.Name())
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "%s", output)
 	t.Logf("%s", output)
@@ -435,17 +443,6 @@ func runInDownloadLoggerProcess(t *testing.T) bool {
 }
 
 func TestDownload_BulkFrameworkOutputWarning(t *testing.T) {
-	if !runInDownloadLoggerProcess(t) {
-		return
-	}
-	withTenantConfig(t, &fakeTenantConfig{})
-	framework := reporthandling.Framework{PortalBase: armotypes.PortalBase{Name: "nsa"}}
-	withPolicyGetter(t, &fakePolicyGetter{
-		frameworks: []reporthandling.Framework{framework},
-		framework:  &framework,
-		named:      fakeSecurityViewFrameworks(),
-	}, nil)
-
 	const diagnostic = "Ignoring output filename because bulk framework downloads write individual JSON files"
 	for _, tt := range []struct {
 		name       string
@@ -463,6 +460,18 @@ func TestDownload_BulkFrameworkOutputWarning(t *testing.T) {
 		{name: "named framework", output: "frameworks.json", directory: ".", identifier: "nsa"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			// Let Go select the subtest in the parent before starting its child.
+			if !runInDownloadLoggerProcess(t) {
+				return
+			}
+			withTenantConfig(t, &fakeTenantConfig{})
+			framework := reporthandling.Framework{PortalBase: armotypes.PortalBase{Name: "nsa"}}
+			withPolicyGetter(t, &fakePolicyGetter{
+				frameworks: []reporthandling.Framework{framework},
+				framework:  &framework,
+				named:      fakeSecurityViewFrameworks(),
+			}, nil)
+
 			t.Chdir(t.TempDir())
 			originalStore := getter.DefaultLocalStore
 			getter.DefaultLocalStore = t.TempDir()
@@ -512,6 +521,25 @@ func TestDownload_BulkFrameworkOutputWarning(t *testing.T) {
 			t.Log(diagnostics[0])
 		})
 	}
+}
+
+func TestDownload_LoggerSubtestSelection(t *testing.T) {
+	const prefix = "TestDownload_BulkFrameworkOutputWarning/"
+	const selected = prefix + "bare_filename"
+	cmd := downloadTestCommand(t, selected)
+	cmd.Env = append(os.Environ(), downloadLoggerChildTest+"=")
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "%s", output)
+
+	var runs []string
+	for _, line := range strings.Split(string(output), "\n") {
+		_, name, found := strings.Cut(line, "=== RUN   "+prefix)
+		if found {
+			runs = append(runs, prefix+strings.TrimSpace(name))
+		}
+	}
+	// The selected subtest runs in the parent and its logger-isolated child.
+	require.Equal(t, []string{selected, selected}, runs, "%s", output)
 }
 
 // TestDownload_ArtifactsJSONOutputWritesToCurrentDirectory pins the behavior
