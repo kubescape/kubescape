@@ -434,12 +434,20 @@ func intPointerValue(value *int) int {
 // (unknown docIndex, or ResolveLocation finding nothing) is omitted rather than defaulted to line
 // 1 - a relatedLocation with a fabricated line number would be worse than no relatedLocation at all.
 func resolveReviewPathLocations(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.PathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) map[string]locationresolver.Location {
-	if locationResolver == nil {
+	if opaSessionObj == nil {
 		return nil
 	}
-	docIndex, ok := getDocIndex(opaSessionObj, resourceID)
-	if !ok {
-		return nil
+	tf, terraform := opaSessionObj.TerraformSourceLocations[resourceID]
+	var docIndex int
+	if !terraform {
+		if locationResolver == nil {
+			return nil
+		}
+		var ok bool
+		docIndex, ok = getDocIndex(opaSessionObj, resourceID)
+		if !ok {
+			return nil
+		}
 	}
 
 	var locations map[string]locationresolver.Location
@@ -454,9 +462,19 @@ func resolveReviewPathLocations(opaSessionObj *cautils.OPASessionObj, locationRe
 			if _, seen := locations[p.ReviewPath]; seen {
 				continue
 			}
-			location, err := locationResolver.ResolveLocation(p.ReviewPath, docIndex)
-			if err != nil || location.Line == 0 {
-				continue
+			var location locationresolver.Location
+			if terraform {
+				field, ok := tf.Field(p.ReviewPath)
+				if !ok {
+					continue
+				}
+				location = locationresolver.Location{Line: field.Line, Column: field.Column}
+			} else {
+				var err error
+				location, err = locationResolver.ResolveLocation(p.ReviewPath, docIndex)
+				if err != nil || location.Line == 0 {
+					continue
+				}
 			}
 			if locations == nil {
 				locations = make(map[string]locationresolver.Location)
@@ -1045,10 +1063,26 @@ func resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *
 }
 
 func lookupFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.PathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) (locationresolver.Location, bool) {
-	// Terraform files have no YAML node tree to resolve fix paths in, so point
-	// at the resource block the workload was converted from.
-	if location, ok := terraformResourceLocation(opaSessionObj, resourceID); ok {
-		return location, true
+	if opaSessionObj == nil {
+		return locationresolver.Location{}, false
+	}
+	if tf, ok := opaSessionObj.TerraformSourceLocations[resourceID]; ok {
+		paths := AssistedRemediationPathsToString(ac)
+		if ac != nil {
+			for _, rule := range ac.ResourceAssociatedRules {
+				for _, entry := range rule.Paths {
+					if entry.FailedPath != "" {
+						paths = append(paths, entry.FailedPath)
+					}
+				}
+			}
+		}
+		for _, path := range paths {
+			if field, ok := tf.Field(path); ok {
+				return locationresolver.Location{Line: field.Line, Column: field.Column}, true
+			}
+		}
+		return locationresolver.Location{Line: tf.Line, Column: tf.Column}, true
 	}
 	if locationResolver == nil {
 		return locationresolver.Location{}, false
@@ -1245,20 +1279,6 @@ func collectFixes(ctx context.Context, cache *fixReportCache, result *sarif.Resu
 	}
 }
 
-// terraformResourceLocation returns the start of the Terraform resource block
-// a resource was converted from. It reports false for resources that didn't
-// come from a Terraform file.
-func terraformResourceLocation(opaSessionObj *cautils.OPASessionObj, resourceID string) (locationresolver.Location, bool) {
-	if opaSessionObj == nil {
-		return locationresolver.Location{}, false
-	}
-	source, ok := opaSessionObj.TerraformSourceLocations[resourceID]
-	if !ok {
-		return locationresolver.Location{}, false
-	}
-	return locationresolver.Location{Line: source.Line, Column: source.Column}, true
-}
-
 func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, bool) {
 	resource, ok := opaSessionObj.GetResource(resourceID)
 	if !ok || resource == nil {
@@ -1398,9 +1418,13 @@ func addRBACSubjectRelatedLocations(result *sarif.Result, opaSessionObj *cautils
 		if source.RelativePath == "" {
 			continue
 		}
-		// a Terraform file has no YAML tree, so point at its resource block
-		location, ok := terraformResourceLocation(opaSessionObj, object.GetID())
-		if !ok {
+		var location locationresolver.Location
+		if tf, ok := opaSessionObj.TerraformSourceLocations[object.GetID()]; ok {
+			location = locationresolver.Location{Line: tf.Line, Column: tf.Column}
+			if field, ok := tf.Field(rest); ok {
+				location = locationresolver.Location{Line: field.Line, Column: field.Column}
+			}
+		} else {
 			docIndex, found := getDocIndex(opaSessionObj, object.GetID())
 			if !found {
 				continue

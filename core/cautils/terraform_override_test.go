@@ -132,6 +132,8 @@ func TestTerraformDirectory_GetWorkloads_OverrideFixture(t *testing.T) {
 		loc, ok := td.SourceLocations()[terraformWorkloadPath(main, i)]
 		require.True(t, ok)
 		lines = append(lines, loc.Line)
+		_, found := loc.Field("spec.hostNetwork")
+		assert.False(t, found, "the override file has different line numbers from main.tf")
 	}
 	assert.ElementsMatch(t, []int{1, 19}, lines)
 }

@@ -30,6 +30,7 @@ resource "kubernetes_manifest" "cm" {
     apiVersion = "v1"
     kind       = "ConfigMap"
     metadata   = { name = "cm-${count.index}", namespace = "shop" }
+    data = { "app.example/key" = "ok" }
   }
 }
 
@@ -69,7 +70,7 @@ resource "kubernetes_manifest" "cm" {
 		"ConfigMap/cm-0": {Line: 11, Column: 1},
 		"ConfigMap/cm-1": {Line: 11, Column: 1},
 		"Namespace/shop": {Line: 5, Column: 1},
-		"Deployment/web": {Line: 20, Column: 3},
+		"Deployment/web": {Line: 21, Column: 3},
 	}
 	got := map[string]SourceLocation{}
 	for _, w := range workloads[path] {
@@ -77,6 +78,14 @@ resource "kubernetes_manifest" "cm" {
 		require.True(t, ok)
 		location, ok := td.SourceLocations()[lw.GetPath()]
 		require.True(t, ok, "no source location for %s", lw.GetPath())
+		if w.GetKind() == "ConfigMap" {
+			field, ok := location.Field("data[app.example/key]")
+			require.True(t, ok)
+			assert.Equal(t, SourceLocation{Line: 17, Column: 14}, field)
+			_, ok = location.Field("data.app.example/key")
+			assert.False(t, ok)
+		}
+		location.tree = nil
 		got[w.GetKind()+"/"+w.GetName()] = location
 	}
 	assert.Equal(t, want, got)
@@ -109,8 +118,8 @@ func TestTerraformDirectory_SourceLocations_PerScan(t *testing.T) {
 	firstPath, first := scan(0)
 	secondPath, second := scan(9)
 	require.Equal(t, firstPath, secondPath, "both scans should use the same relative path")
-	assert.Equal(t, SourceLocation{Line: 1, Column: 1}, first[firstPath])
-	assert.Equal(t, SourceLocation{Line: 10, Column: 1}, second[secondPath])
+	assert.Equal(t, 1, first[firstPath].Line)
+	assert.Equal(t, 10, second[secondPath].Line)
 }
 
 // A directory's locations are those of its last GetWorkloads call.
@@ -130,12 +139,12 @@ func TestTerraformDirectory_SourceLocations_ResetOnGetWorkloads(t *testing.T) {
 	write(0)
 	_, errs := td.GetWorkloads(dir)
 	require.Empty(t, errs)
-	assert.Equal(t, map[string]SourceLocation{path + ":0": {Line: 1, Column: 1}}, td.SourceLocations())
+	assert.Equal(t, 1, td.SourceLocations()[path+":0"].Line)
 
 	write(4)
 	_, errs = td.GetWorkloads(dir)
 	require.Empty(t, errs)
-	assert.Equal(t, map[string]SourceLocation{path + ":0": {Line: 5, Column: 1}}, td.SourceLocations())
+	assert.Equal(t, 5, td.SourceLocations()[path+":0"].Line)
 }
 
 func TestLoadResourcesFromTerraformWithLocations(t *testing.T) {
@@ -155,8 +164,13 @@ func TestLoadResourcesFromTerraformWithLocations(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, skips)
 	require.Len(t, workloads, 2)
+	blocks := map[string]SourceLocation{}
+	for path, loc := range locations {
+		loc.tree = nil
+		blocks[path] = loc
+	}
 	assert.Equal(t, map[string]SourceLocation{
 		filepath.Join(root, "a", "main.tf") + ":0": {Line: 1, Column: 1},
 		filepath.Join(root, "b", "main.tf") + ":0": {Line: 4, Column: 1},
-	}, locations)
+	}, blocks)
 }

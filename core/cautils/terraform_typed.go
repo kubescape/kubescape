@@ -551,10 +551,10 @@ func attributeValueFor(path, name string, val interface{}) interface{} {
 // are expanded with their iterator context before field conversion.
 func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error, path string) map[string]interface{} {
 	converter := terraformBodyConverter{errs: errs, remaining: maxTerraformLocalSize}
-	return converter.bodyToMap(body, evalCtx, path, false, false)
+	return converter.bodyToMap(body, evalCtx, path, false, false, nil)
 }
 
-func (c *terraformBodyConverter) bodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, path string, resource, generated bool) map[string]interface{} {
+func (c *terraformBodyConverter) bodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, path string, resource, generated bool, parent *terraformSourceNode) map[string]interface{} {
 	out := map[string]interface{}{}
 
 	for name, attr := range body.Attributes {
@@ -586,7 +586,9 @@ func (c *terraformBodyConverter) bodyToMap(body *hclsyntax.Body, evalCtx *hcl.Ev
 			// a rule read the field as set.
 			continue
 		}
-		out[attributeKeyFor(path, name)] = value
+		key := attributeKeyFor(path, name)
+		out[key] = value
+		parent.field(key, attr.NameRange).expression(attr.Expr, evalCtx)
 	}
 	if c.exhausted {
 		return out
@@ -615,12 +617,8 @@ func (c *terraformBodyConverter) bodyToMap(body *hclsyntax.Body, evalCtx *hcl.Ev
 
 	for _, blockType := range order {
 		blocks := grouped[blockType]
-		if isBackendServicePortBlock(path, blockType) {
-			out["port"] = c.bodyToMap(blocks[0].Body, blocks[0].evalCtx, path+"."+blockType, false, blocks[0].generated)
-			continue
-		}
 		if isPersistentVolumeSourceBlock(path, blockType) {
-			pvSource := c.bodyToMap(blocks[0].Body, blocks[0].evalCtx, path+"."+blockType, false, blocks[0].generated)
+			pvSource := c.bodyToMap(blocks[0].Body, blocks[0].evalCtx, path+"."+blockType, false, blocks[0].generated, parent)
 			for k, v := range pvSource {
 				out[k] = v
 			}
@@ -643,15 +641,20 @@ func (c *terraformBodyConverter) bodyToMap(body *hclsyntax.Body, evalCtx *hcl.Ev
 			isRepeatable = true
 		}
 
+		if isBackendServicePortBlock(path, blockType) {
+			field, isRepeatable = "port", false
+		}
+		child := parent.field(field, blocks[0].TypeRange)
 		if isRepeatable {
 			var arr []interface{}
 			for _, b := range blocks {
-				arr = append(arr, c.bodyToMap(b.Body, b.evalCtx, path+"."+blockType, false, b.generated))
+				item := child.item(b.TypeRange)
+				arr = append(arr, c.bodyToMap(b.Body, b.evalCtx, path+"."+blockType, false, b.generated, item))
 			}
 			out[field] = arr
 			continue
 		}
-		out[field] = c.bodyToMap(blocks[0].Body, blocks[0].evalCtx, path+"."+blockType, false, blocks[0].generated)
+		out[field] = c.bodyToMap(blocks[0].Body, blocks[0].evalCtx, path+"."+blockType, false, blocks[0].generated, child)
 	}
 
 	if strings.HasSuffix(path, ".path") && strings.HasPrefix(path, "kubernetes_ingress_v1") {
@@ -674,7 +677,7 @@ func hclResourceBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *
 	if len(references) > 0 {
 		converter.references = references[0]
 	}
-	return converter.bodyToMap(body, evalCtx, path, true, false)
+	return converter.bodyToMap(body, evalCtx, path, true, false, nil)
 }
 
 // extractTypedResources finds resource "kubernetes_<type>" "name" { ... }
@@ -724,9 +727,10 @@ func extractTypedResourceManifests(body hcl.Body, evalCtx *hcl.EvalContext, refe
 		// dynamic blocks they generate are bounded together, not per instance.
 		converter := terraformBodyConverter{errs: &errs, remaining: maxTerraformLocalSize, references: reference}
 		for _, instanceCtx := range instances {
+			source := newTerraformLocation(block.DefRange())
 			manifests = append(manifests, terraformManifest{
-				object: typedResourceManifest(&converter, block, gvk.apiVersion, gvk.kind, instanceCtx, path),
-				source: block.DefRange(),
+				object: typedResourceManifest(&converter, block, gvk.apiVersion, gvk.kind, instanceCtx, path, source),
+				source: source,
 			})
 		}
 	}
@@ -743,8 +747,8 @@ func syntaxAttribute(body *hclsyntax.Body, name string) *hcl.Attribute {
 
 // typedResourceManifest converts one instance of a typed resource block,
 // evaluated in evalCtx, into a Kubernetes manifest.
-func typedResourceManifest(converter *terraformBodyConverter, block *hclsyntax.Block, apiVersion, kind string, evalCtx *hcl.EvalContext, path string) map[string]interface{} {
-	obj := converter.bodyToMap(block.Body, evalCtx, path, true, false)
+func typedResourceManifest(converter *terraformBodyConverter, block *hclsyntax.Block, apiVersion, kind string, evalCtx *hcl.EvalContext, path string, source *terraformSourceNode) map[string]interface{} {
+	obj := converter.bodyToMap(block.Body, evalCtx, path, true, false, source)
 	obj["apiVersion"] = apiVersion
 	if block.Labels[0] == "kubernetes_horizontal_pod_autoscaler" && usesHPAV2beta2(obj) {
 		obj["apiVersion"] = "autoscaling/v2beta2"

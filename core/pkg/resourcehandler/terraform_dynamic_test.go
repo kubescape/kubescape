@@ -91,9 +91,15 @@ func TestGetResourcesFromInputRecordsTerraformLocations(t *testing.T) {
 	require.Len(t, first, 1)
 	require.Len(t, second, 1)
 	for _, location := range first {
-		assert.Equal(t, cautils.SourceLocation{Line: 1, Column: 1}, location)
+		assert.Equal(t, 1, location.Line)
+		field, ok := location.Field("metadata.name")
+		require.True(t, ok)
+		assert.Equal(t, cautils.SourceLocation{Line: location.Line + 2, Column: 5}, field)
 	}
 	for _, location := range second {
-		assert.Equal(t, cautils.SourceLocation{Line: 7, Column: 1}, location)
+		assert.Equal(t, 7, location.Line)
+		field, ok := location.Field("metadata.name")
+		require.True(t, ok)
+		assert.Equal(t, cautils.SourceLocation{Line: location.Line + 2, Column: 5}, field)
 	}
 }
