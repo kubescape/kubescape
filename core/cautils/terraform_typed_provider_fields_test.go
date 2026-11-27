@@ -59,6 +59,15 @@ resource "kubernetes_job_v1" "j" {
   }
   spec {
     ttl_seconds_after_finished = "10"
+    pod_failure_policy {
+      rule {
+        action = "FailJob"
+        on_pod_condition {
+          type   = "DisruptionTarget"
+          status = "True"
+        }
+      }
+    }
     template {
       metadata {}
       spec {
@@ -104,6 +113,17 @@ resource "kubernetes_pod_v1" "p" {
     container {
       name  = "app"
       image = "nginx"
+      volume_device {
+        name        = "raw-disk"
+        device_path = "/dev/xvdba"
+      }
+    }
+    dns_config {
+      nameservers = ["1.1.1.1"]
+      option {
+        name  = "ndots"
+        value = "1"
+      }
     }
     volume {
       name = "sec"
@@ -126,6 +146,19 @@ resource "kubernetes_pod_v1" "p" {
       config_map {
         name         = "c"
         default_mode = "0755"
+      }
+    }
+    volume {
+      name = "ephem"
+      ephemeral {
+        volume_claim_template {
+          metadata {
+            labels = { type = "my-type" }
+          }
+          spec {
+            access_modes = ["ReadWriteOnce"]
+          }
+        }
       }
     }
   }
@@ -165,13 +198,29 @@ resource "kubernetes_pod_v1" "p" {
 	job := targets["Job"].(*batchv1.Job)
 	require.NotNil(t, job.Spec.TTLSecondsAfterFinished)
 	assert.Equal(t, int32(10), *job.Spec.TTLSecondsAfterFinished)
+	require.NotNil(t, job.Spec.PodFailurePolicy)
+	require.Len(t, job.Spec.PodFailurePolicy.Rules, 1)
+	assert.Equal(t, batchv1.PodFailurePolicyActionFailJob, job.Spec.PodFailurePolicy.Rules[0].Action)
+	require.Len(t, job.Spec.PodFailurePolicy.Rules[0].OnPodConditions, 1)
+	assert.Equal(t, corev1.PodConditionType("DisruptionTarget"), job.Spec.PodFailurePolicy.Rules[0].OnPodConditions[0].Type)
+	assert.Equal(t, corev1.ConditionTrue, job.Spec.PodFailurePolicy.Rules[0].OnPodConditions[0].Status)
 
 	cronJob := targets["CronJob"].(*batchv1.CronJob)
 	require.NotNil(t, cronJob.Spec.JobTemplate.Spec.TTLSecondsAfterFinished)
 	assert.Equal(t, int32(30), *cronJob.Spec.JobTemplate.Spec.TTLSecondsAfterFinished)
 
 	pod := targets["Pod"].(*corev1.Pod)
-	require.Len(t, pod.Spec.Volumes, 2)
+	require.Len(t, pod.Spec.Containers[0].VolumeDevices, 1)
+	assert.Equal(t, "raw-disk", pod.Spec.Containers[0].VolumeDevices[0].Name)
+	assert.Equal(t, "/dev/xvdba", pod.Spec.Containers[0].VolumeDevices[0].DevicePath)
+
+	require.NotNil(t, pod.Spec.DNSConfig)
+	require.Len(t, pod.Spec.DNSConfig.Options, 1)
+	assert.Equal(t, "ndots", pod.Spec.DNSConfig.Options[0].Name)
+	require.NotNil(t, pod.Spec.DNSConfig.Options[0].Value)
+	assert.Equal(t, "1", *pod.Spec.DNSConfig.Options[0].Value)
+
+	require.Len(t, pod.Spec.Volumes, 3)
 	secretVolume := pod.Spec.Volumes[0].Secret
 	require.NotNil(t, secretVolume.DefaultMode)
 	assert.Equal(t, int32(0o644), *secretVolume.DefaultMode)
@@ -181,6 +230,12 @@ resource "kubernetes_pod_v1" "p" {
 	assert.Nil(t, secretVolume.Items[1].Mode)
 	require.NotNil(t, pod.Spec.Volumes[1].ConfigMap.DefaultMode)
 	assert.Equal(t, int32(0o755), *pod.Spec.Volumes[1].ConfigMap.DefaultMode)
+
+	ephemeralVolume := pod.Spec.Volumes[2].Ephemeral
+	require.NotNil(t, ephemeralVolume)
+	require.NotNil(t, ephemeralVolume.VolumeClaimTemplate)
+	assert.Equal(t, "my-type", ephemeralVolume.VolumeClaimTemplate.Labels["type"])
+	assert.Equal(t, []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}, ephemeralVolume.VolumeClaimTemplate.Spec.AccessModes)
 }
 
 // A data attribute is renamed only on a Secret, and only at its top level.
