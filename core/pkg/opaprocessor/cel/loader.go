@@ -12,6 +12,7 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
+	sigyaml "sigs.k8s.io/yaml"
 )
 
 // vapdataFS bakes the vendored cel-admission-library bundle (see vapdata/README.md)
@@ -71,6 +72,8 @@ type VAP struct {
 	// treated. The apiserver defaults an omitted policy to Fail, so newVAP
 	// stores the resolved value (Fail when nil) rather than the raw pointer.
 	failurePolicy admissionregistrationv1.FailurePolicyType
+
+	manifest string
 }
 
 // failOnError reports whether an evaluation error denies the request. Only an
@@ -84,6 +87,11 @@ func (v *VAP) failOnError() bool {
 // a binding's paramRef is something the apiserver resolves rather than ignores.
 func (v *VAP) TakesParams() bool {
 	return v.paramKind != nil
+}
+
+// Manifest returns the serialized YAML manifest of the ValidatingAdmissionPolicy.
+func (v *VAP) Manifest() string {
+	return v.manifest
 }
 
 // requireSupported reports whether the offline engine can honor this policy with
@@ -489,9 +497,11 @@ func newVAP(policy *admissionregistrationv1.ValidatingAdmissionPolicy) *VAP {
 	for _, c := range policy.Spec.MatchConditions {
 		matchConditions = append(matchConditions, MatchCondition{Name: c.Name, Expression: c.Expression})
 	}
+	manifestBytes, _ := sigyaml.Marshal(policy)
 	vap := &VAP{
 		ControlID:        policy.Labels[controlIDLabel],
 		PolicyName:       policy.Name,
+		manifest:         string(manifestBytes),
 		failurePolicy:    *failurePolicy,
 		matchConditions:  matchConditions,
 		matchConstraints: policy.Spec.MatchConstraints,

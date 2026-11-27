@@ -1307,6 +1307,8 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		return mcp.NewToolResultText(string(result)), nil
 	case "create_admission_policy_binding":
 		return ksServer.CreateAdmissionPolicyBinding(ctx, arguments)
+	case "generate_vap":
+		return ksServer.GenerateVAP(ctx, arguments)
 	case "explain_control":
 		return ksServer.ExplainControl(ctx, arguments)
 	default:
@@ -1609,6 +1611,13 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 		mcp.WithArray("resource_rules", mcp.WithStringItems(), mcp.Description("Restrict the binding to group/version/resource entries the policy already matches (e.g. apps/v1/deployments, /v1/pods). Omit to bind everything the policy matches")),
 		mcp.WithReadOnlyHintAnnotation(true),
 	)
+	generateVAPTool := mcp.NewTool(
+		"generate_vap",
+		mcp.WithDescription("Generate a ValidatingAdmissionPolicy manifest for a policy in the embedded CEL admission policy library, validated like `kubescape vap generate-policy`. Name the policy with exactly one of policy_name (see list_admission_policies) or control_id (e.g. C-0016). Only controls that already have a CEL/VAP implementation in the embedded library are supported; for anything else, an error is returned. Read-only: it returns the YAML in manifest and does not create or apply anything in a cluster. Kubescape's ValidatingAdmissionPolicy support is experimental."),
+		mcp.WithString("control_id", mcp.Description("Kubescape control ID whose policy to generate (e.g. C-0016). Exactly one of control_id or policy_name is required")),
+		mcp.WithString("policy_name", mcp.Description("Name of the ValidatingAdmissionPolicy to generate (see list_admission_policies). Exactly one of control_id or policy_name is required")),
+		mcp.WithReadOnlyHintAnnotation(true),
+	)
 	validateScanSelectionTool := mcp.NewTool(
 		"validate_scan_selection",
 		mcp.WithDescription("Check, without running a scan, whether control identifiers resolve against the policy catalog the way scan_controls resolves them. Each identifier is a control ID (e.g. C-0286) or a framework section number (e.g. CIS-3.1.1), case-insensitive. Reports which identifiers resolve to which control, which are unknown, which section numbers are ambiguous, and which name a control already named by an earlier identifier. Read-only: it needs no cluster access. If the policy bundle is still loading or cannot be read it returns an error rather than reporting identifiers as unknown."),
@@ -1621,6 +1630,7 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 	ksServer.s.AddTool(validateScanSelectionTool, ksServer.toolHandler(validateScanSelectionTool.Name))
 	ksServer.s.AddTool(listAdmissionPoliciesTool, ksServer.toolHandler(listAdmissionPoliciesTool.Name))
 	ksServer.s.AddTool(createAdmissionPolicyBindingTool, ksServer.toolHandler(createAdmissionPolicyBindingTool.Name))
+	ksServer.s.AddTool(generateVAPTool, ksServer.toolHandler(generateVAPTool.Name))
 }
 
 func GetMCPServerCmd() *cobra.Command {

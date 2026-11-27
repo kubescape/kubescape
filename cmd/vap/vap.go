@@ -44,6 +44,10 @@ var vapHelperCmdExamples = fmt.Sprintf(`
   %[1]s vap create-policy-binding --name my-policy-binding --control C-0016 --namespace=my-namespace | kubectl apply -f -
   # Create a policy binding by ValidatingAdmissionPolicy name
   %[1]s vap create-policy-binding --name my-policy-binding --policy kubescape-c-0016-allow-privilege-escalation --namespace=my-namespace | kubectl apply -f -
+  # Generate a ValidatingAdmissionPolicy manifest by Kubescape control ID
+  %[1]s vap generate-policy --control C-0016
+  # Generate a ValidatingAdmissionPolicy manifest by ValidatingAdmissionPolicy name
+  %[1]s vap generate-policy --policy kubescape-c-0016-allow-privilege-escalation
   # Roll a control out in report-only mode before switching it to Deny
   %[1]s vap create-policy-binding --name my-policy-binding --control C-0016 --action Audit --action Warn | kubectl apply -f -
   # Narrow a policy binding to specific resources, including custom ones
@@ -65,6 +69,7 @@ func GetVapHelperCmd() *cobra.Command {
 	vapHelperCmd.AddCommand(getListPoliciesCmd())
 	vapHelperCmd.AddCommand(getDeployLibraryCmd())
 	vapHelperCmd.AddCommand(getCreatePolicyBindingCmd())
+	vapHelperCmd.AddCommand(getGeneratePolicyCmd())
 
 	return vapHelperCmd
 }
@@ -158,6 +163,96 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 	createPolicyBindingCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write output to file instead of stdout")
 
 	return createPolicyBindingCmd
+}
+
+func getGeneratePolicyCmd() *cobra.Command {
+	var outputFile string
+	var policyName string
+	var controlID string
+
+	cmd := &cobra.Command{
+		Use:   "generate-policy",
+		Short: "Generate a ValidatingAdmissionPolicy manifest from the embedded CEL library",
+		Long:  ``,
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			outPath, err := validateOutputFile(outputFile, cmd.Flags().Changed("output"))
+			if err != nil {
+				return err
+			}
+			result, err := GeneratePolicy(GeneratePolicyOptions{
+				PolicyName: policyName,
+				ControlID:  controlID,
+			})
+			if err != nil {
+				return err
+			}
+			return writeOutput(result.Manifest, outPath, cmd.OutOrStdout())
+		},
+	}
+	cmd.Flags().StringVarP(&policyName, "policy", "p", "", "Name of the ValidatingAdmissionPolicy to generate")
+	cmd.Flags().StringVarP(&controlID, "control", "c", "", "Kubescape control ID to generate a ValidatingAdmissionPolicy for")
+	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write output to file instead of stdout")
+
+	return cmd
+}
+
+// GeneratePolicyResult holds the output of GeneratePolicy.
+type GeneratePolicyResult struct {
+	PolicyName  string
+	ControlID   string
+	Manifest    string
+	TakesParams bool
+}
+
+// GeneratePolicyOptions contains options for generating a ValidatingAdmissionPolicy manifest.
+type GeneratePolicyOptions struct {
+	PolicyName string
+	ControlID  string
+}
+
+// GeneratePolicy returns the ValidatingAdmissionPolicy manifest for a control ID or policy name.
+// It reads only the embedded policy library: no cluster, file or network access.
+func GeneratePolicy(opts GeneratePolicyOptions) (*GeneratePolicyResult, error) {
+	policyName := strings.TrimSpace(opts.PolicyName)
+	controlID := strings.ToUpper(strings.TrimSpace(opts.ControlID))
+
+	switch {
+	case policyName == "" && controlID == "":
+		return nil, fmt.Errorf("either --policy or --control must be specified")
+	case policyName != "" && controlID != "":
+		return nil, fmt.Errorf("only one of --policy or --control can be specified")
+	}
+
+	if controlID != "" {
+		manifest, pName, takesParams, err := cel.PolicyManifestForControl(controlID)
+		if err != nil {
+			if errors.Is(err, cel.ErrNoCELEquivalent) {
+				return nil, fmt.Errorf("control %q has no CEL equivalent yet", controlID)
+			}
+			return nil, err
+		}
+		return &GeneratePolicyResult{
+			PolicyName:  pName,
+			ControlID:   controlID,
+			Manifest:    manifest,
+			TakesParams: takesParams,
+		}, nil
+	}
+
+	manifest, cID, takesParams, err := cel.PolicyManifestForPolicy(policyName)
+	if err != nil {
+		if errors.Is(err, cel.ErrNoCELEquivalent) {
+			return nil, fmt.Errorf("policy %q has no CEL equivalent yet", policyName)
+		}
+		return nil, err
+	}
+	return &GeneratePolicyResult{
+		PolicyName:  policyName,
+		ControlID:   cID,
+		Manifest:    manifest,
+		TakesParams: takesParams,
+	}, nil
 }
 
 // ErrMarshalManifest marks a failure to serialize the binding, as opposed to a
