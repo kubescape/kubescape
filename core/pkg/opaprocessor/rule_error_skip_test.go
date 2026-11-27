@@ -119,6 +119,14 @@ func liveBinding(t *testing.T, controlID, name string) metav1unstructured.Unstru
 	}}
 }
 
+// liveBindingWithParamRef is liveBinding that also names the params it supplies.
+func liveBindingWithParamRef(t *testing.T, controlID, name, paramName string) metav1unstructured.Unstructured {
+	t.Helper()
+	binding := liveBinding(t, controlID, name)
+	require.NoError(t, metav1unstructured.SetNestedField(binding.Object, paramName, "spec", "paramRef", "name"))
+	return binding
+}
+
 // runEager scans pods with ProcessRulesListener.
 func runEager(session *cautils.OPASessionObj, pods ...workloadinterface.IMetadata) error {
 	for _, pod := range pods {
@@ -200,7 +208,10 @@ func TestRuleLevelErrorsSkipTheControl(t *testing.T) {
 			name:   "CEL policy matched by two live bindings",
 			broken: ruleErrorTestControl("C-0004", "cel-two-bindings", reporthandling.PolicyRule{RuleLanguage: reporthandling.CELLanguage}),
 			bindings: func(t *testing.T) []metav1unstructured.Unstructured {
-				return []metav1unstructured.Unstructured{liveBinding(t, "C-0004", "binding-a"), liveBinding(t, "C-0004", "binding-b")}
+				return []metav1unstructured.Unstructured{
+					liveBindingWithParamRef(t, "C-0004", "binding-a", "params-a"),
+					liveBindingWithParamRef(t, "C-0004", "binding-b", "params-b"),
+				}
 			},
 			reasonContains: "is matched by 2 live bindings",
 		},

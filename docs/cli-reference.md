@@ -515,9 +515,10 @@ the policy, that object supplies `params` even when its kind is not the bundled
 resolution falls back to the bundled `ControlConfiguration` — when there is no
 binding, the binding does not cover the matched resource, or the binding names no
 object — because the scan cannot supply the inputs admission uses. (Policies
-matched by multiple bindings, or bindings that select parameters dynamically via
+matched by multiple bindings that supply parameters, or bindings that select parameters dynamically via
 `spec.paramRef.selector`, are also refused before resolution to preserve
-admission parity.)
+admission parity. Several bindings that supply no parameters change nothing,
+since a binding steers a scan only through its params.)
 
 Every custom rule becomes a control named `custom-<rule>` in the report.
 
