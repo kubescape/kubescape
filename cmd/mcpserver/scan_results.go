@@ -185,15 +185,19 @@ func snapshotMetadataSize(doc scanResultDocument) (int, error) {
 
 func (s *scanResultStore) page(owner, id string, offset, limit int, now time.Time) ([]byte, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.expireLocked(now)
 	entry, ok := s.entries[id]
 	if !ok || owner == "" || owner != entry.owner {
+		s.mu.Unlock()
 		return nil, errScanResultsUnavailable
 	}
 	if offset < 0 || offset > len(entry.document.Resources) || limit < 1 || limit > maxFailedResources {
+		s.mu.Unlock()
 		return nil, fmt.Errorf("offset must be between 0 and total_failed; limit must be between 1 and %d", maxFailedResources)
 	}
+	s.mu.Unlock()
+
+	// The local entry keeps the immutable document alive even if the store evicts it.
 	return marshalScanPage(entry.document, offset, limit)
 }
 

@@ -513,6 +513,43 @@ func TestScanResultSharedDecodingAcrossSnapshots(t *testing.T) {
 	}
 }
 
+func BenchmarkScanResultParallelPageReads(b *testing.B) {
+	const owner = "alice"
+	const resourceCount = 2 * maxFailedResources
+	now := time.Now()
+	payload := json.RawMessage(`{"detail":"` + strings.Repeat("x", 4096) + `"}`)
+	doc := scanResultDocument{
+		scanResponse: scanResponse{TotalFailed: resourceCount},
+		Resources:    make([]json.RawMessage, resourceCount),
+	}
+	for i := range doc.Resources {
+		doc.Resources[i] = payload
+	}
+	encoded, err := json.Marshal(doc)
+	require.NoError(b, err)
+	var store scanResultStore
+	first, err := store.firstPage(owner, doc, len(encoded), now)
+	require.NoError(b, err)
+	var firstPage scanResultDocument
+	require.NoError(b, json.Unmarshal(first, &firstPage))
+	require.NotEmpty(b, firstPage.ScanID)
+	require.NotNil(b, firstPage.NextOffset)
+	offset := *firstPage.NextOffset
+	page, err := store.page(owner, firstPage.ScanID, offset, maxFailedResources, now)
+	require.NoError(b, err)
+	b.SetBytes(int64(len(page)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if _, err := store.page(owner, firstPage.ScanID, offset, maxFailedResources, now); err != nil {
+				b.Error(err)
+				return
+			}
+		}
+	})
+}
+
 func BenchmarkScanResultOversizedDecoding(b *testing.B) {
 	ks := &KubescapeMcpserver{}
 	data := oversizedResourceArrayPayload(2000)
