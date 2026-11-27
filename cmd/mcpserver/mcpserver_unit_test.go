@@ -234,6 +234,7 @@ func TestReadResourceWithFakeClient(t *testing.T) {
 		{name: "default CVE list", uri: "kubescape://vulnerability-manifests/security/manifest", wantIDs: []string{"CVE-1", "CVE-2"}},
 		{name: "explicit CVE list", uri: "kubescape://vulnerability-manifests/security/manifest/cve_list", wantIDs: []string{"CVE-1", "CVE-2"}},
 		{name: "CVE details", uri: "kubescape://vulnerability-manifests/security/manifest/cve_details/CVE-2", wantIDs: []string{"CVE-2"}, details: true},
+		{name: "missing CVE details", uri: "kubescape://vulnerability-manifests/security/manifest/cve_details/CVE-999", wantIDs: nil, details: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request := mcp.ReadResourceRequest{}
@@ -384,5 +385,57 @@ func assertConfigurationScanNamespaces(want ...string) func(*testing.T, any) {
 			got = append(got, item.(map[string]any)["namespace"].(string))
 		}
 		assert.ElementsMatch(t, want, got)
+	}
+}
+
+func TestReadResourceEmptyMatches(t *testing.T) {
+	manifest := &storagev1beta1.VulnerabilityManifest{
+		ObjectMeta: metav1.ObjectMeta{Name: "empty-manifest", Namespace: "security"},
+	}
+	client := storagefake.NewClientset(manifest)
+	ksServer := &KubescapeMcpserver{ksClient: client.SpdxV1beta1()}
+
+	req := mcp.ReadResourceRequest{}
+	req.Params.URI = "kubescape://vulnerability-manifests/security/empty-manifest/cve_list"
+	contents, err := ksServer.ReadResource(context.Background(), req)
+	require.NoError(t, err)
+	require.Len(t, contents, 1)
+	text, ok := contents[0].(mcp.TextResourceContents)
+	require.True(t, ok)
+	assert.Equal(t, "null", text.Text)
+}
+
+func BenchmarkReadResource_CVEList(b *testing.B) {
+	for _, count := range []int{100, 1000, 5000} {
+		b.Run(fmt.Sprintf("matches_%d", count), func(b *testing.B) {
+			matches := make([]storagev1beta1.Match, count)
+			for i := 0; i < count; i++ {
+				matches[i] = storagev1beta1.Match{
+					Vulnerability: storagev1beta1.Vulnerability{
+						VulnerabilityMetadata: storagev1beta1.VulnerabilityMetadata{
+							ID:       fmt.Sprintf("CVE-2026-%05d", i),
+							Severity: "High",
+						},
+					},
+				}
+			}
+			manifest := &storagev1beta1.VulnerabilityManifest{
+				ObjectMeta: metav1.ObjectMeta{Name: "manifest", Namespace: "security"},
+				Spec:       storagev1beta1.VulnerabilityManifestSpec{Payload: storagev1beta1.GrypeDocument{Matches: matches}},
+			}
+			client := storagefake.NewClientset(manifest)
+			ksServer := &KubescapeMcpserver{ksClient: client.SpdxV1beta1()}
+			req := mcp.ReadResourceRequest{}
+			req.Params.URI = "kubescape://vulnerability-manifests/security/manifest/cve_list"
+			ctx := context.Background()
+
+			b.ResetTimer()
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, err := ksServer.ReadResource(ctx, req); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
