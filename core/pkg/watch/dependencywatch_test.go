@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"github.com/stretchr/testify/require"
 	"helm.sh/helm/v3/pkg/chart/loader"
 )
@@ -385,4 +386,63 @@ func TestFileWatcherSelectsHelmIgnoreThroughSymlinkParent(t *testing.T) {
 	plan.addChart(t.Context(), chart, make(map[string]struct{}))
 	require.True(t, plan[config].matches(filepath.Base(rules)), "watch the rule file Helm opens")
 	require.Equal(t, sub, plan[chart].links[filepath.Base(jump)], "watch for the intermediate link being retargeted")
+}
+
+func TestFileWatcherSkipsOversizedHelmIgnore(t *testing.T) {
+	t.Setenv(filesizelimit.MaxFileSizeEnvVar, "64")
+
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	chart := filepath.Join(dir, "chart")
+	git := filepath.Join(chart, ".git")
+	write(t, filepath.Join(git, "settings"), "chart data")
+
+	ignorePath := filepath.Join(chart, ".helmignore")
+	oversized := ".git/\n" + fmt.Sprintf("%080d\n", 0)
+	write(t, ignorePath, oversized)
+
+	plan := make(dependencyDirectories)
+	plan.addChart(t.Context(), chart, make(map[string]struct{}))
+	require.Contains(t, plan, git, "oversized .helmignore exceeding KUBESCAPE_MAX_FILE_SIZE must be rejected")
+	require.True(t, plan[git].chart, "default rules apply when .helmignore exceeds limit")
+}
+
+func TestLoadHelmIgnoreRules_SizeBoundsAndRegularity(t *testing.T) {
+	t.Run("rejects file exceeding size limit", func(t *testing.T) {
+		t.Setenv(filesizelimit.MaxFileSizeEnvVar, "16")
+		ignorePath := filepath.Join(t.TempDir(), ".helmignore")
+		write(t, ignorePath, "0123456789abcdef0")
+
+		rules, err := loadHelmIgnoreRules(ignorePath)
+		require.Nil(t, rules)
+		require.ErrorIs(t, err, errHelmIgnoreTooLarge)
+	})
+
+	t.Run("accepts file at exact size limit", func(t *testing.T) {
+		content := "*.secret\n.git/\n"
+		t.Setenv(filesizelimit.MaxFileSizeEnvVar, fmt.Sprintf("%d", len(content)))
+		ignorePath := filepath.Join(t.TempDir(), ".helmignore")
+		write(t, ignorePath, content)
+
+		rules, err := loadHelmIgnoreRules(ignorePath)
+		require.NoError(t, err)
+		require.NotNil(t, rules)
+	})
+
+	t.Run("rejects directory", func(t *testing.T) {
+		dirPath := filepath.Join(t.TempDir(), ".helmignore")
+		require.NoError(t, os.MkdirAll(dirPath, 0o750))
+
+		rules, err := loadHelmIgnoreRules(dirPath)
+		require.Nil(t, rules)
+		require.ErrorIs(t, err, errHelmIgnoreNotRegular)
+	})
+
+	t.Run("preserves os.ErrNotExist when missing", func(t *testing.T) {
+		missingPath := filepath.Join(t.TempDir(), ".helmignore")
+
+		rules, err := loadHelmIgnoreRules(missingPath)
+		require.Nil(t, rules)
+		require.ErrorIs(t, err, os.ErrNotExist)
+	})
 }
