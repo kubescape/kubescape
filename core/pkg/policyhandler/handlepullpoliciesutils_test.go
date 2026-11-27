@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -171,4 +172,27 @@ func TestPolicyIdentifierToSlice(t *testing.T) {
 			assert.Equal(t, tt.want, policyIdentifierToSlice(tt.policyIdentifier))
 		})
 	}
+}
+
+func TestControlNameOnlyExceptions(t *testing.T) {
+	exception := func(name string, policies ...armotypes.PosturePolicy) armotypes.PostureExceptionPolicy {
+		return armotypes.PostureExceptionPolicy{
+			PortalBase:      armotypes.PortalBase{Name: name},
+			PosturePolicies: policies,
+		}
+	}
+
+	exceptions := []armotypes.PostureExceptionPolicy{
+		exception("by-name", armotypes.PosturePolicy{ControlName: "HostPath mount"}),
+		exception("by-id", armotypes.PosturePolicy{ControlID: "C-0048"}),
+		exception("by-name-and-id", armotypes.PosturePolicy{ControlName: "HostPath mount", ControlID: "C-0048"}),
+		exception("framework-and-name", armotypes.PosturePolicy{FrameworkName: "NSA", ControlName: "HostPath mount"}),
+		exception("rule-and-name", armotypes.PosturePolicy{RuleName: "alert-rw-hostpath", ControlName: "HostPath mount"}),
+		exception("one-of-two", armotypes.PosturePolicy{ControlID: "C-0057"}, armotypes.PosturePolicy{ControlName: "HostPath mount"}, armotypes.PosturePolicy{ControlName: "Privileged container"}),
+		exception("no-policies"),
+		exception("framework-only", armotypes.PosturePolicy{FrameworkName: "NSA"}),
+	}
+
+	assert.Equal(t, []string{"by-name", "framework-and-name", "rule-and-name", "one-of-two"}, controlNameOnlyExceptions(exceptions))
+	assert.Empty(t, controlNameOnlyExceptions(nil))
 }

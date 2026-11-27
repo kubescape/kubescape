@@ -16,7 +16,7 @@
         ],
         "posturePolicies": [
             {
-                "controlName": "HostPath mount" 
+                "controlID": "C-0048"
             }
         ]
     }

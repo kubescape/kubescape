@@ -66,8 +66,9 @@ Policies can be specified by:
 | Attribute | Description | Regex Support |
 |-----------|-------------|---------------|
 | `frameworkName` | Framework name (e.g., `NSA`, `MITRE`) | ✅ Yes |
-| `controlName` | Control name (e.g., `HostPath mount`) | ✅ Yes |
 | `controlID` | Control ID (e.g., `C-0048`) | ✅ Yes |
+
+`controlName` is no longer supported in exceptions. Use `controlID` instead.
 
 Find framework names in the [frameworks directory](https://github.com/kubescape/regolibrary/tree/master/frameworks) and control information in the [controls directory](https://github.com/kubescape/regolibrary/tree/master/controls).
 
@@ -187,7 +188,7 @@ Exclude all resources in the `kube-system` namespace from all frameworks:
         ],
         "posturePolicies": [
             {
-                "controlName": "HostPath mount"
+                "controlID": "C-0048"
             }
         ]
     }
