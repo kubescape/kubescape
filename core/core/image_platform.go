@@ -98,6 +98,13 @@ func canonicalInferredPlatform(osName, architecture string) string {
 	return platform
 }
 
+func podOSName(podSpec *corev1.PodSpec) string {
+	if podSpec.OS == nil {
+		return ""
+	}
+	return strings.TrimSpace(string(podSpec.OS.Name))
+}
+
 // inferWorkloadPlatforms returns every concrete platform allowed by the
 // workload's hard scheduling constraints. It deliberately ignores preferred
 // affinity because the scheduler may choose a different platform. Partial and
@@ -159,7 +166,9 @@ func filterObservedPlatforms(podSpec *corev1.PodSpec, nodePlatforms map[string]s
 		return observed, false
 	}
 
-	hasConstraint := false
+	osName := podOSName(podSpec)
+	// A declared OS alone cannot select a platform without observed architectures.
+	hasConstraint := osName != "" && len(observed) > 0
 	for key := range podSpec.NodeSelector {
 		if isPlatformLabel(key) {
 			hasConstraint = true
@@ -186,7 +195,7 @@ func filterObservedPlatforms(podSpec *corev1.PodSpec, nodePlatforms map[string]s
 	platformSet := make(map[string]struct{}, len(observed))
 	for nodeName, platform := range nodePlatforms {
 		parts := strings.Split(platform, "/")
-		if len(parts) < 2 {
+		if len(parts) < 2 || (osName != "" && parts[0] != osName) {
 			continue
 		}
 		labels := map[string]string{
@@ -408,7 +417,11 @@ func platformsFromSchedulingConstraints(podSpec *corev1.PodSpec) []string {
 		return nil
 	}
 
+	osName := podOSName(podSpec)
 	base := newPlatformConstraint()
+	if osName != "" {
+		base.addExact(stableOSLabel, osName)
+	}
 	for key, value := range podSpec.NodeSelector {
 		base.addExact(key, value)
 	}
@@ -425,9 +438,17 @@ func platformsFromSchedulingConstraints(podSpec *corev1.PodSpec) []string {
 	}
 
 	platformSet := make(map[string]struct{})
+	podOSLabels := map[string]string{stableOSLabel: osName, betaOSLabel: osName}
+requiredTerms:
 	for _, term := range terms {
 		constraint := base.clone()
 		for _, expression := range term.MatchExpressions {
+			if osName != "" && podOSLabels[expression.Key] != "" && isFilterablePlatformExpression(expression) {
+				if !platformExpressionMatches(expression, podOSLabels) {
+					continue requiredTerms
+				}
+				continue
+			}
 			switch expression.Operator {
 			case corev1.NodeSelectorOpIn:
 				constraint.addAllowed(expression.Key, expression.Values)
