@@ -244,6 +244,40 @@ func TestMetrics_UsesDecodedSkipPersistenceQueryParam(t *testing.T) {
 	}
 }
 
+func TestMetrics_FrameworkFilteredScrapeIsNotPersisted(t *testing.T) {
+	for _, target := range []string{
+		"/v1/metrics?frameworks=nsa",
+		"/v1/metrics?frameworks=nsa,mitre&skipPersistence=false",
+	} {
+		t.Run(target, func(t *testing.T) {
+			withTempOutputDirs(t)
+
+			defer func(o scanner) { scanImpl = o }(scanImpl)
+			gotSkipPersistence := make(chan bool, 1)
+			scanImpl = func(_ context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, skipPersistence bool) (*reporthandlingv2.PostureReport, error) {
+				gotSkipPersistence <- skipPersistence
+				resolved, _ := printer.ResolveOutputFile(printer.PrometheusFormat, scanInfo.Output, "")
+				require.NoError(t, os.WriteFile(resolved, []byte("# metrics\n"), 0o600))
+				return nil, nil
+			}
+
+			h := NewHTTPHandler(false)
+			rq := httptest.NewRequest(http.MethodGet, target, nil)
+			w := httptest.NewRecorder()
+
+			h.Metrics(w, rq)
+
+			require.Equal(t, http.StatusOK, w.Result().StatusCode)
+			select {
+			case got := <-gotSkipPersistence:
+				assert.True(t, got, "a scrape limited to a framework subset must not persist results")
+			case <-time.After(5 * time.Second):
+				t.Fatal("scan was not invoked")
+			}
+		})
+	}
+}
+
 func TestMetrics_ReadsResultsFileWithPrometheusExtension(t *testing.T) {
 	withTempOutputDirs(t)
 
