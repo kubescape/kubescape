@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -195,23 +194,14 @@ func TestMetrics_ClientDisconnectSkipsQueuedScan(t *testing.T) {
 	})
 }
 
-func TestMetrics_UsesDecodedSkipPersistenceQueryParam(t *testing.T) {
-	tests := []struct {
-		name string
-		raw  string
-		want bool
-	}{
-		{name: "absent", raw: "", want: false},
-		{name: "lowercase true", raw: "true", want: true},
-		{name: "titlecase true", raw: "True", want: true},
-		{name: "numeric true", raw: "1", want: true},
-		{name: "lowercase false", raw: "false", want: false},
-		{name: "titlecase false", raw: "False", want: false},
-		{name: "numeric false", raw: "0", want: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+func TestMetrics_ScrapeIsNeverPersisted(t *testing.T) {
+	for _, target := range []string{
+		"/v1/metrics",
+		"/v1/metrics?skipPersistence=false",
+		"/v1/metrics?skipPersistence=true",
+		"/v1/metrics?frameworks=nsa&skipPersistence=false",
+	} {
+		t.Run(target, func(t *testing.T) {
 			withTempOutputDirs(t)
 
 			defer func(o scanner) { scanImpl = o }(scanImpl)
@@ -224,10 +214,6 @@ func TestMetrics_UsesDecodedSkipPersistenceQueryParam(t *testing.T) {
 			}
 
 			h := NewHTTPHandler(false)
-			target := "/v1/metrics"
-			if tt.raw != "" {
-				target += "?skipPersistence=" + url.QueryEscape(tt.raw)
-			}
 			rq := httptest.NewRequest(http.MethodGet, target, nil)
 			w := httptest.NewRecorder()
 
@@ -236,7 +222,7 @@ func TestMetrics_UsesDecodedSkipPersistenceQueryParam(t *testing.T) {
 			require.Equal(t, http.StatusOK, w.Result().StatusCode)
 			select {
 			case got := <-gotSkipPersistence:
-				assert.Equal(t, tt.want, got)
+				assert.True(t, got, "a metrics scrape must never persist results")
 			case <-time.After(5 * time.Second):
 				t.Fatal("scan was not invoked")
 			}

@@ -26,8 +26,9 @@ type MetricsQueryParams struct {
 	// If not provided, all available frameworks will be scanned
 	Frameworks string `schema:"frameworks" json:"frameworks"`
 
-	// Do not persist data after scanning
-	// default: false
+	// SkipPersistence is deprecated and ignored: a metrics scrape is always
+	// read-only. It is still decoded so existing scrapers that send it keep
+	// working.
 	SkipPersistence bool `schema:"skipPersistence" json:"skipPersistence"`
 }
 
@@ -67,11 +68,12 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	scanInfo, policyIdentifiers := getPrometheusDefaultScanCommand(scanID, resultsFile, metricsQueryParams.Frameworks)
 
 	scanCtx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
-	// A scrape that covers only the requested frameworks must not replace the
-	// stored results for the frameworks it did not scan, so a filtered scan is
-	// never persisted. Persisting it would drop findings from every other
-	// framework until the next full scan.
-	skipPersistence := metricsQueryParams.SkipPersistence || len(policyIdentifiers) > 0
+	// A scrape never persists its results. /v1/metrics is registered without
+	// the token check that guards the other /v1/* routes, so the caller has no
+	// identity that could authorize a write, and a scrape that stores what it
+	// scanned replaces the stored controls of every workload it reported on.
+	// The skipPersistence query param is accepted for compatibility only.
+	skipPersistence := true
 	scanParams := &scanRequestParams{
 		scanQueryParams: &ScanQueryParams{
 			ReturnResults:   true,
