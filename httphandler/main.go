@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,6 +23,7 @@ import (
 	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"github.com/kubescape/kubescape/v4/httphandler/config"
 	_ "github.com/kubescape/kubescape/v4/httphandler/docs"
 	"github.com/kubescape/kubescape/v4/httphandler/listener"
@@ -168,10 +172,12 @@ func initializeSaaSEnv() {
 	if hasExplicitPath {
 		path = envPath
 	}
-	_, fileDiscoveryErr := os.Stat(path)
-	hasFileDiscovery := fileDiscoveryErr == nil
-
-	if !hasFileDiscovery {
+	data, fileDiscoveryErr := readBoundedRegularFile(path, filesizelimit.GetMaxFileSize(), errServiceDiscoveryNotRegular, errServiceDiscoveryTooLarge)
+	if fileDiscoveryErr != nil {
+		if !errors.Is(fileDiscoveryErr, os.ErrNotExist) {
+			logger.L().Warning("invalid service-discovery file - skipping SaaS wiring", helpers.String("path", path), helpers.Error(fileDiscoveryErr))
+			return
+		}
 		// An explicit file path was configured but isn't there (typo, or a
 		// configmap that hasn't finished mounting yet) - this is a
 		// configuration problem, not "no backend configured", and falling
@@ -190,9 +196,9 @@ func initializeSaaSEnv() {
 		}
 	}
 
-	if hasFileDiscovery {
+	if fileDiscoveryErr == nil {
 		logger.L().Info("using file-based service discovery", helpers.String("path", path))
-		sdGetter = servicediscoveryv3.NewServiceDiscoveryFileV3(path)
+		sdGetter = servicediscoveryv3.NewServiceDiscoveryStreamV3(data)
 	} else {
 		apiURL := "api.armosec.io"
 		if envVar := os.Getenv("API_URL"); envVar != "" {
@@ -259,13 +265,107 @@ func getNamespace(cfg config.Config) string {
 	return defaultNamespace
 }
 
+var (
+	errServiceDiscoveryNotRegular = errors.New("service discovery file is not a regular file")
+	errServiceDiscoveryTooLarge   = errors.New("service discovery file exceeds maximum size limit")
+	errCredentialNotRegular       = errors.New("credential file is not a regular file")
+	errCredentialTooLarge         = errors.New("credential file exceeds maximum size limit")
+)
+
+func joinPreserveSymlinks(dir, name string) string {
+	if strings.TrimSpace(dir) == "" {
+		return ""
+	}
+	if os.IsPathSeparator(dir[len(dir)-1]) {
+		return dir + name
+	}
+	return dir + string(os.PathSeparator) + name
+}
+
+func readBoundedRegularFile(path string, limit int64, notRegularErr, tooLargeErr error) ([]byte, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, os.ErrNotExist
+	}
+	statInfo, err := os.Stat(path) //nolint:gosec // G703: path comes from trusted operator configuration (KS_SERVICE_DISCOVERY_FILE_PATH / KS_CREDENTIALS_SECRET_PATH)
+	if err != nil {
+		return nil, err
+	}
+	if statInfo.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, notRegularErr)
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", notRegularErr, path)
+	}
+
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0) //nolint:gosec // G703: path comes from trusted operator configuration (KS_SERVICE_DISCOVERY_FILE_PATH / KS_CREDENTIALS_SECRET_PATH)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, notRegularErr)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %q", notRegularErr, path)
+	}
+	if info.Size() > limit {
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", tooLargeErr, path, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		clear(data)
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		clear(data)
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", tooLargeErr, path, limit)
+	}
+	return data, nil
+}
+
+func loadCredentialsBounded(secretPath string) (*utils.Credentials, error) {
+	creds := &utils.Credentials{}
+	limit := filesizelimit.GetMaxFileSize()
+	found := false
+
+	fields := []struct {
+		key    string
+		target *string
+	}{
+		{key: utils.AccessKeySecretKey, target: &creds.AccessKey},
+		{key: utils.AccountSecretKey, target: &creds.Account},
+	}
+	for _, field := range fields {
+		b, err := readBoundedRegularFile(joinPreserveSymlinks(secretPath, field.key), limit, errCredentialNotRegular, errCredentialTooLarge)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, err
+		}
+		found = true
+		*field.target = strings.TrimSuffix(string(b), "\n")
+		clear(b)
+	}
+	if !found {
+		return nil, fmt.Errorf("access key and account files are missing in path %s", secretPath)
+	}
+	return creds, nil
+}
+
 func loadAndSetCredentials() {
 	credentialsPath := "/etc/credentials"
 	if envVar := os.Getenv("KS_CREDENTIALS_SECRET_PATH"); envVar != "" {
 		credentialsPath = envVar
 	}
 
-	credentials, err := utils.LoadCredentialsFromFile(credentialsPath)
+	credentials, err := loadCredentialsBounded(credentialsPath)
 	if err != nil {
 		logger.L().Error("failed to load credentials", helpers.Error(err))
 		// fallback (backward compatibility)
