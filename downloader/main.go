@@ -25,15 +25,21 @@ var backoffFactory = func() backoff.BackOff {
 	return b
 }
 
-func downloadArtifacts(ks Downloader, downloads []metav1.DownloadInfo) error {
+func downloadArtifacts(ctx context.Context, ks Downloader, downloads []metav1.DownloadInfo) error {
 	var errs []error
 	for _, download := range downloads {
+		if ctx.Err() != nil {
+			break
+		}
 		var result *metav1.DownloadResult
 		var err error
 
 		d := download // copy for closure
 
 		operation := func() error {
+			if err := ctx.Err(); err != nil {
+				return backoff.Permanent(err)
+			}
 			result, err = ks.Download(&d)
 			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
@@ -45,7 +51,7 @@ func downloadArtifacts(ks Downloader, downloads []metav1.DownloadInfo) error {
 			return nil
 		}
 
-		b := backoffFactory()
+		b := backoff.WithContext(backoffFactory(), ctx)
 
 		if retryErr := backoff.Retry(operation, b); retryErr != nil {
 			logger.L().Error("failed to download artifact", helpers.Error(retryErr), helpers.String("target", d.Target))
@@ -55,7 +61,11 @@ func downloadArtifacts(ks Downloader, downloads []metav1.DownloadInfo) error {
 
 		logger.L().Success("downloaded artifacts", helpers.String("count", fmt.Sprintf("%d", len(result.Files))), helpers.String("files", strings.Join(result.Files, ", ")))
 	}
-	return errors.Join(errs...)
+	err := errors.Join(errs...)
+	if ctxErr := ctx.Err(); ctxErr != nil && !errors.Is(err, ctxErr) {
+		return errors.Join(err, ctxErr)
+	}
+	return err
 }
 
 func main() {
@@ -66,7 +76,7 @@ func main() {
 		{Target: "artifacts"},                         // download all artifacts
 		{Target: "framework", Identifier: "security"}, // force add the "security" framework
 	}
-	if err := downloadArtifacts(ks, downloads); err != nil {
+	if err := downloadArtifacts(ctx, ks, downloads); err != nil {
 		logger.L().Error("failed to download all artifacts", helpers.Error(err))
 		os.Exit(1)
 	}

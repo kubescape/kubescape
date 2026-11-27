@@ -3,12 +3,110 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 )
+
+type downloadFunc func(*metav1.DownloadInfo) (*metav1.DownloadResult, error)
+
+func (f downloadFunc) Download(info *metav1.DownloadInfo) (*metav1.DownloadResult, error) {
+	return f(info)
+}
+
+func TestDownloadArtifactsStopsOnContext(t *testing.T) {
+	for _, name := range []string{"already_canceled", "canceled_during_backoff", "deadline_during_backoff"} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				var ctx context.Context
+				var cancel context.CancelFunc
+				want := context.Canceled
+				if name == "deadline_during_backoff" {
+					ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+					want = context.DeadlineExceeded
+				} else {
+					ctx, cancel = context.WithCancel(context.Background())
+				}
+				defer cancel()
+				alreadyCanceled := name == "already_canceled"
+				if alreadyCanceled {
+					cancel()
+				}
+
+				original := backoffFactory
+				t.Cleanup(func() { backoffFactory = original })
+				backoffFactory = func() backoff.BackOff {
+					return backoff.WithMaxRetries(backoff.NewConstantBackOff(time.Minute), 1)
+				}
+
+				previous := errors.New("previous target failed")
+				var calls []string
+				ks := downloadFunc(func(info *metav1.DownloadInfo) (*metav1.DownloadResult, error) {
+					calls = append(calls, info.Target)
+					switch info.Target {
+					case "previous":
+						return nil, errors.Join(os.ErrPermission, previous)
+					case "retry":
+						return nil, errors.New("transient download failure")
+					default:
+						return &metav1.DownloadResult{}, nil
+					}
+				})
+				result := make(chan error, 1)
+				go func() {
+					result <- downloadArtifacts(ctx, ks, []metav1.DownloadInfo{
+						{Target: "previous"}, {Target: "retry"}, {Target: "next"},
+					})
+				}()
+				if !alreadyCanceled {
+					// Wait for the worker to block in backoff without advancing fake time.
+					synctest.Wait()
+					if got := strings.Join(calls, ","); got != "previous,retry" {
+						t.Errorf("expected downloads to reach retry wait, got %v", calls)
+					}
+					if name == "canceled_during_backoff" {
+						cancel()
+					} else {
+						// Advance only to the one-second deadline, before the retry timer.
+						<-ctx.Done()
+					}
+				}
+
+				synctest.Wait()
+				var err error
+				select {
+				case err = <-result:
+					t.Log("downloader returned before the retry timer fired")
+				default:
+					t.Error("downloader did not return before the retry timer fired")
+					// Let the fake clock advance so the worker exits before cleanup.
+					err = <-result
+				}
+				t.Logf("attempted targets: %v; context: %v; cancellation returned: %t", calls, ctx.Err(), errors.Is(err, want))
+				if !errors.Is(err, want) {
+					t.Errorf("expected error matching %v, got %v", want, err)
+				}
+				if alreadyCanceled {
+					if len(calls) != 0 {
+						t.Errorf("expected no downloads, got %v", calls)
+					}
+					return
+				}
+				if strings.Join(calls, ",") != "previous,retry" {
+					t.Errorf("expected no further downloads, got %v", calls)
+				}
+				if !errors.Is(err, previous) {
+					t.Errorf("expected previous target error in %v", err)
+				}
+			})
+		})
+	}
+}
 
 func init() {
 	// Override backoff factory to make tests fast and predictable
@@ -108,7 +206,7 @@ func TestDownloadArtifacts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &mockDownloader{errsByTarget: tt.errsByTarget}
-			err := downloadArtifacts(m, downloads)
+			err := downloadArtifacts(context.Background(), m, downloads)
 			if (err != nil) != tt.expectError {
 				t.Errorf("expected error: %v, got error: %v", tt.expectError, err)
 			}
