@@ -426,7 +426,7 @@ func runInDownloadLoggerProcess(t *testing.T) bool {
 		logger.DisableColor(true)
 		return true
 	}
-	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+t.Name()+"$", "-test.v")
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+t.Name()+"$", "-test.v") //nolint:gosec // G204: re-executes the running Go test binary with fixed flags and a source-defined test name.
 	cmd.Env = append(os.Environ(), childTest+"="+t.Name())
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, "%s", output)
