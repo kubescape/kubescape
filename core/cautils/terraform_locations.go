@@ -2,7 +2,6 @@ package cautils
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/hashicorp/hcl/v2"
 )
@@ -12,12 +11,6 @@ type SourceLocation struct {
 	Line   int
 	Column int
 }
-
-// terraformSourceLocations maps a Terraform workload's path ("<file>:<index>",
-// as set by TerraformDirectory.GetWorkloads) to the start of the resource
-// block it was converted from. Terraform files have no YAML node tree, so the
-// printers can't resolve a finding's location the way they do for manifests.
-var terraformSourceLocations sync.Map
 
 // terraformManifest is a Kubernetes object converted from a Terraform
 // resource block, with the source range of that block.
@@ -41,21 +34,24 @@ func terraformWorkloadPath(file string, index int) string {
 	return fmt.Sprintf("%s:%d", file, index)
 }
 
-func recordTerraformSourceLocation(workloadPath string, source hcl.Range) {
+// recordSourceLocation records the start of the resource block a workload was
+// converted from, under the workload's path ("<file>:<index>").
+func (td *TerraformDirectory) recordSourceLocation(workloadPath string, source hcl.Range) {
 	if source.Start.Line <= 0 {
-		terraformSourceLocations.Delete(workloadPath)
 		return
 	}
-	terraformSourceLocations.Store(workloadPath, SourceLocation{Line: source.Start.Line, Column: source.Start.Column})
+	if td.sourceLocations == nil {
+		td.sourceLocations = map[string]SourceLocation{}
+	}
+	td.sourceLocations[workloadPath] = SourceLocation{Line: source.Start.Line, Column: source.Start.Column}
 }
 
-// TerraformSourceLocation returns the start of the Terraform resource block a
-// workload was converted from, given the workload's path. It reports false
-// for workloads that didn't come from a Terraform file.
-func TerraformSourceLocation(workloadPath string) (SourceLocation, bool) {
-	v, ok := terraformSourceLocations.Load(workloadPath)
-	if !ok {
-		return SourceLocation{}, false
-	}
-	return v.(SourceLocation), true
+// SourceLocations returns the start of the Terraform resource block each
+// workload of the last GetWorkloads call was converted from, keyed by the
+// workload's path ("<file>:<index>"). Terraform files have no YAML node tree,
+// so the printers can't resolve a finding's location the way they do for
+// manifests. The locations belong to this directory's scan, so scans in the
+// same process (e.g. the MCP server) never see or overwrite each other's.
+func (td *TerraformDirectory) SourceLocations() map[string]SourceLocation {
+	return td.sourceLocations
 }

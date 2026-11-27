@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -62,5 +63,37 @@ resource "kubernetes_pod_v1" "risky" {
 			assert.NotContains(t, skips[0].Reason, "risky", "report reasons must not expose source resource labels under --hide")
 			assert.NotContains(t, skips[0].Reason, "payroll-prod.tf", "report reasons must not expose source filenames under --hide")
 		})
+	}
+}
+
+// The files loader records the Terraform resource block of each resource it
+// loads from a .tf file, by resource ID, in the map the caller passes for the
+// scan. Two inputs scanned in one process get separate maps.
+func TestGetResourcesFromInputRecordsTerraformLocations(t *testing.T) {
+	load := func(leadingLines int) map[string]cautils.SourceLocation {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "main.tf"), []byte(strings.Repeat("\n", leadingLines)+`resource "kubernetes_namespace_v1" "ns" {
+  metadata {
+    name = "shop"
+  }
+}
+`), 0o600))
+		locations := map[string]cautils.SourceLocation{}
+		_, _, workloads, _, err := getResourcesFromInput(context.Background(), dir, cautils.HelmValueOptions{}, nil, cautils.DefaultGitCloneDepth, locations)
+		require.NoError(t, err)
+		require.Len(t, workloads, 1)
+		require.Contains(t, locations, workloads[0].GetID())
+		return locations
+	}
+
+	first := load(0)
+	second := load(6)
+	require.Len(t, first, 1)
+	require.Len(t, second, 1)
+	for _, location := range first {
+		assert.Equal(t, cautils.SourceLocation{Line: 1, Column: 1}, location)
+	}
+	for _, location := range second {
+		assert.Equal(t, cautils.SourceLocation{Line: 7, Column: 1}, location)
 	}
 }

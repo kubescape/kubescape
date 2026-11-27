@@ -96,51 +96,55 @@ const (
 )
 
 type OPASessionObj struct {
-	K8SResources            K8SResources                                  // input k8s objects
-	ExternalResources       ExternalResources                             // input non-k8s objects (external resources)
-	AllPolicies             *Policies                                     // list of all frameworks
-	ExcludedRules           map[string]bool                               // rules to exclude map[rule name>]X
-	catalogMu               sync.RWMutex                                  // guards lazy initialization and catalog swaps
-	catalog                 ResourceCatalog                               // accessor abstraction over scan resources; access via GetCatalog/SetCatalog
-	AllResources            map[string]workloadinterface.IMetadata        // all scanned resources, map[<resource ID>]<resource>
-	CELNamespaceContext     map[string]workloadinterface.IMetadata        // supplemental Namespaces for CEL; not scanned resources
-	ResourcesResult         map[string]resourcesresults.Result            // resources scan results, map[<resource ID>]<resource result>
-	ResourceSource          map[string]reporthandling.Source              // resources sources, map[<resource ID>]<resource result>
-	ResourcesPrioritized    map[string]prioritization.PrioritizedResource // resources prioritization information, map[<resource ID>]<prioritized resource>
-	ResourceAttackTracks    map[string][]v1alpha1.IAttackTrack            // resources attack tracks, map[<resource ID>][]<attack track> -- a resource can be implicated by more than one attack track at once, each contributing to its score
-	AttackTracks            map[string]v1alpha1.IAttackTrack
-	Report                  *reporthandlingv2.PostureReport // scan results v2 - Remove
-	RegoInputData           RegoInputData                   // input passed to rego for scanning. map[<control name>][<input arguments>]
-	Metadata                *reporthandlingv2.Metadata
-	InfoMap                 map[string]apis.StatusInfo         // Map errors of resources to StatusInfo
-	ResourceToControlsMap   map[string][]string                // map[<apigroup/apiversion/resource>] = [<control_IDs>]
-	ScanCoverage            ScanCoverage                       // runtime coverage gaps (failed GVR pulls + not-evaluated controls)
-	PartialGVRFailures      []PartialGVRPull                   // per-selector LIST failures for GVRs that were partially collected
-	UnexaminedKinds         []UnexaminedKind                   // cluster-served resource kinds no control in the policy set queried
-	ListedGVRs              map[string]bool                    // queried <apigroup/apiversion/resource> -> listed at least once without a rule field selector
-	NamespaceSummaries      NamespaceSummaries                 // per-namespace compliance rollup, see BuildNamespaceSummaries
-	PolicyDegradations      []PolicyDegradation                // policy inputs (control configurations, exceptions) served from a fallback
-	ZeroScoredControls      map[string]struct{}                // controls the compliance score counts as 0 (timed out or failed); set by the OPA processor, kept by any recompute
-	SkippedManifests        []SkippedManifest                  // manifest files skipped during loading (invalid YAML, missing kind, etc.)
-	SessionID               string                             // SessionID
-	Policies                []reporthandling.Framework         // list of frameworks to scan
-	Exceptions              []armotypes.PostureExceptionPolicy // list of exceptions to apply on scan results
-	ExceptionAudit          *ExceptionAudit                    // optional exception usage audit
-	AuditExceptions         bool                               // include exception usage audit in supported outputs
-	HonorInlineExceptions   bool                               // honor kubescape.io/skip-* annotations as inline exception policies
-	ShowSecrets             bool                               // preserve secret values for evidence display (--show-secrets)
-	PreservedEvidenceValues map[string]map[string]string       // per-resource path -> unredacted value captured before scrubbing when ShowSecrets is enabled
-	OmitRawResources        bool                               // omit raw resources from output
-	SourcePathsAnonymized   bool                               // ResourceSource paths are pseudonyms (--hide/--encrypt), so no manifest can be opened from them
-	SingleResourceScan      workloadinterface.IWorkload        // single resource scan
-	TopWorkloadsByScore     []reporthandling.IResource
-	TriggeredByCLI          bool
-	LabelsToCopy            []string                    // Labels to copy from workloads to scan reports
-	SkipControls            string                      // Comma-separated control IDs to skip
-	IncludeControls         string                      // Comma-separated control IDs to include (all others skipped)
-	VAPPolicies             []unstructured.Unstructured // ValidatingAdmissionPolicy resources collected from the cluster
-	VAPBindings             []unstructured.Unstructured // ValidatingAdmissionPolicyBinding resources collected from the cluster
-	VAPParamObjects         []unstructured.Unstructured // ControlConfiguration resources collected from the cluster for binding paramRefs
+	K8SResources        K8SResources                           // input k8s objects
+	ExternalResources   ExternalResources                      // input non-k8s objects (external resources)
+	AllPolicies         *Policies                              // list of all frameworks
+	ExcludedRules       map[string]bool                        // rules to exclude map[rule name>]X
+	catalogMu           sync.RWMutex                           // guards lazy initialization and catalog swaps
+	catalog             ResourceCatalog                        // accessor abstraction over scan resources; access via GetCatalog/SetCatalog
+	AllResources        map[string]workloadinterface.IMetadata // all scanned resources, map[<resource ID>]<resource>
+	CELNamespaceContext map[string]workloadinterface.IMetadata // supplemental Namespaces for CEL; not scanned resources
+	ResourcesResult     map[string]resourcesresults.Result     // resources scan results, map[<resource ID>]<resource result>
+	ResourceSource      map[string]reporthandling.Source       // resources sources, map[<resource ID>]<resource result>
+	// TerraformSourceLocations is the start of the Terraform resource block each
+	// resource converted from a .tf file came from, map[<resource ID>]. It is
+	// per scan, so scans in one process don't share or overwrite locations.
+	TerraformSourceLocations map[string]SourceLocation
+	ResourcesPrioritized     map[string]prioritization.PrioritizedResource // resources prioritization information, map[<resource ID>]<prioritized resource>
+	ResourceAttackTracks     map[string][]v1alpha1.IAttackTrack            // resources attack tracks, map[<resource ID>][]<attack track> -- a resource can be implicated by more than one attack track at once, each contributing to its score
+	AttackTracks             map[string]v1alpha1.IAttackTrack
+	Report                   *reporthandlingv2.PostureReport // scan results v2 - Remove
+	RegoInputData            RegoInputData                   // input passed to rego for scanning. map[<control name>][<input arguments>]
+	Metadata                 *reporthandlingv2.Metadata
+	InfoMap                  map[string]apis.StatusInfo         // Map errors of resources to StatusInfo
+	ResourceToControlsMap    map[string][]string                // map[<apigroup/apiversion/resource>] = [<control_IDs>]
+	ScanCoverage             ScanCoverage                       // runtime coverage gaps (failed GVR pulls + not-evaluated controls)
+	PartialGVRFailures       []PartialGVRPull                   // per-selector LIST failures for GVRs that were partially collected
+	UnexaminedKinds          []UnexaminedKind                   // cluster-served resource kinds no control in the policy set queried
+	ListedGVRs               map[string]bool                    // queried <apigroup/apiversion/resource> -> listed at least once without a rule field selector
+	NamespaceSummaries       NamespaceSummaries                 // per-namespace compliance rollup, see BuildNamespaceSummaries
+	PolicyDegradations       []PolicyDegradation                // policy inputs (control configurations, exceptions) served from a fallback
+	ZeroScoredControls       map[string]struct{}                // controls the compliance score counts as 0 (timed out or failed); set by the OPA processor, kept by any recompute
+	SkippedManifests         []SkippedManifest                  // manifest files skipped during loading (invalid YAML, missing kind, etc.)
+	SessionID                string                             // SessionID
+	Policies                 []reporthandling.Framework         // list of frameworks to scan
+	Exceptions               []armotypes.PostureExceptionPolicy // list of exceptions to apply on scan results
+	ExceptionAudit           *ExceptionAudit                    // optional exception usage audit
+	AuditExceptions          bool                               // include exception usage audit in supported outputs
+	HonorInlineExceptions    bool                               // honor kubescape.io/skip-* annotations as inline exception policies
+	ShowSecrets              bool                               // preserve secret values for evidence display (--show-secrets)
+	PreservedEvidenceValues  map[string]map[string]string       // per-resource path -> unredacted value captured before scrubbing when ShowSecrets is enabled
+	OmitRawResources         bool                               // omit raw resources from output
+	SourcePathsAnonymized    bool                               // ResourceSource paths are pseudonyms (--hide/--encrypt), so no manifest can be opened from them
+	SingleResourceScan       workloadinterface.IWorkload        // single resource scan
+	TopWorkloadsByScore      []reporthandling.IResource
+	TriggeredByCLI           bool
+	LabelsToCopy             []string                    // Labels to copy from workloads to scan reports
+	SkipControls             string                      // Comma-separated control IDs to skip
+	IncludeControls          string                      // Comma-separated control IDs to include (all others skipped)
+	VAPPolicies              []unstructured.Unstructured // ValidatingAdmissionPolicy resources collected from the cluster
+	VAPBindings              []unstructured.Unstructured // ValidatingAdmissionPolicyBinding resources collected from the cluster
+	VAPParamObjects          []unstructured.Unstructured // ControlConfiguration resources collected from the cluster for binding paramRefs
 
 	// VAPCoverage refines VAPPolicies/VAPBindings' coarse "is any binding
 	// present" signal (see reportsummary.ControlSummary.VAPEnforcement) with

@@ -70,7 +70,8 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 					ignoreFile = ignoreErr.Path
 				}
 			} else {
-				input.root, input.sources, input.workloads, skipped, err = getResourcesFromInput(ctx, scanInfo.InputPatterns[path], helmValueOpts, pathFilter, cloneDepth, scanInfo.WorkspaceDir)
+				input.terraformLocations = map[string]cautils.SourceLocation{}
+				input.root, input.sources, input.workloads, skipped, err = getResourcesFromInput(ctx, scanInfo.InputPatterns[path], helmValueOpts, pathFilter, cloneDepth, input.terraformLocations, scanInfo.WorkspaceDir)
 				input.remote = remoteName(scanInfo.InputPatterns[path], cloneDepth)
 			}
 		}
@@ -103,6 +104,12 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 	anchorInputs(ctx, inputs)
 	for _, input := range inputs {
 		maps.Copy(sessionObj.ResourceSource, input.sources)
+		if len(input.terraformLocations) > 0 {
+			if sessionObj.TerraformSourceLocations == nil {
+				sessionObj.TerraformSourceLocations = map[string]cautils.SourceLocation{}
+			}
+			maps.Copy(sessionObj.TerraformSourceLocations, input.terraformLocations)
+		}
 
 		// map all resources: map["/apiVersion/version/kind"][]<k8s workloads>
 		addWorkloadsToResourcesMap(mappedResources, input.workloads)
@@ -166,6 +173,9 @@ type loadedInput struct {
 	remote    string // stable name of a cloned remote repository; "" for a local input
 	sources   map[string]reporthandling.Source
 	workloads []workloadinterface.IMetadata
+	// terraformLocations is the Terraform resource block of each resource
+	// converted from a .tf file, by resource ID.
+	terraformLocations map[string]cautils.SourceLocation
 }
 
 // anchorInputs keeps the resources of a scan with several roots apart.
@@ -573,14 +583,16 @@ func excludeFilesUnderDirectories(sourceToWorkloads map[string][]workloadinterfa
 // source file it came from. When workspace containment is configured via workspaceOpt,
 // external references and symlinks outside the workspace are contained or skipped.
 func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautils.HelmValueOptions, pathFilter *cautils.PathFilter, workspaceOpt ...string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, []cautils.SkippedManifest, error) {
-	_, workloadIDToSource, workloads, skips, err := getResourcesFromInput(ctx, path, helmValueOpts, pathFilter, cautils.DefaultGitCloneDepth, workspaceOpt...)
+	_, workloadIDToSource, workloads, skips, err := getResourcesFromInput(ctx, path, helmValueOpts, pathFilter, cautils.DefaultGitCloneDepth, nil, workspaceOpt...)
 	return workloadIDToSource, workloads, skips, err
 }
 
 // getResourcesFromInput loads one scan input. It also returns the local root the
 // input's paths are reported against, or "" for a cloned remote repository, whose
-// temporary checkout must not leak into resource IDs.
-func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cautils.HelmValueOptions, pathFilter *cautils.PathFilter, cloneDepth int, workspaceOpt ...string) (string, map[string]reporthandling.Source, []workloadinterface.IMetadata, []cautils.SkippedManifest, error) {
+// temporary checkout must not leak into resource IDs. When terraformLocations
+// is not nil, it is filled with the Terraform resource block of each resource
+// converted from a .tf file, by resource ID.
+func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cautils.HelmValueOptions, pathFilter *cautils.PathFilter, cloneDepth int, terraformLocations map[string]cautils.SourceLocation, workspaceOpt ...string) (string, map[string]reporthandling.Source, []workloadinterface.IMetadata, []cautils.SkippedManifest, error) {
 	var workspaceDir string
 	if len(workspaceOpt) > 0 {
 		workspaceDir = workspaceOpt[0]
@@ -654,7 +666,7 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 			}
 		}
 	}
-	terraformSourceToWorkloads, terraformSkips, err := cautils.LoadResourcesFromTerraformFilteredWithSkips(ctx, path, pathFilter, workspaceDir)
+	terraformSourceToWorkloads, terraformSkips, terraformPathLocations, err := cautils.LoadResourcesFromTerraformWithLocations(ctx, path, pathFilter, workspaceDir)
 	allSkips = append(allSkips, terraformSkips...)
 	if err != nil {
 		return "", nil, nil, allSkips, err
@@ -699,6 +711,14 @@ func getResourcesFromInput(ctx context.Context, path string, helmValueOpts cauti
 
 		for i := range ws {
 			workloadIDToSource[ws[i].GetID()] = workloadSource
+			if terraformLocations == nil {
+				continue
+			}
+			if lw, ok := ws[i].(*localworkload.LocalWorkload); ok {
+				if location, ok := terraformPathLocations[lw.GetPath()]; ok {
+					terraformLocations[ws[i].GetID()] = location
+				}
+			}
 		}
 	}
 

@@ -124,6 +124,9 @@ func IsTerraformFile(path string) bool {
 type TerraformDirectory struct {
 	path         string
 	workspaceDir string
+	// sourceLocations holds the resource block location of each workload of
+	// the last GetWorkloads call, by workload path.
+	sourceLocations map[string]SourceLocation
 }
 
 func NewTerraformDirectory(path string, workspaceOpt ...string) *TerraformDirectory {
@@ -139,6 +142,7 @@ func NewTerraformDirectory(path string, workspaceOpt ...string) *TerraformDirect
 // same-module default or an auto-loaded tfvars file are evaluated — deliberately
 // not a full Terraform evaluator (see LoadResourcesFromTerraform doc).
 func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadinterface.IMetadata, []error) {
+	td.sourceLocations = nil
 	path = filepath.Clean(path)
 	entries, err := os.ReadDir(path)
 	if err != nil {
@@ -210,7 +214,7 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 		src := parsedPaths[i]
 		for j, manifest := range manifests {
 			workloadPath := terraformWorkloadPath(src, j)
-			recordTerraformSourceLocation(workloadPath, manifest.source)
+			td.recordSourceLocation(workloadPath, manifest.source)
 			data, err := json.Marshal(manifest.object)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("%s: manifest %d: %w", src, j, err))

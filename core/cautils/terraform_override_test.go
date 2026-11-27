@@ -98,7 +98,8 @@ func TestIsTerraformOverrideFile(t *testing.T) {
 // instead of producing a second workload with the same identity.
 func TestTerraformDirectory_GetWorkloads_OverrideFixture(t *testing.T) {
 	dir := "testdata/terraform_override"
-	workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
+	td := NewTerraformDirectory(dir)
+	workloads, errs := td.GetWorkloads(dir)
 	require.Empty(t, errs)
 
 	main := filepath.Join(dir, "main.tf")
@@ -128,7 +129,7 @@ func TestTerraformDirectory_GetWorkloads_OverrideFixture(t *testing.T) {
 	// Findings still point at the resource blocks in main.tf.
 	var lines []int
 	for i := range workloads[main] {
-		loc, ok := TerraformSourceLocation(terraformWorkloadPath(main, i))
+		loc, ok := td.SourceLocations()[terraformWorkloadPath(main, i)]
 		require.True(t, ok)
 		lines = append(lines, loc.Line)
 	}
