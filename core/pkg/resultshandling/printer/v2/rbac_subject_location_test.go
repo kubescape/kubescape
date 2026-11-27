@@ -1,9 +1,12 @@
 package printer
 
 import (
+	"context"
+	"encoding/csv"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -114,16 +117,23 @@ func rbacSubjectSession(t *testing.T, manifest string, objects ...*localworkload
 			}},
 		}
 	}
+	ctrlSummary := reportsummary.ControlSummary{
+		ControlID:   controlID,
+		Name:        "Administrative Roles",
+		Description: "Attackers who have cluster admin permissions can take advantage of their privileges",
+		Remediation: "Remove the binding",
+		ScoreFactor: 8.0,
+		StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+	}
+	failedStatus := &apis.StatusInfo{InnerStatus: apis.StatusFailed}
+	for _, subject := range subjects {
+		ctrlSummary.Append(failedStatus, subject.GetID())
+	}
+
 	session.Report = &reporthandlingv2.PostureReport{
 		SummaryDetails: reportsummary.SummaryDetails{
 			Controls: reportsummary.ControlSummaries{
-				controlID: reportsummary.ControlSummary{
-					ControlID:   controlID,
-					Name:        "Administrative Roles",
-					Description: "Attackers who have cluster admin permissions can take advantage of their privileges",
-					Remediation: "Remove the binding",
-					ScoreFactor: 8.0,
-				},
+				controlID: ctrlSummary,
 			},
 		},
 	}
@@ -262,4 +272,62 @@ func TestRBACSubjectPaths_PriorityOrder(t *testing.T) {
 	})
 	require.True(t, ok)
 	require.Equal(t, []string{"kind"}, paths)
+}
+
+func TestCSVPrinter_RBACSubjectInFileScan(t *testing.T) {
+	session := singleRBACSubjectSession(t)
+	tmpFile, err := os.CreateTemp(t.TempDir(), "test_rbac_*.csv")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
+	cp := NewCsvPrinter(false)
+	cp.writer = tmpFile
+
+	err = cp.ActionPrint(context.Background(), session, nil)
+	require.NoError(t, err)
+
+	_, err = tmpFile.Seek(0, 0)
+	require.NoError(t, err)
+
+	r := csv.NewReader(tmpFile)
+	records, err := r.ReadAll()
+	require.NoError(t, err)
+	require.Greater(t, len(records), 1)
+
+	header := records[0]
+	sourceIdx := -1
+	for i, col := range header {
+		if col == "Source Path" {
+			sourceIdx = i
+			break
+		}
+	}
+	require.NotEqual(t, -1, sourceIdx, "Source Path column must exist in CSV header")
+
+	foundSubjectRow := false
+	for _, row := range records[1:] {
+		if strings.Contains(row[4], "ServiceAccount") || strings.Contains(row[4], "ci") {
+			foundSubjectRow = true
+			require.Equal(t, "rbac.yaml", row[sourceIdx], "Source Path column must report binding's relative path for RBAC subject")
+		}
+	}
+	require.True(t, foundSubjectRow, "must find RBAC subject row in CSV output")
+}
+
+func TestJUnitPrinter_RBACSubjectInFileScan(t *testing.T) {
+	session := singleRBACSubjectSession(t)
+	tmpFile, err := os.CreateTemp(t.TempDir(), "test_rbac_*.xml")
+	require.NoError(t, err)
+	defer tmpFile.Close()
+
+	jp := NewJunitPrinter(false)
+	jp.writer = tmpFile
+
+	err = jp.ActionPrint(context.Background(), session, nil)
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(tmpFile.Name())
+	require.NoError(t, err)
+
+	require.Contains(t, string(content), "sourcePath: rbac.yaml", "JUnit failure content must report binding's relative path for RBAC subject")
 }
