@@ -688,12 +688,16 @@ func (ksServer *KubescapeMcpserver) ReadResource(ctx context.Context, request mc
 		return nil, fmt.Errorf("failed to get vulnerability manifest: %w", err)
 	}
 
+	matches := manifest.Spec.Payload.Matches
 	var responseJson []byte
 	if cveID == "" {
-		// CVE list
+		// CVE list: pre-allocate exact capacity and index into matches to avoid copying large Match structs.
 		var cveList []v1beta1.Vulnerability
-		for _, match := range manifest.Spec.Payload.Matches {
-			cveList = append(cveList, match.Vulnerability)
+		if len(matches) > 0 {
+			cveList = make([]v1beta1.Vulnerability, len(matches))
+			for i := range matches {
+				cveList[i] = matches[i].Vulnerability
+			}
 		}
 		responseJson, err = json.Marshal(cveList)
 		if err != nil {
@@ -702,9 +706,9 @@ func (ksServer *KubescapeMcpserver) ReadResource(ctx context.Context, request mc
 	} else {
 		// CVE details
 		var match []v1beta1.Match
-		for _, m := range manifest.Spec.Payload.Matches {
-			if m.Vulnerability.ID == cveID {
-				match = append(match, m)
+		for i := range matches {
+			if matches[i].Vulnerability.ID == cveID {
+				match = append(match, matches[i])
 			}
 		}
 		responseJson, err = json.Marshal(match)
