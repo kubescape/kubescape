@@ -185,12 +185,14 @@ func parseRegistryKey(raw string) (registryKey, bool) {
 	if err != nil || u.Host == "" {
 		return registryKey{}, false
 	}
-	host := u.Host
+	host := strings.ToLower(u.Host)
 	if host == "registry-1.docker.io" || host == "index.docker.io" {
 		host = "docker.io"
 	}
 	keyPath := u.Path
-	if strings.HasPrefix(keyPath, "/v1/") || strings.HasPrefix(keyPath, "/v2/") {
+	if keyPath == "/v1" || keyPath == "/v2" {
+		keyPath = ""
+	} else if strings.HasPrefix(keyPath, "/v1/") || strings.HasPrefix(keyPath, "/v2/") {
 		keyPath = keyPath[3:]
 	}
 	if keyPath == "/" {
@@ -207,12 +209,19 @@ func parseRegistryKey(raw string) (registryKey, bool) {
 // path (so "registry.example.com/team" covers "registry.example.com/team/app").
 func (k registryKey) matches(domain, repository string) bool {
 	keyLabels, keyPort := splitRegistryHost(k.host)
-	domainLabels, domainPort := splitRegistryHost(domain)
+	domainLabels, domainPort := splitRegistryHost(strings.ToLower(domain))
 	if keyPort != domainPort || len(keyLabels) != len(domainLabels) {
 		return false
 	}
-	if !strings.HasPrefix("/"+repository, k.path) {
-		return false
+	if k.path != "" {
+		repoPath := "/" + repository
+		if strings.HasSuffix(k.path, "/") {
+			if !strings.HasPrefix(repoPath, k.path) {
+				return false
+			}
+		} else if repoPath != k.path && !strings.HasPrefix(repoPath, k.path+"/") {
+			return false
+		}
 	}
 	for i, pattern := range keyLabels {
 		if matched, err := path.Match(pattern, domainLabels[i]); err != nil || !matched {
