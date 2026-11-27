@@ -17,6 +17,11 @@ type SourceLocation struct {
 type terraformManifest struct {
 	object map[string]interface{}
 	source hcl.Range
+	// incomplete is set when an attribute, count or for_each of the resource
+	// could not be resolved, so object is missing what Terraform would set.
+	// Such an object is not scanned: a missing field could hide a
+	// misconfiguration.
+	incomplete bool
 }
 
 func terraformManifestObjects(manifests []terraformManifest) []map[string]interface{} {

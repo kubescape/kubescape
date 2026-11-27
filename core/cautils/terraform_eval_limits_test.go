@@ -122,9 +122,7 @@ resource "kubernetes_pod_v1" "app" {
 	})
 
 	obj, errs := terraformObject(t, dir)
-	container := terraformFirstContainer(t, obj)
-	assert.Equal(t, "nginx:1.27", container["image"])
-	assert.NotContains(t, container, "command")
+	assert.Nil(t, obj, "the pod is left out rather than scanned without its command")
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0].Error(), `"command"`)
 }

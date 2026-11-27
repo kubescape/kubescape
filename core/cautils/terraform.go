@@ -209,7 +209,13 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 
 		typedManifests, typedErrs := extractTypedResourceManifests(file.Body, evalCtx, references)
 		errs = append(errs, typedErrs...)
-		manifests = append(manifests, typedManifests...)
+		for _, manifest := range typedManifests {
+			// A resource with unresolved values is reported through its
+			// *terraformResourceError instead of being scanned incomplete.
+			if !manifest.incomplete {
+				manifests = append(manifests, manifest)
+			}
+		}
 
 		src := parsedPaths[i]
 		for j, manifest := range manifests {

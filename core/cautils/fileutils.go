@@ -1188,6 +1188,10 @@ func LoadResourcesFromTerraformWithLocations(ctx context.Context, basePath strin
 		dir := filepath.Dir(basePath)
 		td := NewTerraformDirectory(dir, workspaceDir)
 		wls, errs := td.GetWorkloads(dir)
+		if resources, ok := onlyTerraformResourceErrors(errs); ok {
+			logTerraformUnresolvedResources(ctx, dir, resources, errs)
+			return wls, []SkippedManifest{terraformUnresolvedResourcesSkip(dir, resources)}, td.SourceLocations(), nil
+		}
 		if len(errs) > 0 {
 			return wls, nil, td.SourceLocations(), fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(errs...))
 		}
@@ -1217,6 +1221,14 @@ func LoadResourcesFromTerraformWithLocations(ctx context.Context, basePath strin
 		td := NewTerraformDirectory(dir, workspaceDir)
 		wls, dirErrs := td.GetWorkloads(dir)
 		maps.Copy(locations, td.SourceLocations())
+		if resources, ok := onlyTerraformResourceErrors(dirErrs); ok {
+			// Only the resources that use values the scan can't resolve were
+			// left out; the rest of the configuration is scanned.
+			logTerraformUnresolvedResources(ctx, dir, resources, dirErrs)
+			skips = append(skips, terraformUnresolvedResourcesSkip(dir, resources))
+			maps.Copy(sourceToWorkloads, wls)
+			continue
+		}
 		if len(dirErrs) > 0 {
 			// Override blocks with no primary definition are skipped without
 			// affecting the rest of the configuration, so the workloads it
@@ -2395,4 +2407,12 @@ func getFileFormat(filePath string) FileFormat {
 	} else {
 		return FileFormat(filePath)
 	}
+}
+
+// logTerraformUnresolvedResources warns that the resources of the Terraform
+// configuration in dir that use values the scan can't resolve were left out,
+// naming them and the reasons.
+func logTerraformUnresolvedResources(ctx context.Context, dir string, resources []string, errs []error) {
+	logger.L().Ctx(ctx).Warning("Scanning Terraform configuration without the resources that use values that can't be resolved",
+		helpers.String("path", dir), helpers.String("resources", strings.Join(resources, ", ")), helpers.Error(errors.Join(errs...)))
 }
