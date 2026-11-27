@@ -194,6 +194,9 @@ func (prettyPrinter *PrettyPrinter) pathLineResolver(opaSessionObj *cautils.OPAS
 		return nil
 	}
 
+	if tf, ok := opaSessionObj.TerraformSourceLocations[scanned.resourceID]; ok {
+		return func(path string) (int, bool) { loc, ok := tf.Field(path); return loc.Line, ok }
+	}
 	docIndex, ok := getDocIndex(opaSessionObj, scanned.resourceID)
 	if ok {
 		resolver := caches.get(scanned.absPath).locationResolver(scanned.absPath, "evidence")

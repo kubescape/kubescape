@@ -142,7 +142,7 @@ func NewTerraformDirectory(path string, workspaceOpt ...string) *TerraformDirect
 // same-module default or an auto-loaded tfvars file are evaluated — deliberately
 // not a full Terraform evaluator (see LoadResourcesFromTerraform doc).
 func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadinterface.IMetadata, []error) {
-	td.sourceLocations = nil
+	td.sourceLocations = make(map[string]SourceLocation)
 	path = filepath.Clean(path)
 	entries, err := os.ReadDir(path)
 	if err != nil {
@@ -214,7 +214,12 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 		src := parsedPaths[i]
 		for j, manifest := range manifests {
 			workloadPath := terraformWorkloadPath(src, j)
-			td.recordSourceLocation(workloadPath, manifest.source)
+			// List items share the enclosing manifest's workload path.
+			location := manifest.source.SourceLocation
+			if _, list, _ := listEnvelopeKind(manifest.object); !list {
+				location.tree = manifest.source
+			}
+			td.sourceLocations[workloadPath] = location
 			data, err := json.Marshal(manifest.object)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("%s: manifest %d: %w", src, j, err))
@@ -355,7 +360,9 @@ func extractKubernetesManifestResources(body hcl.Body, evalCtx *hcl.EvalContext,
 				errs = append(errs, fmt.Errorf("resource %q: manifest is not an object", block.Labels[1]))
 				continue
 			}
-			manifests = append(manifests, terraformManifest{object: m, source: block.DefRange})
+			source := newTerraformLocation(block.DefRange)
+			source.expression(attr.Expr, instanceCtx)
+			manifests = append(manifests, terraformManifest{object: m, source: source})
 		}
 	}
 	return manifests, errs

@@ -1271,7 +1271,7 @@ dynamic "security_context" {
 			moduleCtx:        ctx,
 		},
 	}
-	converter.bodyToMap(body, ctx, "kubernetes_pod_v1.demo.spec.container", false, false)
+	converter.bodyToMap(body, ctx, "kubernetes_pod_v1.demo.spec.container", false, false, nil)
 	require.Empty(t, errs)
 	require.NotEmpty(t, converter.references.localResults)
 	for key := range converter.references.localResults {
@@ -1310,7 +1310,7 @@ dynamic "security_context" {
 }`)
 	var errs []error
 	converter := terraformBodyConverter{errs: &errs, remaining: terraformElementOverhead}
-	converter.bodyToMap(body, &hcl.EvalContext{}, "kubernetes_pod_v1.demo.spec.container", false, false)
+	converter.bodyToMap(body, &hcl.EvalContext{}, "kubernetes_pod_v1.demo.spec.container", false, false, nil)
 	require.NotEmpty(t, errs, "reserving block overhead must not silently omit its security fields")
 	assert.Contains(t, fmt.Sprint(errs), "dynamic block expansion exceeds the size limit")
 }

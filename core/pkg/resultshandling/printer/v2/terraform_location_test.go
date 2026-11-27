@@ -5,16 +5,18 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // TestResolveFixLocation_Terraform checks that findings on resources converted
-// from Terraform point at their resource block, not at line 1 (#5710).
+// from Terraform resolve to their own attributes or the enclosing resource.
 func TestResolveFixLocation_Terraform(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "main.tf")
@@ -47,6 +49,10 @@ resource "kubernetes_deployment_v1" "web" {
           name  = "web"
           image = "nginx:1.27"
         }
+        container {
+          name = "sidecar"
+          image = "busybox"
+        }
       }
     }
   }
@@ -70,12 +76,20 @@ resource "kubernetes_deployment_v1" "web" {
 	require.Contains(t, ids, "Deployment")
 	require.Contains(t, ids, "Namespace")
 
-	// The fix path can't be resolved in a .tf file, so the location is the
-	// resource block, whether or not a YAML location resolver is available.
+	// A control without paths points at the resource header.
 	ac := &resourcesresults.ResourceAssociatedControl{}
 	assert.Equal(t, locationresolver.Location{Line: 11, Column: 1}, resolveFixLocation(session, nil, ac, ids["Deployment"]))
 	assert.Equal(t, locationresolver.Location{Line: 5, Column: 1}, resolveFixLocation(session, nil, ac, ids["Namespace"]))
-	assert.Equal(t, 11, codeQualityLine(session, nil, ac, ids["Deployment"]))
+	ac.ResourceAssociatedRules = []resourcesresults.ResourceAssociatedRule{{
+		Status: apis.StatusFailed,
+		Paths: []armotypes.PosturePaths{
+			{FixPath: armotypes.FixPath{Path: "spec.template.spec.hostPID", Value: "false"}, ReviewPath: "spec.template.spec.containers[1].image"},
+		}}}
+	assert.Equal(t, locationresolver.Location{Line: 25, Column: 9}, resolveFixLocation(session, nil, ac, ids["Deployment"]))
+	assert.Equal(t, 25, codeQualityLine(session, nil, ac, ids["Deployment"]))
+	assert.Equal(t, locationresolver.Location{Line: 32, Column: 11}, resolveReviewPathLocations(session, nil, ac, ids["Deployment"])["spec.template.spec.containers[1].image"])
+	ac.ResourceAssociatedRules[0].Paths = []armotypes.PosturePaths{{ReviewPath: "spec.template.spec.containers[2].image"}}
+	assert.Equal(t, locationresolver.Location{Line: 11, Column: 1}, resolveFixLocation(session, nil, ac, ids["Deployment"]))
 }
 
 func TestResolveFixLocation_NonTerraformFallsBackToLineOne(t *testing.T) {
@@ -91,8 +105,4 @@ func TestResolveFixLocation_NonTerraformFallsBackToLineOne(t *testing.T) {
 
 	ac := &resourcesresults.ResourceAssociatedControl{}
 	assert.Equal(t, locationresolver.Location{Line: 1, Column: 1}, resolveFixLocation(session, nil, ac, lw.GetID()))
-	_, ok := terraformResourceLocation(session, lw.GetID())
-	assert.False(t, ok)
-	_, ok = terraformResourceLocation(nil, lw.GetID())
-	assert.False(t, ok)
 }

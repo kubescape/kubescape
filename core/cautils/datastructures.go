@@ -106,8 +106,8 @@ type OPASessionObj struct {
 	CELNamespaceContext map[string]workloadinterface.IMetadata // supplemental Namespaces for CEL; not scanned resources
 	ResourcesResult     map[string]resourcesresults.Result     // resources scan results, map[<resource ID>]<resource result>
 	ResourceSource      map[string]reporthandling.Source       // resources sources, map[<resource ID>]<resource result>
-	// TerraformSourceLocations is the start of the Terraform resource block each
-	// resource converted from a .tf file came from, map[<resource ID>]. It is
+	// TerraformSourceLocations maps each resource ID to its Terraform block
+	// and the source positions of fields written in that file. It is
 	// per scan, so scans in one process don't share or overwrite locations.
 	TerraformSourceLocations map[string]SourceLocation
 	ResourcesPrioritized     map[string]prioritization.PrioritizedResource // resources prioritization information, map[<resource ID>]<prioritized resource>

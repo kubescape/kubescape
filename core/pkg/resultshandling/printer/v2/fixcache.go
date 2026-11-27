@@ -123,6 +123,9 @@ func (c *fixReportCache) fileString(path string) (string, error) {
 // only names the output format in the warning. A failure caches a nil resolver,
 // which resolveFixLocation already reads as "fall back to line 1".
 func (c *fixReportCache) locationResolver(path, format string) *locationresolver.PathLocationResolver {
+	if cautils.IsTerraformFile(path) {
+		return nil
+	}
 	if resolver, ok := c.resolvers[path]; ok {
 		return resolver
 	}
