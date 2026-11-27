@@ -67,11 +67,16 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	scanInfo, policyIdentifiers := getPrometheusDefaultScanCommand(scanID, resultsFile, metricsQueryParams.Frameworks)
 
 	scanCtx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
+	// A scrape that covers only the requested frameworks must not replace the
+	// stored results for the frameworks it did not scan, so a filtered scan is
+	// never persisted. Persisting it would drop findings from every other
+	// framework until the next full scan.
+	skipPersistence := metricsQueryParams.SkipPersistence || len(policyIdentifiers) > 0
 	scanParams := &scanRequestParams{
 		scanQueryParams: &ScanQueryParams{
 			ReturnResults:   true,
 			KeepResults:     false,
-			SkipPersistence: metricsQueryParams.SkipPersistence,
+			SkipPersistence: skipPersistence,
 		},
 		scanInfo:          scanInfo,
 		policyIdentifiers: policyIdentifiers,
