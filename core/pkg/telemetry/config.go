@@ -62,13 +62,17 @@ func ResolveConfig(flagEndpoint, version string) (Config, error) {
 		ServiceName: resolveServiceName(),
 		Version:     version,
 	}
+	flagEndpoint = strings.TrimSpace(flagEndpoint)
+	cfg.FromEnvironment = flagEndpoint == "" && hasEndpointInEnvironment()
+	if flagEndpoint == "" && !cfg.FromEnvironment {
+		return cfg, nil
+	}
+
 	if cfg.Protocol != ProtocolGRPC && cfg.Protocol != ProtocolHTTP {
 		return Config{}, fmt.Errorf("invalid %s %q: supported protocols are %q and %q", EnvProtocol, cfg.Protocol, ProtocolGRPC, ProtocolHTTP)
 	}
 
-	flagEndpoint = strings.TrimSpace(flagEndpoint)
-	if flagEndpoint == "" {
-		cfg.FromEnvironment = hasEndpointInEnvironment()
+	if cfg.FromEnvironment {
 		return cfg, nil
 	}
 
