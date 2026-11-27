@@ -97,7 +97,7 @@ func (k8sHandler *K8sResourceHandler) getMaxParallelPulls() int {
 	if k8sHandler.maxParallelResourcePulls > 0 {
 		return k8sHandler.maxParallelResourcePulls
 	}
-	if v := os.Getenv("KUBESCAPE_MAX_PARALLEL_PULLS"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("KUBESCAPE_MAX_PARALLEL_PULLS")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
 		}
@@ -114,7 +114,7 @@ func (k8sHandler *K8sResourceHandler) newStore() (partitionstore.Store, error) {
 	if k8sHandler.storeFactory != nil {
 		return k8sHandler.storeFactory()
 	}
-	if v := os.Getenv("KUBESCAPE_PARTITION_STORE"); v != "" {
+	if v := strings.TrimSpace(os.Getenv("KUBESCAPE_PARTITION_STORE")); v != "" {
 		if strings.EqualFold(v, "memory") {
 			logger.L().Info("using in-memory partition store (configured by KUBESCAPE_PARTITION_STORE)")
 			return partitionstore.NewMemoryStore(), nil
@@ -124,7 +124,7 @@ func (k8sHandler *K8sResourceHandler) newStore() (partitionstore.Store, error) {
 		}
 	}
 	var opts []partitionstore.Option
-	if baseDir := os.Getenv("KUBESCAPE_SPILL_DIR"); baseDir != "" {
+	if baseDir := strings.TrimSpace(os.Getenv("KUBESCAPE_SPILL_DIR")); baseDir != "" {
 		opts = append(opts, partitionstore.WithBaseDir(baseDir))
 	}
 	store, err := partitionstore.NewDiskStore(opts...)
