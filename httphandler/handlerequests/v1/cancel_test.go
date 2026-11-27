@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -363,5 +364,111 @@ func TestCancelScan_WaitFalse_NoFailedArtifactLeftBehind(t *testing.T) {
 	failedPath := filepath.Join(FailedOutputDir, scanID)
 	if _, err := os.Stat(failedPath); err == nil {
 		t.Errorf("FailedOutputDir artifact %q exists after cancellation; want it removed", failedPath)
+	}
+}
+
+// TestRunQueuedScan_CancelledReleasesStateBeforeUnblockingWaiter verifies that
+// skipping a cancelled queued scan releases ScanInfo cleanups, cancel funcs,
+// and busy state before sending the error response on scanReq.resp.
+func TestRunQueuedScan_CancelledReleasesStateBeforeUnblockingWaiter(t *testing.T) {
+	h := &HTTPHandler{state: newServerState()}
+	scanID := "33333333-4444-5555-6666-777777777777"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	resp := make(chan *utilsmetav1.Response, 1)
+
+	var cancelCalls atomic.Int32
+	inReleaseCancel := make(chan struct{})
+	allowReleaseCancel := make(chan struct{})
+	cancelWrapper := func() {
+		cancel()
+		if cancelCalls.Add(1) == 2 {
+			close(inReleaseCancel)
+			<-allowReleaseCancel
+		}
+	}
+
+	h.state.setBusy(scanID, cancelWrapper)
+	if !h.state.cancel(scanID) {
+		t.Fatalf("cancel(%q) = false; want true", scanID)
+	}
+
+	inCleanup := make(chan struct{})
+	allowCleanup := make(chan struct{})
+	scanInfo := &cautils.ScanInfo{}
+	scanInfo.AddCleanup(func() {
+		close(inCleanup)
+		<-allowCleanup
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.runQueuedScan(&scanRequestParams{
+			scanID:          scanID,
+			scanInfo:        scanInfo,
+			scanQueryParams: &ScanQueryParams{ReturnResults: true},
+			ctx:             ctx,
+			resp:            resp,
+			isUserScan:      true,
+		})
+	}()
+
+	select {
+	case <-inCleanup:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runQueuedScan did not reach releaseScanInfo")
+	}
+
+	select {
+	case r := <-resp:
+		t.Fatalf("resp received %+v before releaseScanInfo completed", r)
+	default:
+	}
+	if !h.state.isBusy(scanID) {
+		t.Errorf("isBusy(%q) during releaseScanInfo = false; want true", scanID)
+	}
+
+	close(allowCleanup)
+
+	select {
+	case <-inReleaseCancel:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runQueuedScan did not reach releaseCancel")
+	}
+
+	// Do not call h.state.* while releaseCancel holds s.mtx.Lock().
+	select {
+	case r := <-resp:
+		t.Fatalf("resp received %+v before releaseCancel completed", r)
+	default:
+	}
+
+	close(allowReleaseCancel)
+
+	select {
+	case r := <-resp:
+		if r.Type != utilsapisv1.ErrorScanResponseType {
+			t.Errorf("response type = %v, want %v", r.Type, utilsapisv1.ErrorScanResponseType)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiter did not receive error response after cleanup unblocked")
+	}
+
+	if h.state.isBusy(scanID) {
+		t.Errorf("isBusy(%q) after response received = true; want false", scanID)
+	}
+	if running := h.state.getRunningUserScanID(); running != "" {
+		t.Errorf("getRunningUserScanID() after response received = %q; want empty", running)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runQueuedScan did not finish")
+	}
+
+	if got := cancelCalls.Load(); got != 2 {
+		t.Errorf("cancelCalls = %d, want 2 (cancel + releaseCancel)", got)
 	}
 }
