@@ -149,6 +149,50 @@ resource "kubernetes_pod_v1" "counted" {
 	assert.Equal(t, dir, skips[0].Path)
 }
 
+func TestLoadResourcesFromTerraform_TypedTopLevelTryAndCan(t *testing.T) {
+	dir := resolvedTempDir(t)
+	writeTerraformFiles(t, dir, map[string]string{"main.tf": `
+variable "settings" {
+  default = { image = "nginx:1.27" }
+}
+
+resource "kubernetes_config_map_v1" "unresolved-try" {
+  data = try(data.kubernetes_config_map_v1.settings.data, { image = "fallback" })
+}
+
+resource "kubernetes_config_map_v1" "unresolved-can" {
+  immutable = can(data.kubernetes_config_map_v1.settings.data)
+}
+
+resource "kubernetes_config_map_v1" "resolved" {
+  data      = try(var.settings, data.kubernetes_config_map_v1.settings.data)
+  immutable = can(var.settings.image)
+}
+
+resource "kubernetes_config_map_v1" "optional" {
+  data      = { image = try(var.settings.optional, "fallback") }
+  immutable = can(var.settings.optional)
+}
+`})
+
+	workloads, skips, err := LoadResourcesFromTerraformFilteredWithSkips(context.Background(), dir, nil)
+	require.NoError(t, err)
+	byName := workloadsByName(t, workloads)
+	assert.Equal(t, []string{"optional", "resolved"}, sortedNames(byName))
+	require.Contains(t, byName, "resolved")
+	resolved := byName["resolved"].GetObject()
+	assert.Equal(t, map[string]interface{}{"image": "nginx:1.27"}, resolved["data"])
+	assert.Equal(t, true, resolved["immutable"])
+	require.Contains(t, byName, "optional")
+	optional := byName["optional"].GetObject()
+	assert.Equal(t, map[string]interface{}{"image": "fallback"}, optional["data"])
+	assert.Equal(t, false, optional["immutable"])
+
+	require.Len(t, skips, 1)
+	assert.Equal(t, dir, skips[0].Path)
+	assert.ElementsMatch(t, []string{"kubernetes_config_map_v1.unresolved-try", "kubernetes_config_map_v1.unresolved-can"}, skips[0].Resources)
+}
+
 // A configuration error that isn't about one resource, such as a malformed
 // tfvars file, still fails the configuration as before.
 func TestLoadResourcesFromTerraform_ConfigurationErrorStillFails(t *testing.T) {

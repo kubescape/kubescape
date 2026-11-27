@@ -648,10 +648,11 @@ func (c *terraformBodyConverter) bodyToMap(body *hclsyntax.Body, evalCtx *hcl.Ev
 		if generated && !c.reserve(terraformValueSize(val, c.remaining)+len(name), path) {
 			continue
 		}
-		if generated {
+		// A successful evaluation can still hide an unresolved reference through try or can.
+		if resource || generated {
 			checkReferences := len(attr.Expr.Variables()) > 0 || hasUnavailableTerraformFunctions(attr.Expr, evalCtx)
 			if !val.IsWhollyKnown() || (checkReferences && c.references.hasUnresolvableVariables(attr.Expr, evalCtx)) {
-				*c.errs = append(*c.errs, fmt.Errorf("%s: generated attribute %q contains unresolved references", path, name))
+				*c.errs = append(*c.errs, fmt.Errorf("%s: attribute %q contains unresolved references", path, name))
 				continue
 			}
 		}
