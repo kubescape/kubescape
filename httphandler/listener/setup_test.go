@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -694,4 +695,73 @@ func TestTLSReloader_ConcurrentGetCertificate(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestLoadTLSKey_RejectsOversizedFile(t *testing.T) {
+	t.Setenv(filesizelimit.MaxFileSizeEnvVar, "64")
+	certFile, keyFile := writeTestTLSFiles(t)
+
+	pair, err := loadTLSKey(certFile, keyFile)
+	require.ErrorIs(t, err, errTLSFileTooLarge)
+	require.Nil(t, pair)
+}
+
+func TestLoadTLSKey_RejectsDirectory(t *testing.T) {
+	_, keyFile := writeTestTLSFiles(t)
+	dirPath := t.TempDir()
+
+	pair, err := loadTLSKey(dirPath, keyFile)
+	require.ErrorIs(t, err, errTLSFileNotRegular)
+	require.Nil(t, pair)
+}
+
+func TestTLSReloader_FallbackOnOversizedRotatedFile(t *testing.T) {
+	certFile, keyFile := writeTestTLSFiles(t)
+	reloader, err := newTLSReloader(certFile, keyFile)
+	require.NoError(t, err)
+
+	cert1, err := reloader.GetCertificate(&tls.ClientHelloInfo{})
+	require.NoError(t, err)
+
+	time.Sleep(10 * time.Millisecond)
+	t.Setenv(filesizelimit.MaxFileSizeEnvVar, "64")
+	certPEM2, keyPEM2 := generateTestCertAndKey(t, "oversized.example.com")
+	require.NoError(t, os.WriteFile(certFile, certPEM2, 0o600))
+	require.NoError(t, os.WriteFile(keyFile, keyPEM2, 0o600))
+
+	cert2, err := reloader.GetCertificate(&tls.ClientHelloInfo{})
+	require.NoError(t, err)
+	require.Equal(t, cert1.Certificate, cert2.Certificate)
+}
+
+func TestLoadTLSKey_PreservesSymlinkParentPath(t *testing.T) {
+	rootDir := t.TempDir()
+	cfgDir := filepath.Join(rootDir, "cfg")
+	secretsDir := filepath.Join(rootDir, "secrets")
+	currentDir := filepath.Join(secretsDir, "current")
+	require.NoError(t, os.MkdirAll(cfgDir, 0o700))
+	require.NoError(t, os.MkdirAll(currentDir, 0o700))
+
+	certPEM, keyPEM := generateTestCertAndKey(t, "symlink-parent.example.com")
+	require.NoError(t, os.WriteFile(filepath.Join(secretsDir, "tls.crt"), certPEM, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(secretsDir, "tls.key"), keyPEM, 0o600))
+
+	linkPath := filepath.Join(cfgDir, "link")
+	require.NoError(t, os.Symlink(currentDir, linkPath))
+
+	// Uncleaned relative traversal through symlink: /cfg/link/../tls.crt -> /secrets/tls.crt
+	certPath := linkPath + string(filepath.Separator) + ".." + string(filepath.Separator) + "tls.crt"
+	keyPath := linkPath + string(filepath.Separator) + ".." + string(filepath.Separator) + "tls.key"
+
+	pair, err := loadTLSKey(certPath, keyPath)
+	require.NoError(t, err)
+	require.NotNil(t, pair)
+
+	reloader, err := newTLSReloader(certPath, keyPath)
+	require.NoError(t, err)
+	cert, err := reloader.GetCertificate(&tls.ClientHelloInfo{})
+	require.NoError(t, err)
+	parsed, err := x509.ParseCertificate(cert.Certificate[0])
+	require.NoError(t, err)
+	require.Equal(t, "symlink-parent.example.com", parsed.Subject.CommonName)
 }

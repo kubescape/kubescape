@@ -5,18 +5,21 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/pprof"
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/metrics"
+	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"github.com/kubescape/kubescape/v4/httphandler/docs"
 	handlerequestsv1 "github.com/kubescape/kubescape/v4/httphandler/handlerequests/v1"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -133,6 +136,77 @@ func serveUntilShutdown(ctx context.Context, server *http.Server, ln net.Listene
 	return err
 }
 
+var (
+	errTLSFileNotRegular = errors.New("TLS credential file is not a regular file")
+	errTLSFileTooLarge   = errors.New("TLS credential file exceeds maximum size limit")
+)
+
+func readBoundedTLSFile(kind, path string, limit int64) ([]byte, os.FileInfo, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, nil, fmt.Errorf("failed to stat %s file %q: %w", kind, path, os.ErrNotExist)
+	}
+	statInfo, err := os.Stat(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to stat %s file %q: %w", kind, path, err)
+	}
+	if statInfo.IsDir() {
+		return nil, nil, fmt.Errorf("%q is a directory, not a file: %w", path, errTLSFileNotRegular)
+	}
+	if !statInfo.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("%w: %q", errTLSFileNotRegular, path)
+	}
+
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, nil, err
+	}
+	if info.IsDir() {
+		return nil, nil, fmt.Errorf("%q is a directory, not a file: %w", path, errTLSFileNotRegular)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("%w: %q", errTLSFileNotRegular, path)
+	}
+	if info.Size() > limit {
+		return nil, nil, fmt.Errorf("%w: %q exceeds the %d byte limit", errTLSFileTooLarge, path, limit)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		clear(data)
+		return nil, nil, err
+	}
+	if int64(len(data)) > limit {
+		clear(data)
+		return nil, nil, fmt.Errorf("%w: %q exceeds the %d byte limit", errTLSFileTooLarge, path, limit)
+	}
+	return data, info, nil
+}
+
+func loadBoundedTLSKeyPair(certFile, keyFile string) (tls.Certificate, os.FileInfo, os.FileInfo, error) {
+	limit := filesizelimit.GetMaxFileSize()
+	certPEM, certInfo, err := readBoundedTLSFile("cert", certFile, limit)
+	if err != nil {
+		return tls.Certificate{}, nil, nil, err
+	}
+	keyPEM, keyInfo, err := readBoundedTLSFile("key", keyFile, limit)
+	if err != nil {
+		return tls.Certificate{}, nil, nil, err
+	}
+	defer clear(keyPEM)
+
+	pair, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return tls.Certificate{}, nil, nil, err
+	}
+	return pair, certInfo, keyInfo, nil
+}
+
 func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {
 	switch {
 	case certFile == "" && keyFile == "":
@@ -141,7 +215,7 @@ func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {
 		return nil, fmt.Errorf("both KS_CERT_FILE and KS_KEY_FILE must be set to enable TLS (got certFile=%q, keyFile=%q)", certFile, keyFile)
 	}
 
-	pair, err := tls.LoadX509KeyPair(certFile, keyFile)
+	pair, _, _, err := loadBoundedTLSKeyPair(certFile, keyFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load key pair: %w", err)
 	}
@@ -209,31 +283,21 @@ func (r *tlsReloader) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certificate, 
 }
 
 // reload reads and parses the certificate and private key files unconditionally,
-// recording file metadata.
+// recording file metadata from the opened descriptors.
 func (r *tlsReloader) reload() error {
-	certStat, err := os.Stat(r.certFile)
+	pair, certInfo, keyInfo, err := loadBoundedTLSKeyPair(r.certFile, r.keyFile)
 	if err != nil {
-		return fmt.Errorf("failed to stat cert file %q: %w", r.certFile, err)
-	}
-
-	keyStat, err := os.Stat(r.keyFile)
-	if err != nil {
-		return fmt.Errorf("failed to stat key file %q: %w", r.keyFile, err)
-	}
-
-	pair, err := tls.LoadX509KeyPair(r.certFile, r.keyFile)
-	if err != nil {
-		return fmt.Errorf("failed to load key pair: %w", err)
+		return err
 	}
 
 	r.mu.Lock()
 	r.cert = &pair
-	r.certFileInfo = certStat
-	r.keyFileInfo = keyStat
-	r.certModTime = certStat.ModTime()
-	r.certSize = certStat.Size()
-	r.keyModTime = keyStat.ModTime()
-	r.keySize = keyStat.Size()
+	r.certFileInfo = certInfo
+	r.keyFileInfo = keyInfo
+	r.certModTime = certInfo.ModTime()
+	r.certSize = certInfo.Size()
+	r.keyModTime = keyInfo.ModTime()
+	r.keySize = keyInfo.Size()
 	r.mu.Unlock()
 
 	return nil
@@ -278,18 +342,18 @@ func (r *tlsReloader) maybeReload() error {
 		return nil
 	}
 
-	pair, err := tls.LoadX509KeyPair(r.certFile, r.keyFile)
+	pair, certInfo, keyInfo, err := loadBoundedTLSKeyPair(r.certFile, r.keyFile)
 	if err != nil {
 		return fmt.Errorf("failed to load rotated key pair: %w", err)
 	}
 
 	r.cert = &pair
-	r.certFileInfo = certStat
-	r.keyFileInfo = keyStat
-	r.certModTime = certStat.ModTime()
-	r.certSize = certStat.Size()
-	r.keyModTime = keyStat.ModTime()
-	r.keySize = keyStat.Size()
+	r.certFileInfo = certInfo
+	r.keyFileInfo = keyInfo
+	r.certModTime = certInfo.ModTime()
+	r.certSize = certInfo.Size()
+	r.keyModTime = keyInfo.ModTime()
+	r.keySize = keyInfo.Size()
 
 	logger.L().Info("reloaded TLS certificate and key pair",
 		helpers.String("certFile", r.certFile),
