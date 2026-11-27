@@ -286,7 +286,7 @@ func readBoundedRegularFile(path string, limit int64, notRegularErr, tooLargeErr
 	if strings.TrimSpace(path) == "" {
 		return nil, os.ErrNotExist
 	}
-	statInfo, err := os.Stat(path)
+	statInfo, err := os.Stat(path) //nolint:gosec // G703: path comes from trusted operator configuration (KS_SERVICE_DISCOVERY_FILE_PATH / KS_CREDENTIALS_SECRET_PATH)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +297,7 @@ func readBoundedRegularFile(path string, limit int64, notRegularErr, tooLargeErr
 		return nil, fmt.Errorf("%w: %q", notRegularErr, path)
 	}
 
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0) //nolint:gosec // G703: path comes from trusted operator configuration (KS_SERVICE_DISCOVERY_FILE_PATH / KS_CREDENTIALS_SECRET_PATH)
 	if err != nil {
 		return nil, err
 	}
