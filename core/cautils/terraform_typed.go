@@ -544,6 +544,56 @@ func isPDBIntOrStringField(path, name string) bool {
 	return strings.Contains(path, "kubernetes_pod_disruption_budget")
 }
 
+// providerBoolFields are the attributes the provider declares as bools, taken
+// from its schema for the resources in typedResourceGVK. Each of these names
+// is a bool wherever it appears, so the name alone is enough.
+var providerBoolFields = map[string]bool{
+	"allocate_load_balancer_node_ports": true,
+	"allow_privilege_escalation":        true,
+	"allow_volume_expansion":            true,
+	"attach_required":                   true,
+	"auto_approve":                      true,
+	"automount_service_account_token":   true,
+	"enable_service_links":              true,
+	"global_default":                    true,
+	"host_ipc":                          true,
+	"host_network":                      true,
+	"host_pid":                          true,
+	"host_process":                      true,
+	"immutable":                         true,
+	"manual_selector":                   true,
+	"optional":                          true,
+	"paused":                            true,
+	"pod_info_on_mount":                 true,
+	"privileged":                        true,
+	"publish_not_ready_addresses":       true,
+	"read_only":                         true,
+	"read_only_root_filesystem":         true,
+	"ready":                             true,
+	"run_as_non_root":                   true,
+	"serving":                           true,
+	"share_process_namespace":           true,
+	"stdin":                             true,
+	"stdin_once":                        true,
+	"suspend":                           true,
+	"terminating":                       true,
+	"tty":                               true,
+}
+
+// terraformBoolString converts a string set on a bool attribute the way
+// Terraform does before the provider sees it: only "true", "false", "1" and
+// "0" convert, anything else is a Terraform error. strconv.ParseBool is not
+// used because it also takes "TRUE" and "True", which Terraform rejects.
+func terraformBoolString(s string) (bool, bool) {
+	switch s {
+	case "true", "1":
+		return true, true
+	case "false", "0":
+		return false, true
+	}
+	return false, false
+}
+
 func attributeValueFor(path, name string, val interface{}) interface{} {
 	// The provider keeps the security context IDs in strings so that "" can
 	// leave them unset: it sets runAsUser, runAsGroup and fsGroup only from a
@@ -558,6 +608,11 @@ func attributeValueFor(path, name string, val interface{}) interface{} {
 	}
 	if s, ok := val.(string); ok && (isConvertiblePortField(path, name) || isStringTypedNumberField(path, name) || isPDBIntOrStringField(path, name) || isEndpointSlicePortField(path, name)) && isDigitOnly(s) {
 		return json.Number(canonicalizeNumericString(s))
+	}
+	if s, ok := val.(string); ok && providerBoolFields[name] {
+		if b, ok := terraformBoolString(s); ok {
+			return b
+		}
 	}
 	return val
 }
