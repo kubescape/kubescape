@@ -27,6 +27,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils/helmprovenance"
 	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"github.com/kubescape/kubescape/v4/core/pkg/pathcontainment"
+	"github.com/kubescape/kubescape/v4/internal/textencoding"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/valyala/fastjson"
@@ -1648,7 +1649,10 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err 
 		}
 	}()
 
-	docs, splitErr := splitYAMLDocuments(yamlFile)
+	// The documents are split by looking for "---" lines in the raw bytes, which
+	// UTF-16 text doesn't contain: without decoding it first, everything after
+	// the first document would be dropped with no error.
+	docs, splitErr := splitYAMLDocuments(textencoding.DecodeUTF16(yamlFile))
 
 	var parseErrs []error
 	if splitErr != nil {
@@ -1838,6 +1842,9 @@ func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err
 			err = fmt.Errorf("panic during JSON parsing: %v", r)
 		}
 	}()
+
+	// fastjson reads UTF-8 only.
+	jsonFile = textencoding.DecodeUTF16(jsonFile)
 
 	// A UTF-8 byte order mark is not part of the JSON text. Windows editors and
 	// PowerShell's Out-File -Encoding utf8 write one, the YAML reader skips it,
