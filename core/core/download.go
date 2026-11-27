@@ -89,6 +89,13 @@ func (ks *Kubescape) Download(downloadInfo *metav1.DownloadInfo) (*metav1.Downlo
 	if err := os.MkdirAll(downloadInfo.Path, downloadDirPerm); err != nil {
 		return nil, fmt.Errorf("failed to create download directory %q: %w", downloadInfo.Path, err)
 	}
+	if downloadInfo.Target == TargetFramework && downloadInfo.Identifier == "" &&
+		strings.EqualFold(filepath.Ext(downloadInfo.FileName), ".json") {
+		logger.L().Ctx(ks.Context()).Warning(
+			"Ignoring output filename because bulk framework downloads write individual JSON files. Specify a framework name to write a single JSON file",
+			helpers.String("filename", downloadInfo.FileName),
+			helpers.String("directory", downloadInfo.Path))
+	}
 	files, err := downloadArtifact(ks.Context(), downloadInfo, downloadFunc)
 	if err != nil {
 		return nil, err

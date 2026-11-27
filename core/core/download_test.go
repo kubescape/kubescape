@@ -6,12 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
@@ -413,11 +416,112 @@ func TestDownload_BareJSONOutputPathIsRespected(t *testing.T) {
 	assert.FileExists(t, "nsa.json")
 }
 
+// Run logger-sensitive download tests in a child process because initializing a
+// logger replaces the global backend and the logger API cannot restore it.
+func runInDownloadLoggerProcess(t *testing.T) bool {
+	t.Helper()
+	const childTest = "KUBESCAPE_DOWNLOAD_LOGGER_TEST"
+	if os.Getenv(childTest) == t.Name() {
+		logger.InitLogger("pretty")
+		logger.DisableColor(true)
+		return true
+	}
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+t.Name()+"$", "-test.v")
+	cmd.Env = append(os.Environ(), childTest+"="+t.Name())
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "%s", output)
+	t.Logf("%s", output)
+	return false
+}
+
+func TestDownload_BulkFrameworkOutputWarning(t *testing.T) {
+	if !runInDownloadLoggerProcess(t) {
+		return
+	}
+	withTenantConfig(t, &fakeTenantConfig{})
+	framework := reporthandling.Framework{PortalBase: armotypes.PortalBase{Name: "nsa"}}
+	withPolicyGetter(t, &fakePolicyGetter{
+		frameworks: []reporthandling.Framework{framework},
+		framework:  &framework,
+		named:      fakeSecurityViewFrameworks(),
+	}, nil)
+
+	const diagnostic = "Ignoring output filename because bulk framework downloads write individual JSON files"
+	for _, tt := range []struct {
+		name       string
+		output     string
+		identifier string
+		directory  string
+		warn       bool
+		preSplit   bool
+	}{
+		{name: "bare filename", output: "frameworks.json", directory: ".", warn: true},
+		{name: "relative uppercase filename", output: filepath.Join("exports", "frameworks.JSON"), directory: "exports", warn: true, preSplit: true},
+		{name: "absolute filename", output: filepath.Join(t.TempDir(), "frameworks.json"), warn: true},
+		{name: "directory", output: "exports", directory: "exports"},
+		{name: "default directory"},
+		{name: "named framework", output: "frameworks.json", directory: ".", identifier: "nsa"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			originalStore := getter.DefaultLocalStore
+			getter.DefaultLocalStore = t.TempDir()
+			t.Cleanup(func() { getter.DefaultLocalStore = originalStore })
+			readLog := verifyCaptureLog(t)
+
+			directory := tt.directory
+			switch {
+			case tt.output == "":
+				directory = getter.GetDefaultPath("")
+			case filepath.IsAbs(tt.output):
+				directory = filepath.Dir(tt.output)
+			}
+			info := &metav1.DownloadInfo{
+				Target: TargetFramework, Path: tt.output, Identifier: tt.identifier,
+			}
+			if tt.preSplit {
+				info.Path, info.FileName = filepath.Split(tt.output)
+			}
+			result, err := NewKubescape(context.Background()).Download(info)
+			require.NoError(t, err)
+			names := []string{"clusterscan.json", "nsa.json", "workloadscan.json"}
+			if tt.identifier != "" {
+				names = []string{tt.output}
+			}
+			var wantFiles []string
+			for _, name := range names {
+				wantFiles = append(wantFiles, filepath.Join(directory, name))
+			}
+			require.ElementsMatch(t, wantFiles, result.Files)
+			require.Equal(t, names, dirEntryNames(t, directory))
+
+			var diagnostics []string
+			for _, line := range strings.Split(readLog(), "\n") {
+				if strings.Contains(line, diagnostic) {
+					diagnostics = append(diagnostics, strings.TrimSuffix(line, "\r"))
+				}
+			}
+			if !tt.warn {
+				require.Empty(t, diagnostics, "unexpected bulk framework destination diagnostic")
+				return
+			}
+			require.Len(t, diagnostics, 1, "bulk framework destination diagnostic count")
+			want := fmt.Sprintf("[warning] %s. Specify a framework name to write a single JSON file. filename: %s; directory: %s",
+				diagnostic, filepath.Base(tt.output), directory)
+			require.Equal(t, want, diagnostics[0], "bulk framework destination warning severity, message, filename, and directory")
+			t.Log(diagnostics[0])
+		})
+	}
+}
+
 // TestDownload_ArtifactsJSONOutputWritesToCurrentDirectory pins the behavior
 // for `--output out.json` with the multi-file artifacts target: a single
 // filename cannot hold four artifacts, so they are written to the current
 // directory rather than the default store.
 func TestDownload_ArtifactsJSONOutputWritesToCurrentDirectory(t *testing.T) {
+	if !runInDownloadLoggerProcess(t) {
+		return
+	}
 	withTenantConfig(t, &fakeTenantConfig{})
 	withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: map[string][]string{"a": {"1"}}}, nil)
 	withExceptionsGetter(t, &fakeExceptionsGetter{exceptions: []armotypes.PostureExceptionPolicy{{}}}, nil)
@@ -431,6 +535,7 @@ func TestDownload_ArtifactsJSONOutputWritesToCurrentDirectory(t *testing.T) {
 	getter.DefaultLocalStore = t.TempDir()
 	t.Cleanup(func() { getter.DefaultLocalStore = origStore })
 	t.Chdir(t.TempDir())
+	readLog := verifyCaptureLog(t)
 
 	ks := NewKubescape(context.Background())
 	_, err := ks.Download(&metav1.DownloadInfo{
@@ -438,6 +543,7 @@ func TestDownload_ArtifactsJSONOutputWritesToCurrentDirectory(t *testing.T) {
 		FileName: "out.json",
 	})
 	require.NoError(t, err)
+	assert.NotContains(t, readLog(), "Ignoring output filename")
 
 	for _, want := range []string{"controls-inputs.json", "exceptions.json", "nsa.json", "attack-tracks.json"} {
 		assert.FileExists(t, want)
