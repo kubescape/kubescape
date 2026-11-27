@@ -205,6 +205,10 @@ var providerControlAttributes = map[string]bool{
 	"wait_for_default_service_account": true, // namespaces
 	"wait_for_service_account_token":   true, // secrets
 	"wait_until_bound":                 true, // persistent volume claims
+	"auto_approve":                     true, // certificate signing requests
+	"target_state":                     true, // pods
+	"data_wo_revision":                 true, // secrets
+	"binary_data_wo_revision":          true, // secrets
 }
 
 // providerControlBlocks are the provider's top-level control blocks, stripped
@@ -280,8 +284,18 @@ var rbdAttributeNames = map[string]string{
 // attributeKeyFor is attributeNameFor for an attribute of the block at path,
 // for the attributes whose Kubernetes name depends on the block they are in.
 func attributeKeyFor(path, name string) string {
-	if name == "data" && isSecretResource(path) {
-		return "stringData"
+	if isSecretResource(path) {
+		// The provider sends data and the write-only data_wo as the Secret's
+		// stringData, and binary_data and binary_data_wo, already base64, as
+		// its data. A Secret has no binaryData field. The write-only values
+		// are kept even without their *_revision argument, which only tells
+		// the provider when to send them; they are masked like the rest.
+		switch name {
+		case "data", "data_wo":
+			return "stringData"
+		case "binary_data", "binary_data_wo":
+			return "data"
+		}
 	}
 	if strings.HasSuffix(path, ".rbd") {
 		if key, ok := rbdAttributeNames[name]; ok {
