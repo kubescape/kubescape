@@ -310,3 +310,47 @@ resource "kubernetes_persistent_volume_claim_v1" "pvc" {
 		require.NoError(t, dec.Decode(target), "%s does not decode into the Kubernetes type", kind)
 	}
 }
+
+// A dynamic block may generate a provider control block such as timeouts,
+// which is stripped without an error. A dynamic block still can't generate a
+// Terraform meta-block such as lifecycle.
+func TestExtractTypedResourcesDynamicControlBlocks(t *testing.T) {
+	t.Run("dynamic timeouts is stripped", func(t *testing.T) {
+		src := `
+resource "kubernetes_namespace_v1" "ns" {
+  dynamic "timeouts" {
+    for_each = [1]
+    content {
+      create = "3m"
+    }
+  }
+  metadata {
+    name = "ns"
+  }
+}
+`
+		manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+		require.Empty(t, errs)
+		require.Len(t, manifests, 1)
+		assert.NotContains(t, manifests[0], "timeouts")
+	})
+
+	t.Run("dynamic lifecycle is an error", func(t *testing.T) {
+		src := `
+resource "kubernetes_namespace_v1" "ns" {
+  dynamic "lifecycle" {
+    for_each = [1]
+    content {
+      prevent_destroy = true
+    }
+  }
+  metadata {
+    name = "ns"
+  }
+}
+`
+		_, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
+		require.Len(t, errs, 1)
+		assert.ErrorContains(t, errs[0], `dynamic cannot generate Terraform meta-block "lifecycle"`)
+	})
+}

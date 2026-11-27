@@ -621,10 +621,15 @@ func (c *terraformBodyConverter) bodyToMap(body *hclsyntax.Body, evalCtx *hcl.Ev
 	grouped := map[string][]terraformBlock{}
 	var order []string
 	for _, b := range c.blocks(body, evalCtx, path, generated) {
-		if resource && (resourceMetaBlocks[b.Type] || providerControlBlocks[b.Type]) {
+		if resource && resourceMetaBlocks[b.Type] {
 			if b.generated {
 				*c.errs = append(*c.errs, fmt.Errorf("%s: dynamic cannot generate Terraform meta-block %q", path, b.Type))
 			}
+			continue
+		}
+		// A provider control block is an ordinary block of the resource, so a
+		// dynamic block may generate it.
+		if resource && providerControlBlocks[b.Type] {
 			continue
 		}
 		if _, seen := grouped[b.Type]; !seen {
