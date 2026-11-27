@@ -192,6 +192,26 @@ var resourceMetaBlocks = map[string]bool{
 	"connection":  true,
 }
 
+// providerControlAttributes are top-level attributes of the Kubernetes
+// provider's resources that tell the provider how to apply the object, such
+// as whether to wait for a rollout. They are not part of the Kubernetes object
+// the provider creates, so like the meta-arguments they are stripped at the
+// resource's top level only.
+var providerControlAttributes = map[string]bool{
+	"wait_for_rollout":                 true, // deployments, stateful sets, daemon sets
+	"wait_for_load_balancer":           true, // services, ingresses
+	"wait_for_completion":              true, // jobs
+	"wait_for_default_service_account": true, // namespaces
+	"wait_for_service_account_token":   true, // secrets
+	"wait_until_bound":                 true, // persistent volume claims
+}
+
+// providerControlBlocks are the provider's top-level control blocks, stripped
+// for the same reason.
+var providerControlBlocks = map[string]bool{
+	"timeouts": true,
+}
+
 var fieldInitialisms = map[string]string{
 	"api":  "API",
 	"cpu":  "CPU",
@@ -561,7 +581,7 @@ func (c *terraformBodyConverter) bodyToMap(body *hclsyntax.Body, evalCtx *hcl.Ev
 		if c.exhausted {
 			break
 		}
-		if resource && resourceMetaAttributes[name] {
+		if resource && (resourceMetaAttributes[name] || providerControlAttributes[name]) {
 			continue
 		}
 		val, diags := attr.Expr.Value(evalCtx)
@@ -605,6 +625,11 @@ func (c *terraformBodyConverter) bodyToMap(body *hclsyntax.Body, evalCtx *hcl.Ev
 			if b.generated {
 				*c.errs = append(*c.errs, fmt.Errorf("%s: dynamic cannot generate Terraform meta-block %q", path, b.Type))
 			}
+			continue
+		}
+		// A provider control block is an ordinary block of the resource, so a
+		// dynamic block may generate it.
+		if resource && providerControlBlocks[b.Type] {
 			continue
 		}
 		if _, seen := grouped[b.Type]; !seen {
