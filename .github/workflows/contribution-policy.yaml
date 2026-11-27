@@ -36,6 +36,6 @@ jobs:
     steps:
       # Before activation, verify this pinned action commit is on kubescape/workflows main.
       # No checkout: contributor code is never executed by this privileged job.
-      - uses: kubescape/workflows/.github/actions/contribution-policy@b65263209ccb370f0cb508f776cde7850ebfb6ee
+      - uses: kubescape/workflows/.github/actions/contribution-policy@5e37275ff09ed76e90f7ea72f07ff84a22479d8b
         with:
           start: ${{ vars.CONTRIBUTION_POLICY_START }}
