@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/anchore/grype/grype/match"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
@@ -851,6 +853,84 @@ func TestGetVulnerabilitiesAndSeverities(t *testing.T) {
 			expectedVulnerabilities: []string{"CVE-2023-1234", "cve-2023-1234"},
 			expectedSeverities:      []string{},
 		},
+		{
+			// An all-uppercase GHSA ID must reach grype as the canonical
+			// mixed-case form as well: grype compares the ID exactly and
+			// reports GHSA advisories with a lowercase suffix, so the
+			// uppercase and lowercase variants alone are never enough
+			// (issue #5796).
+			policies: []VulnerabilitiesIgnorePolicy{
+				{
+					Metadata: Metadata{
+						Name: "ghsa-uppercase-only",
+					},
+					Kind: "VulnerabilitiesIgnorePolicy",
+					Targets: []Target{
+						{
+							DesignatorType: "Attributes",
+							Attributes: Attributes{
+								Registry: "quay.io",
+							},
+						},
+					},
+					Vulnerabilities: []string{"GHSA-JC7W-C686-C4V9"},
+					Severities:      []string{},
+				},
+			},
+			image:                   "quay.io/kubescape/kubescape-cli:v3.0.0",
+			expectedVulnerabilities: []string{"GHSA-JC7W-C686-C4V9", "GHSA-jc7w-c686-c4v9", "ghsa-jc7w-c686-c4v9"},
+			expectedSeverities:      []string{},
+		},
+		{
+			// The same applies to an all-lowercase GHSA entry.
+			policies: []VulnerabilitiesIgnorePolicy{
+				{
+					Metadata: Metadata{
+						Name: "ghsa-all-lowercase",
+					},
+					Kind: "VulnerabilitiesIgnorePolicy",
+					Targets: []Target{
+						{
+							DesignatorType: "Attributes",
+							Attributes: Attributes{
+								Registry: "quay.io",
+							},
+						},
+					},
+					Vulnerabilities: []string{"ghsa-jc7w-c686-c4v9"},
+					Severities:      []string{},
+				},
+			},
+			image:                   "quay.io/kubescape/kubescape-cli:v3.0.0",
+			expectedVulnerabilities: []string{"GHSA-JC7W-C686-C4V9", "GHSA-jc7w-c686-c4v9", "ghsa-jc7w-c686-c4v9"},
+			expectedSeverities:      []string{},
+		},
+		{
+			// Non-GHSA advisory IDs must not gain a canonical form: CVE IDs
+			// are already covered by the uppercase variant, and lowercasing
+			// an arbitrary advisory prefix would not match any reported ID.
+			policies: []VulnerabilitiesIgnorePolicy{
+				{
+					Metadata: Metadata{
+						Name: "ghsa-prefix-not-present",
+					},
+					Kind: "VulnerabilitiesIgnorePolicy",
+					Targets: []Target{
+						{
+							DesignatorType: "Attributes",
+							Attributes: Attributes{
+								Registry: "quay.io",
+							},
+						},
+					},
+					Vulnerabilities: []string{"CVE-2024-1234"},
+					Severities:      []string{},
+				},
+			},
+			image:                   "quay.io/kubescape/kubescape-cli:v3.0.0",
+			expectedVulnerabilities: []string{"CVE-2024-1234", "cve-2024-1234"},
+			expectedSeverities:      []string{},
+		},
 	}
 
 	for _, tt := range tests {
@@ -861,6 +941,59 @@ func TestGetVulnerabilitiesAndSeverities(t *testing.T) {
 			sort.Strings(vulnerabilities)
 			assert.Equal(t, tt.expectedVulnerabilities, vulnerabilities)
 			assert.Equal(t, tt.expectedSeverities, severities)
+		})
+	}
+}
+
+// TestGHSAExceptionsApplyInAnyCasing goes through grype's real ignore-rule
+// matching, because matchPolicies returning the canonical ID only helps if
+// grype then waives the canonical match (issue #5796).
+func TestGHSAExceptionsApplyInAnyCasing(t *testing.T) {
+	const canonicalID = "GHSA-jc7w-c686-c4v9"
+	tests := []struct {
+		name        string
+		exceptionID string
+	}{
+		{name: "canonical", exceptionID: "GHSA-jc7w-c686-c4v9"},
+		{name: "all-uppercase", exceptionID: "GHSA-JC7W-C686-C4V9"},
+		{name: "all-lowercase", exceptionID: "ghsa-jc7w-c686-c4v9"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			policies := []VulnerabilitiesIgnorePolicy{
+				{
+					Metadata: Metadata{
+						Name: "ghsa-exception",
+					},
+					Kind: "VulnerabilitiesIgnorePolicy",
+					Targets: []Target{
+						{
+							DesignatorType: "Attributes",
+							Attributes: Attributes{
+								Registry: "quay.io",
+							},
+						},
+					},
+					Vulnerabilities: []string{tt.exceptionID},
+					Severities:      []string{},
+				},
+			}
+			exceptionIDs, _, err := getUniqueVulnerabilitiesAndSeverities(policies, "quay.io/kubescape/kubescape-cli:v3.0.0", true)
+			require.NoError(t, err)
+
+			ignoreRules := make([]match.IgnoreRule, 0, len(exceptionIDs))
+			for _, id := range exceptionIDs {
+				ignoreRules = append(ignoreRules, match.IgnoreRule{Vulnerability: id})
+			}
+
+			matches := match.NewMatches(match.Match{
+				Vulnerability: vulnerability.Vulnerability{
+					Reference: vulnerability.Reference{ID: canonicalID},
+				},
+			})
+			remaining, ignored := match.ApplyIgnoreRules(matches, ignoreRules)
+			assert.Equal(t, 0, remaining.Count())
+			assert.Len(t, ignored, 1)
 		})
 	}
 }

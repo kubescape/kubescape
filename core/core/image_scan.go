@@ -1031,6 +1031,13 @@ func matchPolicies(policies []VulnerabilitiesIgnorePolicy, attrs Attributes) ([]
 				if vulnerabilityLowercase != vulnerability && vulnerabilityLowercase != vulnerabilityUppercase {
 					uniqueVulns[vulnerabilityLowercase] = append(uniqueVulns[vulnerabilityLowercase], vulnerability)
 				}
+				// A GHSA ID is canonical as the "GHSA-" prefix followed by a
+				// lowercase suffix, so neither the uppercase nor the lowercase
+				// variant above matches an all-uppercase or all-lowercase entry
+				// (issue #5796). Emit the canonical form too.
+				if vulnerabilityCanonical, ok := canonicalGHSAID(vulnerabilityUppercase); ok && vulnerabilityCanonical != vulnerability && vulnerabilityCanonical != vulnerabilityUppercase {
+					uniqueVulns[vulnerabilityCanonical] = append(uniqueVulns[vulnerabilityCanonical], vulnerability)
+				}
 			}
 			for _, severity := range policy.Severities {
 				severityUppercase := strings.ToUpper(severity)
@@ -1047,6 +1054,18 @@ func matchPolicies(policies []VulnerabilitiesIgnorePolicy, attrs Attributes) ([]
 		uniqueSeversList = append(uniqueSeversList, sever)
 	}
 	return uniqueVulnsList, uniqueSeversList
+}
+
+// canonicalGHSAID returns the canonical casing of a GHSA advisory ID: an
+// uppercase "GHSA-" prefix followed by a lowercase suffix, the form grype
+// reports and compares exactly. ok is false for any other advisory ID.
+func canonicalGHSAID(id string) (string, bool) {
+	uppercase := strings.ToUpper(id)
+	const prefix = "GHSA-"
+	if !strings.HasPrefix(uppercase, prefix) {
+		return "", false
+	}
+	return prefix + strings.ToLower(strings.TrimPrefix(uppercase, prefix)), true
 }
 
 func isNonRegistryForExceptions(img string, stat func(string) bool) bool {
