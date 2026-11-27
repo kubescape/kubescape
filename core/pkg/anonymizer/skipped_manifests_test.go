@@ -318,3 +318,71 @@ func TestTransformSessionRollsBackSkippedManifests(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, string(before), string(after))
 }
+
+// The Terraform resources left out of a scan are listed by address in the
+// report. They are labels from the scanned configuration, so --hide and
+// --encrypt replace them, as they do the path.
+func TestApplyHidesTheSkippedTerraformResources(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "acme-payroll-repo")
+	skipped := func() []cautils.SkippedManifest {
+		return []cautils.SkippedManifest{{
+			Path:      dir,
+			Reason:    "2 Terraform resource(s) not scanned because they use values that can't be resolved; see scan logs for details",
+			Resources: []string{"kubernetes_pod_v1.payments_gateway", "kubernetes_pod_v1.ledger"},
+		}}
+	}
+	dek := make([]byte, 32)
+	for name, apply := range map[string]func(*resultshandling.ResultsHandler) error{
+		"--hide": Apply,
+		"--encrypt": func(handler *resultshandling.ResultsHandler) error {
+			return ApplyEncrypted(handler, dek, []byte("01234567890123456789012345678901"))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			session := skippedManifestsSession()
+			session.SkippedManifests, session.ScanCoverage.SkippedManifests = skipped(), skipped()
+			require.NoError(t, apply(&resultshandling.ResultsHandler{ScanData: session}))
+
+			for _, entry := range [][]cautils.SkippedManifest{session.SkippedManifests, session.ScanCoverage.SkippedManifests} {
+				require.Len(t, entry, 1)
+				encoded, err := json.Marshal(entry)
+				require.NoError(t, err)
+				for _, secret := range []string{"payments_gateway", "ledger", "acme-payroll-repo"} {
+					assert.NotContains(t, string(encoded), secret, name)
+				}
+				// The count and the diagnostic survive, and the resources stay
+				// distinguishable.
+				require.Len(t, entry[0].Resources, 2, name)
+				assert.NotEqual(t, entry[0].Resources[0], entry[0].Resources[1], name)
+				assert.Contains(t, entry[0].Reason, "2 Terraform resource(s) not scanned", name)
+			}
+		})
+	}
+}
+
+// Anonymizing a session leaves the resources of the session it was cloned from
+// as they were, since the entries share the list.
+func TestApplyDoesNotEditTheSkippedTerraformResourcesInPlace(t *testing.T) {
+	resources := []string{"kubernetes_pod_v1.payments_gateway"}
+	entries := []cautils.SkippedManifest{{Path: "/work/acme/infra", Reason: "1 Terraform resource(s) not scanned", Resources: resources}}
+
+	require.NoError(t, transformSkippedManifests(entries, NewMappingTransformer()))
+	assert.NotEqual(t, []string{"kubernetes_pod_v1.payments_gateway"}, entries[0].Resources)
+	assert.Equal(t, []string{"kubernetes_pod_v1.payments_gateway"}, resources, "the original list is not edited")
+}
+
+// The resources are part of the report when nothing hides them.
+func TestSkippedManifestResourcesArePartOfTheReport(t *testing.T) {
+	skipped := cautils.SkippedManifest{
+		Path:      "infra",
+		Reason:    "1 Terraform resource(s) not scanned",
+		Resources: []string{"kubernetes_pod_v1.web"},
+	}
+	encoded, err := json.Marshal(skipped)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"path":"infra","reason":"1 Terraform resource(s) not scanned","resources":["kubernetes_pod_v1.web"]}`, string(encoded))
+
+	encoded, err = json.Marshal(cautils.SkippedManifest{Path: "broken.yaml", Reason: "invalid YAML"})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"path":"broken.yaml","reason":"invalid YAML"}`, string(encoded), "other skips are unchanged")
+}

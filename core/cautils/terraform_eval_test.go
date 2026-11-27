@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,6 +24,15 @@ func terraformObject(t *testing.T, dir string) (map[string]interface{}, []error)
 	t.Helper()
 	workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
 	wls := workloads[filepath.Join(dir, "main.tf")]
+	for _, err := range errs {
+		var resourceErr *terraformResourceError
+		if errors.As(err, &resourceErr) {
+			// A resource that can't be converted completely is left out
+			// rather than scanned with fields missing.
+			require.Empty(t, wls, "a resource with conversion errors must not be scanned")
+			return nil, errs
+		}
+	}
 	require.Len(t, wls, 1)
 	return wls[0].GetObject(), errs
 }
@@ -250,8 +260,7 @@ resource "kubernetes_pod_v1" "app" {
 	obj, errs := terraformObject(t, dir)
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0].Error(), `"image"`)
-	assert.Equal(t, "app", obj["metadata"].(map[string]interface{})["name"])
-	assert.NotContains(t, terraformFirstContainer(t, obj), "image")
+	assert.Nil(t, obj, "the pod is left out rather than scanned without its image")
 }
 
 func TestTerraformDirectory_GetWorkloads_Functions(t *testing.T) {
@@ -497,7 +506,7 @@ variable "privileged" {
 		require.NotEmpty(t, errs)
 		assert.Contains(t, errs[0].Error(), "production.auto.tfvars")
 		assert.Contains(t, errs[0].Error(), "not nullable and has no default")
-		assert.NotEqual(t, true, terraformFirstContainer(t, obj)["securityContext"].(map[string]interface{})["privileged"], "the overridden value must not be used")
+		assert.Nil(t, obj, "the overridden value must not be used: the pod is left out")
 	})
 	t.Run("a nullable variable keeps null", func(t *testing.T) {
 		dir := t.TempDir()
@@ -538,7 +547,7 @@ resource "kubernetes_pod_v1" "app" {
 	obj, errs := terraformObject(t, dir)
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0].Error(), `"owner"`)
-	assert.Equal(t, "app", obj["metadata"].(map[string]interface{})["name"])
+	assert.Nil(t, obj, "the pod is left out rather than scanned without its owner")
 }
 
 func TestTerraformDirectory_GetWorkloads_LocalSizeLimit(t *testing.T) {
@@ -571,7 +580,7 @@ resource "kubernetes_pod_v1" "app" {
 	obj, errs := terraformObject(t, dir)
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0].Error(), `"args"`)
-	assert.NotContains(t, terraformFirstContainer(t, obj), "args")
+	assert.Nil(t, obj, "the pod is left out rather than scanned without its args")
 }
 
 func TestTerraformDirectory_GetWorkloads_LocalsTotalSizeLimit(t *testing.T) {
@@ -609,9 +618,7 @@ resource "kubernetes_pod_v1" "app" {
 	})
 
 	obj, errs := terraformObject(t, dir)
-	container := terraformFirstContainer(t, obj)
-	assert.Equal(t, fmt.Sprintf("nginx:%d", localSize), container["image"])
-	assert.NotContains(t, container, "command")
+	assert.Nil(t, obj, "the pod is left out rather than scanned without its command")
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0].Error(), `"command"`)
 }

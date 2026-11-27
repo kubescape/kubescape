@@ -81,6 +81,12 @@ type SkippedManifest struct {
 	// because that file could not be used. Reason names it, and --hide and
 	// --encrypt replace it there. It is not part of the report.
 	IgnoreFile string `json:"-"`
+	// Resources are the addresses of the Terraform resources, such as
+	// kubernetes_pod_v1.web, that were left out of a configuration whose
+	// other resources were scanned. They are listed here and not in Reason,
+	// which must not expose labels from the scanned configuration; --hide and
+	// --encrypt replace them.
+	Resources []string `json:"resources,omitempty"`
 }
 
 type ScanTypes string

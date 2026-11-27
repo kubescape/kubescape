@@ -676,7 +676,7 @@ resource "kubernetes_pod_v1" "demo" {
 			obj, errs := terraformObject(t, dir)
 			require.NotEmpty(t, errs, "unresolved dynamic blocks must be reported, not silently passed")
 			assert.Contains(t, fmt.Sprint(errs), "dynamic")
-			assert.NotContains(t, terraformFirstContainer(t, obj), "dynamic")
+			assert.Nil(t, obj, "the resource is left out rather than scanned without its dynamic block")
 		})
 	}
 }

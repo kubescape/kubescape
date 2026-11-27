@@ -733,10 +733,38 @@ func transformSkippedManifests(skipped []cautils.SkippedManifest, transformer Tr
 			strconv.Quote(original), strconv.Quote(transformed),
 			original, transformed,
 		)
+		// The Terraform resource addresses are labels from the scanned
+		// configuration. Unlike a path, they can't be found in the reason, so
+		// each is replaced where it is listed.
+		hiddenResources, err := transformTerraformResources(skipped[i].Resources, transformer)
+		if err != nil {
+			return err
+		}
+		skipped[i].Resources = hiddenResources
 		skipped[i].Path = transformed
 		skipped[i].Reason = strings.NewReplacer(replacements...).Replace(skipped[i].Reason)
 	}
 	return nil
+}
+
+// transformTerraformResources returns the Terraform resource addresses of a
+// skipped manifest with each replaced. They are labels from the scanned
+// configuration, which can't be found in the reason the way a path can, so
+// they are replaced where they are listed. The list is rebuilt, not edited,
+// since the caller's copy of the entries shares it.
+func transformTerraformResources(resources []string, transformer Transformer) ([]string, error) {
+	if len(resources) == 0 {
+		return resources, nil
+	}
+	hidden := make([]string, 0, len(resources))
+	for _, resource := range resources {
+		transformed, err := transformValue(transformer, "terraform-resource", resource)
+		if err != nil {
+			return nil, err
+		}
+		hidden = append(hidden, transformed)
+	}
+	return hidden, nil
 }
 
 // ignoreFileReplacements returns the old, new pairs that replace, in the

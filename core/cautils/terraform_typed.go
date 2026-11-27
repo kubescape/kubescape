@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -762,15 +763,19 @@ func hclResourceBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *
 // converts each into a K8s manifest map. Resource types with no entry in the
 // table are left alone (not guessed at); a metadata.name is defaulted from
 // the Terraform resource label when the block doesn't set one explicitly. A
-// resource with count or for_each becomes one manifest per known instance; a
-// count or for_each that can't be resolved is an error.
+// resource with count or for_each becomes one manifest per known instance.
+//
+// An attribute that can't be resolved is left unset rather than guessed at.
+// Its errors are returned as *terraformResourceError, so the loader can leave
+// out only that resource and still scan the rest of the configuration.
 func extractTypedResources(body hcl.Body, evalCtx *hcl.EvalContext, references ...terraformReferenceChecker) ([]map[string]interface{}, []error) {
 	manifests, errs := extractTypedResourceManifests(body, evalCtx, references...)
 	return terraformManifestObjects(manifests), errs
 }
 
 // extractTypedResourceManifests is extractTypedResources, keeping the source
-// range of the resource block each manifest was converted from.
+// range of the resource block each manifest was converted from and marking
+// the manifests of a resource with errors as incomplete.
 func extractTypedResourceManifests(body hcl.Body, evalCtx *hcl.EvalContext, references ...terraformReferenceChecker) ([]terraformManifest, []error) {
 	synBody, ok := body.(*hclsyntax.Body)
 	if !ok {
@@ -797,20 +802,78 @@ func extractTypedResourceManifests(body hcl.Body, evalCtx *hcl.EvalContext, refe
 			syntaxAttribute(block.Body, "count"), syntaxAttribute(block.Body, "for_each"),
 			evalCtx, reference, path, reference.sourceSize(block.Body, block.Range().End.Byte-block.Range().Start.Byte))
 		if err != nil {
-			errs = append(errs, err)
+			errs = append(errs, &terraformResourceError{resource: path, err: err})
 			continue
 		}
 		// All instances of the resource share one converter, so the values and
 		// dynamic blocks they generate are bounded together, not per instance.
-		converter := terraformBodyConverter{errs: &errs, remaining: maxTerraformLocalSize, references: reference}
+		var resourceErrs []error
+		converter := terraformBodyConverter{errs: &resourceErrs, remaining: maxTerraformLocalSize, references: reference}
+		var converted []terraformManifest
 		for _, instanceCtx := range instances {
-			manifests = append(manifests, terraformManifest{
+			converted = append(converted, terraformManifest{
 				object: typedResourceManifest(&converter, block, gvk.apiVersion, gvk.kind, instanceCtx, path),
 				source: block.DefRange(),
 			})
 		}
+		for _, err := range resourceErrs {
+			errs = append(errs, &terraformResourceError{resource: path, err: err})
+		}
+		for i := range converted {
+			converted[i].incomplete = len(resourceErrs) > 0
+		}
+		manifests = append(manifests, converted...)
 	}
 	return manifests, errs
+}
+
+// terraformResourceError is an error converting one resource, such as an
+// attribute that depends on another resource, a data source or a variable
+// without a value. Only that resource is left out of the scan.
+type terraformResourceError struct {
+	// resource is the resource's address, such as kubernetes_pod_v1.web.
+	resource string
+	err      error
+}
+
+func (e *terraformResourceError) Error() string {
+	return e.err.Error()
+}
+
+func (e *terraformResourceError) Unwrap() error {
+	return e.err
+}
+
+// onlyTerraformResourceErrors returns the resources errs left out, in order
+// and without repeats, when every error in errs is a *terraformResourceError,
+// so the rest of the configuration can still be scanned. ok is false when errs
+// is empty or holds any other error.
+func onlyTerraformResourceErrors(errs []error) (resources []string, ok bool) {
+	seen := map[string]bool{}
+	for _, err := range errs {
+		var resourceErr *terraformResourceError
+		if !errors.As(err, &resourceErr) {
+			return nil, false
+		}
+		if !seen[resourceErr.resource] {
+			seen[resourceErr.resource] = true
+			resources = append(resources, resourceErr.resource)
+		}
+	}
+	return resources, len(errs) > 0
+}
+
+// terraformUnresolvedResourcesSkip records that some resources of the
+// Terraform configuration in dir were left out. Like the other Terraform
+// skips, its reason carries neither resource labels nor file names, which
+// --hide can't anonymize in free text; the resources are listed in Resources,
+// which it does, and the scan logs name them with the reasons.
+func terraformUnresolvedResourcesSkip(dir string, resources []string) SkippedManifest {
+	return SkippedManifest{
+		Path:      dir,
+		Reason:    fmt.Sprintf("%d Terraform resource(s) not scanned because they use values that can't be resolved, such as other resources, data sources or variables without a value; see scan logs for details", len(resources)),
+		Resources: resources,
+	}
 }
 
 // syntaxAttribute returns the named attribute of body, or nil when it isn't set.
