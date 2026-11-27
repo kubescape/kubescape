@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/pkg/filesizelimit"
 	"github.com/kubescape/kubescape/v4/httphandler/config"
 	"github.com/kubescape/kubescape/v4/httphandler/storage"
 )
@@ -420,6 +422,114 @@ func TestLoadAndSetCredentials_missingFilesFallback(t *testing.T) {
 	}
 	if got := config.GetAccessKey(); got != "" {
 		t.Fatalf("expected no access key to be set on fallback, got %s", got)
+	}
+}
+
+func TestInitializeSaaSEnv_rejectsOversizedServiceDiscoveryFile(t *testing.T) {
+	resetSaaSState(t)
+	t.Setenv(filesizelimit.MaxFileSizeEnvVar, "64")
+
+	path := filepath.Join(t.TempDir(), "services.json")
+	if err := os.WriteFile(path, []byte(validServicesV3JSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KS_SERVICE_DISCOVERY_FILE_PATH", path)
+
+	initializeSaaSEnv()
+
+	conn := getter.GetKSCloudAPIConnector()
+	if conn.GetCloudAPIURL() != "" || conn.GetCloudReportURL() != "" {
+		t.Fatalf("expected oversized service-discovery file to be rejected, got apiURL=%q reportURL=%q", conn.GetCloudAPIURL(), conn.GetCloudReportURL())
+	}
+}
+
+func TestLoadAndSetCredentials_rejectsOversizedCredentialFile(t *testing.T) {
+	resetSaaSState(t)
+	t.Setenv(filesizelimit.MaxFileSizeEnvVar, "8")
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "accessKey"), []byte("my-very-long-access-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "account"), []byte("acct\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KS_CREDENTIALS_SECRET_PATH", dir)
+
+	loadAndSetCredentials()
+
+	if got := config.GetAccessKey(); got != "" {
+		t.Fatalf("expected oversized accessKey file to be rejected, got %q", got)
+	}
+}
+
+func TestInitializeSaaSEnv_rejectsDirectoryServiceDiscoveryFile(t *testing.T) {
+	resetSaaSState(t)
+	t.Setenv("KS_SERVICE_DISCOVERY_FILE_PATH", t.TempDir())
+	t.Setenv("API_URL", "http://127.0.0.1:1")
+
+	initializeSaaSEnv()
+
+	conn := getter.GetKSCloudAPIConnector()
+	if conn.GetCloudAPIURL() != "" || conn.GetCloudReportURL() != "" {
+		t.Fatalf("expected directory service-discovery path to be skipped without fallback, got apiURL=%q reportURL=%q", conn.GetCloudAPIURL(), conn.GetCloudReportURL())
+	}
+}
+
+func TestInitializeSaaSEnv_preservesSymlinkParentPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on Windows")
+	}
+	resetSaaSState(t)
+
+	root := t.TempDir()
+	cfgDir := filepath.Join(root, "cfg")
+	secretsDir := filepath.Join(root, "secrets")
+	currentDir := filepath.Join(secretsDir, "current")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(currentDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretsDir, "services.json"), []byte(validServicesV3JSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	linkPath := filepath.Join(cfgDir, "link")
+	if err := os.Symlink(currentDir, linkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("KS_SERVICE_DISCOVERY_FILE_PATH", linkPath+string(os.PathSeparator)+".."+string(os.PathSeparator)+"services.json")
+
+	initializeSaaSEnv()
+
+	conn := getter.GetKSCloudAPIConnector()
+	if got := conn.GetCloudAPIURL(); got != "https://api.test.io" {
+		t.Fatalf("expected cloud API URL https://api.test.io, got %q", got)
+	}
+}
+
+func TestLoadAndSetCredentials_rejectsDirectoryCredentialFile(t *testing.T) {
+	resetSaaSState(t)
+
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "accessKey"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "account"), []byte("acct\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KS_CREDENTIALS_SECRET_PATH", dir)
+	t.Setenv("ACCOUNT_ID", "fallback-account")
+
+	loadAndSetCredentials()
+
+	if got := config.GetAccessKey(); got != "" {
+		t.Fatalf("expected empty accessKey when directory rejected, got %q", got)
+	}
+	if got := config.GetAccount(); got != "fallback-account" {
+		t.Fatalf("expected fallback-account, got %q", got)
 	}
 }
 
