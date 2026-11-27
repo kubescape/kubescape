@@ -102,7 +102,7 @@ environment.systemPackages = with pkgs; [ kubescape ];
 home.packages = with pkgs; [ kubescape ];
 ```
 
-> **Note**: Community-supported. See [NixOS support](https://nixos.wiki/wiki/Support) for issues.
+> **Note**: Community-supported. See [NixOS support](https://wiki.nixos.org/wiki/Support) for issues.
 
 ### Chocolatey (Windows)
 

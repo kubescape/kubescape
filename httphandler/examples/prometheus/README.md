@@ -57,7 +57,7 @@ helm upgrade --install kubescape kubescape/kubescape-operator \
 
 A pre-built Grafana dashboard is available for visualizing Kubescape metrics:
 
-- [Kubescape Grafana Dashboard](https://grafana.com/grafana/dashboards/18183-kubescape/)
+- [Kubescape Grafana Dashboard JSON](https://github.com/kubescape/prometheus-exporter/blob/main/dashboards/grafana_dashboard.json)
 
 ---
 
