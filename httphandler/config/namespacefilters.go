@@ -6,11 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -80,62 +78,13 @@ func GetNamespaceFilters() (NamespaceFilters, bool) {
 	return source.current, true
 }
 
-func openNamespaceFiltersFile(path string) (*os.File, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, os.ErrNotExist
-	}
-	statInfo, err := os.Stat(path)
-	if err != nil {
-		return nil, err
-	}
-	if statInfo.IsDir() {
-		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrNamespaceFiltersNotRegular)
-	}
-	if !statInfo.Mode().IsRegular() {
-		return nil, fmt.Errorf("%w: %q", ErrNamespaceFiltersNotRegular, path)
-	}
-
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	info, err := file.Stat()
-	if err != nil {
-		_ = file.Close()
-		return nil, err
-	}
-	if info.IsDir() {
-		_ = file.Close()
-		return nil, fmt.Errorf("%q is a directory, not a file: %w", path, ErrNamespaceFiltersNotRegular)
-	}
-	if !info.Mode().IsRegular() {
-		_ = file.Close()
-		return nil, fmt.Errorf("%w: %q", ErrNamespaceFiltersNotRegular, path)
-	}
-	return file, nil
-}
-
 func readNamespaceFilters(path string) (NamespaceFilters, error) {
-	f, err := openNamespaceFiltersFile(path)
-	if err != nil {
-		return NamespaceFilters{}, err
-	}
-	defer f.Close()
 	// ConfigMaps are limited to 1 MiB; reject oversized standalone files too.
 	const maxBytes = 1 << 20
 
-	info, err := f.Stat()
-	if err == nil && info.Size() > maxBytes {
-		return NamespaceFilters{}, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrNamespaceFiltersTooLarge, path, maxBytes)
-	}
-
-	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	data, err := readBoundedRegularFile(path, maxBytes, ErrNamespaceFiltersNotRegular, ErrNamespaceFiltersTooLarge)
 	if err != nil {
 		return NamespaceFilters{}, err
-	}
-	if len(data) > maxBytes {
-		return NamespaceFilters{}, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrNamespaceFiltersTooLarge, path, maxBytes)
 	}
 	var document struct {
 		Include namespaceList `json:"includeNamespaces"`
