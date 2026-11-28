@@ -89,7 +89,7 @@ func TestGitlabFailedReloginInvalidatesSession(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			adaptor := NewGitlabAdaptor()
+			adaptor := NewGitlabAdaptor(WithGitlabInsecureHTTPCredentials())
 
 			// Initial login succeeds
 			require.NoError(t, adaptor.Login(ctx, server.URL, RegistryCredentials{Token: "goodtoken"}))
@@ -147,7 +147,7 @@ func TestGitlabDestroyInvalidatesSession(t *testing.T) {
 	defer server.Close()
 
 	ctx := context.Background()
-	adaptor := NewGitlabAdaptor()
+	adaptor := NewGitlabAdaptor(WithGitlabInsecureHTTPCredentials())
 
 	require.NoError(t, adaptor.Login(ctx, server.URL, RegistryCredentials{Token: "goodtoken"}))
 	require.NotNil(t, adaptor.client)
@@ -179,7 +179,7 @@ func TestGitlabConcurrentScanAndSessionInvalidation(t *testing.T) {
 	defer server.Close()
 
 	ctx := context.Background()
-	adaptor := NewGitlabAdaptor()
+	adaptor := NewGitlabAdaptor(WithGitlabInsecureHTTPCredentials())
 	require.NoError(t, adaptor.Login(ctx, server.URL, RegistryCredentials{Token: "goodtoken"}))
 
 	var wg sync.WaitGroup
@@ -252,7 +252,7 @@ func TestGitlabInflightInvalidation(t *testing.T) {
 				defer server.Close()
 
 				ctx := context.Background()
-				adaptor := NewGitlabAdaptor()
+				adaptor := NewGitlabAdaptor(WithGitlabInsecureHTTPCredentials())
 				require.NoError(t, adaptor.Login(ctx, server.URL, RegistryCredentials{Token: "goodtoken"}))
 
 				images := []ContainerImageIdentifier{{Registry: "registry.gitlab.com", Repository: "team/app", Tag: "latest"}}

@@ -201,7 +201,7 @@ func TestHarborIdentity_LoginSetsRegistryBoundary(t *testing.T) {
 				_, _ = w.Write([]byte(`{"scanner":{"vulnerabilities":[]}}`))
 			}))
 			defer server.Close()
-			a := NewHarborAdaptor()
+			a := NewHarborAdaptor(WithHarborInsecureHTTPCredentials())
 			require.NoError(t, a.Login(context.Background(), server.URL, credentials))
 			foreign := ContainerImageIdentifier{Registry: "other.example", Repository: "team/app", Tag: "release"}
 			reports, err := a.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{foreign})

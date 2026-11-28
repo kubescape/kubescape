@@ -67,3 +67,44 @@ func sameRegistryAPIOrigin(a, b *url.URL) bool {
 	return strings.EqualFold(a.Scheme, b.Scheme) &&
 		strings.EqualFold(a.Hostname(), b.Hostname()) && port(a) == port(b)
 }
+
+// parseRegistryHostAndScheme normalizes a registry host or URL into its transport
+// scheme ("https" by default, or "http") and trimmed host.
+func parseRegistryHostAndScheme(registry string) (string, string, error) {
+	trimmed := strings.TrimSpace(registry)
+	if trimmed == "" {
+		return "", "", errors.New("registry host cannot be empty")
+	}
+	lower := strings.ToLower(trimmed)
+	scheme := "https"
+	host := trimmed
+	if strings.HasPrefix(lower, "http://") {
+		scheme = "http"
+		host = trimmed[len("http://"):]
+	} else if strings.HasPrefix(lower, "https://") {
+		host = trimmed[len("https://"):]
+	}
+	host = strings.TrimRight(host, "/")
+	if host == "" {
+		return "", "", errors.New("registry host cannot be empty")
+	}
+	if strings.Contains(host, "@") {
+		return "", "", errors.New("registry host must not contain userinfo; pass credentials in RegistryCredentials")
+	}
+	return scheme, host, nil
+}
+
+// validateRegistryLoginSecurity enforces credentials.Authority binding and refuses
+// transmitting credentials over plain HTTP unless explicitly opted in.
+func validateRegistryLoginSecurity(scheme, host string, credentials RegistryCredentials, allowInsecureHTTP bool, optInOption string) error {
+	if trimmedAuth := strings.TrimSpace(credentials.Authority); trimmedAuth != "" {
+		_, authHost, err := parseRegistryHostAndScheme(trimmedAuth)
+		if err != nil || !strings.EqualFold(authHost, host) {
+			return fmt.Errorf("credentials authority %q does not match registry host %q", credentials.Authority, host)
+		}
+	}
+	if strings.EqualFold(scheme, "http") && credentials.hasAuthenticator() && !allowInsecureHTTP {
+		return fmt.Errorf("refusing to send credentials over plain http to %s; use https or enable %s", host, optInOption)
+	}
+	return nil
+}

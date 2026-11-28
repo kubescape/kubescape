@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,7 +82,7 @@ func TestHarborAdaptor_Login(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			adaptor := NewHarborAdaptor()
+			adaptor := NewHarborAdaptor(WithHarborInsecureHTTPCredentials())
 			err := adaptor.Login(context.Background(), tt.registry, tt.credentials)
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -110,6 +111,102 @@ func TestHarborAPIWrapperRejectsOversizedResponse(t *testing.T) {
 
 	assert.Nil(t, body)
 	assert.ErrorContains(t, err, "exceeds the 8-byte limit")
+}
+
+func TestHarborAdaptor_Login_SecurityGuards(t *testing.T) {
+	t.Run("refuses credentials over plain http without opt-in and sends no request", func(t *testing.T) {
+		var hits int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits++
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"with_chartmuseum": true}`))
+		}))
+		defer server.Close()
+
+		for _, creds := range []RegistryCredentials{
+			{Token: "secret-token"},
+			{Username: "robot$user", Password: "secret-password"},
+		} {
+			adaptor := NewHarborAdaptor()
+			err := adaptor.Login(context.Background(), server.URL, creds)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "refusing to send credentials over plain http")
+		}
+		assert.Zero(t, hits)
+	})
+
+	t.Run("allows anonymous plain http login without opt-in", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"with_chartmuseum": true}`))
+		}))
+		defer server.Close()
+
+		adaptor := NewHarborAdaptor()
+		err := adaptor.Login(context.Background(), server.URL, RegistryCredentials{})
+		require.NoError(t, err)
+	})
+
+	t.Run("rejects mismatched credentials authority before network call", func(t *testing.T) {
+		var hits int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits++
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"with_chartmuseum": true}`))
+		}))
+		defer server.Close()
+
+		adaptor := NewHarborAdaptor()
+		err := adaptor.Login(context.Background(), server.URL, RegistryCredentials{
+			Authority: "other-harbor.example.com",
+			Username:  "robot$user",
+			Password:  "secret-password",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not match registry host")
+		assert.Zero(t, hits)
+	})
+
+	t.Run("accepts matching credentials authority with explicit http opt-in", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"with_chartmuseum": true}`))
+		}))
+		defer server.Close()
+
+		hostOnly := strings.TrimPrefix(server.URL, "http://")
+		adaptor := NewHarborAdaptor(WithHarborInsecureHTTPCredentials())
+		err := adaptor.Login(context.Background(), server.URL, RegistryCredentials{
+			Authority: hostOnly + "/",
+			Username:  "robot$user",
+			Password:  "secret-password",
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("rejects registry host containing URL userinfo even with empty RegistryCredentials", func(t *testing.T) {
+		var hits int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits++
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"with_chartmuseum": true}`))
+		}))
+		defer server.Close()
+
+		hostOnly := strings.TrimPrefix(server.URL, "http://")
+		for _, opt := range [][]HarborAdaptorOption{nil, {WithHarborInsecureHTTPCredentials()}} {
+			adaptor := NewHarborAdaptor(opt...)
+			for _, badRegistry := range []string{
+				"http://robot:secret@" + hostOnly,
+				"https://robot:secret@" + hostOnly,
+			} {
+				err := adaptor.Login(context.Background(), badRegistry, RegistryCredentials{})
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "must not contain userinfo")
+			}
+		}
+		assert.Zero(t, hits)
+	})
 }
 
 func TestExtractProjectAndRepo(t *testing.T) {

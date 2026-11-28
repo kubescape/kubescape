@@ -54,8 +54,26 @@ func (w *harborAPIWrapper) DoRequest(ctx context.Context, method, path string) (
 	return readRegistryAPIResponse(resp.Body, w.maxResponseSize)
 }
 
+// HarborAdaptorConfig configures optional behavior for HarborAdaptor.
+type HarborAdaptorConfig struct {
+	// AllowInsecureHTTPCredentials allows transmitting credentials over plain HTTP.
+	// This should only be used in local test environments.
+	AllowInsecureHTTPCredentials bool
+}
+
+// HarborAdaptorOption configures optional settings on HarborAdaptor.
+type HarborAdaptorOption func(*HarborAdaptorConfig)
+
+// WithHarborInsecureHTTPCredentials allows transmitting credentials over plain HTTP (e.g. for local test environments).
+func WithHarborInsecureHTTPCredentials() HarborAdaptorOption {
+	return func(c *HarborAdaptorConfig) {
+		c.AllowInsecureHTTPCredentials = true
+	}
+}
+
 // HarborAdaptor implements IContainerImageVulnerabilityAdaptor for Harbor Container Registry.
 type HarborAdaptor struct {
+	config HarborAdaptorConfig
 	mu     sync.RWMutex
 	client HarborAPI
 	host   string
@@ -76,8 +94,14 @@ type harborScanOverview struct {
 }
 
 // NewHarborAdaptor creates a new Harbor adaptor instance.
-func NewHarborAdaptor() *HarborAdaptor {
-	return &HarborAdaptor{}
+func NewHarborAdaptor(opts ...HarborAdaptorOption) *HarborAdaptor {
+	var cfg HarborAdaptorConfig
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+	return &HarborAdaptor{config: cfg}
 }
 
 // Login authenticates with Harbor. The registry string should be the host (e.g. core.harbor.domain).
@@ -89,13 +113,12 @@ func (a *HarborAdaptor) Login(ctx context.Context, registry string, credentials 
 	a.client = nil
 	a.host = ""
 
-	cleanHost := registry
-	scheme := "https"
-	if strings.HasPrefix(cleanHost, "http://") {
-		scheme = "http"
-		cleanHost = strings.TrimPrefix(cleanHost, "http://")
-	} else {
-		cleanHost = strings.TrimPrefix(cleanHost, "https://")
+	scheme, cleanHost, err := parseRegistryHostAndScheme(registry)
+	if err != nil {
+		return err
+	}
+	if err := validateRegistryLoginSecurity(scheme, cleanHost, credentials, a.config.AllowInsecureHTTPCredentials, "WithHarborInsecureHTTPCredentials"); err != nil {
+		return err
 	}
 
 	baseURL := fmt.Sprintf("%s://%s", scheme, cleanHost)
@@ -117,7 +140,7 @@ func (a *HarborAdaptor) Login(ctx context.Context, registry string, credentials 
 	// so this primarily validates that the Harbor endpoint is reachable and the URL is correct,
 	// rather than strictly verifying the validity of the credentials for all projects.
 	// We rely on actual vulnerability fetch calls to return 401/403 if credentials are invalid.
-	_, err := wrapper.DoRequest(ctx, http.MethodGet, "/api/v2.0/systeminfo")
+	_, err = wrapper.DoRequest(ctx, http.MethodGet, "/api/v2.0/systeminfo")
 	if err != nil {
 		return fmt.Errorf("failed to connect to harbor at %s: %w", baseURL, err)
 	}
