@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -32,13 +33,13 @@ const (
 )
 
 var (
-	tmpDirPaths      = make(map[string]string)
-	tmpDirRefs       = make(map[string]int)
-	tmpDirPathsMu    sync.Mutex
-	cloneGroup       singleflight.Group
-	plainClone       = git.PlainClone
-	gitTransportOnce sync.Once
-	hexShaRegex      = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+	tmpDirPaths       = make(map[string]string)
+	tmpDirRefs        = make(map[string]int)
+	tmpDirPathsMu     sync.Mutex
+	cloneGroup        singleflight.Group
+	plainCloneContext = git.PlainCloneContext
+	gitTransportOnce  sync.Once
+	hexShaRegex       = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 )
 
 // isCommitSHA checks whether a string is a 40-character hexadecimal Git commit SHA.
@@ -193,12 +194,11 @@ func getProviderError(gitURL giturl.IGitAPI) error {
 
 // cloneRepo clones a repository to a local temporary directory and returns the directory.
 // depthOpt optionally specifies the clone depth (defaults to DefaultGitCloneDepth = 0 for full history; set > 0 e.g. 1 for shallow tip-only clones).
-func cloneRepo(gitURL giturl.IGitAPI, depthOpt ...int) (string, error) {
+func cloneRepo(ctx context.Context, gitURL giturl.IGitAPI, depthOpt ...int) (string, error) {
 	depth := DefaultGitCloneDepth
 	if len(depthOpt) > 0 {
 		depth = depthOpt[0]
 	}
-
 	// This is a process-wide go-git setting. Configure it once before any
 	// clone starts so different repositories can be cloned concurrently
 	// without racing on transport.UnsupportedCapabilities.
@@ -275,7 +275,7 @@ func cloneRepo(gitURL giturl.IGitAPI, depthOpt ...int) (string, error) {
 		}
 
 		// Actual clone
-		repo, err := plainClone(tmpDir, false, &cloneOpts)
+		repo, err := plainCloneContext(ctx, tmpDir, false, &cloneOpts)
 		if err != nil {
 			return "", fmt.Errorf("failed to clone %s: %w", gitURL.GetRepoName(), err)
 		}
@@ -361,9 +361,8 @@ func ReleaseClonedRepo(path string, depthOpt ...int) error {
 	return nil
 }
 
-// CloneGitRepo clone git repository with optional depth (defaults to DefaultGitCloneDepth = 0 for full commit history).
-// Set depth > 0 (e.g. 1) for shallow tip-only clones.
-func CloneGitRepo(path *string, depthOpt ...int) (string, error) {
+// CloneGitRepoContext clones a git repository using the provided context and optional depth.
+func CloneGitRepoContext(ctx context.Context, path *string, depthOpt ...int) (string, error) {
 	depth := DefaultGitCloneDepth
 	if len(depthOpt) > 0 {
 		depth = depthOpt[0]
@@ -378,7 +377,7 @@ func CloneGitRepo(path *string, depthOpt ...int) (string, error) {
 	// Clone git repository if needed
 	logger.L().Start("cloning", helpers.String("repository url", gitURL.GetURL().String()))
 
-	clonedDir, err = cloneRepo(gitURL, depth)
+	clonedDir, err = cloneRepo(ctx, gitURL, depth)
 	if err != nil {
 		logger.L().StopError("failed to clone git repo", helpers.String("url", gitURL.GetURL().String()), helpers.Error(err))
 		return "", fmt.Errorf("failed to clone git repo '%s',  %w", gitURL.GetURL().String(), err)
@@ -388,6 +387,12 @@ func CloneGitRepo(path *string, depthOpt ...int) (string, error) {
 	logger.L().StopSuccess("Done accessing remote repo")
 
 	return clonedDir, nil
+}
+
+// CloneGitRepo clone git repository with optional depth (defaults to DefaultGitCloneDepth = 0 for full commit history).
+// Set depth > 0 (e.g. 1) for shallow tip-only clones.
+func CloneGitRepo(path *string, depthOpt ...int) (string, error) {
+	return CloneGitRepoContext(context.Background(), path, depthOpt...)
 }
 
 // GetClonedPath returns the temporary workspace directory for a cloned repository URL.
