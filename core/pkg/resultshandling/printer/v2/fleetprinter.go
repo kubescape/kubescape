@@ -33,7 +33,7 @@ const notMeasured = "-"
 // being readable somewhere around five of them, and it is already in the JSON
 // for anyone who wants it.
 func PrintFleetReport(w io.Writer, report *fleet.FleetReport) {
-	if report == nil {
+	if report == nil || w == nil {
 		return
 	}
 
@@ -47,6 +47,9 @@ func PrintFleetReport(w io.Writer, report *fleet.FleetReport) {
 // ones that produced nothing. A cluster missing from the table would make the
 // fleet look smaller and healthier than it is.
 func printFleetClusters(w io.Writer, report *fleet.FleetReport) {
+	if report == nil || w == nil {
+		return
+	}
 	if len(report.Clusters) == 0 {
 		cautils.SimpleDisplay(w, "No clusters were scanned.\n\n")
 		return
@@ -87,6 +90,9 @@ func printFleetClusters(w io.Writer, report *fleet.FleetReport) {
 // came from, and names the ones held out. A score with no basis printed next to
 // it invites more confidence than it has earned.
 func printFleetCompliance(w io.Writer, rollup *fleet.ComplianceRollup) {
+	if rollup == nil || w == nil {
+		return
+	}
 	cautils.SimpleDisplay(w, "\nFleet compliance: %s  (from %d of %d clusters)\n",
 		gchalk.WithBrightWhite().Bold(percentOrDash(rollup.ComplianceScore)),
 		rollup.ClustersScored, rollup.ClustersTotal)
@@ -122,6 +128,9 @@ func printFleetCompliance(w io.Writer, rollup *fleet.ComplianceRollup) {
 // printFleetDivergence shows the controls the clusters did not agree on, worst
 // severity first, so the row worth reading is the one at the top.
 func printFleetDivergence(w io.Writer, divergence *fleet.FleetDivergence, compared matrixComparability) {
+	if divergence == nil || w == nil {
+		return
+	}
 	// Ahead of the agreement case on purpose. A reference that produced nothing
 	// is worth saying whether or not the clusters went on to disagree, and it is
 	// least obvious in the run that otherwise looks like a clean bill of health.
@@ -150,6 +159,9 @@ func printFleetDivergence(w io.Writer, divergence *fleet.FleetDivergence, compar
 	// Sorted on severity here rather than in the report, which stays ordered by
 	// control ID so two runs stay diffable. A reader wants the worst first.
 	sort.SliceStable(controls, func(i, j int) bool {
+		if controls[i] == nil || controls[j] == nil {
+			return controls[i] != nil
+		}
 		left, right := severityRank(controls[i].Severity), severityRank(controls[j].Severity)
 		if left != right {
 			return left > right
@@ -165,6 +177,9 @@ func printFleetDivergence(w io.Writer, divergence *fleet.FleetDivergence, compar
 	diverging := newFleetTable(w)
 	diverging.AppendHeader(header)
 	for _, control := range controls {
+		if control == nil {
+			continue
+		}
 		row := table.Row{
 			getColor(severityRank(control.Severity))(control.Severity),
 			fmt.Sprintf("%s %s", control.ControlID, control.Name),
@@ -202,6 +217,9 @@ type matrixComparability struct {
 // disjoint control sets produces an empty divergence while still having several
 // clusters in it. Counting the union would read that as agreement.
 func comparability(matrix *fleet.FleetControlMatrix) matrixComparability {
+	if matrix == nil {
+		return matrixComparability{}
+	}
 	seen := make(map[string]struct{})
 	measured := matrixComparability{}
 
@@ -249,6 +267,9 @@ func newFleetTable(w io.Writer) table.Writer {
 // difference between a cluster that is configured differently and one that was
 // never looked at.
 func divergenceKindText(control *fleet.ControlDivergence) string {
+	if control == nil {
+		return "exception"
+	}
 	switch {
 	case control.PostureDiverges && control.CoverageGap:
 		return "posture, coverage"
@@ -269,6 +290,9 @@ func divergenceKindText(control *fleet.ControlDivergence) string {
 // cluster missed by a point or by half, which is the whole reason the figures
 // are carried on the exclusion in the first place.
 func exclusionText(excluded *fleet.ExcludedCluster, minCoverage float32) string {
+	if excluded == nil {
+		return ""
+	}
 	switch excluded.Reason {
 	case fleet.ExcludedNotScanned:
 		return "it was not scanned"
@@ -307,7 +331,7 @@ func fleetStatusText(status fleet.ClusterScanStatus) string {
 // high compliance score sitting next to an incomplete one is not read as good
 // news.
 func fleetCoverageText(cluster *fleet.ClusterResult) string {
-	if cluster.Coverage == nil {
+	if cluster == nil || cluster.Coverage == nil {
 		return notMeasured
 	}
 	coverage := cautils.ComplianceScoreToString(cluster.Coverage.CoverageScore, 0) + "%"

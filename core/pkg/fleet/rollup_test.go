@@ -795,3 +795,22 @@ func permutations(results []ClusterResult) [][]ClusterResult {
 	}
 	return all
 }
+
+func TestRollupHelpers_NilSafety(t *testing.T) {
+	assert.NotPanics(t, func() {
+		names, scores := clusterFrameworkScores(nil)
+		assert.Nil(t, names)
+		assert.Nil(t, scores)
+
+		noReport := &ClusterResult{}
+		names, scores = clusterFrameworkScores(noReport)
+		assert.Nil(t, names)
+		assert.Nil(t, scores)
+
+		assert.Nil(t, vacuousFrameworkSet(nil))
+		assert.Nil(t, vacuousFrameworkSet(noReport))
+
+		rollups := buildFrameworkRollups([]*ClusterResult{nil, noReport})
+		assert.Nil(t, rollups)
+	})
+}

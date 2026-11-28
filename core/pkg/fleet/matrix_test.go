@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -408,4 +409,21 @@ func TestBuildControlMatrixSettlesControlDescriptionByValue(t *testing.T) {
 	assert.Equal(t,
 		BuildControlMatrix([]ClusterResult{first, second}),
 		BuildControlMatrix([]ClusterResult{second, first}))
+}
+
+func TestMatrix_NilSafety(t *testing.T) {
+	assert.NotPanics(t, func() {
+		cell := newControlStatusCell(nil)
+		assert.Equal(t, CellNotEvaluated, cell.Status)
+		assert.Equal(t, float32(-1), cell.ComplianceScore)
+		assert.Equal(t, 0, cell.FailedResources)
+
+		status := cellStatus(nil)
+		assert.Equal(t, CellNotEvaluated, status)
+
+		summaryWithoutResources := &reportsummary.ControlSummary{}
+		cell2 := newControlStatusCell(summaryWithoutResources)
+		assert.Equal(t, CellNotEvaluated, cell2.Status)
+		assert.Equal(t, 0, cell2.FailedResources)
+	})
 }

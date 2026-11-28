@@ -397,3 +397,18 @@ func TestClusterResultScored(t *testing.T) {
 		})
 	}
 }
+
+func TestClusterResult_NilReceiverSafety(t *testing.T) {
+	var nilCluster *ClusterResult
+	assert.NotPanics(t, func() {
+		assert.False(t, nilCluster.Scanned())
+		assert.False(t, nilCluster.Scored())
+	})
+
+	partialCluster := &ClusterResult{
+		Status: ClusterScanned,
+		Report: nil,
+	}
+	assert.False(t, partialCluster.Scanned())
+	assert.False(t, partialCluster.Scored())
+}

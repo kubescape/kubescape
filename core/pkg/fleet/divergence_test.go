@@ -417,3 +417,9 @@ func TestBuildDivergenceTrimsTheReferenceCluster(t *testing.T) {
 	assert.Equal(t, CellPassed, padded.Controls[0].ReferenceStatus)
 	assert.Equal(t, divergenceFor("prod", clusters...), padded)
 }
+
+func TestDivergence_NilSafety(t *testing.T) {
+	assert.NotPanics(t, func() {
+		assert.Equal(t, 0, outcomesRepresented(nil))
+	})
+}

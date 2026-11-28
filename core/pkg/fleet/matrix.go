@@ -152,9 +152,19 @@ func outcomeRank(status CellStatus) int {
 // and which is already a copy of the map value, so the write-back stays inside
 // this function and the caller's report is never modified.
 func newControlStatusCell(summary *reportsummary.ControlSummary) ControlStatusCell {
+	if summary == nil {
+		return ControlStatusCell{
+			Status:          CellNotEvaluated,
+			ComplianceScore: -1,
+		}
+	}
+	failed := 0
+	if numRes := summary.NumberOfResources(); numRes != nil {
+		failed = numRes.Failed()
+	}
 	return ControlStatusCell{
 		Status:          cellStatus(summary),
-		FailedResources: summary.NumberOfResources().Failed(),
+		FailedResources: failed,
 		ComplianceScore: summary.GetComplianceScore(),
 	}
 }
@@ -175,7 +185,13 @@ func newControlStatusCell(summary *reportsummary.ControlSummary) ControlStatusCe
 // confusion CellStatus exists to prevent. The deprecated "excluded" and
 // "irrelevant" spellings are genuine non-application and stay skipped.
 func cellStatus(summary *reportsummary.ControlSummary) CellStatus {
+	if summary == nil {
+		return CellNotEvaluated
+	}
 	status := summary.GetStatus()
+	if status == nil {
+		return CellNotEvaluated
+	}
 
 	switch {
 	case status.IsPassed():

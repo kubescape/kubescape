@@ -233,6 +233,9 @@ func buildFrameworkRollups(contributors []*ClusterResult) []FrameworkRollup {
 	accumulators := make(map[string]*frameworkAccumulator)
 
 	for _, cluster := range contributors {
+		if cluster == nil {
+			continue
+		}
 		vacuous := vacuousFrameworkSet(cluster)
 		names, scores := clusterFrameworkScores(cluster)
 
@@ -333,6 +336,9 @@ func usableScore(score float32) bool {
 // the report was written in, the value does not, and a contradictory report
 // should not end up reporting the more flattering of the two figures.
 func clusterFrameworkScores(cluster *ClusterResult) (names []string, scores map[string]float32) {
+	if cluster == nil || cluster.Report == nil {
+		return nil, nil
+	}
 	frameworks := cluster.Report.SummaryDetails.Frameworks
 	names = make([]string, 0, len(frameworks))
 	scores = make(map[string]float32, len(frameworks))
@@ -364,7 +370,7 @@ func clusterFrameworkScores(cluster *ClusterResult) (names []string, scores map[
 // vacuousFrameworkSet is the set of framework names the cluster's own scan
 // flagged as vacuous, for lookup while its frameworks are walked.
 func vacuousFrameworkSet(cluster *ClusterResult) map[string]struct{} {
-	if cluster.Coverage == nil || len(cluster.Coverage.VacuousFrameworks) == 0 {
+	if cluster == nil || cluster.Coverage == nil || len(cluster.Coverage.VacuousFrameworks) == 0 {
 		return nil
 	}
 	set := make(map[string]struct{}, len(cluster.Coverage.VacuousFrameworks))
