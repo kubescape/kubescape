@@ -20,6 +20,8 @@ const helmValuesHTTPTimeout = 15 * time.Second
 // appearing in URL strings or formatted error messages without disturbing path segments.
 var helmURLUserInfoPattern = regexp.MustCompile(`(^|[\s"'(\[]|[a-zA-Z][a-zA-Z0-9+.-]*:)//[^\s/?#"<>\\]*@`)
 
+var helmURLSchemePrefixPattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*://`)
+
 func mergeBoundedHelmValues(o HelmValueOptions, stdin io.Reader) (map[string]any, error) {
 	return mergeBoundedHelmValuesWithClient(o, stdin, helmValuesHTTPClient(nil))
 }
@@ -94,9 +96,12 @@ func isWindowsDriveScheme(scheme string) bool {
 }
 
 func isLocalHelmValuePath(source string) bool {
+	if strings.HasPrefix(source, "//") {
+		return false
+	}
 	u, err := url.Parse(source)
 	if err != nil {
-		return true
+		return !helmURLSchemePrefixPattern.MatchString(source)
 	}
 	if u.Scheme == "" {
 		return true

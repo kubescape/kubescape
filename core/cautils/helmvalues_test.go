@@ -276,6 +276,23 @@ func TestHelmValueOptions_MergeValues_RedactsURLCredentialsAndBlocksUnsafeRedire
 		assert.Equal(t, "https://bad host/values.yaml", sanitizeHelmValueSource("https://"+secretUser+":"+secretPass+"@bad host/values.yaml"))
 		assert.Equal(t, `C:\charts\values.yaml`, sanitizeHelmValueSource(`C:\charts\values.yaml`))
 
+		for _, tc := range []struct {
+			name string
+			url  string
+		}{
+			{name: "invalid escape", url: "https://" + secretUser + ":" + secretPass + "@host.example/%zz/values.yaml"},
+			{name: "space in host", url: "https://" + secretUser + ":" + secretPass + "@ho st.example/values.yaml"},
+			{name: "scheme-relative", url: "//" + secretUser + ":" + secretPass + "@host.example/values.yaml"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := (HelmValueOptions{ValueFiles: []string{tc.url}}).MergeValues()
+				assertRedacted(t, err)
+
+				_, err = (HelmValueOptions{FileValues: []string{"k=" + tc.url}}).MergeValues()
+				assertRedacted(t, err)
+			})
+		}
+
 		source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "file:///etc/passwd", http.StatusFound)
 		}))
