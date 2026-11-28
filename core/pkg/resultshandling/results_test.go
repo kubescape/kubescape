@@ -1611,3 +1611,32 @@ func TestWriteJsonAndToJson_NilReportReturnsError(t *testing.T) {
 	assert.EqualError(t, err, "no data provided for JSON output")
 	assert.Nil(t, data)
 }
+
+func TestResultsHandler_NilReceiverSafety(t *testing.T) {
+	var nilRH *ResultsHandler
+
+	assert.NotPanics(t, func() {
+		assert.Equal(t, float32(0), nilRH.GetRiskScore())
+		assert.Equal(t, float32(0), nilRH.GetComplianceScore())
+		assert.Nil(t, nilRH.GetData())
+		assert.Nil(t, nilRH.GetPrinters())
+		assert.Nil(t, nilRH.GetReporter())
+		assert.Nil(t, nilRH.GetResults())
+
+		nilRH.SetData(&cautils.OPASessionObj{})
+		nilRH.SetScanError(errors.New("scan error"))
+
+		err := nilRH.WriteJson(io.Discard)
+		assert.Error(t, err)
+		assert.EqualError(t, err, "results handler is nil")
+
+		jsonBytes, err := nilRH.ToJson()
+		assert.Error(t, err)
+		assert.EqualError(t, err, "results handler is nil")
+		assert.Nil(t, jsonBytes)
+
+		err = nilRH.HandleResults(context.Background(), &cautils.ScanInfo{})
+		assert.Error(t, err)
+		assert.EqualError(t, err, "results handler is nil")
+	})
+}

@@ -64,11 +64,17 @@ func (rh *ResultsHandler) GetComplianceScore() float32 {
 //
 // Call the ToJson() method if you want the JSON representation of the data
 func (rh *ResultsHandler) GetData() *cautils.OPASessionObj {
+	if rh == nil {
+		return nil
+	}
 	return rh.ScanData
 }
 
 // SetData sets the scan/action related data
 func (rh *ResultsHandler) SetData(data *cautils.OPASessionObj) {
+	if rh == nil {
+		return
+	}
 	rh.ScanData = data
 }
 
@@ -76,21 +82,36 @@ func (rh *ResultsHandler) SetData(data *cautils.OPASessionObj) {
 // results have been printed. This lets callers preserve useful scan output
 // without reporting a successful exit status for incomplete results.
 func (rh *ResultsHandler) SetScanError(err error) {
+	if rh == nil {
+		return
+	}
 	rh.scanError = err
 }
 
 // GetPrinters returns all printers
 func (rh *ResultsHandler) GetPrinters() []printer.IPrinter {
+	if rh == nil {
+		return nil
+	}
 	return rh.PrinterObjs
 }
 
 // GetReporter returns the reporter object
 func (rh *ResultsHandler) GetReporter() reporter.IReport {
+	if rh == nil {
+		return nil
+	}
 	return rh.ReporterObj
 }
 
 // WriteJson streams the results in JSON format directly to the given writer
 func (rh *ResultsHandler) WriteJson(w io.Writer) error {
+	if rh == nil {
+		return fmt.Errorf("results handler is nil")
+	}
+	if rh.ScanData == nil {
+		return fmt.Errorf("no data provided for JSON output")
+	}
 	finalizedReport := printerv2.FinalizeResults(rh.ScanData)
 	if finalizedReport == nil {
 		return fmt.Errorf("no data provided for JSON output")
@@ -149,6 +170,9 @@ func (rh *ResultsHandler) WriteJson(w io.Writer) error {
 
 // ToJson returns the results in the JSON format
 func (rh *ResultsHandler) ToJson() ([]byte, error) {
+	if rh == nil {
+		return nil, fmt.Errorf("results handler is nil")
+	}
 	var buf bytes.Buffer
 	err := rh.WriteJson(&buf)
 	res := buf.Bytes()
@@ -268,6 +292,9 @@ func restoreReport(sessionObj *cautils.OPASessionObj, snap reportSnapshot) {
 
 // HandleResults handles all necessary actions for the scan results
 func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.ScanInfo) (err error) {
+	if rh == nil {
+		return fmt.Errorf("results handler is nil")
+	}
 	// The reporting span lives here rather than at the call sites so every
 	// entry point that produces output — scan, scan control/framework/workload,
 	// scan image and the patch flow — contributes the same phase to the trace.
