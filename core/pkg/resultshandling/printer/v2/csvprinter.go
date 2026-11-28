@@ -189,7 +189,8 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 		}
 
 		sourcePath := ""
-		if src, ok := opaSessionObj.ResourceSource[resID]; ok {
+		if opaSessionObj != nil && opaSessionObj.ResourceSource != nil {
+			src := reportedSource(opaSessionObj, resID)
 			sourcePath = csvSourcePath(src)
 		}
 

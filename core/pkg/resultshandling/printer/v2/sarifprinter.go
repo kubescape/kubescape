@@ -1314,6 +1314,9 @@ func rbacSubjectBinding(resource workloadinterface.IMetadata) (workloadinterface
 // reportedSource returns the manifest a failed resource is reported in. An RBAC
 // subject without a source of its own uses its binding's.
 func reportedSource(opaSessionObj *cautils.OPASessionObj, resourceID string) reporthandling.Source {
+	if opaSessionObj == nil || opaSessionObj.ResourceSource == nil {
+		return reporthandling.Source{}
+	}
 	source := opaSessionObj.ResourceSource[resourceID]
 	if source.RelativePath != "" {
 		return source
