@@ -21,8 +21,13 @@ kubescape scan ./manifests -f json -o results.json
 # 2) Preview
 kubescape fix results.json --dry-run
 
-# 3) Apply (interactive confirm on a TTY; use --no-confirm in CI)
+# 3) Apply (interactive confirm on a TTY)
 kubescape fix results.json
+```
+
+CI / non-interactive (skips the confirm prompt):
+
+```bash
 kubescape fix results.json --no-confirm
 ```
 
