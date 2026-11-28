@@ -36,7 +36,7 @@ func TestListFiles(t *testing.T) {
 
 func TestListFilesNestedGlob(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "manifests[old]")
-	for _, name := range []string{"deploy.yaml", "app/deploy.yaml", "app/deep/deploy.yaml", "app/service.json", "app/main.tf", "app/{literal}.tf", "app/{draft.tf", "app/upper.TF", "other/notes.txt"} {
+	for _, name := range []string{"deploy.yaml", "app/deploy.yaml", "app/deep/deploy.yaml", "app/service.json", "app/main.tf", "app/{literal}.tf", "app/{draft.tf", "app/deep/{nested.tf", "app/deep/{draft.yaml", "app/upper.TF", "other/notes.txt"} {
 		path := filepath.Join(root, filepath.FromSlash(name))
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750))
 		require.NoError(t, os.WriteFile(path, nil, 0o600))
@@ -47,9 +47,11 @@ func TestListFilesNestedGlob(t *testing.T) {
 		want    []string
 	}{
 		{"*/deploy.yaml", []string{"app/deploy.yaml"}},
-		{"**/*.yaml", []string{"deploy.yaml", "app/deploy.yaml", "app/deep/deploy.yaml"}},
+		{"**/*.yaml", []string{"deploy.yaml", "app/deploy.yaml", "app/deep/deploy.yaml", "app/deep/{draft.yaml"}},
+		{"**/{draft.yaml", []string{"app/deep/{draft.yaml"}},
+		{"**/{draft.{yaml,json}", []string{"app/deep/{draft.yaml"}},
 		{"[a]pp/deploy.yaml", []string{"app/deploy.yaml"}},
-		{"*.yaml", []string{"deploy.yaml", "app/deploy.yaml", "app/deep/deploy.yaml"}},
+		{"*.yaml", []string{"deploy.yaml", "app/deploy.yaml", "app/deep/deploy.yaml", "app/deep/{draft.yaml"}},
 		{"deploy.yaml", []string{"deploy.yaml"}},
 	} {
 		t.Run(tt.pattern, func(t *testing.T) {
@@ -80,7 +82,7 @@ func TestListFilesNestedGlob(t *testing.T) {
 
 	files, errs = ScanGlobCollisionPaths(terraformGlob, nil)
 	require.Empty(t, errs)
-	assert.ElementsMatch(t, []string{filepath.Join(root, "app", "main.tf"), filepath.Join(root, "app", "{literal}.tf"), filepath.Join(root, "app", "{draft.tf")}, files)
+	assert.ElementsMatch(t, []string{filepath.Join(root, "app", "main.tf"), filepath.Join(root, "app", "{literal}.tf"), filepath.Join(root, "app", "{draft.tf"), filepath.Join(root, "app", "deep", "{nested.tf")}, files)
 
 	for _, tc := range []struct {
 		pattern string
@@ -88,6 +90,7 @@ func TestListFilesNestedGlob(t *testing.T) {
 	}{
 		{"*/{literal}.tf", "app/{literal}.tf"},
 		{"*/{draft.tf", "app/{draft.tf"},
+		{"**/{nested.tf", "app/deep/{nested.tf"},
 		{"[!a]pp/main.tf", "app/main.tf"},
 		{"*/upper.TF", "app/upper.TF"},
 	} {
@@ -101,6 +104,23 @@ func TestListFilesNestedGlob(t *testing.T) {
 	files, errs = ScanGlobCollisionPaths(filepath.Join(root, "**", "*.txt"), nil)
 	require.Empty(t, errs)
 	assert.Empty(t, files)
+}
+
+func TestScanGlobRejectsMalformedPatternsWithoutCandidates(t *testing.T) {
+	root := t.TempDir()
+	for _, pattern := range []string{"**/[draft.yaml", "**/{draft[.yaml", "**/[!]/deploy.yaml"} {
+		t.Run(pattern, func(t *testing.T) {
+			input := filepath.Join(root, filepath.FromSlash(pattern))
+			for _, scan := range []func(string, *PathFilter) ([]string, []error){ScanGlobPaths, ScanGlobCollisionPaths} {
+				paths, errs := scan(input, nil)
+				assert.Empty(t, paths)
+				require.NotEmpty(t, errs)
+				for _, err := range errs {
+					assert.ErrorIs(t, err, filepath.ErrBadPattern)
+				}
+			}
+		})
+	}
 }
 
 func TestListFilesNestedGlobSkipsDirectoriesBeyondFixedDepth(t *testing.T) {

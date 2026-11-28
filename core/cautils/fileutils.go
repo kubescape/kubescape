@@ -2274,6 +2274,20 @@ func glob(root, pattern string, kind globPathKind, filter *PathFilter) ([]string
 	matchRelativePath := patternSeparators > 0
 	fixedDepth := matchRelativePath && !strings.Contains(pattern, "**")
 
+	match := filepath.Match
+	matchPattern := pattern
+	if matchRelativePath {
+		match = doublestar.PathMatch
+		if !doublestar.ValidatePathPattern(matchPattern) {
+			matchPattern = literalizeUnclosedGlobBraces(pattern)
+			if !doublestar.ValidatePathPattern(matchPattern) {
+				return nil, filepath.ErrBadPattern
+			}
+		}
+	} else if _, err := filepath.Match(pattern, ""); err != nil {
+		return nil, err
+	}
+
 	// filepath.WalkDir does not follow symlinks, the root included, so a scan of a
 	// directory given as a symlink (a linked checkout, say) would list nothing.
 	// Walk its target and report each path under the root as given, which is
@@ -2305,14 +2319,13 @@ func glob(root, pattern string, kind globPathKind, filter *PathFilter) ([]string
 			return nil
 		}
 
-		match, name := filepath.Match, filepath.Base(path)
+		name := filepath.Base(path)
 		var next error
 		if matchRelativePath {
 			name, err = filepath.Rel(root, path)
 			if err != nil {
 				return err
 			}
-			match = doublestar.PathMatch
 			if fixedDepth && isDirectory && strings.Count(name, separator) >= patternSeparators {
 				next = filepath.SkipDir
 			}
@@ -2327,13 +2340,7 @@ func glob(root, pattern string, kind globPathKind, filter *PathFilter) ([]string
 		} else if isDirectory != (kind == globDirectories) || (!isDirectory && !IsYaml(path) && !IsJson(path)) {
 			return next
 		}
-		matched, err := match(pattern, name)
-		if err != nil && matchRelativePath {
-			// Legacy globs (such as an unclosed '{') can fail doublestar parsing even though filepath.Match accepts them as literals.
-			if fallbackMatched, fallbackErr := filepath.Match(pattern, name); fallbackErr == nil {
-				matched, err = fallbackMatched, nil
-			}
-		}
+		matched, err := match(matchPattern, name)
 		if err != nil {
 			return err
 		}
@@ -2354,6 +2361,48 @@ func glob(root, pattern string, kind globPathKind, filter *PathFilter) ([]string
 		return next
 	})
 	return append(matches, rendererDirs...), err
+}
+
+// literalizeUnclosedGlobBraces quotes unmatched opening braces without changing
+// brace alternatives. A character class quotes the brace on every platform.
+func literalizeUnclosedGlobBraces(pattern string) string {
+	var opens []int
+	inClass := false
+	for i := 0; i < len(pattern); i++ {
+		ch := pattern[i]
+		if ch == '\\' && filepath.Separator != '\\' {
+			i++
+			continue
+		}
+		if inClass {
+			inClass = ch != ']'
+			continue
+		}
+		switch ch {
+		case '[':
+			inClass = true
+		case '{':
+			opens = append(opens, i)
+		case '}':
+			if len(opens) == 0 {
+				return pattern
+			}
+			opens = opens[:len(opens)-1]
+		}
+	}
+	if len(opens) == 0 {
+		return pattern
+	}
+
+	var quoted strings.Builder
+	start := 0
+	for _, i := range opens {
+		quoted.WriteString(pattern[start:i])
+		quoted.WriteString("[{]")
+		start = i + 1
+	}
+	quoted.WriteString(pattern[start:])
+	return quoted.String()
 }
 
 // globFilesThroughSymlink keeps the bounded directory-symlink matches of filepath.Glob.

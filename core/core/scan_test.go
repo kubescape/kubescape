@@ -1444,18 +1444,18 @@ func TestGetOutputPrinters_GlobDiscoveryCollision(t *testing.T) {
 		assert.Nil(t, printers)
 	})
 
-	t.Run("globstar rejects collision with a deeply nested manifest", func(t *testing.T) {
+	t.Run("globstar and a literal opening brace reject a deeply nested collision", func(t *testing.T) {
 		baseDir := t.TempDir()
 		subDir := filepath.Join(baseDir, "group", "app")
 		require.NoError(t, os.MkdirAll(subDir, 0o700))
-		manifest := filepath.Join(subDir, "deploy.yaml")
+		manifest := filepath.Join(subDir, "{draft.yaml")
 		require.NoError(t, os.WriteFile(manifest, manifestContent, 0o600))
 
 		scanInfo := &cautils.ScanInfo{
 			ScanType:      cautils.ScanTypeControl,
 			Format:        printer.YamlFormat,
 			Output:        manifest,
-			InputPatterns: []string{filepath.Join(baseDir, "**", "*.yaml")},
+			InputPatterns: []string{filepath.Join(baseDir, "**", "{draft.yaml")},
 		}
 
 		printers, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
