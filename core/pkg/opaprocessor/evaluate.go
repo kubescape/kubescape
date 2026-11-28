@@ -30,6 +30,13 @@ func (opap *OPAProcessor) EvaluateRule(ctx context.Context, rule *reporthandling
 	}
 
 	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ControlConfigInputs, nil)
-	ruleResponses, _, err := opap.runOPAOnSingleRule(ctx, rule, enumeratedData, ruleData, ruleRegoDependenciesData, controlID)
-	return ruleResponses, err
+	ruleResponses, outcome, err := opap.runOPAOnSingleRule(ctx, rule, enumeratedData, ruleData, ruleRegoDependenciesData, controlID)
+	if err != nil {
+		return ruleResponses, err
+	}
+	if len(outcome.skipped) > 0 {
+		first := outcome.skipped[0]
+		return ruleResponses, fmt.Errorf("CEL evaluation skipped %d resource(s); first: %s: %w", len(outcome.skipped), celResourceID(first.obj), first.err)
+	}
+	return ruleResponses, nil
 }

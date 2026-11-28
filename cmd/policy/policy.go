@@ -8,7 +8,7 @@ import (
 )
 
 var policyCmdExamples = fmt.Sprintf(`
-  policy command can be used for authoring and testing custom Rego controls.
+  Scaffold custom Rego controls and test Rego or CEL policies.
   This is an experimental feature and it might change.
 
   Examples:
@@ -35,7 +35,7 @@ var policyCmdExamples = fmt.Sprintf(`
 func GetPolicyCmd() *cobra.Command {
 	policyCmd := &cobra.Command{
 		Use:     "policy",
-		Short:   "Author and test custom Rego controls",
+		Short:   "Scaffold Rego controls and test Rego or CEL policies",
 		Long:    ``,
 		Example: policyCmdExamples,
 	}

@@ -439,7 +439,19 @@ too. It cannot be combined with `--update`:
 kubescape policy test ./myrules --junit-report policy-test.xml
 ```
 
-`policy test` gives a rule that reads
+For a CEL rule, place a single standalone `ValidatingAdmissionPolicy` without
+`spec.paramKind` in `policy.yaml` beside the same `test/` directory. Use
+`policy test --update` to generate the case's `expected.json`, then review the
+findings before committing the fixture. To evaluate expressions that read
+`namespaceObject`, include the corresponding Namespace manifest in the case's
+`input/` directory.
+
+```sh
+kubescape policy test ./myrules/require-team-label
+kubescape scan ./manifests --custom-rules ./myrules/require-team-label/policy.yaml
+```
+
+For Rego, `policy test` gives a rule that reads
 [control configuration](#control-configuration) its inputs from an optional
 `data.json` in the test case directory, in the format regolibrary's fixtures
 use:
