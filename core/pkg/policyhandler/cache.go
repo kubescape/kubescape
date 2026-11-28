@@ -51,10 +51,16 @@ func NewTimedCache[T any](ttl time.Duration) *TimedCache[T] {
 // enabled reports whether the cache can hold a value at all. ttl is fixed at
 // construction, so this needs no lock.
 func (c *TimedCache[T]) enabled() bool {
+	if c == nil {
+		return false
+	}
 	return c.ttl > 0
 }
 
 func (c *TimedCache[T]) Set(value T) {
+	if c == nil {
+		return
+	}
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
@@ -72,6 +78,10 @@ func (c *TimedCache[T]) Set(value T) {
 }
 
 func (c *TimedCache[T]) Get() (T, bool) {
+	if c == nil {
+		var zero T
+		return zero, false
+	}
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 
@@ -112,6 +122,9 @@ func (c *TimedCache[T]) invalidateTask() {
 }
 
 func (c *TimedCache[T]) Stop() {
+	if c == nil {
+		return
+	}
 	if !c.stopped.CompareAndSwap(cacheStateActive, cacheStateStopping) {
 		return
 	}
@@ -120,7 +133,7 @@ func (c *TimedCache[T]) Stop() {
 }
 
 func (c *TimedCache[T]) Invalidate() {
-	if c.stopped.Load() != cacheStateActive {
+	if c == nil || c.stopped.Load() != cacheStateActive {
 		return
 	}
 	c.invalidateExternal()

@@ -58,9 +58,11 @@ func (r *policyHandlerRegistry) idleWindow() time.Duration {
 // handler for an unrelated cluster.
 func (r *policyHandlerRegistry) sweepLocked(now time.Time, window time.Duration) {
 	for name, entry := range r.entries {
-		if entry.refCount <= 0 && now.Sub(entry.lastAccess) > window {
+		if entry != nil && entry.refCount <= 0 && now.Sub(entry.lastAccess) > window {
 			delete(r.entries, name)
-			go entry.handler.Close()
+			if entry.handler != nil {
+				go entry.handler.Close()
+			}
 		}
 	}
 }

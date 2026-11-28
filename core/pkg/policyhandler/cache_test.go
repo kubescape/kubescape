@@ -136,3 +136,19 @@ func TestCache_ConcurrentAccess(t *testing.T) {
 	}
 
 }
+
+func TestTimedCache_NilReceiverSafety(t *testing.T) {
+	var c *TimedCache[string]
+	if c.enabled() {
+		t.Errorf("expected c.enabled() to be false on nil receiver")
+	}
+
+	val, ok := c.Get()
+	if ok || val != "" {
+		t.Errorf("expected Get() to return zero value and false on nil receiver, got %q, %v", val, ok)
+	}
+
+	c.Set("test")
+	c.Invalidate()
+	c.Stop()
+}
