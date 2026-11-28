@@ -1,0 +1,41 @@
+name: Contribution policy automation
+
+on:
+  issues:
+    types: [opened, reopened, labeled, unlabeled, assigned, unassigned, closed]
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, reopened, edited, synchronize, closed, labeled, unlabeled]
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+# The three-assignment limit is per repository. Preserve queued commands.
+# queue: max is supported: https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency#example-queueing-multiple-pending-runs
+concurrency:
+  group: contribution-policy
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  policy:
+    if: >-
+      github.repository_owner == 'kubescape' &&
+      vars.CONTRIBUTION_POLICY_START != '' &&
+      (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      checks: write
+    steps:
+      # Before activation, verify this pinned action commit is on kubescape/workflows main.
+      # No checkout: contributor code is never executed by this privileged job.
+      - uses: kubescape/workflows/.github/actions/contribution-policy@5e37275ff09ed76e90f7ea72f07ff84a22479d8b
+        with:
+          start: ${{ vars.CONTRIBUTION_POLICY_START }}

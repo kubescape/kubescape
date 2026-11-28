@@ -1,44 +1,19 @@
 ## Overview
-<!-- Please provide a brief overview of the changes made in this pull request. e.g. current behavior/future behavior -->
+<!-- Explain the problem, what changes, and why. -->
 
-<!-- 
-## Additional Information
+## Related issue
+<!-- After policy rollout, link an issue that has completed triage and is assigned to you.
+Use Fixes #number for a complete fix or Refs #number for partial work. -->
 
-> Any additional information that may be useful for reviewers to know 
--->
+## How to test
+<!-- Include the command or reproduction steps and the result you actually observed. -->
 
-<!--
-## How to Test
+## AI assistance
+<!-- If used, name the tools and describe how you verified their output. -->
 
-> Please provide instructions on how to test the changes made in this pull request
--->
+## Checklist
 
-<!--
-## Examples/Screenshots
-
-> Here you add related screenshots 
--->
-
-<!-- 
-## Related issues/PRs:
-
-Here you add related issues and PRs.
-If this resolved an issue, write "Resolved #<issue number>
-
-e.g. If this PR resolves issues 1 and 2, it should look as follows:
-* Resolved #1
-* Resolved #2
--->
-
-<!--
-## Checklist before requesting a review
-
-put an [x] in the box to get it checked 
-
-- [ ] My code follows the style guidelines of this project
-- [ ] I have commented on my code, particularly in hard-to-understand areas
-- [ ] I have performed a self-review of my code
-- [ ] If it is a core feature, I have added thorough tests.
-- [ ] New and existing unit tests pass locally with my changes
-
---> 
+- [ ] I understand and take responsibility for the changes.
+- [ ] I tested the changes and described the results above.
+- [ ] I added regression coverage where appropriate.
+- [ ] My commits include the required DCO sign-off.
