@@ -36,7 +36,7 @@ kubescape fix cluster.json --output-dir ./fixes
 
 ## Safe output modes
 
-Prefer non-destructive modes when reviewing:
+Prefer non-destructive modes when reviewing plain manifests (in-place, copies, or a unified diff):
 
 ```bash
 # Fixed copies (tree layout mirrors the scan roots)
@@ -44,12 +44,18 @@ kubescape fix results.json --output-dir ./fixed
 
 # Unified diff to review / git apply
 kubescape fix results.json --output-patch remediation.patch
-
-# Helm-rendered resources: Kustomize JSON 6902 overlay
-kubescape fix results.json --output-kustomize ./patches --values ./my-chart/values.yaml
 ```
 
-Helm chart sources are not edited in place; use `--output-kustomize` for machine-applicable patches. Match scan-time Helm values with `--values` / `-f`, `--set`, `--set-string`, `--set-file`, `--release-name`, `--release-namespace`.
+`--output-kustomize` writes patches only for Helm-rendered resources, and only from a report produced by scanning a Helm chart. A plain-manifest report (for example from `./manifests`) yields no overlay. Scan the chart, then pass that report:
+
+```bash
+kubescape scan ./my-chart -f json -o chart-results.json
+kubescape fix chart-results.json --output-kustomize ./patches --values ./my-chart/values.yaml
+```
+
+Helm chart sources are not edited in place; use `--output-kustomize` for machine-applicable patches on eligible Helm-rendered resources. Match scan-time Helm values with `--values` / `-f`, `--set`, `--set-string`, `--set-file`, `--release-name`, `--release-namespace`.
+
+In `--output-kustomize` mode, `fix` declines container workloads from an ordinary scan report: the report redacts container environment configuration and does not supply scan-time provenance. Non-container resources such as Services are still emitted, and each declined resource is listed with its reason.
 
 ## Narrow which controls are fixed
 

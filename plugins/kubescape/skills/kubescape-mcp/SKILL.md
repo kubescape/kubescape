@@ -41,7 +41,7 @@ Full configuration scan manifests need continuous scanning enabled on the operat
 ## What agents should do
 
 1. Prefer MCP tools when the server is connected instead of re-deriving CR queries by hand.
-2. For large scan tools (`run_framework_security_scan`, `run_rbac_security_scan`, `run_network_security_scan`, `scan_controls`, `scan_workload`, `scan_local_iac`, `scan_local_iac_controls`), follow pagination: use `scan_id` + `next_offset` with `get_scan_results` in the **same MCP session** until `next_offset` is absent. Snapshots expire (~10 minutes) and are process-local.
+2. For large scan tools (`run_framework_security_scan`, `run_rbac_security_scan`, `run_network_security_scan`, `scan_controls`, `scan_workload`, `scan_local_iac`, `scan_local_iac_controls`, `scan_manifest`), follow pagination: use `scan_id` + `next_offset` with `get_scan_results` in the **same MCP session** until `next_offset` is absent. Snapshots expire (~10 minutes) and are process-local. If a scan exceeds the retention budget, the server returns the first page and `pagination_warning` without `next_offset` — report the incomplete result and narrow the scan scope; do not treat that page as complete.
 3. With `--workspace` set, local paths must stay inside that root; `../` or escaping symlinks return `INVALID_ARGUMENT`.
 4. If operator CRs are missing, say so clearly and fall back to CLI `kubescape scan` / `kubescape fix` skills for offline manifest work.
 5. Do not invent tool names — discover tools from the live MCP session and match `docs/mcp-server.md`.

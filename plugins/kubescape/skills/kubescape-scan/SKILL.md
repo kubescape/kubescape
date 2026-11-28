@@ -76,7 +76,11 @@ Useful scope flags: `--include-namespaces` / `-e --exclude-namespaces`, `--inclu
 ```bash
 kubescape scan image nginx:1.27
 kubescape scan image nginx:1.27 redis:7 --platform linux/amd64
-kubescape scan image myregistry.io/app:tag -u "$USER" -p "$PASS"
+
+# Private registry: prefer env vars so the password is not on argv
+export KUBESCAPE_REGISTRY_USERNAME="$USER"
+export KUBESCAPE_REGISTRY_PASSWORD="$PASS"
+kubescape scan image myregistry.io/app:tag
 
 # Posture scan that also analyzes workload images
 kubescape scan --scan-images
