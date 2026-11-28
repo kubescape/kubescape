@@ -133,7 +133,7 @@ func TestGitlabAdaptor_Login(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			adaptor := NewGitlabAdaptor()
+			adaptor := NewGitlabAdaptor(WithGitlabInsecureHTTPCredentials())
 			err := adaptor.Login(context.Background(), tt.registry, tt.credentials)
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -163,6 +163,66 @@ func TestGitlabAPIWrapperRejectsOversizedResponse(t *testing.T) {
 
 	assert.Nil(t, body)
 	assert.ErrorContains(t, err, "exceeds the 8-byte limit")
+}
+
+func TestGitlabAdaptor_Login_SecurityGuards(t *testing.T) {
+	t.Run("refuses credentials over plain http without opt-in and sends no request", func(t *testing.T) {
+		var hits int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits++
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"data":{"currentUser":{"username":"testuser"}}}`))
+		}))
+		defer server.Close()
+
+		adaptor := NewGitlabAdaptor()
+		err := adaptor.Login(context.Background(), server.URL, RegistryCredentials{Token: "secret-token"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "refusing to send credentials over plain http")
+		assert.Zero(t, hits)
+	})
+
+	t.Run("rejects mismatched credentials authority before network call", func(t *testing.T) {
+		var hits int
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits++
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"data":{"currentUser":{"username":"testuser"}}}`))
+		}))
+		defer server.Close()
+
+		adaptor := NewGitlabAdaptor()
+		err := adaptor.Login(context.Background(), server.URL, RegistryCredentials{
+			Authority: "other-gitlab.example.com",
+			Token:     "secret-token",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not match registry host")
+		assert.Zero(t, hits)
+	})
+
+	t.Run("refuses uppercase HTTP scheme without opt-in", func(t *testing.T) {
+		adaptor := NewGitlabAdaptor()
+		err := adaptor.Login(context.Background(), "HTTP://127.0.0.1:8080", RegistryCredentials{Token: "secret-token"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "refusing to send credentials over plain http")
+	})
+
+	t.Run("accepts matching credentials authority with explicit http opt-in", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"data":{"currentUser":{"username":"testuser"}}}`))
+		}))
+		defer server.Close()
+
+		hostOnly := strings.TrimPrefix(server.URL, "http://")
+		adaptor := NewGitlabAdaptor(WithGitlabInsecureHTTPCredentials())
+		err := adaptor.Login(context.Background(), server.URL, RegistryCredentials{
+			Authority: "https://" + strings.ToUpper(hostOnly) + "/",
+			Token:     "secret-token",
+		})
+		require.NoError(t, err)
+	})
 }
 
 func TestGitlabAdaptor_GetImagesScanStatus(t *testing.T) {

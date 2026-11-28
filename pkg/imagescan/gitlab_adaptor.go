@@ -68,15 +68,39 @@ func (w *gitlabAPIWrapper) DoGraphQL(ctx context.Context, query string, variable
 	return bodyBytes, nil
 }
 
+// GitlabAdaptorConfig configures optional behavior for GitlabAdaptor.
+type GitlabAdaptorConfig struct {
+	// AllowInsecureHTTPCredentials allows transmitting credentials over plain HTTP.
+	// This should only be used in local test environments.
+	AllowInsecureHTTPCredentials bool
+}
+
+// GitlabAdaptorOption configures optional settings on GitlabAdaptor.
+type GitlabAdaptorOption func(*GitlabAdaptorConfig)
+
+// WithGitlabInsecureHTTPCredentials allows transmitting credentials over plain HTTP (e.g. for local test environments).
+func WithGitlabInsecureHTTPCredentials() GitlabAdaptorOption {
+	return func(c *GitlabAdaptorConfig) {
+		c.AllowInsecureHTTPCredentials = true
+	}
+}
+
 // GitlabAdaptor implements IContainerImageVulnerabilityAdaptor for GitLab Container Registry.
 type GitlabAdaptor struct {
+	config GitlabAdaptorConfig
 	client GitlabAPI
 	mu     sync.RWMutex
 }
 
 // NewGitlabAdaptor creates a new GitLab adaptor instance.
-func NewGitlabAdaptor() *GitlabAdaptor {
-	return &GitlabAdaptor{}
+func NewGitlabAdaptor(opts ...GitlabAdaptorOption) *GitlabAdaptor {
+	var cfg GitlabAdaptorConfig
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+	return &GitlabAdaptor{config: cfg}
 }
 
 // Login authenticates with GitLab GraphQL API.
@@ -87,22 +111,24 @@ func (a *GitlabAdaptor) Login(ctx context.Context, registry string, credentials 
 	// Invalidate any previous session immediately so failed re-login does not leave stale authenticated state
 	a.client = nil
 
-	if credentials.Token == "" {
+	trimmedCreds := credentials.Trimmed()
+	if trimmedCreds.Token == "" {
 		return fmt.Errorf("gitlab adaptor requires a personal or project access token; username/password is not supported for the GraphQL API")
 	}
 
-	registry = strings.TrimRight(registry, "/")
-	host := strings.TrimPrefix(strings.TrimPrefix(registry, "https://"), "http://")
-	scheme := "https"
-	if strings.HasPrefix(registry, "http://") {
-		scheme = "http"
+	scheme, host, err := parseRegistryHostAndScheme(registry)
+	if err != nil {
+		return err
+	}
+	if err := validateRegistryLoginSecurity(scheme, host, trimmedCreds, a.config.AllowInsecureHTTPCredentials, "WithGitlabInsecureHTTPCredentials"); err != nil {
+		return err
 	}
 
 	baseURL := fmt.Sprintf("%s://%s", scheme, host)
 
 	wrapper := &gitlabAPIWrapper{
 		baseURL:         baseURL,
-		token:           credentials.Token,
+		token:           trimmedCreds.Token,
 		httpClient:      &http.Client{Timeout: 15 * time.Second},
 		maxResponseSize: maxRegistryAPIResponseBytes,
 	}

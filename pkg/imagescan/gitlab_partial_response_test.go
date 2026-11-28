@@ -357,7 +357,7 @@ func TestGitLabPartialResponse_HTTPPipelineKeepsPartialVulnerabilityData(t *test
 			address, err := url.Parse(server.URL)
 			require.NoError(t, err)
 			registry = address.Host
-			a := NewGitlabAdaptor()
+			a := NewGitlabAdaptor(WithGitlabInsecureHTTPCredentials())
 			credentials := RegistryCredentials{}
 			if kind == "token" {
 				credentials.Token = t.Name()

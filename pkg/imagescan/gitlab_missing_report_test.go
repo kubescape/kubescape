@@ -120,7 +120,7 @@ func TestGitLabMissingConnectionThroughHTTP(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	adaptor := NewGitlabAdaptor()
+	adaptor := NewGitlabAdaptor(WithGitlabInsecureHTTPCredentials())
 	require.NoError(t, adaptor.Login(context.Background(), server.URL, RegistryCredentials{Token: "report-token"}))
 	images := []ContainerImageIdentifier{partialGitLabImage()}
 	statuses, err := adaptor.GetImagesScanStatus(context.Background(), images)

@@ -352,12 +352,12 @@ func TestRegistryRedirect_LoginDoesNotAuthenticateAtForeignOrigin(t *testing.T) 
 			defer source.Close()
 			credentials := RegistryCredentials{Token: "login-test-only"}
 			if provider == "harbor" {
-				adaptor := NewHarborAdaptor()
+				adaptor := NewHarborAdaptor(WithHarborInsecureHTTPCredentials())
 				err := adaptor.Login(context.Background(), source.URL, credentials)
 				require.ErrorContains(t, err, "credentials cannot leave origin")
 				require.Nil(t, adaptor.client)
 			} else {
-				adaptor := NewGitlabAdaptor()
+				adaptor := NewGitlabAdaptor(WithGitlabInsecureHTTPCredentials())
 				err := adaptor.Login(context.Background(), source.URL, credentials)
 				require.ErrorContains(t, err, "credentials cannot leave origin")
 				require.Nil(t, adaptor.client)

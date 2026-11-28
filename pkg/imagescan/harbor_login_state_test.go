@@ -78,7 +78,7 @@ func TestHarborFailedReloginInvalidatesSession(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			adaptor := NewHarborAdaptor()
+			adaptor := NewHarborAdaptor(WithHarborInsecureHTTPCredentials())
 
 			// Initial login succeeds
 			require.NoError(t, adaptor.Login(ctx, goodServer.URL, RegistryCredentials{Username: "user", Password: "pwd"}))
