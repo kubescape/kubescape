@@ -46,8 +46,8 @@ metadata:
 	dir := filepath.Join(root, "require-team-label")
 	input := filepath.Join(dir, "test", "mixed", "input")
 	require.NoError(t, os.MkdirAll(input, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "policy.yaml"), []byte(policy), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(input, "objects.yaml"), []byte(manifests), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "policy.yaml"), []byte(policy), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(input, "objects.yaml"), []byte(manifests), 0600))
 
 	rules, err := DiscoverPath(root)
 	require.NoError(t, err)
