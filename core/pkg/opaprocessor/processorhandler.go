@@ -153,6 +153,7 @@ type OPAProcessor struct {
 	cleanedResources        map[string]workloadinterface.IMetadata
 	onBatchProcessed        func(batch *cautils.ResourceBatch)
 	onWholeClusterProcessed func(projectedBatch *cautils.ResourceBatch)
+	finalized               bool
 }
 
 // NewOPAProcessor snapshots len(sessionObj.AllResources) at construction for
@@ -295,31 +296,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 		logger.L().Ctx(ctx).Warning(processErr.Error())
 	}
 
-	// rebuild ScanCoverage so controls that timed out or errored during
-	// evaluation (recorded by markControlTimedOut and markControlErrored) are
-	// reflected in NotEvaluatedControls alongside any collection-phase failures
-	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.notEvaluatedReasons(), opap.PartialGVRFailures, opap.PolicyDegradations, opap.SkippedManifests, opap.inScopeControlIDs())
-	opap.appendSkippedWholeClusterControlsToCoverage()
-	opap.ScanCoverage.ComputeCoverageScore(len(opap.Report.SummaryDetails.Controls))
-
-	// edit results
-	opap.updateResults(ctx)
-
-	opap.markNotEvaluatedControlsSkipped()
-	opap.ScanCoverage.VacuousFrameworks = cautils.DetectVacuousFrameworks(opap.Report.SummaryDetails.Frameworks)
-	opap.ScanCoverage.UnexaminedKinds = opap.UnexaminedKinds
-
-	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
-	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
-		logger.L().Ctx(ctx).Warning("failed to calculate score", helpers.Error(err))
-	}
-
-	// BuildNamespaceSummaries relies on ControlSummary.ComplianceScore for
-	// controls it has no resource for in a given namespace, so it must run
-	// after scorewrapper.Calculate has populated that field.
-	opap.NamespaceSummaries = cautils.BuildNamespaceSummariesFromCatalog(opap.Report.SummaryDetails.Controls, opap.GetCatalog())
-
-	opap.reweightComplianceScores()
+	opap.finalizeResults(ctx)
 
 	return processErr
 }
@@ -538,6 +515,18 @@ done:
 		opap.onWholeClusterProcessed(projectedBatch)
 	}
 
+	opap.finalizeResults(ctx)
+	return nil
+}
+
+// finalizeResults runs after evaluation workers have stopped. The processor is
+// single-use: once finalized, no further evaluation may mutate its session.
+// Keeping this operation idempotent avoids repeating destructive resource
+// cleanup or rebuilding summaries from already aggregated state.
+func (opap *OPAProcessor) finalizeResults(ctx context.Context) {
+	if opap.finalized {
+		return
+	}
 	// Rebuild scan coverage
 	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.notEvaluatedReasons(), opap.PartialGVRFailures, opap.PolicyDegradations, opap.SkippedManifests, opap.inScopeControlIDs())
 	opap.appendSkippedWholeClusterControlsToCoverage()
@@ -560,8 +549,7 @@ done:
 	opap.NamespaceSummaries = cautils.BuildNamespaceSummariesFromCatalog(opap.Report.SummaryDetails.Controls, opap.GetCatalog())
 
 	opap.reweightComplianceScores()
-
-	return nil
+	opap.finalized = true
 }
 
 // processScope processes all controls for a single evaluation scope.
