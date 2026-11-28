@@ -3,9 +3,11 @@ package cautils
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -107,5 +109,179 @@ func TestHelmValueOptions_MergeValues_BoundsAndNonRegularInputs(t *testing.T) {
 		assert.Equal(t, "prod", app["env"])
 		assert.Equal(t, "v1", app["tag"])
 		assert.Equal(t, "secret-value", app["config"])
+	})
+}
+
+func injectURLCredentials(rawURL, user, password string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	if password == "" {
+		u.User = url.User(user)
+	} else {
+		u.User = url.UserPassword(user, password)
+	}
+	return u.String()
+}
+
+func TestHelmValueOptions_MergeValues_RedactsURLCredentialsAndBlocksUnsafeRedirects(t *testing.T) {
+	const (
+		secretUser  = "ci-secret-user"
+		secretPass  = "super-secret-pass-123"
+		bearerToken = "glpat-bare-token-456"
+	)
+
+	assertRedacted := func(t *testing.T, err error) {
+		t.Helper()
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), secretUser)
+		assert.NotContains(t, err.Error(), secretPass)
+		assert.NotContains(t, err.Error(), bearerToken)
+	}
+
+	t.Run("redacts credentials from HTTP error status", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+		}))
+		defer ts.Close()
+
+		credURL := injectURLCredentials(ts.URL+"/values.yaml", secretUser, secretPass)
+		_, err := (HelmValueOptions{ValueFiles: []string{credURL}}).MergeValues()
+		assertRedacted(t, err)
+		assert.Contains(t, err.Error(), "/values.yaml")
+	})
+
+	t.Run("redacts credentials from oversized HTTP response error", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "32")
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("note: " + strings.Repeat("x", 128) + "\n"))
+		}))
+		defer ts.Close()
+
+		credURL := injectURLCredentials(ts.URL+"/large.yaml", secretUser, secretPass)
+		_, err := (HelmValueOptions{ValueFiles: []string{credURL}}).MergeValues()
+		assertRedacted(t, err)
+		assert.ErrorIs(t, err, ErrHelmTemplateTooLarge)
+	})
+
+	t.Run("redacts credentials from invalid YAML parse error", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(":\n\t[invalid"))
+		}))
+		defer ts.Close()
+
+		credURL := injectURLCredentials(ts.URL+"/bad.yaml", secretUser, secretPass)
+		_, err := (HelmValueOptions{ValueFiles: []string{credURL}}).MergeValues()
+		assertRedacted(t, err)
+		assert.Contains(t, err.Error(), "failed to parse")
+	})
+
+	t.Run("redacts credentials and bare username tokens from transport errors in -f and --set-file", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			url  string
+		}{
+			{name: "user and password", url: "http://" + secretUser + ":" + secretPass + "@127.0.0.1:0/values.yaml"},
+			{name: "bare token as username", url: "http://" + bearerToken + "@127.0.0.1:0/values.yaml"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := (HelmValueOptions{ValueFiles: []string{tc.url}}).MergeValues()
+				assertRedacted(t, err)
+
+				_, err = (HelmValueOptions{FileValues: []string{"cfg=" + tc.url}}).MergeValues()
+				assertRedacted(t, err)
+			})
+		}
+	})
+
+	t.Run("redacts credentials from unsupported scheme errors", func(t *testing.T) {
+		_, err := (HelmValueOptions{ValueFiles: []string{"ftp://" + secretUser + ":" + secretPass + "@charts.example.com/values.yaml"}}).MergeValues()
+		assertRedacted(t, err)
+		assert.Contains(t, err.Error(), "unsupported Helm values source scheme")
+	})
+
+	t.Run("blocks https to http scheme downgrade redirect", func(t *testing.T) {
+		var targetHits atomic.Int32
+		httpTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			targetHits.Add(1)
+			_, _ = w.Write([]byte("downgraded: true\n"))
+		}))
+		defer httpTarget.Close()
+
+		httpsSource := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, httpTarget.URL+"/values.yaml", http.StatusFound)
+		}))
+		defer httpsSource.Close()
+
+		_, err := mergeBoundedHelmValuesWithClient(HelmValueOptions{ValueFiles: []string{httpsSource.URL + "/values.yaml"}}, nil, httpsSource.Client())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "scheme downgrade from https")
+		assert.Zero(t, targetHits.Load())
+	})
+
+	t.Run("blocks cross-origin redirect when URL carries credentials", func(t *testing.T) {
+		var targetHits atomic.Int32
+		target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			targetHits.Add(1)
+			_, _ = w.Write([]byte("leaked: true\n"))
+		}))
+		defer target.Close()
+
+		source := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, target.URL+"/values.yaml", http.StatusTemporaryRedirect)
+		}))
+		defer source.Close()
+
+		credURL := injectURLCredentials(source.URL+"/values.yaml", secretUser, secretPass)
+		_, err := mergeBoundedHelmValuesWithClient(HelmValueOptions{ValueFiles: []string{credURL}}, nil, source.Client())
+		assertRedacted(t, err)
+		assert.Contains(t, err.Error(), "credentials cannot leave origin")
+		assert.Zero(t, targetHits.Load())
+	})
+
+	t.Run("allows same-origin https redirect and unauthenticated cross-origin http redirect", func(t *testing.T) {
+		t.Setenv(MaxFileSizeEnvVar, "4096")
+		source := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/same" {
+				http.Redirect(w, r, "/final", http.StatusFound)
+				return
+			}
+			_, _ = w.Write([]byte("app:\n  tier: core\n"))
+		}))
+		defer source.Close()
+
+		credSameOrigin := injectURLCredentials(source.URL+"/same", secretUser, secretPass)
+		merged, err := mergeBoundedHelmValuesWithClient(HelmValueOptions{ValueFiles: []string{credSameOrigin}}, nil, source.Client())
+		require.NoError(t, err)
+		assert.Equal(t, "core", merged["app"].(map[string]any)["tier"])
+
+		publicTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("app:\n  tier: edge\n"))
+		}))
+		defer publicTarget.Close()
+
+		publicSource := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, publicTarget.URL+"/values.yaml", http.StatusFound)
+		}))
+		defer publicSource.Close()
+
+		merged, err = (HelmValueOptions{ValueFiles: []string{publicSource.URL}}).MergeValues()
+		require.NoError(t, err)
+		assert.Equal(t, "edge", merged["app"].(map[string]any)["tier"])
+	})
+
+	t.Run("redacts malformed URLs and blocks non-HTTP redirect schemes", func(t *testing.T) {
+		assert.Equal(t, "https://bad host/values.yaml", sanitizeHelmValueSource("https://"+secretUser+":"+secretPass+"@bad host/values.yaml"))
+		assert.Equal(t, `C:\charts\values.yaml`, sanitizeHelmValueSource(`C:\charts\values.yaml`))
+
+		source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "file:///etc/passwd", http.StatusFound)
+		}))
+		defer source.Close()
+
+		_, err := (HelmValueOptions{ValueFiles: []string{source.URL}}).MergeValues()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported scheme")
 	})
 }

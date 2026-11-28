@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,7 +16,7 @@ import (
 const helmValuesHTTPTimeout = 15 * time.Second
 
 func mergeBoundedHelmValues(o HelmValueOptions, stdin io.Reader) (map[string]any, error) {
-	return mergeBoundedHelmValuesWithClient(o, stdin, &http.Client{Timeout: helmValuesHTTPTimeout})
+	return mergeBoundedHelmValuesWithClient(o, stdin, helmValuesHTTPClient(nil))
 }
 
 func mergeBoundedHelmValuesWithClient(o HelmValueOptions, stdin io.Reader, client *http.Client) (map[string]any, error) {
@@ -28,7 +29,7 @@ func mergeBoundedHelmValuesWithClient(o HelmValueOptions, stdin io.Reader, clien
 		}
 		var currentMap map[string]any
 		if err := sigsyaml.Unmarshal(raw, &currentMap); err != nil {
-			return nil, fmt.Errorf("failed to parse %s: %w", filePath, err)
+			return nil, fmt.Errorf("failed to parse %s: %w", sanitizeHelmValueSource(filePath), err)
 		}
 		base = mergeMaps(base, currentMap)
 	}
@@ -73,14 +74,18 @@ func readBoundedHelmValueSource(source string, stdin io.Reader, client *http.Cli
 
 	u, err := url.Parse(source)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeHelmURLError(err)
 	}
 	switch strings.ToLower(u.Scheme) {
 	case "http", "https":
 		return fetchBoundedHelmValueURL(source, client, limit)
 	default:
-		return nil, fmt.Errorf("unsupported Helm values source scheme %q in %q", u.Scheme, source)
+		return nil, fmt.Errorf("unsupported Helm values source scheme %q in %q", u.Scheme, sanitizeHelmValueSource(source))
 	}
+}
+
+func isWindowsDriveScheme(scheme string) bool {
+	return len(scheme) == 1 && ((scheme[0] >= 'a' && scheme[0] <= 'z') || (scheme[0] >= 'A' && scheme[0] <= 'Z'))
 }
 
 func isLocalHelmValuePath(source string) bool {
@@ -92,38 +97,143 @@ func isLocalHelmValuePath(source string) bool {
 		return true
 	}
 	// Treat single-letter Windows drive prefixes (e.g. C:\...) as local file paths.
-	if len(u.Scheme) == 1 && ((u.Scheme[0] >= 'a' && u.Scheme[0] <= 'z') || (u.Scheme[0] >= 'A' && u.Scheme[0] <= 'Z')) {
-		return true
-	}
-	return false
+	return isWindowsDriveScheme(u.Scheme)
 }
 
 func readBoundedHelmReader(r io.Reader, name string, limit int64) ([]byte, error) {
+	safeName := sanitizeHelmValueSource(name)
 	if r == nil {
-		return nil, fmt.Errorf("nil reader for %s", name)
+		return nil, fmt.Errorf("nil reader for %s", safeName)
 	}
 	data, err := io.ReadAll(io.LimitReader(r, limit+1))
 	if err != nil {
 		return nil, err
 	}
 	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, name, limit)
+		return nil, fmt.Errorf("%w: %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, safeName, limit)
 	}
 	return data, nil
 }
 
 func fetchBoundedHelmValueURL(rawURL string, client *http.Client, limit int64) ([]byte, error) {
-	if client == nil {
-		client = &http.Client{Timeout: helmValuesHTTPTimeout}
-	}
-	resp, err := client.Get(rawURL)
+	safeURL := sanitizeHelmValueSource(rawURL)
+	resp, err := helmValuesHTTPClient(client).Get(rawURL)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeHelmURLError(err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("failed to fetch %s: HTTP %d %s", rawURL, resp.StatusCode, resp.Status)
+		return nil, fmt.Errorf("failed to fetch %s: HTTP %d %s", safeURL, resp.StatusCode, resp.Status)
 	}
-	return readBoundedHelmReader(resp.Body, rawURL, limit)
+	return readBoundedHelmReader(resp.Body, safeURL, limit)
+}
+
+func helmValuesHTTPClient(base *http.Client) *http.Client {
+	client := http.Client{Timeout: helmValuesHTTPTimeout}
+	if base != nil {
+		client = *base
+	}
+	callerPolicy := client.CheckRedirect
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		history := make([]*http.Request, len(via))
+		for i, previous := range via {
+			history[i] = previous.Clone(previous.Context())
+		}
+		validate := func() error {
+			if req.URL == nil {
+				return errors.New("refusing redirect: destination URL is missing")
+			}
+			if !strings.EqualFold(req.URL.Scheme, "http") && !strings.EqualFold(req.URL.Scheme, "https") {
+				return fmt.Errorf("refusing redirect to unsupported scheme %q", req.URL.Scheme)
+			}
+			for _, previous := range history {
+				if previous == nil || previous.URL == nil {
+					continue
+				}
+				if strings.EqualFold(previous.URL.Scheme, "https") && !strings.EqualFold(req.URL.Scheme, "https") {
+					return fmt.Errorf("refusing redirect to %s: scheme downgrade from https", sanitizeHelmValueURL(req.URL))
+				}
+				if (previous.Header.Get("Authorization") != "" || previous.URL.User != nil) &&
+					!sameHelmHTTPOrigin(previous.URL, req.URL) {
+					return fmt.Errorf("refusing redirect: credentials cannot leave origin %s for %s", previous.URL.Host, req.URL.Host)
+				}
+			}
+			return nil
+		}
+		if err := validate(); err != nil {
+			return err
+		}
+		if callerPolicy != nil {
+			if err := callerPolicy(req, via); err != nil {
+				return err
+			}
+			return validate()
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+	return &client
+}
+
+func sameHelmHTTPOrigin(a, b *url.URL) bool {
+	port := func(u *url.URL) string {
+		if u.Port() != "" {
+			return u.Port()
+		}
+		if strings.EqualFold(u.Scheme, "https") {
+			return "443"
+		}
+		return "80"
+	}
+	return strings.EqualFold(a.Scheme, b.Scheme) &&
+		strings.EqualFold(a.Hostname(), b.Hostname()) && port(a) == port(b)
+}
+
+func sanitizeHelmValueURL(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	cloned := *u
+	cloned.User = nil
+	return cloned.String()
+}
+
+func sanitizeHelmValueSource(source string) string {
+	if source == "" || strings.TrimSpace(source) == "-" {
+		return source
+	}
+	if u, err := url.Parse(source); err == nil {
+		if u.Scheme == "" || isWindowsDriveScheme(u.Scheme) {
+			return source
+		}
+		return sanitizeHelmValueURL(u)
+	}
+	if schemeIdx := strings.Index(source, "://"); schemeIdx >= 0 {
+		rest := source[schemeIdx+3:]
+		authEnd := len(rest)
+		if idx := strings.IndexAny(rest, "/?#"); idx >= 0 {
+			authEnd = idx
+		}
+		if atIdx := strings.Index(rest[:authEnd], "@"); atIdx >= 0 {
+			return source[:schemeIdx+3] + rest[atIdx+1:]
+		}
+	}
+	return source
+}
+
+func sanitizeHelmURLError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		sanitized := *urlErr
+		sanitized.URL = sanitizeHelmValueSource(urlErr.URL)
+		sanitized.Err = sanitizeHelmURLError(urlErr.Err)
+		return &sanitized
+	}
+	return err
 }
