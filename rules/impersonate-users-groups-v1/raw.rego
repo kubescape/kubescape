@@ -16,9 +16,7 @@ deny contains msga if {
 	resources := core_identity_resources(rolebinding)
 	rule := role.rules[p]
 
-	# a rule restricted to named identities cannot be used to impersonate an arbitrary identity
-	# (an omitted or explicitly empty resourceNames list is unrestricted)
-	count(resource_names(rule)) == 0
+	names_an_identity(rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -67,9 +65,7 @@ deny contains msga if {
 
 	rule := role.rules[p]
 
-	# a rule restricted to named identities cannot be used to impersonate an arbitrary identity
-	# (an omitted or explicitly empty resourceNames list is unrestricted)
-	count(resource_names(rule)) == 0
+	names_an_identity(rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -98,6 +94,21 @@ deny contains msga if {
 			"externalObjects": subjectVector,
 		},
 	}
+}
+
+# Impersonation is authorized with the name of the identity being taken on: the
+# user or group name, the service account name, the uid, or the value of a user
+# extra. An entry narrowed with resourceNames still lets the subject act as each
+# identity it names, and naming one powerful identity is enough, for example
+# resourceNames: ["system:masters"] on groups, whose members bypass RBAC. So a
+# narrowed entry is reported too. resourceNames is matched literally, so "" names
+# no identity and "*" is not a wildcard. An entry narrowed to those two alone is
+# treated as naming none, as the other rules here do.
+names_an_identity(rule) if count(resource_names(rule)) == 0
+
+names_an_identity(rule) if {
+	some name in resource_names(rule)
+	not name in {"", "*"}
 }
 
 # The authorizer only visits RoleBindings for a request that has a namespace.

@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: break-glass-impersonator
+rules:
+- apiGroups: [""]
+  resources: ["users", "groups"]
+  resourceNames: ["ops-admin", "system:masters"]
+  verbs: ["impersonate"]

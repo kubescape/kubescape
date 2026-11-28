@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: user-impersonator
+rules:
+- apiGroups: [""]
+  resources: ["users"]
+  resourceNames: ["admin@example.com"]
+  verbs: ["impersonate"]
