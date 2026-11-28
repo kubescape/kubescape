@@ -36,7 +36,7 @@ kubescape fix cluster.json --output-dir ./fixes
 
 ## Safe output modes
 
-Prefer non-destructive modes when reviewing plain manifests (in-place, copies, or a unified diff):
+Prefer non-destructive modes when reviewing without changing originals: fixed copies or a unified diff. In-place fix rewrites the original manifests — do not use it when the user asked for review without changes.
 
 ```bash
 # Fixed copies (tree layout mirrors the scan roots)
@@ -72,7 +72,7 @@ Matching is case-insensitive on control ID; `--skip-controls` wins if both lists
 kubescape fix results.json --no-confirm --verify
 ```
 
-Re-scans after applying to check that selected remediations cleared their findings.
+Re-scans after applying to check that selected remediations cleared their findings. The rescan uses the controls configuration the report records (or `--controls-config`) and defaults for settings the report does not record (exceptions, controls version, policy sources). If the original scan used non-default values for those, the rescan can evaluate different settings — scan again with the original settings when they matter.
 
 ## Important behaviors
 
