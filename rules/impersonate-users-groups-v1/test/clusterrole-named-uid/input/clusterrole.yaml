@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: uid-impersonator
+rules:
+- apiGroups: ["authentication.k8s.io"]
+  resources: ["uids"]
+  resourceNames: ["06f6ce97-e2c5-4ab8-7ba5-7654dd08d52b"]
+  verbs: ["impersonate"]
