@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jwalton/gchalk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -116,9 +117,13 @@ func TestColorBuilder(t *testing.T) {
 		assert.Equal(t, "v4.0.0", b.Green("v4.0.0"))
 	})
 
-	t.Run("colored builder returns usable builder", func(t *testing.T) {
+	t.Run("colored builder emits green ANSI text", func(t *testing.T) {
+		previousLevel := gchalk.GetLevel()
+		gchalk.SetLevel(gchalk.LevelBasic)
+		t.Cleanup(func() { gchalk.SetLevel(previousLevel) })
+
 		b := colorBuilder(true)
 		require.NotNil(t, b)
-		assert.Contains(t, b.Green("v4.0.0"), "v4.0.0")
+		assert.Equal(t, "\x1b[32mv4.0.0\x1b[39m", b.Green("v4.0.0"))
 	})
 }
