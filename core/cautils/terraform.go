@@ -127,6 +127,16 @@ type TerraformDirectory struct {
 	// sourceLocations holds the resource block location of each workload of
 	// the last GetWorkloads call, by workload path.
 	sourceLocations map[string]SourceLocation
+	// moduleInputs, when set, are the values a module block passes to this
+	// directory. They take the place of its tfvars files, which Terraform
+	// reads for the root module only.
+	moduleInputs *terraformModuleInputs
+	// moduleCalls are the module blocks with a local source found by the
+	// last GetWorkloads call.
+	moduleCalls []terraformModuleCall
+	// indexOffsets continue the workload index of each file across renders
+	// of the same module, so every call keeps its own workload paths.
+	indexOffsets map[string]int
 }
 
 func NewTerraformDirectory(path string, workspaceOpt ...string) *TerraformDirectory {
@@ -139,10 +149,12 @@ func NewTerraformDirectory(path string, workspaceOpt ...string) *TerraformDirect
 
 // GetWorkloads extracts embedded K8s manifests from resource "kubernetes_manifest" blocks.
 // Literals, built-in functions, locals, and var.x references resolved from a
-// same-module default or an auto-loaded tfvars file are evaluated — deliberately
-// not a full Terraform evaluator (see LoadResourcesFromTerraform doc).
+// same-module default, an auto-loaded tfvars file or, for a module rendered
+// through a local module call, the values the call passes are evaluated —
+// deliberately not a full Terraform evaluator (see LoadResourcesFromTerraform doc).
 func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadinterface.IMetadata, []error) {
 	td.sourceLocations = nil
+	td.moduleCalls = nil
 	path = filepath.Clean(path)
 	entries, err := os.ReadDir(path)
 	if err != nil {
@@ -195,12 +207,15 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 		collectVariableDefaults(file.Body, varDefaults, declared)
 	}
 	applyTerraformVariableOverrides(merged.variables, varDefaults, declared)
-	if len(files) > 0 {
+	if td.moduleInputs != nil {
+		errs = append(errs, applyTerraformModuleInputs(*td.moduleInputs, declared, varDefaults)...)
+	} else if len(files) > 0 {
 		errs = append(errs, applyTerraformVarFiles(parser, path, td.workspaceDir, declared, varDefaults)...)
 	}
 	locals, localExpressions := resolveLocals(files, varDefaults)
 	evalCtx := newTerraformEvalContext(varDefaults, locals)
 	references := terraformReferenceChecker{localExpressions: localExpressions, moduleCtx: evalCtx, declaredVariables: declared, sourceSizes: merged.sourceSizes}
+	td.moduleCalls = collectTerraformModuleCalls(files, path, evalCtx, references)
 
 	workloads := map[string][]workloadinterface.IMetadata{}
 	for i, file := range files {
@@ -218,8 +233,12 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 		}
 
 		src := parsedPaths[i]
+		offset := td.indexOffsets[src]
+		if td.indexOffsets != nil {
+			td.indexOffsets[src] += len(manifests)
+		}
 		for j, manifest := range manifests {
-			workloadPath := terraformWorkloadPath(src, j)
+			workloadPath := terraformWorkloadPath(src, offset+j)
 			td.recordSourceLocation(workloadPath, manifest.source)
 			data, err := json.Marshal(manifest.object)
 			if err != nil {

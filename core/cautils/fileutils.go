@@ -1149,6 +1149,8 @@ func LoadResourcesFromNestedKustomizeDirectories(ctx context.Context, basePath s
 // (Terraform files are not self-contained the way a chart or kustomization is), but a directory
 // input is discovered recursively: every directory under basePath that contains .tf files is
 // scanned, so a module nested below the scan root (e.g. modules/<name>/) is not silently skipped.
+// A directory that another one calls through a module block with a local source is scanned
+// through each call, with the values the call passes, as Terraform would create it.
 func LoadResourcesFromTerraform(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, error) {
 	return LoadResourcesFromTerraformFiltered(ctx, basePath, nil)
 }
@@ -1207,63 +1209,18 @@ func LoadResourcesFromTerraformWithLocations(ctx context.Context, basePath strin
 		return nil, nil, nil, nil
 	}
 
-	explicitTerraformDir := isTerraformDirectory(basePath)
-
-	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
-	var skips []SkippedManifest
-	for _, dir := range dirs {
-		if workspaceDir != "" && !pathcontainment.IsPathContained(workspaceDir, dir) {
-			if explicitTerraformDir && dir == basePath {
-				return nil, skips, nil, fmt.Errorf("%w: Terraform directory %q outside workspace root", pathcontainment.ErrPathEscapesWorkspace, dir)
-			}
-			logger.L().Ctx(ctx).Warning("Skipping Terraform directory outside workspace root", helpers.String("path", dir))
-			continue
-		}
-		td := NewTerraformDirectory(dir, workspaceDir)
-		wls, dirErrs := td.GetWorkloads(dir)
-		maps.Copy(locations, td.SourceLocations())
-		if resources, ok := onlyTerraformResourceErrors(dirErrs); ok {
-			// Only the resources that use values the scan can't resolve were
-			// left out; the rest of the configuration is scanned.
-			logTerraformUnresolvedResources(ctx, dir, resources, dirErrs)
-			skips = append(skips, terraformUnresolvedResourcesSkip(dir, resources))
-			maps.Copy(sourceToWorkloads, wls)
-			continue
-		}
-		if len(dirErrs) > 0 {
-			// Override blocks with no primary definition are skipped without
-			// affecting the rest of the configuration, so the workloads it
-			// defines are kept. The configuration error is still reported.
-			// Resources left out for unresolved values may come with them; they
-			// are reported as well instead of dropping the whole configuration.
-			resources, resourceErrs, others := splitTerraformResourceErrors(dirErrs)
-			overridesOnly := onlyTerraformMissingOverrideTargets(others)
-			if explicitTerraformDir && dir == basePath {
-				if overridesOnly {
-					maps.Copy(sourceToWorkloads, wls)
-				}
-				return sourceToWorkloads, skips, locations, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(dirErrs...))
-			}
-			if overridesOnly {
-				logger.L().Ctx(ctx).Warning("Nested Terraform configuration has override blocks that could not be applied; scanning the resources it defines without them",
-					helpers.String("path", dir), helpers.Error(errors.Join(others...)))
-				skips = append(skips, SkippedManifest{Path: dir, Reason: "some Terraform override blocks could not be applied; see scan logs for details"})
-				if len(resources) > 0 {
-					logTerraformUnresolvedResources(ctx, dir, resources, resourceErrs)
-					skips = append(skips, terraformUnresolvedResourcesSkip(dir, resources))
-				}
-				maps.Copy(sourceToWorkloads, wls)
-				continue
-			}
-			logger.L().Ctx(ctx).Warning("Skipping nested Terraform configuration that failed to render", helpers.String("path", dir), helpers.Error(errors.Join(dirErrs...)))
-			// HCL diagnostics contain source filenames and resource labels that
-			// report anonymization cannot safely identify; keep them in logs.
-			skips = append(skips, SkippedManifest{Path: dir, Reason: "failed to render Terraform configuration; see scan logs for details"})
-			continue
-		}
-		maps.Copy(sourceToWorkloads, wls)
+	root := ""
+	if isTerraformDirectory(basePath) {
+		root = basePath
 	}
-	return sourceToWorkloads, skips, locations, nil
+	load := newTerraformModuleLoad(ctx, dirs, root, workspaceDir, locations)
+	if err := load.run(dirs); err != nil {
+		if errors.Is(err, pathcontainment.ErrPathEscapesWorkspace) {
+			return nil, load.skips, nil, err
+		}
+		return load.workloads, load.skips, locations, err
+	}
+	return load.workloads, load.skips, locations, nil
 }
 
 // LoadResourcesFromFiles globs input for plain YAML/JSON manifests and loads them. renderedCharts
