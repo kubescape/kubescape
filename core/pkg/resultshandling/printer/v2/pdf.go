@@ -36,6 +36,9 @@ func NewPdfPrinter() *PdfPrinter {
 }
 
 func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if pp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.PdfFormat, outputFile, pdfOutputFile)
 	if !explicitOutput {
 		// Binary PDF must never fall back to stdout: it corrupts TTYs and
@@ -56,6 +59,9 @@ func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) error {
 }
 
 func (pp *PdfPrinter) Score(score float32) {
+	if pp == nil {
+		return
+	}
 	// Handle invalid scores
 	if score > 100 {
 		score = 100
@@ -74,15 +80,18 @@ func (pp *PdfPrinter) PrintNextSteps() {
 // A combined scan has both posture results and image CVEs. Both sections go
 // into one PDF. Image-only scans keep the image-scan header.
 func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if pp == nil {
+		return fmt.Errorf("failed to write PDF results: printer is nil")
+	}
+	if pp.writer == nil {
+		return fmt.Errorf("failed to write PDF results: output writer is nil")
+	}
 	if err := printer.PrepareOutput(pp.writer); err != nil {
 		return err
 	}
 	hasPosture := opaSessionObj != nil && opaSessionObj.Report != nil
 	if !hasPosture && len(imageScanData) == 0 {
 		return fmt.Errorf("failed to print results, missing data")
-	}
-	if pp.writer == nil {
-		return fmt.Errorf("failed to write PDF results: output writer is nil")
 	}
 	var outBuff []byte
 	var err error
@@ -302,7 +311,7 @@ func getSeverityColor(severity string) *props.Color {
 
 // CloseWriter closes the PDF output writer, returning any error from flushing or closing.
 func (p *PdfPrinter) CloseWriter() error {
-	if p.writer != nil && p.writer != os.Stdout {
+	if p != nil && p.writer != nil && p.writer != os.Stdout {
 		return printer.CloseOutput(p.writer)
 	}
 	return nil
