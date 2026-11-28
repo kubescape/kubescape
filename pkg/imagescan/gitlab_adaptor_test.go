@@ -223,6 +223,35 @@ func TestGitlabAdaptor_Login_SecurityGuards(t *testing.T) {
 		})
 		require.NoError(t, err)
 	})
+
+	t.Run("rejects registry host or authority containing URL userinfo before network call", func(t *testing.T) {
+		var hits int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits++
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"data":{"currentUser":{"username":"testuser"}}}`))
+		}))
+		defer server.Close()
+
+		hostOnly := strings.TrimPrefix(server.URL, "http://")
+		adaptor := NewGitlabAdaptor(WithGitlabInsecureHTTPCredentials())
+		for _, badRegistry := range []string{
+			"http://user:secret@" + hostOnly,
+			"https://user:secret@" + hostOnly,
+		} {
+			err := adaptor.Login(context.Background(), badRegistry, RegistryCredentials{Token: "secret-token"})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "must not contain userinfo")
+		}
+
+		err := adaptor.Login(context.Background(), server.URL, RegistryCredentials{
+			Authority: "https://user:secret@" + hostOnly,
+			Token:     "secret-token",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not match registry host")
+		assert.Zero(t, hits)
+	})
 }
 
 func TestGitlabAdaptor_GetImagesScanStatus(t *testing.T) {

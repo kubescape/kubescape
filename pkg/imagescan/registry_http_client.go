@@ -88,6 +88,9 @@ func parseRegistryHostAndScheme(registry string) (string, string, error) {
 	if host == "" {
 		return "", "", errors.New("registry host cannot be empty")
 	}
+	if strings.Contains(host, "@") {
+		return "", "", errors.New("registry host must not contain userinfo; pass credentials in RegistryCredentials")
+	}
 	return scheme, host, nil
 }
 

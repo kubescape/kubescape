@@ -183,6 +183,30 @@ func TestHarborAdaptor_Login_SecurityGuards(t *testing.T) {
 		})
 		require.NoError(t, err)
 	})
+
+	t.Run("rejects registry host containing URL userinfo even with empty RegistryCredentials", func(t *testing.T) {
+		var hits int
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits++
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"with_chartmuseum": true}`))
+		}))
+		defer server.Close()
+
+		hostOnly := strings.TrimPrefix(server.URL, "http://")
+		for _, opt := range [][]HarborAdaptorOption{nil, {WithHarborInsecureHTTPCredentials()}} {
+			adaptor := NewHarborAdaptor(opt...)
+			for _, badRegistry := range []string{
+				"http://robot:secret@" + hostOnly,
+				"https://robot:secret@" + hostOnly,
+			} {
+				err := adaptor.Login(context.Background(), badRegistry, RegistryCredentials{})
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "must not contain userinfo")
+			}
+		}
+		assert.Zero(t, hits)
+	})
 }
 
 func TestExtractProjectAndRepo(t *testing.T) {
