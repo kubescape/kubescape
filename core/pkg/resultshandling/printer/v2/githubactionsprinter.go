@@ -382,21 +382,24 @@ outerLoop:
 	return sb.String()
 }
 
+// Break GFM URL autolinks so Markdown escapes render as literal punctuation.
 var mdTableCellReplacer = strings.NewReplacer(
+	"://", "&#58;//",
+	"www.", "www&#46;",
 	"\\", "\\\\",
 	"|", "\\|",
 	"`", "'",
 	"*", "\\*",
 	"_", "\\_",
-	"<", "\\<",
-	">", "\\>",
+	"&", "&amp;",
+	"<", "&lt;",
+	">", "&gt;",
 	"[", "\\[",
 	"]", "\\]",
 	"~", "\\~",
 )
 
 func sanitizeMarkdownTableCell(s string) string {
-	s = mdTableCellReplacer.Replace(s)
 	s = strings.ReplaceAll(s, "\r\n", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", " ")
@@ -408,9 +411,11 @@ func sanitizeMarkdownTableCell(s string) string {
 		}
 		b.WriteRune(r)
 	}
-	return strings.TrimFunc(b.String(), func(r rune) bool {
+	cell := strings.TrimFunc(b.String(), func(r rune) bool {
 		return unicode.IsSpace(r) && r != '\t'
 	})
+	// Stripping controls can bring the characters of a URL prefix together.
+	return mdTableCellReplacer.Replace(cell)
 }
 
 func writeStepSummary(ctx context.Context, summaryPath string, render func(maxBytes int) string) error {
