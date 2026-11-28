@@ -104,6 +104,8 @@ var pluralOverrides = map[string]string{
 	"init_container":             "initContainers",
 	"volume":                     "volumes",
 	"volume_mount":               "volumeMounts",
+	"volume_device":              "volumeDevices",
+	"volume_devices":             "volumeDevices",
 	"env_from":                   "envFrom",
 	"port":                       "ports",
 	"toleration":                 "tolerations",
@@ -142,6 +144,10 @@ var pluralOverrides = map[string]string{
 	"condition":                  "conditions",
 	"readiness_gate":             "readinessGates",
 	"topology_spread_constraint": "topologySpreadConstraints",
+	"option":                     "options",
+	"options":                    "options",
+	"on_pod_condition":           "onPodConditions",
+	"on_pod_conditions":          "onPodConditions",
 }
 
 // repeatableBlocks lists HCL block labels that always encode as a JSON array,
@@ -149,6 +155,7 @@ var pluralOverrides = map[string]string{
 // but the K8s field underneath (e.g. spec.containers) is always a list.
 var repeatableBlocks = map[string]bool{
 	"container": true, "init_container": true, "volume": true, "volume_mount": true,
+	"volume_device": true, "volume_devices": true,
 	"env": true, "env_from": true, "port": true, "ports": true, "toleration": true,
 	"host_alias": true, "host_aliases": true, "rule": true, "subject": true,
 	"image_pull_secret": true, "image_pull_secrets": true,
@@ -169,6 +176,8 @@ var repeatableBlocks = map[string]bool{
 	"items": true, "sources": true,
 	"preferred_during_scheduling_ignored_during_execution": true,
 	"cluster_role_selectors":                               true,
+	"option":                                               true, "options": true,
+	"on_pod_condition": true, "on_pod_conditions": true,
 }
 
 // resourceMetaAttributes are Terraform meta-argument attributes valid on any
@@ -471,6 +480,18 @@ func isNestedHPAMetricBlock(path, blockType string) bool {
 	return strings.HasSuffix(path, ".external") || strings.HasSuffix(path, ".pods") || strings.HasSuffix(path, ".object")
 }
 
+// isEphemeralVolumeClaimTemplateBlock reports whether blockType is the
+// volume_claim_template of an ephemeral volume source. The provider reuses the
+// name from StatefulSet, but in an EphemeralVolumeSource it is a single object
+// named volumeClaimTemplate, not the list of volumeClaimTemplates a StatefulSet
+// takes.
+func isEphemeralVolumeClaimTemplateBlock(path, blockType string) bool {
+	if blockType != "volume_claim_template" {
+		return false
+	}
+	return strings.HasSuffix(path, ".ephemeral")
+}
+
 // isServiceTargetPortField reports whether name is a Service port's
 // target_port. The provider declares it as a string and turns it into a number
 // or a name with intstr.Parse when it builds the Service.
@@ -732,6 +753,10 @@ func (c *terraformBodyConverter) bodyToMap(body *hclsyntax.Body, evalCtx *hcl.Ev
 		}
 		if isNestedHPAMetricBlock(path, blockType) {
 			field = "metric"
+			isRepeatable = false
+		}
+		if isEphemeralVolumeClaimTemplateBlock(path, blockType) {
+			field = "volumeClaimTemplate"
 			isRepeatable = false
 		}
 		if isPodAffinityRequiredBlock(path, blockType) {
