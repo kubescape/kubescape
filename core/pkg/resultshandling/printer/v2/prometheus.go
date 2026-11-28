@@ -37,6 +37,9 @@ func (pp *PrometheusPrinter) PrintNextSteps() {
 }
 
 func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	if pp == nil {
+		return fmt.Errorf("failed to set writer: printer is nil")
+	}
 	outputFile, explicitOutput := printer.ResolveOutputFile(printer.PrometheusFormat, outputFile, prometheusOutputFile)
 	if explicitOutput {
 		var err error
@@ -48,7 +51,7 @@ func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) e
 }
 
 func (pp *PrometheusPrinter) Score(score float32) {
-	if pp.writer == nil {
+	if pp == nil || pp.writer == nil {
 		return
 	}
 	// Handle invalid scores
@@ -95,6 +98,9 @@ func (pp *PrometheusPrinter) generateImagePrometheusFormat(imageScanData []cauti
 
 // ActionPrint writes posture scan results and container image vulnerability metrics in Prometheus format.
 func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if pp == nil {
+		return fmt.Errorf("failed to write prometheus results: printer is nil")
+	}
 	if err := printer.PrepareOutput(pp.writer); err != nil {
 		return err
 	}
@@ -131,7 +137,7 @@ func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 
 // CloseWriter closes the Prometheus output writer, returning any error from flushing or closing.
 func (p *PrometheusPrinter) CloseWriter() error {
-	if p.writer != nil && p.writer != os.Stdout {
+	if p != nil && p.writer != nil && p.writer != os.Stdout {
 		return printer.CloseOutput(p.writer)
 	}
 	return nil
