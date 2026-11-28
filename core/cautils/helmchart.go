@@ -687,6 +687,16 @@ func readHelmTemplateFile(path string) ([]byte, error) {
 
 var helmDrivePathPattern = regexp.MustCompile(`^[a-zA-Z]:/`)
 
+func validateHelmEntrySize(entryName, archiveName string, size, limit int64) error {
+	if size > limit {
+		return fmt.Errorf("%w: archive entry %q in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, entryName, archiveName, limit)
+	}
+	return nil
+}
+
+// loadBoundedHelmArchiveFiles mirrors helm.sh/helm/v3/pkg/chart/loader.LoadArchiveFiles
+// (verified against helm.sh/helm/v3 v3.21.4) while enforcing per-entry limit bytes
+// before buffering. Re-check tar/path validation parity whenever helm.sh/helm/v3 is upgraded.
 func loadBoundedHelmArchiveFiles(in io.Reader, archiveName string, limit int64) ([]*helmloader.BufferedFile, error) {
 	unzipped, err := gzip.NewReader(in)
 	if err != nil {
@@ -713,8 +723,8 @@ func loadBoundedHelmArchiveFiles(in io.Reader, archiveName string, limit int64) 
 		if hd.Size < 0 {
 			return nil, fmt.Errorf("invalid negative tar entry size %d for %q in %q", hd.Size, hd.Name, archiveName)
 		}
-		if hd.Size > limit {
-			return nil, fmt.Errorf("%w: archive entry %q in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, hd.Name, archiveName, limit)
+		if err := validateHelmEntrySize(hd.Name, archiveName, hd.Size, limit); err != nil {
+			return nil, err
 		}
 		if helmloader.MaxDecompressedChartSize < 0 || hd.Size > helmloader.MaxDecompressedChartSize-totalDecompressed {
 			return nil, fmt.Errorf("decompressed chart is larger than the maximum file size %d", helmloader.MaxDecompressedChartSize)
@@ -757,8 +767,8 @@ func loadBoundedHelmArchiveFiles(in io.Reader, archiveName string, limit int64) 
 		if err != nil {
 			return nil, err
 		}
-		if int64(len(data)) > limit {
-			return nil, fmt.Errorf("%w: archive entry %q in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, hd.Name, archiveName, limit)
+		if err := validateHelmEntrySize(hd.Name, archiveName, int64(len(data)), limit); err != nil {
+			return nil, err
 		}
 		data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
 		files = append(files, &helmloader.BufferedFile{Name: n, Data: data})
@@ -769,11 +779,15 @@ func loadBoundedHelmArchiveFiles(in io.Reader, archiveName string, limit int64) 
 	return files, nil
 }
 
+// validateBoundedHelmChartFiles mirrors helm.sh/helm/v3/pkg/chart/loader.LoadFiles
+// subchart discovery (verified against helm.sh/helm/v3 v3.21.4) to enforce limit
+// recursively across unpacked and packaged (.tgz) dependencies before calling
+// helmloader.LoadFiles. Re-check parity whenever helm.sh/helm/v3 is upgraded.
 func validateBoundedHelmChartFiles(files []*helmloader.BufferedFile, archiveName string, limit int64) error {
 	subcharts := make(map[string][]*helmloader.BufferedFile)
 	for _, f := range files {
-		if int64(len(f.Data)) > limit {
-			return fmt.Errorf("%w: archive entry %q in %q exceeds the %d byte limit", ErrHelmTemplateTooLarge, f.Name, archiveName, limit)
+		if err := validateHelmEntrySize(f.Name, archiveName, int64(len(f.Data)), limit); err != nil {
+			return err
 		}
 		if !strings.HasPrefix(f.Name, "charts/") {
 			continue
