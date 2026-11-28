@@ -281,6 +281,20 @@ func TestPlatformsFromSchedulingConstraints(t *testing.T) {
 			want: []string{"linux/arm64"},
 		},
 		{
+			name: "declared OS narrows required affinity OR terms",
+			spec: &corev1.PodSpec{
+				OS: &corev1.PodOS{Name: corev1.Linux},
+				Affinity: requiredNodeAffinity(
+					nodeTerm(inRequirement(betaOSLabel, "windows"), inRequirement(stableArchLabel, "amd64")),
+					nodeTerm(
+						corev1.NodeSelectorRequirement{Key: stableOSLabel, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"windows"}},
+						inRequirement(stableArchLabel, "arm64"),
+					),
+				),
+			},
+			want: []string{"linux/arm64"},
+		},
+		{
 			name: "conflicting selector and affinity is not guessed",
 			spec: &corev1.PodSpec{
 				NodeSelector: map[string]string{stableOSLabel: "linux"},
@@ -374,6 +388,14 @@ func TestInferWorkloadPlatforms(t *testing.T) {
 			want: []string{"linux/arm64"},
 		},
 		{
+			name: "scheduled Node wins over a conflicting Pod OS",
+			spec: map[string]any{
+				"nodeName": "arm-worker",
+				"os":       map[string]any{"name": "windows"},
+			},
+			want: []string{"linux/arm64"},
+		},
+		{
 			name: "unknown scheduled Node falls back to selector",
 			spec: map[string]any{
 				"nodeName": "not-collected",
@@ -427,6 +449,7 @@ func TestInferWorkloadPlatforms(t *testing.T) {
 
 func TestCollectImageScanTargetsUsesPlatformOverride(t *testing.T) {
 	pod := platformTestPod("app", "example/app:latest", map[string]any{
+		"os": map[string]any{"name": "linux"},
 		"nodeSelector": map[string]any{
 			stableOSLabel: "linux", stableArchLabel: "arm64",
 		},
@@ -440,12 +463,12 @@ func TestCollectImageScanTargetsUsesPlatformOverride(t *testing.T) {
 		context.Background(),
 		cautils.ContextFile,
 		nil,
-		"linux/amd64",
+		"windows/amd64",
 	)
 
 	require.Empty(t, errs)
 	assert.Equal(t, targetSet(ImageScanTarget{
-		Image: "example/app:latest", Platform: "linux/amd64",
+		Image: "example/app:latest", Platform: "windows/amd64",
 	}), collectedTargetSet(targets))
 }
 
@@ -504,6 +527,62 @@ func TestCollectImageScanTargetsCoversHeterogeneousCluster(t *testing.T) {
 	), collectedTargetSet(targets))
 }
 
+func TestCollectImageScanTargetsInfersPlatformFromPodOS(t *testing.T) {
+	pod := platformTestPod("app", "example/app:latest", map[string]any{
+		"os":           map[string]any{"name": "linux"},
+		"nodeSelector": map[string]any{stableArchLabel: "arm64"},
+	})
+	scanData := cautils.NewOPASessionObjMock()
+	scanData.AllResources[pod.GetID()] = pod
+
+	targets, _, errs := collectImageScanTargets(
+		cautils.ScanTypeFramework, scanData, context.Background(), cautils.ContextFile, nil, "",
+	)
+
+	assert.Empty(t, errs)
+	assert.Equal(t, targetSet(ImageScanTarget{
+		Image: "example/app:latest", Platform: "linux/arm64",
+	}), collectedTargetSet(targets))
+}
+
+func TestCollectImageScanTargetsFiltersNodesByPodOS(t *testing.T) {
+	linux := platformTestNode("linux-worker", map[string]string{
+		stableOSLabel: "linux", stableArchLabel: "amd64",
+	}, "", "")
+	windows := platformTestNode("windows-worker", map[string]string{
+		stableOSLabel: "windows", stableArchLabel: "amd64",
+	}, "", "")
+	pod := platformTestPod("app", "example/app:latest", map[string]any{
+		"os": map[string]any{"name": "linux"},
+	})
+	scanData := cautils.NewOPASessionObjMock()
+	scanData.AllResources[linux.GetID()] = linux
+	scanData.AllResources[windows.GetID()] = windows
+	scanData.AllResources[pod.GetID()] = pod
+
+	targets, _, errs := collectImageScanTargets(
+		cautils.ScanTypeCluster, scanData, context.Background(), cautils.ContextCluster, nil, "",
+	)
+
+	require.Empty(t, errs)
+	assert.Equal(t, targetSet(ImageScanTarget{
+		Image: "example/app:latest", Platform: "linux/amd64",
+	}), collectedTargetSet(targets))
+}
+
+func TestInferWorkloadPlatformsRejectsConflictingPodOSSelector(t *testing.T) {
+	pod := platformTestPod("app", "example/app:latest", map[string]any{
+		"os":           map[string]any{"name": "linux"},
+		"nodeSelector": map[string]any{stableOSLabel: "windows", stableArchLabel: "amd64"},
+	})
+	selection := selectWorkloadPlatforms(pod, map[string]string{
+		"linux-worker":   "linux/amd64",
+		"windows-worker": "windows/amd64",
+	})
+	assert.True(t, selection.constrained)
+	assert.Empty(t, selection.platforms)
+}
+
 func TestCollectImageScanTargetsDoesNotScanExcludedPlatform(t *testing.T) {
 	amd := platformTestNode("amd-worker", map[string]string{
 		stableOSLabel: "linux", stableArchLabel: "amd64",
@@ -554,21 +633,26 @@ func TestAddImageScanTargetRequiredVariantWins(t *testing.T) {
 }
 
 func TestCollectImageScanTargetsPreservesProviderDefaultWithoutEvidence(t *testing.T) {
-	pod := platformTestPod("app", "example/app:latest", nil)
-	scanData := cautils.NewOPASessionObjMock()
-	scanData.AllResources[pod.GetID()] = pod
+	for _, tt := range []struct {
+		name string
+		spec map[string]any
+	}{
+		{name: "no platform constraints"},
+		{name: "declared OS only", spec: map[string]any{"os": map[string]any{"name": "linux"}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := platformTestPod("app", "example/app:latest", tt.spec)
+			scanData := cautils.NewOPASessionObjMock()
+			scanData.AllResources[pod.GetID()] = pod
 
-	targets, _, errs := collectImageScanTargets(
-		cautils.ScanTypeFramework,
-		scanData,
-		context.Background(),
-		cautils.ContextFile,
-		nil,
-		"",
-	)
+			targets, _, errs := collectImageScanTargets(
+				cautils.ScanTypeFramework, scanData, context.Background(), cautils.ContextFile, nil, "",
+			)
 
-	require.Empty(t, errs)
-	assert.Equal(t, targetSet(ImageScanTarget{Image: "example/app:latest"}), collectedTargetSet(targets))
+			require.Empty(t, errs)
+			assert.Equal(t, targetSet(ImageScanTarget{Image: "example/app:latest"}), collectedTargetSet(targets))
+		})
+	}
 }
 
 func TestCollectImageScanTargetsDeduplicatesSameVariant(t *testing.T) {
