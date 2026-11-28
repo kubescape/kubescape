@@ -29,7 +29,7 @@ func (rp *RepoPrinter) PrintSummaryTable(_ io.Writer, _ *reportsummary.SummaryDe
 }
 
 func (rp *RepoPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, _ [][]string) {
-	if summaryDetails == nil {
+	if rp == nil || writer == nil || summaryDetails == nil {
 		return
 	}
 

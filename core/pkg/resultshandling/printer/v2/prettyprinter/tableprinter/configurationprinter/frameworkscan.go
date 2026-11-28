@@ -27,10 +27,16 @@ func NewFrameworkPrinter(verboseMode bool) *FrameworkPrinter {
 var _ TablePrinter = &FrameworkPrinter{}
 
 func (fp *FrameworkPrinter) getVerboseMode() bool {
+	if fp == nil {
+		return false
+	}
 	return fp.verboseMode
 }
 
 func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+	if fp == nil || writer == nil {
+		return
+	}
 	if summaryDetails == nil || summaryDetails.NumberOfControls() == nil || summaryDetails.NumberOfControls().All() == 0 {
 		fmt.Fprintf(writer, "\nKubescape did not scan any resources. Make sure you are scanning valid manifests (Deployments, Pods, etc.)\n")
 		return

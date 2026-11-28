@@ -22,7 +22,7 @@ func (wp *WorkloadPrinter) PrintSummaryTable(_ io.Writer, _ *reportsummary.Summa
 }
 
 func (wp *WorkloadPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, _ [][]string) {
-	if summaryDetails == nil {
+	if wp == nil || writer == nil || summaryDetails == nil {
 		return
 	}
 

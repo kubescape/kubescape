@@ -56,6 +56,25 @@ func TestGetVerboseMode(t *testing.T) {
 	// Test case 2: Setting verbose mode to true
 	frameworkPrinter = NewFrameworkPrinter(true)
 	assert.Equal(t, true, frameworkPrinter.getVerboseMode())
+
+	// Test case 3: Nil receiver
+	var nilFP *FrameworkPrinter
+	assert.Equal(t, false, nilFP.getVerboseMode())
+}
+
+func TestFrameworkPrinter_NilSafety(t *testing.T) {
+	var nilFP *FrameworkPrinter
+	assert.NotPanics(t, func() {
+		assert.False(t, nilFP.getVerboseMode())
+		nilFP.PrintSummaryTable(nil, nil, nil)
+		nilFP.PrintCategoriesTables(nil, nil, nil)
+	})
+
+	fp := NewFrameworkPrinter(false)
+	assert.NotPanics(t, func() {
+		fp.PrintSummaryTable(nil, nil, nil)
+		fp.PrintCategoriesTables(nil, nil, nil)
+	})
 }
 
 func TestShortRowFormat(t *testing.T) {
