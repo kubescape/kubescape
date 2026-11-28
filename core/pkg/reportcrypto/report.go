@@ -523,6 +523,10 @@ func (d *reportDecryptor) remapResult(result rawObject, resultIndex int) error {
 
 	for controlIndex := range controls {
 		controlContext := fmt.Sprintf("%s.controls[%d]", context, controlIndex)
+		if err := d.decryptControlEvidence(controls[controlIndex], controlContext); err != nil {
+			return err
+		}
+
 		rulesRaw, ok := controls[controlIndex]["rules"]
 		if !ok || isJSONNull(rulesRaw) {
 			continue
@@ -628,6 +632,47 @@ func (d *reportDecryptor) remapRule(rule rawObject, context string) error {
 	}
 	rule["relatedResourcesIDs"] = updatedRelated
 
+	return nil
+}
+
+// decryptControlEvidence restores the value of each evidence entry attached to
+// a control. Evidence values are copies of resource fields, so they carry the
+// same ciphertext the anonymizer wrote into the resource.
+func (d *reportDecryptor) decryptControlEvidence(control rawObject, context string) error {
+	evidenceRaw, ok := control["evidence"]
+	if !ok || isJSONNull(evidenceRaw) {
+		return nil
+	}
+
+	evidence, err := decodeObjectArray(evidenceRaw, context+".evidence")
+	if err != nil {
+		return err
+	}
+
+	for i := range evidence {
+		valueContext := fmt.Sprintf("%s.evidence[%d].value", context, i)
+		value, ok, err := optionalString(evidence[i], "value", valueContext)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+
+		restored, err := decryptEmbeddedCiphertexts(value, d.dek)
+		if err != nil {
+			return fmt.Errorf("failed to restore %s: %w", valueContext, err)
+		}
+		evidence[i]["value"], err = json.Marshal(restored)
+		if err != nil {
+			return fmt.Errorf("failed to marshal %s: %w", valueContext, err)
+		}
+	}
+
+	control["evidence"], err = json.Marshal(evidence)
+	if err != nil {
+		return fmt.Errorf("failed to marshal %s.evidence: %w", context, err)
+	}
 	return nil
 }
 
