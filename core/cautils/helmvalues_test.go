@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -127,9 +128,9 @@ func injectURLCredentials(rawURL, user, password string) string {
 
 func TestHelmValueOptions_MergeValues_RedactsURLCredentialsAndBlocksUnsafeRedirects(t *testing.T) {
 	const (
-		secretUser  = "ci-secret-user"
-		secretPass  = "super-secret-pass-123"
-		bearerToken = "glpat-bare-token-456"
+		secretUser    = "ci-fixture-user"
+		secretPass    = "ci-fixture-pass-123"
+		fixtureBareID = "bare-identity-value-456"
 	)
 
 	assertRedacted := func(t *testing.T, err error) {
@@ -137,7 +138,7 @@ func TestHelmValueOptions_MergeValues_RedactsURLCredentialsAndBlocksUnsafeRedire
 		require.Error(t, err)
 		assert.NotContains(t, err.Error(), secretUser)
 		assert.NotContains(t, err.Error(), secretPass)
-		assert.NotContains(t, err.Error(), bearerToken)
+		assert.NotContains(t, err.Error(), fixtureBareID)
 	}
 
 	t.Run("redacts credentials from HTTP error status", func(t *testing.T) {
@@ -183,7 +184,7 @@ func TestHelmValueOptions_MergeValues_RedactsURLCredentialsAndBlocksUnsafeRedire
 			url  string
 		}{
 			{name: "user and password", url: "http://" + secretUser + ":" + secretPass + "@127.0.0.1:0/values.yaml"},
-			{name: "bare token as username", url: "http://" + bearerToken + "@127.0.0.1:0/values.yaml"},
+			{name: "bare token as username", url: "http://" + fixtureBareID + "@127.0.0.1:0/values.yaml"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				_, err := (HelmValueOptions{ValueFiles: []string{tc.url}}).MergeValues()
@@ -284,4 +285,61 @@ func TestHelmValueOptions_MergeValues_RedactsURLCredentialsAndBlocksUnsafeRedire
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unsupported scheme")
 	})
+
+	t.Run("redacts scheme-relative URL userinfo in url.Error.URL and sanitizeHelmValueSource", func(t *testing.T) {
+		assert.Equal(t, "//other.example/values.yaml", sanitizeHelmValueSource("//"+secretUser+":"+secretPass+"@other.example/values.yaml"))
+		assert.Equal(t, "/tmp/user@org/values.yaml", sanitizeHelmValueSource("/tmp/user@org/values.yaml"))
+
+		source := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Location", "//"+secretUser+":"+secretPass+"@other.example/values.yaml")
+			w.WriteHeader(http.StatusFound)
+		}))
+		defer source.Close()
+
+		credURL := injectURLCredentials(source.URL+"/start", secretUser, secretPass)
+		_, err := mergeBoundedHelmValuesWithClient(HelmValueOptions{ValueFiles: []string{credURL}}, nil, source.Client())
+		assertRedacted(t, err)
+		assert.Contains(t, err.Error(), "//other.example/values.yaml")
+	})
+
+	t.Run("redacts credentials embedded in redirect parse errors with invalid escapes", func(t *testing.T) {
+		source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Location", "https://"+secretUser+":"+secretPass+"@example.com/%zz")
+			w.WriteHeader(http.StatusFound)
+		}))
+		defer source.Close()
+
+		_, err := (HelmValueOptions{ValueFiles: []string{source.URL}}).MergeValues()
+		assertRedacted(t, err)
+		assert.Contains(t, err.Error(), "https://example.com/%zz")
+	})
+
+	t.Run("preserves outer error wrappers and errors.Is markers during sanitization", func(t *testing.T) {
+		marker := errors.New("custom transport marker")
+		client := &http.Client{
+			Transport: helmValuesRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				return nil, errors.Join(marker, &url.Error{
+					Op:  "Get",
+					URL: "https://" + secretUser + ":" + secretPass + "@inner.example.com/values.yaml",
+					Err: errors.New("inner transport failure"),
+				})
+			}),
+		}
+
+		credURL := "https://" + secretUser + ":" + secretPass + "@charts.example.com/values.yaml"
+		_, err := mergeBoundedHelmValuesWithClient(HelmValueOptions{ValueFiles: []string{credURL}}, nil, client)
+		assertRedacted(t, err)
+		assert.ErrorIs(t, err, marker)
+
+		joined := errors.Join(marker, &url.Error{Op: "Get", URL: credURL, Err: errors.New("boom")})
+		sanitized := sanitizeHelmURLError(joined)
+		assertRedacted(t, sanitized)
+		assert.ErrorIs(t, sanitized, marker)
+	})
+}
+
+type helmValuesRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f helmValuesRoundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

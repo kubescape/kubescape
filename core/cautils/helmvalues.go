@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,6 +15,10 @@ import (
 )
 
 const helmValuesHTTPTimeout = 15 * time.Second
+
+// helmURLUserInfoPattern strips embedded userinfo from URLs and scheme-relative URLs
+// appearing in URL strings or formatted error messages without disturbing path segments.
+var helmURLUserInfoPattern = regexp.MustCompile(`(^|[\s"'(\[]|[a-zA-Z][a-zA-Z0-9+.-]*:)//[^\s/?#"'<>\\]*@`)
 
 func mergeBoundedHelmValues(o HelmValueOptions, stdin io.Reader) (map[string]any, error) {
 	return mergeBoundedHelmValuesWithClient(o, stdin, helmValuesHTTPClient(nil))
@@ -206,34 +211,41 @@ func sanitizeHelmValueSource(source string) string {
 		return source
 	}
 	if u, err := url.Parse(source); err == nil {
-		if u.Scheme == "" || isWindowsDriveScheme(u.Scheme) {
+		if (u.Scheme == "" && !strings.HasPrefix(source, "//")) || isWindowsDriveScheme(u.Scheme) {
 			return source
 		}
 		return sanitizeHelmValueURL(u)
 	}
-	if schemeIdx := strings.Index(source, "://"); schemeIdx >= 0 {
-		rest := source[schemeIdx+3:]
-		authEnd := len(rest)
-		if idx := strings.IndexAny(rest, "/?#"); idx >= 0 {
-			authEnd = idx
-		}
-		if atIdx := strings.Index(rest[:authEnd], "@"); atIdx >= 0 {
-			return source[:schemeIdx+3] + rest[atIdx+1:]
-		}
-	}
-	return source
+	return sanitizeHelmErrorMessage(source)
+}
+
+func sanitizeHelmErrorMessage(msg string) string {
+	return helmURLUserInfoPattern.ReplaceAllString(msg, "${1}//")
+}
+
+type sanitizedHelmURLError struct {
+	cause error
+	msg   string
+}
+
+func (e *sanitizedHelmURLError) Error() string {
+	return e.msg
+}
+
+func (e *sanitizedHelmURLError) Unwrap() error {
+	return e.cause
 }
 
 func sanitizeHelmURLError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
-		sanitized := *urlErr
-		sanitized.URL = sanitizeHelmValueSource(urlErr.URL)
-		sanitized.Err = sanitizeHelmURLError(urlErr.Err)
-		return &sanitized
+	msg := sanitizeHelmErrorMessage(err.Error())
+	if msg == err.Error() {
+		return err
 	}
-	return err
+	return &sanitizedHelmURLError{
+		cause: err,
+		msg:   msg,
+	}
 }
