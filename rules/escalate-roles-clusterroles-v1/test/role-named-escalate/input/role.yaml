@@ -1,0 +1,10 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: app-role-editor
+  namespace: team-a
+rules:
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["roles"]
+  resourceNames: ["app-deployer"]
+  verbs: ["escalate", "patch"]

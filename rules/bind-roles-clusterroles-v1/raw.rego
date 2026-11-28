@@ -16,9 +16,7 @@ deny contains msga if {
 	is_same_namespace(role, rolebinding)
 	rule := role.rules[p]
 
-	# a rule restricted to named roles/clusterroles cannot be used to bind an arbitrary role/clusterrole
-	# (an omitted or explicitly empty resourceNames list is unrestricted)
-	count(resource_names(rule)) == 0
+	names_a_role(rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -56,6 +54,21 @@ is_same_namespace(role, rolebinding) if {
 is_same_namespace(role, rolebinding) if {
 	role.kind == "Role"
 	role.metadata.namespace == rolebinding.metadata.namespace
+}
+
+# The bind check runs when a RoleBinding or ClusterRoleBinding is written, and it
+# is authorized with the name of the role in roleRef. An entry narrowed with
+# resourceNames still lets the subject bind each role it names to anyone,
+# including itself, without holding that role's rights, which is the escalation
+# this rule reports when the role is a powerful one, such as "cluster-admin".
+# resourceNames is matched literally, so "" names no role and "*" is not a
+# wildcard. An entry narrowed to those two alone is treated as naming none, as
+# the other rules here do.
+names_a_role(rule) if count(resource_names(rule)) == 0
+
+names_a_role(rule) if {
+	some name in resource_names(rule)
+	not name in {"", "*"}
 }
 
 # A manifest meant for "kubectl apply -n" may leave out the namespace, and the
