@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-admin-delegator
+rules:
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["clusterroles"]
+  resourceNames: ["cluster-admin"]
+  verbs: ["bind"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["clusterrolebindings"]
+  verbs: ["create"]
