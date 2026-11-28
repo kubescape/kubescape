@@ -1,0 +1,15 @@
+{
+  "name": "kubescape",
+  "description": "Agent plugins for Kubescape Kubernetes security scanning, remediation, and MCP access.",
+  "owner": {
+    "name": "Kubescape",
+    "url": "https://github.com/kubescape"
+  },
+  "plugins": [
+    {
+      "name": "kubescape",
+      "source": "./plugins/kubescape",
+      "description": "Kubescape CLI skills and MCP server for cluster, manifest, Helm, and image security scanning."
+    }
+  ]
+}

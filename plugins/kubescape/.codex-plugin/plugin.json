@@ -1,0 +1,23 @@
+{
+  "name": "kubescape",
+  "version": "0.1.0",
+  "description": "Scan Kubernetes clusters, manifests, and Helm charts for misconfigurations and image vulnerabilities; fix findings; query posture through the Kubescape MCP server.",
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Kubescape",
+    "shortDescription": "Kubernetes security scanning, fixes, and MCP tools",
+    "longDescription": "Teach agents to run the Kubescape CLI accurately: scan live clusters, YAML/JSON manifests, Helm charts, and container images against frameworks such as NSA, MITRE, and CIS; choose output formats; remediate findings with kubescape fix; and use the bundled kubescape mcpserver MCP integration when cluster operator data is available.",
+    "developerName": "Kubescape",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write", "Interactive"],
+    "websiteURL": "https://kubescape.io",
+    "brandColor": "#2810F8",
+    "logo": "./assets/logo.png",
+    "defaultPrompt": [
+      "Scan this cluster with the NSA framework and summarize failed controls",
+      "Scan ./manifests to JSON, then fix safe findings in place",
+      "Start kubescape mcpserver and list high-severity vulnerabilities"
+    ]
+  }
+}

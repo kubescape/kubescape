@@ -1,0 +1,20 @@
+{
+  "name": "kubescape",
+  "interface": {
+    "displayName": "Kubescape"
+  },
+  "plugins": [
+    {
+      "name": "kubescape",
+      "source": {
+        "source": "local",
+        "path": "./plugins/kubescape"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
