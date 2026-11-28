@@ -18,7 +18,7 @@ const helmValuesHTTPTimeout = 15 * time.Second
 
 // helmURLUserInfoPattern strips embedded userinfo from URLs and scheme-relative URLs
 // appearing in URL strings or formatted error messages without disturbing path segments.
-var helmURLUserInfoPattern = regexp.MustCompile(`(^|[\s"'(\[]|[a-zA-Z][a-zA-Z0-9+.-]*:)//[^\s/?#"'<>\\]*@`)
+var helmURLUserInfoPattern = regexp.MustCompile(`(^|[\s"'(\[]|[a-zA-Z][a-zA-Z0-9+.-]*:)//[^\s/?#"<>\\]*@`)
 
 func mergeBoundedHelmValues(o HelmValueOptions, stdin io.Reader) (map[string]any, error) {
 	return mergeBoundedHelmValuesWithClient(o, stdin, helmValuesHTTPClient(nil))

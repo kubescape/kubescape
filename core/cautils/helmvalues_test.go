@@ -303,15 +303,28 @@ func TestHelmValueOptions_MergeValues_RedactsURLCredentialsAndBlocksUnsafeRedire
 	})
 
 	t.Run("redacts credentials embedded in redirect parse errors with invalid escapes", func(t *testing.T) {
-		source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Location", "https://"+secretUser+":"+secretPass+"@example.com/%zz")
-			w.WriteHeader(http.StatusFound)
-		}))
-		defer source.Close()
+		for _, tc := range []struct {
+			name string
+			user string
+			pass string
+		}{
+			{name: "standard userinfo", user: secretUser, pass: secretPass},
+			{name: "userinfo with apostrophes", user: "ci-user'1", pass: "ci-val'123"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Location", "https://"+tc.user+":"+tc.pass+"@example.com/%zz")
+					w.WriteHeader(http.StatusFound)
+				}))
+				defer source.Close()
 
-		_, err := (HelmValueOptions{ValueFiles: []string{source.URL}}).MergeValues()
-		assertRedacted(t, err)
-		assert.Contains(t, err.Error(), "https://example.com/%zz")
+				_, err := (HelmValueOptions{ValueFiles: []string{source.URL}}).MergeValues()
+				require.Error(t, err)
+				assert.NotContains(t, err.Error(), tc.user)
+				assert.NotContains(t, err.Error(), tc.pass)
+				assert.Contains(t, err.Error(), "https://example.com/%zz")
+			})
+		}
 	})
 
 	t.Run("preserves outer error wrappers and errors.Is markers during sanitization", func(t *testing.T) {
