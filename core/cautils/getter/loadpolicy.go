@@ -17,6 +17,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v4/internal/textencoding"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 )
@@ -114,13 +115,18 @@ func readPolicyFile(path string) ([]byte, error) {
 	return data, nil
 }
 
-// unmarshalPolicy decodes the JSON contents of a local policy file. A leading
-// UTF-8 byte order mark is not part of the JSON text: Windows editors and
-// PowerShell's Out-File -Encoding utf8 write one, and the decoder would reject
-// the whole file at the first byte. Only the decoded text drops it; digests
-// of the file still cover its exact bytes.
+// unmarshalPolicy decodes the JSON contents of a local policy file, given as
+// UTF-8 or as UTF-16 with a byte order mark (what Windows PowerShell 5.1
+// redirection writes). A leading UTF-8 byte order mark is not part of the JSON
+// text: Windows editors and PowerShell's Out-File -Encoding utf8 write one, and
+// the decoder would reject the whole file at the first byte. Only the decoded
+// text is changed; digests of the file still cover its exact bytes.
 func unmarshalPolicy(buf []byte, v any) error {
-	return json.Unmarshal(bytes.TrimPrefix(buf, []byte("\xef\xbb\xbf")), v)
+	text, err := textencoding.DecodeUTF16(buf)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(bytes.TrimPrefix(text, []byte("\xef\xbb\xbf")), v)
 }
 
 // ReadPolicyFile returns the contents of the policy file at path, reading at most
