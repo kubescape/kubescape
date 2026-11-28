@@ -17,52 +17,88 @@ import (
 )
 
 func FailureDisplay(w io.Writer, format string, a ...any) {
+	if w == nil {
+		return
+	}
 	fmt.Fprintf(w, gchalk.WithBrightRed().Bold(format), a...)
 }
 
 func WarningDisplay(w io.Writer, format string, a ...any) {
+	if w == nil {
+		return
+	}
 	fmt.Fprintf(w, gchalk.WithBrightYellow().Bold(format), a...)
 }
 
 func FailureTextDisplay(w io.Writer, format string, a ...any) {
+	if w == nil {
+		return
+	}
 	fmt.Fprintf(w, gchalk.WithBrightRed().Dim(format), a...)
 }
 
 func InfoDisplay(w io.Writer, format string, a ...any) {
+	if w == nil {
+		return
+	}
 	fmt.Fprintf(w, gchalk.WithBrightWhite().Bold(format), a...)
 }
 
 func InfoTextDisplay(w io.Writer, format string, a ...any) {
+	if w == nil {
+		return
+	}
 	fmt.Fprintf(w, gchalk.WithBrightYellow().Bold(format), a...)
 }
 
 func SimpleDisplay(w io.Writer, format string, a ...any) {
+	if w == nil {
+		return
+	}
 	fmt.Fprintf(w, gchalk.White(format), a...)
 }
 
 func SuccessDisplay(w io.Writer, format string, a ...any) {
+	if w == nil {
+		return
+	}
 	fmt.Fprintf(w, gchalk.WithBlue().Bold(format), a...)
 }
 
 func DescriptionDisplay(w io.Writer, format string, a ...any) {
+	if w == nil {
+		return
+	}
 	fmt.Fprintf(w, gchalk.WithWhite().Dim(format), a...)
 }
 
 func BoldDisplay(w io.Writer, format string, a ...any) {
+	if w == nil {
+		return
+	}
 	fmt.Fprintf(w, gchalk.Bold(format), a...)
 }
 
 func LineDisplay(w io.Writer, format string, a ...any) {
+	if w == nil {
+		return
+	}
 	fmt.Fprintf(w, gchalk.WithAnsi256(238).Bold(format), a...)
 }
 
 func SectionHeadingDisplay(w io.Writer, format string, a ...any) {
+	if w == nil {
+		return
+	}
 	fmt.Fprintf(w, "\n"+
 		gchalk.WithBrightWhite().Bold(format)+
 		gchalk.WithAnsi256(238).Bold(fmt.Sprintf("\n%s\n\n", strings.Repeat("─", len(format)))), a...)
 }
 
 func StarDisplay(w io.Writer, format string, a ...any) {
+	if w == nil {
+		return
+	}
 	fmt.Fprintf(w, gchalk.WithAnsi256(238).Bold("* ")+gchalk.White(format), a...)
 }
 
@@ -113,6 +149,9 @@ func NewProgressHandler(title string) *ProgressHandler {
 }
 
 func (p *ProgressHandler) Start(allSteps int) {
+	if p == nil {
+		return
+	}
 	if !isatty.IsTerminal(os.Stderr.Fd()) || helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel {
 		p.pb = progressbar.DefaultSilent(int64(allSteps), p.title)
 		return
@@ -121,6 +160,9 @@ func (p *ProgressHandler) Start(allSteps int) {
 }
 
 func (p *ProgressHandler) ProgressJob(step int, message string) {
+	if p == nil || p.pb == nil {
+		return
+	}
 	p.pb.Add(step) // #nosec G104 -- progress bar update; the error is not actionable
 	p.pb.Describe(message)
 }
@@ -135,7 +177,7 @@ func (p *ProgressHandler) ProgressJob(step int, message string) {
 // left the bar visibly stuck below 100% with no further updates, since Stop
 // was a no-op.
 func (p *ProgressHandler) Stop() {
-	if p.pb == nil {
+	if p == nil || p.pb == nil {
 		return
 	}
 	_ = p.pb.Finish()

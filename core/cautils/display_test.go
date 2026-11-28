@@ -457,6 +457,34 @@ func TestProgressHandler_StopIsNilSafe(t *testing.T) {
 	assert.NotPanics(t, p.Stop)
 }
 
+func TestProgressHandler_NilReceiverSafety(t *testing.T) {
+	var p *ProgressHandler
+	assert.NotPanics(t, func() { p.Start(10) })
+	assert.NotPanics(t, func() { p.ProgressJob(1, "msg") })
+	assert.NotPanics(t, func() { p.Stop() })
+}
+
+func TestProgressHandler_UnstartedNilPBSafety(t *testing.T) {
+	p := NewProgressHandler("unstarted")
+	assert.NotPanics(t, func() { p.ProgressJob(1, "msg") })
+	assert.NotPanics(t, p.Stop)
+}
+
+func TestDisplayFunctions_NilWriterSafety(t *testing.T) {
+	assert.NotPanics(t, func() { FailureDisplay(nil, "test %s", "arg") })
+	assert.NotPanics(t, func() { WarningDisplay(nil, "test %s", "arg") })
+	assert.NotPanics(t, func() { FailureTextDisplay(nil, "test %s", "arg") })
+	assert.NotPanics(t, func() { InfoDisplay(nil, "test %s", "arg") })
+	assert.NotPanics(t, func() { InfoTextDisplay(nil, "test %s", "arg") })
+	assert.NotPanics(t, func() { SimpleDisplay(nil, "test %s", "arg") })
+	assert.NotPanics(t, func() { SuccessDisplay(nil, "test %s", "arg") })
+	assert.NotPanics(t, func() { DescriptionDisplay(nil, "test %s", "arg") })
+	assert.NotPanics(t, func() { BoldDisplay(nil, "test %s", "arg") })
+	assert.NotPanics(t, func() { LineDisplay(nil, "test %s", "arg") })
+	assert.NotPanics(t, func() { SectionHeadingDisplay(nil, "test %s", "arg") })
+	assert.NotPanics(t, func() { StarDisplay(nil, "test %s", "arg") })
+}
+
 // Returns a new instance of ProgressHandler with the given title.
 func TestNewProgressHandler_(t *testing.T) {
 	tests := []struct {
