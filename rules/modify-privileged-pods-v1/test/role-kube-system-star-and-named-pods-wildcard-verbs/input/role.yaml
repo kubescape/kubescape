@@ -1,0 +1,10 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: operator-pod-admin
+  namespace: kube-system
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  resourceNames: ["*", "cilium-operator-0"]
+  verbs: ["*"]

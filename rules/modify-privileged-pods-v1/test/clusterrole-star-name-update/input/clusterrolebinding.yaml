@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: star-name-pod-editor-binding
+subjects:
+- kind: ServiceAccount
+  name: node-agent
+  namespace: monitoring
+roleRef:
+  kind: ClusterRole
+  name: star-name-pod-editor
+  apiGroup: rbac.authorization.k8s.io
