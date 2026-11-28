@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
+	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -183,12 +184,63 @@ resource "kubernetes_pod_v1" "p" {
 	assert.Equal(t, int32(0o755), *pod.Spec.Volumes[1].ConfigMap.DefaultMode)
 }
 
-// A data attribute is renamed only on a Secret, and only at its top level.
+// A Secret's data attributes are renamed to the fields the provider sends
+// them as, only on a Secret, and only at its top level: data and data_wo to
+// stringData, binary_data and binary_data_wo to data. A Secret has no
+// binaryData field, a ConfigMap does.
 func TestAttributeKeyForSecretData(t *testing.T) {
 	assert.Equal(t, "stringData", attributeKeyFor("kubernetes_secret_v1.s", "data"))
 	assert.Equal(t, "stringData", attributeKeyFor("kubernetes_secret.s", "data"))
 	assert.Equal(t, "data", attributeKeyFor("kubernetes_config_map_v1.cm", "data"))
 	assert.Equal(t, "data", attributeKeyFor("kubernetes_secret_v1.s.metadata", "data"))
+	assert.Equal(t, "stringData", attributeKeyFor("kubernetes_secret_v1.s", "data_wo"))
+	assert.Equal(t, "data", attributeKeyFor("kubernetes_secret_v1.s", "binary_data"))
+	assert.Equal(t, "data", attributeKeyFor("kubernetes_secret.s", "binary_data"))
+	assert.Equal(t, "data", attributeKeyFor("kubernetes_secret_v1.s", "binary_data_wo"))
+	assert.Equal(t, "binaryData", attributeKeyFor("kubernetes_config_map_v1.cm", "binary_data"))
+}
+
+// The values of a Secret's binary_data, data_wo and binary_data_wo end up in
+// data and stringData, the fields the scan masks before it reports a Secret,
+// and the Secret decodes into the Kubernetes type.
+func TestExtractTypedResourcesSecretDataFields(t *testing.T) {
+	byName := typedManifestsByName(t, `
+resource "kubernetes_secret_v1" "binary" {
+  metadata {
+    name = "binary"
+  }
+  binary_data = {
+    key = "aHVudGVyMw=="
+  }
+}
+
+resource "kubernetes_secret_v1" "write_only" {
+  metadata {
+    name = "write-only"
+  }
+  data_wo = {
+    password = "hunter2"
+  }
+  data_wo_revision = 1
+  binary_data_wo = {
+    key = "aHVudGVyNA=="
+  }
+  binary_data_wo_revision = 1
+}
+`)
+	binary := byName["Secret/binary"]
+	assert.Equal(t, map[string]interface{}{"key": "aHVudGVyMw=="}, binary["data"])
+	writeOnly := byName["Secret/write-only"]
+	assert.Equal(t, map[string]interface{}{"password": "hunter2"}, writeOnly["stringData"])
+	assert.Equal(t, map[string]interface{}{"key": "aHVudGVyNA=="}, writeOnly["data"])
+	for _, m := range []map[string]interface{}{binary, writeOnly} {
+		data, err := json.Marshal(m)
+		require.NoError(t, err)
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		var secret corev1.Secret
+		require.NoError(t, dec.Decode(&secret), "the Secret does not decode into the Kubernetes type")
+	}
 }
 
 // The provider's control attributes and timeouts blocks tell the provider how
@@ -282,23 +334,60 @@ resource "kubernetes_persistent_volume_claim_v1" "pvc" {
     }
   }
 }
+
+resource "kubernetes_certificate_signing_request_v1" "csr" {
+  auto_approve = true
+  metadata {
+    name = "csr"
+  }
+  spec {
+    request     = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURSBSRVFVRVNULS0tLS0K"
+    signer_name = "kubernetes.io/kube-apiserver-client"
+  }
+}
+
+resource "kubernetes_pod_v1" "pod" {
+  target_state = ["Running"]
+  metadata {
+    name = "pod"
+  }
+  spec {
+    container {
+      name  = "app"
+      image = "nginx"
+    }
+  }
+}
+
+resource "kubernetes_secret_v1" "wo" {
+  metadata {
+    name = "wo"
+  }
+  data_wo                 = { password = "p" }
+  data_wo_revision        = 1
+  binary_data_wo          = { key = "aw==" }
+  binary_data_wo_revision = 1
+}
 `
 	manifests, errs := extractTypedResources(parseTypedHCL(t, src), &hcl.EvalContext{})
 	require.Empty(t, errs)
-	require.Len(t, manifests, 6)
+	require.Len(t, manifests, 9)
 
 	targets := map[string]interface{}{
-		"Deployment":            &appsv1.Deployment{},
-		"Service":               &corev1.Service{},
-		"Job":                   &batchv1.Job{},
-		"Namespace":             &corev1.Namespace{},
-		"Secret":                &corev1.Secret{},
-		"PersistentVolumeClaim": &corev1.PersistentVolumeClaim{},
+		"Deployment":                &appsv1.Deployment{},
+		"Service":                   &corev1.Service{},
+		"Job":                       &batchv1.Job{},
+		"Namespace":                 &corev1.Namespace{},
+		"Secret":                    &corev1.Secret{},
+		"PersistentVolumeClaim":     &corev1.PersistentVolumeClaim{},
+		"CertificateSigningRequest": &certificatesv1.CertificateSigningRequest{},
+		"Pod":                       &corev1.Pod{},
 	}
 	for _, m := range manifests {
 		kind, _ := m["kind"].(string)
 		for _, key := range []string{"timeouts", "waitForRollout", "waitForLoadBalancer", "waitForCompletion",
-			"waitForDefaultServiceAccount", "waitForServiceAccountToken", "waitUntilBound"} {
+			"waitForDefaultServiceAccount", "waitForServiceAccountToken", "waitUntilBound",
+			"autoApprove", "targetState", "dataWoRevision", "binaryDataWoRevision"} {
 			assert.NotContains(t, m, key, "%s keeps the provider control argument %s", kind, key)
 		}
 		target, ok := targets[kind]
