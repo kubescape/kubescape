@@ -109,6 +109,18 @@ func TestReportMock_DisplayMessage_PercentSpecifiers(t *testing.T) {
 	assert.NotContains(t, output, "%!d(MISSING)")
 }
 
+func TestReportMock_NilSafety(t *testing.T) {
+	var nilMock *ReportMock
+
+	assert.NotPanics(t, func() {
+		assert.Empty(t, nilMock.GetURL())
+		assert.Empty(t, nilMock.strToDisplay())
+		nilMock.DisplayMessage()
+		nilMock.SetTenantConfig(nil)
+		assert.NoError(t, nilMock.Submit(context.Background(), nil))
+	})
+}
+
 func TestReportMock_strToDisplay(t *testing.T) {
 	type fields struct {
 		query   string

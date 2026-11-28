@@ -6,6 +6,9 @@ import (
 )
 
 func (report *ReportEventReceiver) setSubReport(opaSessionObj *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
+	if report == nil || opaSessionObj == nil || opaSessionObj.Report == nil {
+		return nil
+	}
 	reportObj := &reporthandlingv2.PostureReport{
 		CustomerGUID:          report.GetAccountID(),
 		ClusterName:           report.GetClusterName(),

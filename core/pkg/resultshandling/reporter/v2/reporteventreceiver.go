@@ -56,6 +56,21 @@ func NewReportEventReceiver(tenantConfig cautils.ITenantConfig, reportID string,
 }
 
 func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
+	if report == nil {
+		return fmt.Errorf("failed to submit scan results: reporter is nil")
+	}
+	if opaSessionObj == nil {
+		return fmt.Errorf("failed to submit scan results: no data provided")
+	}
+	if report.tenantConfig == nil {
+		return fmt.Errorf("failed to submit scan results: tenant config is nil")
+	}
+	if report.client == nil {
+		return fmt.Errorf("failed to submit scan results: client is nil")
+	}
+	if opaSessionObj.Report == nil {
+		return fmt.Errorf("failed to submit scan results: report is nil")
+	}
 	ctx, span := otel.Tracer("").Start(ctx, "reportEventReceiver.Submit")
 	defer span.End()
 	report.reportTime = time.Now().UTC()
@@ -82,7 +97,7 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 		}
 	}()
 
-	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Cluster && report.GetClusterName() == "" {
+	if opaSessionObj.Metadata != nil && opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Cluster && report.GetClusterName() == "" {
 		logger.L().Ctx(ctx).Error("failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS")
 		return nil
 	}
@@ -97,14 +112,23 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 }
 
 func (report *ReportEventReceiver) SetTenantConfig(tenantConfig cautils.ITenantConfig) {
+	if report == nil {
+		return
+	}
 	report.tenantConfig = tenantConfig
 }
 
 func (report *ReportEventReceiver) GetAccountID() string {
+	if report == nil || report.tenantConfig == nil {
+		return ""
+	}
 	return report.tenantConfig.GetAccountID()
 }
 
 func (report *ReportEventReceiver) GetClusterName() string {
+	if report == nil || report.tenantConfig == nil {
+		return ""
+	}
 	return cautils.AdoptClusterName(report.tenantConfig.GetContextName()) // clean cluster name
 }
 
@@ -114,13 +138,15 @@ func (report *ReportEventReceiver) prepareReport(ctx context.Context, opaSession
 	// etc). So, to submit a compatible report to the backend, we have to
 	// override the scanning target, submit the report and then restore the
 	// original value.
-	originalScanningTarget := opaSessionObj.Metadata.ScanMetadata.ScanningTarget
+	if opaSessionObj != nil && opaSessionObj.Metadata != nil {
+		originalScanningTarget := opaSessionObj.Metadata.ScanMetadata.ScanningTarget
 
-	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget != reporthandlingv2.Cluster {
-		opaSessionObj.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
-		defer func() {
-			opaSessionObj.Metadata.ScanMetadata.ScanningTarget = originalScanningTarget
-		}()
+		if opaSessionObj.Metadata.ScanMetadata.ScanningTarget != reporthandlingv2.Cluster {
+			opaSessionObj.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
+			defer func() {
+				opaSessionObj.Metadata.ScanMetadata.ScanningTarget = originalScanningTarget
+			}()
+		}
 	}
 
 	cautils.StartSpinner()
@@ -130,6 +156,9 @@ func (report *ReportEventReceiver) prepareReport(ctx context.Context, opaSession
 }
 
 func (report *ReportEventReceiver) getReportUrl() string {
+	if report == nil || report.client == nil {
+		return ""
+	}
 	url, err := client.GetPostureReportUrl(report.client.GetCloudReportURL(), report.GetAccountID(), report.GetClusterName(), report.reportID)
 	if err != nil {
 		return ""
@@ -291,6 +320,9 @@ func (report *ReportEventReceiver) setResourcesFromCatalog(ctx context.Context, 
 }
 
 func (report *ReportEventReceiver) sendReport(ctx context.Context, postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
+	if postureReport == nil {
+		return fmt.Errorf("failed to send report: report is nil")
+	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("scan canceled: %w", err)
 	}
@@ -326,10 +358,16 @@ func (report *ReportEventReceiver) sendReport(ctx context.Context, postureReport
 }
 
 func (report *ReportEventReceiver) setMessage(message string) {
+	if report == nil {
+		return
+	}
 	report.message = message
 }
 
 func (report *ReportEventReceiver) DisplayMessage() {
+	if report == nil {
+		return
+	}
 
 	// print if logger level is lower than warning (debug/info)
 	if report.message != "" && helpers.ToLevel(logger.L().GetLevel()) < helpers.WarningLevel {
