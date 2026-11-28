@@ -300,6 +300,11 @@ func TestHelmValueOptions_MergeValues_RedactsURLCredentialsAndBlocksUnsafeRedire
 		_, err := mergeBoundedHelmValuesWithClient(HelmValueOptions{ValueFiles: []string{credURL}}, nil, source.Client())
 		assertRedacted(t, err)
 		assert.Contains(t, err.Error(), "//other.example/values.yaml")
+
+		var urlErr *url.Error
+		require.ErrorAs(t, err, &urlErr)
+		assert.Equal(t, "//other.example/values.yaml", urlErr.URL)
+		assertRedacted(t, urlErr)
 	})
 
 	t.Run("redacts credentials embedded in redirect parse errors with invalid escapes", func(t *testing.T) {
@@ -323,6 +328,18 @@ func TestHelmValueOptions_MergeValues_RedactsURLCredentialsAndBlocksUnsafeRedire
 				assert.NotContains(t, err.Error(), tc.user)
 				assert.NotContains(t, err.Error(), tc.pass)
 				assert.Contains(t, err.Error(), "https://example.com/%zz")
+
+				var urlErr *url.Error
+				require.ErrorAs(t, err, &urlErr)
+				assert.NotContains(t, urlErr.Error(), tc.user)
+				assert.NotContains(t, urlErr.Error(), tc.pass)
+				require.NotNil(t, urlErr.Err)
+				assert.NotContains(t, urlErr.Err.Error(), tc.user)
+				assert.NotContains(t, urlErr.Err.Error(), tc.pass)
+				if unwrapped := errors.Unwrap(err); unwrapped != nil {
+					assert.NotContains(t, unwrapped.Error(), tc.user)
+					assert.NotContains(t, unwrapped.Error(), tc.pass)
+				}
 			})
 		}
 	})
@@ -344,10 +361,21 @@ func TestHelmValueOptions_MergeValues_RedactsURLCredentialsAndBlocksUnsafeRedire
 		assertRedacted(t, err)
 		assert.ErrorIs(t, err, marker)
 
+		var outerURLErr *url.Error
+		require.ErrorAs(t, err, &outerURLErr)
+		assert.Equal(t, "https://charts.example.com/values.yaml", outerURLErr.URL)
+		assertRedacted(t, outerURLErr)
+		assertRedacted(t, outerURLErr.Err)
+
 		joined := errors.Join(marker, &url.Error{Op: "Get", URL: credURL, Err: errors.New("boom")})
 		sanitized := sanitizeHelmURLError(joined)
 		assertRedacted(t, sanitized)
 		assert.ErrorIs(t, sanitized, marker)
+
+		var joinedURLErr *url.Error
+		require.ErrorAs(t, sanitized, &joinedURLErr)
+		assert.Equal(t, "https://charts.example.com/values.yaml", joinedURLErr.URL)
+		assertRedacted(t, joinedURLErr)
 	})
 }
 

@@ -206,6 +206,16 @@ func sanitizeHelmValueURL(u *url.URL) string {
 	return cloned.String()
 }
 
+func sanitizeHelmURLString(rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+	if u, err := url.Parse(rawURL); err == nil {
+		return sanitizeHelmValueURL(u)
+	}
+	return sanitizeHelmErrorMessage(rawURL)
+}
+
 func sanitizeHelmValueSource(source string) string {
 	if source == "" || strings.TrimSpace(source) == "-" {
 		return source
@@ -237,15 +247,56 @@ func (e *sanitizedHelmURLError) Unwrap() error {
 }
 
 func sanitizeHelmURLError(err error) error {
+	sanitized, _ := sanitizeHelmURLErrorState(err)
+	return sanitized
+}
+
+func sanitizeHelmURLErrorState(err error) (error, bool) {
 	if err == nil {
-		return nil
+		return nil, false
+	}
+	if urlErr, ok := err.(*url.Error); ok {
+		safeURL := sanitizeHelmURLString(urlErr.URL)
+		safeInner, innerChanged := sanitizeHelmURLErrorState(urlErr.Err)
+		if safeURL == urlErr.URL && !innerChanged {
+			return err, false
+		}
+		sanitized := *urlErr
+		sanitized.URL = safeURL
+		sanitized.Err = safeInner
+		return &sanitized, true
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		orig := joined.Unwrap()
+		children := make([]error, len(orig))
+		anyChanged := false
+		for i, child := range orig {
+			sc, changed := sanitizeHelmURLErrorState(child)
+			children[i] = sc
+			if changed {
+				anyChanged = true
+			}
+		}
+		msg := sanitizeHelmErrorMessage(err.Error())
+		if !anyChanged {
+			if msg == err.Error() {
+				return err, false
+			}
+			return &sanitizedHelmURLError{cause: errors.Join(children...), msg: msg}, true
+		}
+		return errors.Join(children...), true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		safeInner, innerChanged := sanitizeHelmURLErrorState(wrapped.Unwrap())
+		msg := sanitizeHelmErrorMessage(err.Error())
+		if !innerChanged && msg == err.Error() {
+			return err, false
+		}
+		return &sanitizedHelmURLError{cause: safeInner, msg: msg}, true
 	}
 	msg := sanitizeHelmErrorMessage(err.Error())
 	if msg == err.Error() {
-		return err
+		return err, false
 	}
-	return &sanitizedHelmURLError{
-		cause: err,
-		msg:   msg,
-	}
+	return errors.New(msg), true
 }
