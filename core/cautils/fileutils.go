@@ -1233,7 +1233,10 @@ func LoadResourcesFromTerraformWithLocations(ctx context.Context, basePath strin
 			// Override blocks with no primary definition are skipped without
 			// affecting the rest of the configuration, so the workloads it
 			// defines are kept. The configuration error is still reported.
-			overridesOnly := onlyTerraformMissingOverrideTargets(dirErrs)
+			// Resources left out for unresolved values may come with them; they
+			// are reported as well instead of dropping the whole configuration.
+			resources, resourceErrs, others := splitTerraformResourceErrors(dirErrs)
+			overridesOnly := onlyTerraformMissingOverrideTargets(others)
 			if explicitTerraformDir && dir == basePath {
 				if overridesOnly {
 					maps.Copy(sourceToWorkloads, wls)
@@ -1242,8 +1245,12 @@ func LoadResourcesFromTerraformWithLocations(ctx context.Context, basePath strin
 			}
 			if overridesOnly {
 				logger.L().Ctx(ctx).Warning("Nested Terraform configuration has override blocks that could not be applied; scanning the resources it defines without them",
-					helpers.String("path", dir), helpers.Error(errors.Join(dirErrs...)))
+					helpers.String("path", dir), helpers.Error(errors.Join(others...)))
 				skips = append(skips, SkippedManifest{Path: dir, Reason: "some Terraform override blocks could not be applied; see scan logs for details"})
+				if len(resources) > 0 {
+					logTerraformUnresolvedResources(ctx, dir, resources, resourceErrs)
+					skips = append(skips, terraformUnresolvedResourcesSkip(dir, resources))
+				}
 				maps.Copy(sourceToWorkloads, wls)
 				continue
 			}

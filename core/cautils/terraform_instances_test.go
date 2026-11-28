@@ -274,7 +274,9 @@ resource "kubernetes_manifest" "hidden" {
 `,
 	})
 	workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
-	require.Empty(t, errs, "an unresolved kubernetes_manifest is skipped with a warning, as before")
+	resources, ok := onlyTerraformResourceErrors(errs)
+	require.True(t, ok, "an unresolved kubernetes_manifest is left out on its own, like a typed resource: %v", errs)
+	assert.Equal(t, []string{"kubernetes_manifest.unresolved", "kubernetes_manifest.hidden"}, resources)
 	var names []string
 	for _, wl := range workloads[filepath.Join(dir, "main.tf")] {
 		names = append(names, wl.GetName())
