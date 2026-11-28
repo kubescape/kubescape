@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dns-pod-patcher
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  resourceNames: ["coredns-0"]
+  verbs: ["patch"]

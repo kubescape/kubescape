@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dns-pod-patcher-binding
+  namespace: kube-system
+subjects:
+- kind: ServiceAccount
+  name: dns-autoscaler
+  namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: dns-pod-patcher
+  apiGroup: rbac.authorization.k8s.io

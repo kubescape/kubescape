@@ -20,9 +20,7 @@ deny contains msga if {
 
 	rule := role.rules[p]
 
-	# a rule restricted to named pods cannot be pointed at an arbitrary privileged pod
-	# (an omitted or explicitly empty resourceNames list is unrestricted)
-	count(resource_names(rule)) == 0
+	names_a_pod(rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -57,6 +55,23 @@ deny contains msga if {
 			"externalObjects": subjectVector,
 		},
 	}
+}
+
+# An update or patch is authorized with the name of the pod it rewrites, so an
+# entry narrowed with resourceNames still lets the subject rewrite each pod it
+# names: swap the image or command of a kube-system pod and run as its service
+# account on its node. The pods in kube-system are mostly the cluster's own
+# components, so a grant naming one of them is already the harm this rule
+# reports. resourceNames is matched literally, with no wildcard expansion, so
+# "*" only names a pod called "*", which no pod can be, and "" names no object
+# at all. An entry narrowed to those two alone reaches no pod. This is the same
+# call weak-namespace-pod-rce-v1 and steal-privileged-pods-v1 make for update
+# and patch on pods.
+names_a_pod(rule) if count(resource_names(rule)) == 0
+
+names_a_pod(rule) if {
+	some name in resource_names(rule)
+	not name in {"", "*"}
 }
 
 # a ClusterRoleBinding grants the role in every namespace, privileged ones included
