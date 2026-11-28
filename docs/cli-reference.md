@@ -1429,7 +1429,6 @@ kubescape patch [flags]
 | `-t, --tag <tag>` | Output image tag | `<image>-patched` |
 | `-a, --address <address>` | BuildKit daemon address | none (auto-detects local docker daemon, falling back to `unix:///run/buildkit/buildkitd.sock`) |
 | `--timeout <duration>` | Patching timeout | `5m` |
-| `--ignore-errors` | Continue on errors | `false` |
 | `--push` | Push the patched image to the source registry. Sets `--output-mode` to `image`, so it cannot be combined with `--output-mode oci` or `local` | `false` |
 | `--output-mode <mode>` | Output mode for the patched image: `docker`, `image`, `oci` or `local` | `docker` |
 | `--output-path <path>` | Destination path for the `oci` and `local` output modes | - |

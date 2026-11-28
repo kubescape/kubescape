@@ -11,7 +11,6 @@ type PatchInfo struct {
 	PatchedImageTag string        // can be empty, if empty then the image tag will be patched with the latest tag
 	BuildkitAddress string        // buildkit address
 	Timeout         time.Duration // timeout for patching an image
-	IgnoreError     bool          // ignore errors and continue patching
 	Push            bool          // push the patched image to the registry (default: false)
 	OutputMode      string        // output mode for patched image (docker, image, oci, local)
 	OutputPath      string        // destination path for oci or local export

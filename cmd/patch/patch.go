@@ -101,7 +101,6 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.PatchedImageTag, "tag", "t", "", "Tag for the patched image. Defaults to '<image-tag>-patched' ")
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.BuildkitAddress, "address", "a", "", "Address of buildkitd service, defaults to the local docker daemon with fallback to "+buildkit.DefaultAddr)
 	patchCmd.PersistentFlags().DurationVar(&patchInfo.Timeout, "timeout", 5*time.Minute, "Timeout for the operation, defaults to '5m'")
-	patchCmd.PersistentFlags().BoolVar(&patchInfo.IgnoreError, "ignore-errors", false, "Ignore errors and continue patching other images. Default to false")
 	patchCmd.PersistentFlags().BoolVar(&patchInfo.Push, "push", false, "Push the patched image to the source registry. Default to false (the patched image is only loaded into the local image store). If set, this overrides output-mode to 'image'.")
 	patchCmd.PersistentFlags().StringVar(&patchInfo.OutputMode, "output-mode", "docker", "Output mode for the patched image (docker, image, oci, local)")
 	patchCmd.PersistentFlags().StringVar(&patchInfo.OutputPath, "output-path", "", "Destination path for oci or local output mode")
