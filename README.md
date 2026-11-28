@@ -499,6 +499,15 @@ helm upgrade --install kubescape kubescape/kubescape-operator \
 | **VS Code** | [Kubescape Extension](https://marketplace.visualstudio.com/items?itemName=kubescape.kubescape) |
 | **Lens** | [Kubescape Lens Extension](https://github.com/armosec/lens-kubescape) |
 
+### AI Agents
+
+An agent-agnostic plugin marketplace lives at
+[`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json). It
+registers the [`plugins/kubescape`](plugins/kubescape) plugin, which ships
+[agent skills](https://agentskills.io/) for scanning, fixing findings and using
+the [MCP server](docs/mcp-server.md), plus a `kubescape mcpserver` config.
+Codex and Claude Code manifests are included in the plugin directory.
+
 ### Where You Can Use Kubescape
 
 <div align="center">

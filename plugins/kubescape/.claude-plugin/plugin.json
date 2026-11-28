@@ -1,0 +1,22 @@
+{
+  "name": "kubescape",
+  "version": "0.1.0",
+  "description": "Scan Kubernetes clusters, manifests, and Helm charts for misconfigurations and image vulnerabilities; fix findings; query posture through the Kubescape MCP server.",
+  "author": {
+    "name": "Kubescape",
+    "url": "https://kubescape.io"
+  },
+  "homepage": "https://kubescape.io",
+  "repository": "https://github.com/kubescape/kubescape",
+  "license": "Apache-2.0",
+  "keywords": [
+    "kubernetes",
+    "security",
+    "compliance",
+    "misconfiguration",
+    "vulnerability",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}

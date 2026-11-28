@@ -4,6 +4,10 @@
 # vendored VAP bundle: the *kubescape* rule above (for the built binary) would
 # otherwise swallow this policy file, which must be committed so it can be embedded.
 !core/pkg/opaprocessor/cel/vapdata/kubescape-validating-admission-policies.yaml
+# agent plugin directory: same *kubescape* rule would ignore plugins/kubescape.
+!plugins/
+!plugins/kubescape/
+!plugins/kubescape/**
 *debug*
 *vendor*
 *.pyc*
