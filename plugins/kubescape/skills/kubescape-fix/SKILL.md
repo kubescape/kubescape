@@ -26,12 +26,14 @@ kubescape fix results.json
 kubescape fix results.json --no-confirm
 ```
 
-Cluster scans have no local files to rewrite: fixes print to stdout for review/apply (or use `--output-dir`).
+Cluster scans have no local files to rewrite: write fixes to a file (or `--output-dir`) for review, then apply only after the user authorizes that action.
 
 ```bash
 kubescape scan -f json -o cluster.json
-kubescape fix cluster.json | kubectl apply -f -
 kubescape fix cluster.json --output-dir ./fixes
+# Or: kubescape fix cluster.json > fixes.yaml
+# Review the written manifests, then only if the user authorizes:
+# kubectl apply -f ./fixes   # or: kubectl apply -f fixes.yaml
 ```
 
 ## Safe output modes
@@ -52,6 +54,8 @@ kubescape fix results.json --output-patch remediation.patch
 kubescape scan ./my-chart -f json -o chart-results.json
 kubescape fix chart-results.json --output-kustomize ./patches --values ./my-chart/values.yaml
 ```
+
+A mixed report (Helm-rendered resources plus plain manifests) is not fully safe under `--output-kustomize` alone: the overlay is written first, then `fix` continues to the in-place path for plain manifests (guarded by the confirmation prompt; with `--no-confirm` or after confirm, those originals change). When originals must stay unchanged, scan the chart alone for `--output-kustomize`, and handle plain manifests in a separate run with `--output-dir` or `--output-patch`.
 
 Helm chart sources are not edited in place; use `--output-kustomize` for machine-applicable patches on eligible Helm-rendered resources. Match scan-time Helm values with `--values` / `-f`, `--set`, `--set-string`, `--set-file`, `--release-name`, `--release-namespace`.
 
