@@ -35,10 +35,20 @@ type rawEncryptionMetadata struct {
 // identity, severity, scope, and evaluation completeness. Unknown fields from
 // newer Kubescape versions remain forward compatible.
 type scanReport struct {
-	Results        []resultEntry  `json:"results"`
-	SummaryDetails summaryDetails `json:"summaryDetails"`
-	Metadata       reportMetadata `json:"metadata,omitempty"`
-	ScanCoverage   scanCoverage   `json:"scanCoverage,omitempty"`
+	Resources      []resourceEntry `json:"resources,omitempty"`
+	Results        []resultEntry   `json:"results"`
+	SummaryDetails summaryDetails  `json:"summaryDetails"`
+	Metadata       reportMetadata  `json:"metadata,omitempty"`
+	ScanCoverage   scanCoverage    `json:"scanCoverage,omitempty"`
+}
+
+type resourceEntry struct {
+	ResourceID string              `json:"resourceID"`
+	Source     *resourceSourceInfo `json:"source,omitempty"`
+}
+
+type resourceSourceInfo struct {
+	RelativePath string `json:"relativePath,omitempty"`
 }
 
 type resultEntry struct {
@@ -272,6 +282,11 @@ func parseReport(data []byte) (*scanReport, error) {
 	if metadataJSON, exists := topLevel["metadata"]; exists && !isJSONNull(metadataJSON) {
 		if err := json.Unmarshal(metadataJSON, &report.Metadata); err != nil {
 			return nil, fmt.Errorf("invalid report metadata: %w", err)
+		}
+	}
+	if resourcesJSON, exists := topLevel["resources"]; exists && !isJSONNull(resourcesJSON) {
+		if err := json.Unmarshal(resourcesJSON, &report.Resources); err != nil {
+			return nil, fmt.Errorf("invalid report resources: %w", err)
 		}
 	}
 	if coverageJSON, exists := topLevel["scanCoverage"]; exists && !isJSONNull(coverageJSON) {
