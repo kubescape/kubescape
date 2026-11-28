@@ -167,3 +167,29 @@ func TestJsonPrinterCloseWriter(t *testing.T) {
 		assert.NoError(t, err, "os.Stdout should remain usable")
 	})
 }
+
+func TestJsonPrinter_NilReceiverSafety(t *testing.T) {
+	var jp *JsonPrinter
+
+	assert.NotPanics(t, func() {
+		err := jp.ActionPrint(context.Background(), nil, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		err := jp.CloseWriter()
+		assert.NoError(t, err)
+	})
+
+	assert.NotPanics(t, func() {
+		err := jp.SetWriter(context.Background(), "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "printer is nil")
+	})
+
+	assert.NotPanics(t, func() {
+		jp.Score(100)
+		jp.PrintNextSteps()
+	})
+}
