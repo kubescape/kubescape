@@ -149,6 +149,108 @@ resource "kubernetes_pod_v1" "counted" {
 	assert.Equal(t, dir, skips[0].Path)
 }
 
+// A kubernetes_manifest that can't be resolved is left out and reported the
+// same way as a typed resource, instead of only being logged.
+func TestLoadResourcesFromTerraform_UnresolvedKubernetesManifestIsReported(t *testing.T) {
+	dir := resolvedTempDir(t)
+	writeTerraformFiles(t, dir, map[string]string{"main.tf": `
+variable "image" {
+  type = string
+}
+
+variable "replicas" {
+  type = number
+}
+
+resource "kubernetes_namespace_v1" "apps" {
+  metadata { name = "apps" }
+}
+
+resource "kubernetes_manifest" "plain" {
+  manifest = {
+    apiVersion = "v1"
+    kind       = "Pod"
+    metadata   = { name = "plain", namespace = "default" }
+    spec       = { containers = [{ name = "c", image = "nginx:1.27" }] }
+  }
+}
+
+resource "kubernetes_manifest" "web" {
+  manifest = {
+    apiVersion = "v1"
+    kind       = "Pod"
+    metadata   = { name = "web", namespace = kubernetes_namespace_v1.apps.metadata[0].name }
+    spec       = { containers = [{ name = "c", image = "nginx:1.27" }] }
+  }
+}
+
+resource "kubernetes_manifest" "decoded" {
+  manifest = yamldecode("{apiVersion: v1, kind: Pod, metadata: {name: decoded}}")
+}
+
+resource "kubernetes_manifest" "custom_image" {
+  manifest = {
+    apiVersion = "v1"
+    kind       = "Pod"
+    metadata   = { name = "custom-image", namespace = "default" }
+    spec       = { containers = [{ name = "c", image = var.image }] }
+  }
+}
+
+resource "kubernetes_manifest" "counted" {
+  count = var.replicas
+  manifest = {
+    apiVersion = "v1"
+    kind       = "Pod"
+    metadata   = { name = "counted-${count.index}", namespace = "default" }
+    spec       = { containers = [{ name = "c", image = "nginx:1.27" }] }
+  }
+}
+`})
+
+	workloads, skips, err := LoadResourcesFromTerraformFilteredWithSkips(context.Background(), dir, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"apps", "plain"}, sortedNames(workloadsByName(t, workloads)))
+	require.Len(t, skips, 1)
+	assert.Equal(t, dir, skips[0].Path)
+	assert.Equal(t, []string{
+		"kubernetes_manifest.web", "kubernetes_manifest.decoded",
+		"kubernetes_manifest.custom_image", "kubernetes_manifest.counted",
+	}, skips[0].Resources)
+	assert.Contains(t, skips[0].Reason, "4 Terraform resource(s) not scanned")
+}
+
+// When only some instances of a kubernetes_manifest can't be resolved, the
+// whole resource is left out, like a typed resource, so it isn't reported as
+// not scanned while part of it is.
+func TestLoadResourcesFromTerraform_PartlyUnresolvedKubernetesManifestIsLeftOut(t *testing.T) {
+	dir := resolvedTempDir(t)
+	writeTerraformFiles(t, dir, map[string]string{"main.tf": `
+resource "kubernetes_manifest" "plain" {
+  manifest = {
+    apiVersion = "v1"
+    kind       = "ConfigMap"
+    metadata   = { name = "plain", namespace = "default" }
+  }
+}
+
+resource "kubernetes_manifest" "indexed" {
+  count = 2
+  manifest = {
+    apiVersion = "v1"
+    kind       = "ConfigMap"
+    metadata   = { name = ["first"][count.index], namespace = "default" }
+  }
+}
+`})
+
+	workloads, skips, err := LoadResourcesFromTerraformFilteredWithSkips(context.Background(), dir, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"plain"}, sortedNames(workloadsByName(t, workloads)))
+	require.Len(t, skips, 1)
+	assert.Equal(t, []string{"kubernetes_manifest.indexed"}, skips[0].Resources)
+}
+
 // A configuration error that isn't about one resource, such as a malformed
 // tfvars file, still fails the configuration as before.
 func TestLoadResourcesFromTerraform_ConfigurationErrorStillFails(t *testing.T) {

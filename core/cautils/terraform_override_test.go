@@ -569,12 +569,15 @@ resource "kubernetes_manifest" "web" {
 			dir := t.TempDir()
 			writeTerraformOverrideFiles(t, dir, tt.files)
 			workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
-			require.Empty(t, errs)
 			all := terraformOverrideWorkloads(t, workloads)
 			if tt.expected == nil {
+				resources, ok := onlyTerraformResourceErrors(errs)
+				require.True(t, ok, "the skipped resource is reported on its own: %v", errs)
+				assert.Equal(t, []string{"kubernetes_manifest.web"}, resources)
 				assert.Empty(t, all)
 				return
 			}
+			require.Empty(t, errs)
 			require.Len(t, all, 1)
 			assert.Equal(t, tt.expected, podSpec(t, all[0])["hostNetwork"])
 		})
@@ -815,9 +818,10 @@ func TestLoadResourcesFromTerraform_UnmatchedOverride(t *testing.T) {
 	}
 }
 
-// A directory with any other error alongside an unmatched override keeps the
-// existing policy: a nested one is skipped as a whole, a directly scanned one
-// fails without its workloads.
+// A directory with any other error alongside an unmatched override, apart from
+// resources left out for unresolved values, keeps the existing policy: a
+// nested one is skipped as a whole, a directly scanned one fails without its
+// workloads.
 func TestLoadResourcesFromTerraform_UnmatchedOverrideWithOtherErrors(t *testing.T) {
 	root := resolvedTempDir(t)
 	nested := filepath.Join(root, "modules", "app")
@@ -840,6 +844,75 @@ func TestLoadResourcesFromTerraform_UnmatchedOverrideWithOtherErrors(t *testing.
 	assert.Contains(t, err.Error(), `there is no kubernetes_manifest resource named "missing"`)
 	assert.Contains(t, err.Error(), "broken.tf")
 	assert.Empty(t, workloadNames(workloads))
+}
+
+// Resources left out for unresolved values next to an unmatched override don't
+// drop the nested configuration: its other workloads are scanned, and both the
+// override and the resources left out are reported.
+func TestLoadResourcesFromTerraform_UnmatchedOverrideWithUnresolvedResources(t *testing.T) {
+	tests := []struct {
+		name       string
+		unresolved string
+		resource   string
+	}{
+		{
+			name: "kubernetes_manifest",
+			unresolved: `
+resource "kubernetes_manifest" "ns_ref" {
+  manifest = {
+    apiVersion = "v1"
+    kind       = "Pod"
+    metadata   = { name = "ns-ref", namespace = kubernetes_namespace_v1.apps.metadata[0].name }
+  }
+}
+`,
+			resource: "kubernetes_manifest.ns_ref",
+		},
+		{
+			name: "typed resource",
+			unresolved: `
+resource "kubernetes_pod_v1" "ns_ref" {
+  metadata {
+    name      = "ns-ref"
+    namespace = kubernetes_namespace_v1.apps.metadata[0].name
+  }
+  spec {
+    container {
+      name  = "c"
+      image = "nginx:1.27"
+    }
+  }
+}
+`,
+			resource: "kubernetes_pod_v1.ns_ref",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := resolvedTempDir(t)
+			nested := filepath.Join(root, "modules", "app")
+			require.NoError(t, os.MkdirAll(nested, 0o700))
+			writeTerraformOverrideFiles(t, nested, map[string]string{
+				"main.tf":     overrideBaseManifestPod + "\nresource \"kubernetes_namespace_v1\" \"apps\" {\n  metadata { name = \"apps\" }\n}\n" + tt.unresolved,
+				"override.tf": `resource "kubernetes_manifest" "missing" {}`,
+			})
+
+			workloads, skips, err := LoadResourcesFromTerraformFilteredWithSkips(context.Background(), root, nil, root)
+			require.NoError(t, err)
+			assert.ElementsMatch(t, []string{"web", "apps"}, workloadNames(workloads))
+			require.Len(t, skips, 2)
+			assert.Equal(t, nested, skips[0].Path)
+			assert.Contains(t, skips[0].Reason, "override blocks could not be applied")
+			assert.Equal(t, nested, skips[1].Path)
+			assert.Equal(t, []string{tt.resource}, skips[1].Resources)
+
+			// A directly scanned directory still fails, as with an unmatched
+			// override alone.
+			_, _, err = LoadResourcesFromTerraformFilteredWithSkips(context.Background(), nested, nil, root)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), `there is no kubernetes_manifest resource named "missing"`)
+		})
+	}
 }
 
 func TestOnlyTerraformMissingOverrideTargets(t *testing.T) {
@@ -932,8 +1005,8 @@ resource "kubernetes_pod_v1" "big" {
 	assert.Empty(t, terraformOverrideWorkloads(t, workloads))
 }
 
-// The same limit applies to kubernetes_manifest, which skips a resource whose
-// expansion is too large with a warning.
+// The same limit applies to kubernetes_manifest, which leaves out a resource
+// whose expansion is too large and reports it, like a typed resource.
 func TestTerraformDirectory_GetWorkloads_ManifestOverrideCountsTowardsExpansionLimit(t *testing.T) {
 	manifest := func(name, extra string) string {
 		return `
@@ -952,9 +1025,10 @@ resource "kubernetes_manifest" "big" {
 		name     string
 		override string
 		want     int
+		bounded  bool
 	}{
-		{"small override expands", manifest("small", "count = 1000"), 1000},
-		{"large override is bounded", manifest("large", "count = 1000\n  # "+padding), 0},
+		{"small override expands", manifest("small", "count = 1000"), 1000, false},
+		{"large override is bounded", manifest("large", "count = 1000\n  # "+padding), 0, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -964,7 +1038,15 @@ resource "kubernetes_manifest" "big" {
 				"override.tf": tt.override,
 			})
 			workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
-			require.Empty(t, errs)
+			if tt.bounded {
+				require.Len(t, errs, 1)
+				assert.ErrorContains(t, errs[0], "count or for_each expansion exceeds the size limit")
+				resources, ok := onlyTerraformResourceErrors(errs)
+				require.True(t, ok)
+				assert.Equal(t, []string{"kubernetes_manifest.big"}, resources)
+			} else {
+				require.Empty(t, errs)
+			}
 			assert.Len(t, terraformOverrideWorkloads(t, workloads), tt.want)
 		})
 	}

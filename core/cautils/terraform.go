@@ -300,10 +300,11 @@ func terraformVariableNonNullable(attr *hcl.Attribute) (nonNullable, ok bool) {
 
 // extractKubernetesManifests finds resource "kubernetes_manifest" "x" { manifest = {...} }
 // blocks and returns each manifest as a plain Go map, ready for json.Marshal.
-// A resource with count or for_each gives one manifest per known instance. As
-// with an unresolved manifest, a count or for_each that can't be resolved
-// skips only that resource, with a warning. references checks count and
-// for_each for unresolved references, including ones hidden in locals.
+// A resource with count or for_each gives one manifest per known instance. A
+// manifest, count or for_each that can't be resolved leaves out only that
+// resource, and is returned as a *terraformResourceError so the loader reports
+// it, like a typed resource. references checks count and for_each for
+// unresolved references, including ones hidden in locals.
 func extractKubernetesManifests(body hcl.Body, evalCtx *hcl.EvalContext, references ...terraformReferenceChecker) ([]map[string]interface{}, []error) {
 	manifests, errs := extractKubernetesManifestResources(body, evalCtx, references...)
 	return terraformManifestObjects(manifests), errs
@@ -341,18 +342,23 @@ func extractKubernetesManifestResources(body hcl.Body, evalCtx *hcl.EvalContext,
 		if synBody, ok := block.Body.(*hclsyntax.Body); ok {
 			sourceSize = reference.sourceSize(synBody, synBody.SrcRange.End.Byte-synBody.SrcRange.Start.Byte)
 		}
+		path := "kubernetes_manifest." + block.Labels[1]
 		instances, err := terraformResourceInstances(attrContent.Attributes["count"], attrContent.Attributes["for_each"],
-			evalCtx, reference, "kubernetes_manifest."+block.Labels[1], sourceSize)
+			evalCtx, reference, path, sourceSize)
 		if err != nil {
-			logger.L().Warning("skipping kubernetes_manifest with unresolved count or for_each",
-				helpers.String("resource", block.Labels[1]), helpers.Error(err))
+			errs = append(errs, &terraformResourceError{resource: path, err: err})
 			continue
 		}
+		// Like a typed resource, the resource is left out when any of its
+		// instances can't be resolved, so it is never reported as skipped
+		// while part of it is scanned.
+		var converted []terraformManifest
+		unresolved := false
 		for _, instanceCtx := range instances {
 			val, diags := attr.Expr.Value(instanceCtx)
 			if diags.HasErrors() {
-				logger.L().Warning("skipping unresolved kubernetes_manifest reference",
-					helpers.String("resource", block.Labels[1]), helpers.Error(diags))
+				errs = append(errs, &terraformResourceError{resource: path, err: diags})
+				unresolved = true
 				continue
 			}
 			goVal := ctyToGo(val)
@@ -361,7 +367,10 @@ func extractKubernetesManifestResources(body hcl.Body, evalCtx *hcl.EvalContext,
 				errs = append(errs, fmt.Errorf("resource %q: manifest is not an object", block.Labels[1]))
 				continue
 			}
-			manifests = append(manifests, terraformManifest{object: m, source: block.DefRange})
+			converted = append(converted, terraformManifest{object: m, source: block.DefRange})
+		}
+		if !unresolved {
+			manifests = append(manifests, converted...)
 		}
 	}
 	return manifests, errs

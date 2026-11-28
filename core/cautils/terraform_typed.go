@@ -863,18 +863,31 @@ func (e *terraformResourceError) Unwrap() error {
 // so the rest of the configuration can still be scanned. ok is false when errs
 // is empty or holds any other error.
 func onlyTerraformResourceErrors(errs []error) (resources []string, ok bool) {
+	resources, _, others := splitTerraformResourceErrors(errs)
+	if len(errs) == 0 || len(others) > 0 {
+		return nil, false
+	}
+	return resources, true
+}
+
+// splitTerraformResourceErrors splits errs into the resources that were left
+// out, in order and without repeats, with the *terraformResourceError values
+// that name them, and every other error.
+func splitTerraformResourceErrors(errs []error) (resources []string, resourceErrs, others []error) {
 	seen := map[string]bool{}
 	for _, err := range errs {
 		var resourceErr *terraformResourceError
 		if !errors.As(err, &resourceErr) {
-			return nil, false
+			others = append(others, err)
+			continue
 		}
+		resourceErrs = append(resourceErrs, err)
 		if !seen[resourceErr.resource] {
 			seen[resourceErr.resource] = true
 			resources = append(resources, resourceErr.resource)
 		}
 	}
-	return resources, len(errs) > 0
+	return resources, resourceErrs, others
 }
 
 // terraformUnresolvedResourcesSkip records that some resources of the
