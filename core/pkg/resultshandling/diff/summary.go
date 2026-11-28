@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/csvsafe"
+	v2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
 	"sigs.k8s.io/yaml"
 )
 
@@ -165,15 +165,14 @@ func PrintSummaryYAML(w io.Writer, cs *ChangeSet, threshold string) error {
 	return err
 }
 
-// csvSafeCell neutralizes a cell against spreadsheet formula injection (CWE-1236)
-// by delegating to csvsafe.SafeCell.
+// csvSafeCell delegates to v2.CSVSafeCell for spreadsheet formula injection neutralization (CWE-1236).
 func csvSafeCell(cell string) string {
-	return csvsafe.SafeCell(cell)
+	return v2.CSVSafeCell(cell)
 }
 
-// csvSafeRow applies csvSafeCell across every cell of a CSV row.
+// csvSafeRow delegates to v2.CSVSafeRow across every cell of a CSV row.
 func csvSafeRow(row []string) []string {
-	return csvsafe.SafeRow(row)
+	return v2.CSVSafeRow(row)
 }
 
 // PrintSummaryCSV formats and writes summary data as CSV to w.
@@ -190,7 +189,7 @@ func PrintSummaryCSV(w io.Writer, cs *ChangeSet, threshold string) error {
 // writeSummaryCSV writes the formatted and sanitized summary rows to writer.
 func writeSummaryCSV(writer *csv.Writer, summary Summary) error {
 	for _, row := range summaryCSVRows(summary) {
-		if err := writer.Write(csvSafeRow(row)); err != nil {
+		if err := writer.Write(v2.CSVSafeRow(row)); err != nil {
 			return err
 		}
 	}

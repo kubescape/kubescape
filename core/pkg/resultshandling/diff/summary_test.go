@@ -375,12 +375,13 @@ func TestCsvSafeCell_Diff(t *testing.T) {
 }
 
 // TestPrintSummaryCSV_NeutralizesFormulaInjection verifies that formula elements
-// in ResourceID, ControlName, ControlID, and Warnings are neutralized when exported to CSV.
+// in ResourceID, ControlName, ControlID, Warnings, and Threshold are neutralized when exported to CSV.
 func TestPrintSummaryCSV_NeutralizesFormulaInjection(t *testing.T) {
 	const injectedResourceID = "=cmd|' /C calc'!A0"
 	const injectedControlName = "@SUM(A1)"
 	const injectedControlID = "+C-0001"
 	const injectedWarning = "-warning injected"
+	const injectedThreshold = "=high"
 
 	cs := &ChangeSet{
 		New: []ControlChange{
@@ -395,13 +396,17 @@ func TestPrintSummaryCSV_NeutralizesFormulaInjection(t *testing.T) {
 	}
 	var out bytes.Buffer
 
-	require.NoError(t, PrintSummaryCSV(&out, cs, ""))
+	require.NoError(t, PrintSummaryCSV(&out, cs, injectedThreshold))
 
 	records, err := csv.NewReader(strings.NewReader(out.String())).ReadAll()
 	require.NoError(t, err)
 
-	var foundControl, foundResource, foundWarning bool
+	var foundThreshold, foundControl, foundResource, foundWarning bool
 	for _, row := range records {
+		if row[0] == "metadata" && row[1] == "threshold" {
+			foundThreshold = true
+			assert.Equal(t, "text: "+injectedThreshold, row[7], "threshold must be neutralized")
+		}
 		if row[0] == "bucket_control" && row[4] == "text: "+injectedControlID {
 			foundControl = true
 			assert.Equal(t, "text: "+injectedControlName, row[5], "control name must be neutralized")
@@ -413,6 +418,7 @@ func TestPrintSummaryCSV_NeutralizesFormulaInjection(t *testing.T) {
 			foundWarning = true
 		}
 	}
+	assert.True(t, foundThreshold, "expected neutralized metadata threshold row")
 	assert.True(t, foundControl, "expected neutralized bucket_control row")
 	assert.True(t, foundResource, "expected neutralized bucket_resource row")
 	assert.True(t, foundWarning, "expected neutralized warning row")
